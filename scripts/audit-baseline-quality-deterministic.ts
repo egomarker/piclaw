@@ -461,6 +461,8 @@ const groupDefinitions: GroupDefinition[] = [
           "addons-handler.test.ts",
           "addon-web-extensions.test.ts",
           "general-settings-handler.test.ts",
+          "settings-pane-registry.test.ts",
+          "settings-widget-fixture.test.ts",
           "mindmap-history.test.ts",
           "mindmap-layout-utils.test.ts",
           "mindmap-pane-source.test.ts",
