@@ -1,4 +1,4 @@
-import { html, useEffect, useMemo, useRef } from '../vendor/preact-htm.js';
+import { html, useEffect, useMemo, useRef, useState } from '../vendor/preact-htm.js';
 import { postIframeMessageBestEffort, setIframeNameBestEffort } from './generated-widget-host-bridge.js';
 import {
     buildWidgetSrcDoc,
@@ -11,9 +11,19 @@ import {
 } from '../ui/generated-widget.js';
 import { SessionTreeWidget } from './session-tree-widget.js';
 
+export function buildFloatingWidgetBackdropClassName(maximized = false) {
+    return `floating-widget-backdrop${maximized ? ' maximized' : ''}`;
+}
+
+export function buildFloatingWidgetPaneClassName(maximized = false) {
+    return `floating-widget-pane${maximized ? ' maximized' : ''}`;
+}
+
 export function FloatingWidgetPane({ widget, onClose, onWidgetEvent }) {
     const frameRef = useRef(null);
     const frameLoadedRef = useRef(false);
+    const [maximized, setMaximized] = useState(false);
+    const widgetSessionKey = getGeneratedWidgetSessionKey(widget);
     const srcDoc = useMemo(() => buildWidgetSrcDoc(widget), [
         widget?.artifact?.kind,
         widget?.artifact?.html,
@@ -25,13 +35,22 @@ export function FloatingWidgetPane({ widget, onClose, onWidgetEvent }) {
     ]);
 
     useEffect(() => {
+        setMaximized(false);
+    }, [widgetSessionKey]);
+
+    useEffect(() => {
         if (!widget) return undefined;
         const handleEsc = (e) => {
-            if (e.key === 'Escape') onClose?.();
+            if (e.key !== 'Escape') return;
+            if (maximized) {
+                setMaximized(false);
+                return;
+            }
+            onClose?.();
         };
         document.addEventListener('keydown', handleEsc);
         return () => document.removeEventListener('keydown', handleEsc);
-    }, [widget, onClose]);
+    }, [maximized, widget, onClose]);
 
     useEffect(() => {
         frameLoadedRef.current = false;
@@ -154,9 +173,9 @@ export function FloatingWidgetPane({ widget, onClose, onWidgetEvent }) {
     const sandbox = getGeneratedWidgetIframeSandbox(widget);
 
     return html`
-        <div class="floating-widget-backdrop" onClick=${() => onClose?.()}>
+        <div class=${buildFloatingWidgetBackdropClassName(maximized)} onClick=${() => onClose?.()}>
             <section
-                class="floating-widget-pane"
+                class=${buildFloatingWidgetPaneClassName(maximized)}
                 aria-label=${title}
                 onClick=${(e) => e.stopPropagation()}
             >
@@ -168,15 +187,27 @@ export function FloatingWidgetPane({ widget, onClose, onWidgetEvent }) {
                             <div class="floating-widget-subtitle">${subtitle || description}</div>
                         `}
                     </div>
-                    <button
-                        class="floating-widget-close"
-                        type="button"
-                        onClick=${() => onClose?.()}
-                        title="Close widget"
-                        aria-label="Close widget"
-                    >
-                        Close
-                    </button>
+                    <div class="floating-widget-header-actions">
+                        <button
+                            class="floating-widget-action floating-widget-maximize"
+                            type="button"
+                            onClick=${() => setMaximized((value) => !value)}
+                            title=${maximized ? 'Exit zen mode' : 'Enter zen mode'}
+                            aria-label=${maximized ? 'Exit zen mode' : 'Enter zen mode'}
+                            aria-pressed=${maximized ? 'true' : 'false'}
+                        >
+                            ${maximized ? 'Restore' : 'Maximize'}
+                        </button>
+                        <button
+                            class="floating-widget-close"
+                            type="button"
+                            onClick=${() => onClose?.()}
+                            title="Close widget"
+                            aria-label="Close widget"
+                        >
+                            Close
+                        </button>
+                    </div>
                 </div>
                 <div class="floating-widget-body">
                     ${kind === 'session_tree'

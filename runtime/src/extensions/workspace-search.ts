@@ -22,6 +22,28 @@ const WorkspaceSearchSchema = Type.Object({
 
 type WorkspaceSearchParams = Static<typeof WorkspaceSearchSchema>;
 
+const WORKSPACE_SEARCH_WORKING_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+type WorkspaceSearchUiContext = {
+  hasUI?: boolean;
+  ui?: {
+    setWorkingIndicator: (options?: { frames?: string[]; intervalMs?: number }) => void;
+    setWorkingMessage: (message?: string) => void;
+  };
+};
+
+function startWorkspaceSearchProgress(ctx: WorkspaceSearchUiContext | undefined, message: string): void {
+  if (!ctx?.hasUI || !ctx.ui) return;
+  ctx.ui.setWorkingIndicator({ frames: WORKSPACE_SEARCH_WORKING_FRAMES, intervalMs: 90 });
+  ctx.ui.setWorkingMessage(message);
+}
+
+function finishWorkspaceSearchProgress(ctx: WorkspaceSearchUiContext | undefined): void {
+  if (!ctx?.hasUI || !ctx.ui) return;
+  ctx.ui.setWorkingMessage(undefined);
+  ctx.ui.setWorkingIndicator({ frames: [] });
+}
+
 type WorkspaceSearchDetails = {
   count: number;
   results: WorkspaceSearchRow[];
@@ -32,16 +54,28 @@ async function execute(
   params: WorkspaceSearchParams,
   _signal?: AbortSignal,
   _onUpdate?: unknown,
-  _ctx?: ExtensionContext,
+  ctx?: ExtensionContext & WorkspaceSearchUiContext,
 ): Promise<AgentToolResult<WorkspaceSearchDetails>> {
-  const { rows, limit, offset, error } = await searchWorkspace({
-    query: params.query,
-    scope: params.scope,
-    limit: params.limit,
-    offset: params.offset,
-    refresh: params.refresh ?? false,
-    max_kb: params.max_kb,
-  });
+  startWorkspaceSearchProgress(
+    ctx,
+    params.refresh ? "Workspace search: refreshing index and searching…" : "Workspace search: searching index…",
+  );
+  let rows: WorkspaceSearchRow[] = [];
+  let limit = params.limit ?? 0;
+  let offset = params.offset ?? 0;
+  let error: string | undefined;
+  try {
+    ({ rows, limit, offset, error } = await searchWorkspace({
+      query: params.query,
+      scope: params.scope,
+      limit: params.limit,
+      offset: params.offset,
+      refresh: params.refresh ?? false,
+      max_kb: params.max_kb,
+    }));
+  } finally {
+    finishWorkspaceSearchProgress(ctx);
+  }
 
   if (error) {
     return { content: [{ type: "text", text: error }], details: { count: 0, results: [] } };
@@ -84,8 +118,13 @@ export const workspaceSearch: ExtensionFactory = (api) => {
     description: "Refresh the workspace FTS index for the configured roots.",
     promptSnippet: "refresh_workspace_index: rebuild workspace FTS indexing for the configured roots.",
     parameters: Type.Object({}),
-    async execute() {
-      await refreshWorkspaceIndex({ scope: "all" });
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx?: ExtensionContext & WorkspaceSearchUiContext) {
+      startWorkspaceSearchProgress(ctx, "Workspace search: refreshing index…");
+      try {
+        await refreshWorkspaceIndex({ scope: "all" });
+      } finally {
+        finishWorkspaceSearchProgress(ctx);
+      }
       return {
         content: [{ type: "text", text: "Workspace index refreshed." }],
         details: { refreshed: true },

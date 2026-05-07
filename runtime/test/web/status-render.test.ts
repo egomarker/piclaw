@@ -159,6 +159,13 @@ test('tool output panel keeps a tighter 5-line collapsed preview cap', () => {
   expect(source).toContain('maxLines: TOOL_OUTPUT_MAX_LINES');
 });
 
+test('collapsed tool output lines are capped at 132 characters with an ellipsis', async () => {
+  const statusModule = await importFresh<typeof import('../../web/src/components/status.ts')>('../web/src/components/status.ts');
+  const longLine = 'x'.repeat(140);
+  const formatted = statusModule.truncateCollapsedToolOutputLines(`short\n${longLine}`);
+  expect(formatted).toBe(`short\n${'x'.repeat(132)}…`);
+});
+
 function collectInnerHtml(node: FakeNode | null): string[] {
   if (!node || !(node instanceof FakeElement)) return [];
   return [node.innerHTML, ...node.childNodes.flatMap((child) => collectInnerHtml(child))].filter(Boolean);
@@ -241,7 +248,7 @@ test('AgentStatus renders bash tool command lines in monospace spans', async () 
   render(null, host);
 });
 
-test('AgentStatus shows the tail of live tool output while collapsed', async () => {
+test('AgentStatus labels tool output as Output and shows the tail while collapsed', async () => {
   const fakeDocument = new FakeDocument();
   installStatusDomStubs(fakeDocument);
 
@@ -262,6 +269,9 @@ test('AgentStatus shows the tail of live tool output while collapsed', async () 
     },
   }), host);
 
+  const textOutput = collectText(host);
+  expect(textOutput).toContain('Output');
+
   const htmlOutput = collectInnerHtml(host).join('\n');
   expect(htmlOutput).toContain('line 3');
   expect(htmlOutput).toContain('line 7');
@@ -271,7 +281,7 @@ test('AgentStatus shows the tail of live tool output while collapsed', async () 
   render(null, host);
 });
 
-test('AgentStatus places collapsed tool-output more-lines control above the tail preview', async () => {
+test('AgentStatus truncates long collapsed tool-output lines and places more-lines control above the tail preview', async () => {
   const fakeDocument = new FakeDocument();
   installStatusDomStubs(fakeDocument);
 
@@ -280,7 +290,8 @@ test('AgentStatus places collapsed tool-output more-lines control above the tail
 
   const host = fakeDocument.createElement('div');
   fakeDocument.body.appendChild(host);
-  const output = Array.from({ length: 7 }, (_, index) => `line ${index + 1}`).join('\n');
+  const longTailLine = `line 7 ${'x'.repeat(140)}`;
+  const output = Array.from({ length: 7 }, (_, index) => index === 6 ? longTailLine : `line ${index + 1}`).join('\n');
 
   render(h(AgentStatus, {
     status: {
@@ -301,6 +312,10 @@ test('AgentStatus places collapsed tool-output more-lines control above the tail
   expect(truncationIndex).toBeGreaterThan(-1);
   expect(bodyIndex).toBeGreaterThan(-1);
   expect(truncationIndex).toBeLessThan(bodyIndex);
+
+  const htmlOutput = collectInnerHtml(host).join('\n');
+  expect(htmlOutput).toContain(`${longTailLine.slice(0, 132)}…`);
+  expect(htmlOutput).not.toContain(longTailLine);
 
   render(null, host);
 });

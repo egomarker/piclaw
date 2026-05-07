@@ -10,9 +10,14 @@ import {
     resolveAddonAttachmentPreview,
 } from '../ui/addon-web-extensions.js';
 import { getAttachmentPreviewKind, getAttachmentPreviewLabel, isMarkdownAttachmentPreview } from '../ui/attachment-preview.js';
+import { inferDelimitedPreviewDelimiter, parseDelimitedPreview } from '../ui/delimited-preview.js';
 import { formatCompressionRatio, getCompressionMethodLabel, parseZipPreview } from '../ui/zip-preview.js';
 
 export const HTML_ATTACHMENT_PREVIEW_SANDBOX = 'allow-scripts';
+
+export function buildAttachmentPreviewModalClassName(maximized = false) {
+    return `image-modal attachment-preview-modal${maximized ? ' maximized' : ''}`;
+}
 
 function isProbablyTextBytes(bytes) {
     if (!(bytes instanceof Uint8Array) || bytes.length === 0) return true;
@@ -43,13 +48,24 @@ function decodeTextBytes(bytes) {
     }
 }
 
-function buildMetadata(info, languageLabel = null, archivePreview = null) {
+function formatDelimitedDelimiter(delimiter) {
+    if (delimiter === '\t') return 'Tab';
+    if (delimiter === ',') return 'Comma';
+    if (delimiter === ';') return 'Semicolon';
+    if (delimiter === '|') return 'Pipe';
+    return null;
+}
+
+function buildMetadata(info, languageLabel = null, archivePreview = null, delimitedPreview = null) {
     const size = info?.metadata?.size;
     const contentType = info?.content_type || 'application/octet-stream';
     const archiveSummary = archivePreview?.summary || null;
     return [
         { label: 'Type', value: contentType },
         { label: 'Syntax', value: languageLabel },
+        { label: 'Delimiter', value: delimitedPreview ? formatDelimitedDelimiter(delimitedPreview.delimiter) : null },
+        { label: 'Rows', value: delimitedPreview ? `${delimitedPreview.rowCount}${delimitedPreview.truncatedRows ? '+' : ''}` : null },
+        { label: 'Columns', value: delimitedPreview ? `${delimitedPreview.columnCount}${delimitedPreview.truncatedColumns ? '+' : ''}` : null },
         { label: 'Entries', value: archiveSummary ? String(archiveSummary.totalEntries) : null },
         { label: 'Files', value: archiveSummary ? String(archiveSummary.fileCount) : null },
         { label: 'Folders', value: archiveSummary ? String(archiveSummary.directoryCount) : null },
@@ -180,14 +196,16 @@ export function AttachmentPreviewModal({ mediaId, info, onClose }) {
     const previewKind = useMemo(() => getAttachmentPreviewKind(info?.content_type, filename), [info?.content_type, filename]);
     const previewLabel = addonPreview?.label || getAttachmentPreviewLabel(previewKind);
     const isMarkdown = useMemo(() => isMarkdownAttachmentPreview(info?.content_type), [info?.content_type]);
-    const [loading, setLoading] = useState(previewKind === 'text' || previewKind === 'html' || previewKind === 'archive');
+    const [loading, setLoading] = useState(previewKind === 'text' || previewKind === 'html' || previewKind === 'archive' || previewKind === 'delimited');
     const [textContent, setTextContent] = useState('');
     const [archivePreview, setArchivePreview] = useState(null);
+    const [delimitedPreview, setDelimitedPreview] = useState(null);
     const [error, setError] = useState(null);
+    const [maximized, setMaximized] = useState(false);
     const markdownContainerRef = useRef(null);
     const previewLanguage = useMemo(() => previewLanguageFromAttachment(info, filename), [info, filename]);
     const previewLanguageLabel = useMemo(() => previewLanguage ? normalizeCodeLanguageLabel(previewLanguage) : null, [previewLanguage]);
-    const metadata = useMemo(() => buildMetadata(info, !isMarkdown ? previewLanguageLabel : null, archivePreview), [info, isMarkdown, previewLanguageLabel, archivePreview]);
+    const metadata = useMemo(() => buildMetadata(info, !isMarkdown ? previewLanguageLabel : null, archivePreview, delimitedPreview), [info, isMarkdown, previewLanguageLabel, archivePreview, delimitedPreview]);
     const frameUrl = useMemo(() => addonPreview
         ? buildAddonAttachmentPreviewFrameUrl(addonPreview.id, mediaId, filename)
         : buildFrameUrl(mediaId, filename, previewKind), [addonPreview, mediaId, filename, previewKind]);
@@ -203,11 +221,16 @@ export function AttachmentPreviewModal({ mediaId, info, onClose }) {
 
     useEffect(() => {
         const handleEsc = (e) => {
-            if (e.key === 'Escape') onClose();
+            if (e.key !== 'Escape') return;
+            if (maximized) {
+                setMaximized(false);
+                return;
+            }
+            onClose();
         };
         document.addEventListener('keydown', handleEsc);
         return () => document.removeEventListener('keydown', handleEsc);
-    }, [onClose]);
+    }, [maximized, onClose]);
 
     useEffect(() => {
         if (!markdownContainerRef.current || !renderedMarkdown) return undefined;
@@ -219,11 +242,12 @@ export function AttachmentPreviewModal({ mediaId, info, onClose }) {
         let cancelled = false;
 
         async function loadPreview() {
-            if (previewKind !== 'text' && previewKind !== 'html' && previewKind !== 'archive') {
+            if (previewKind !== 'text' && previewKind !== 'html' && previewKind !== 'archive' && previewKind !== 'delimited') {
                 setLoading(false);
                 setError(null);
                 setTextContent('');
                 setArchivePreview(null);
+                setDelimitedPreview(null);
                 return;
             }
 
@@ -231,16 +255,24 @@ export function AttachmentPreviewModal({ mediaId, info, onClose }) {
             setError(null);
             setTextContent('');
             setArchivePreview(null);
+            setDelimitedPreview(null);
             try {
                 const blob = await getMediaBlob(mediaId);
                 const bytes = new Uint8Array(await blob.arrayBuffer());
 
-                if (previewKind === 'text' || previewKind === 'html') {
+                if (previewKind === 'text' || previewKind === 'html' || previewKind === 'delimited') {
                     if (previewKind === 'text' && shouldSniffTextAttachment(info, filename) && !isProbablyTextBytes(bytes)) {
                         throw new Error('Attachment does not appear to contain text content.');
                     }
                     const text = decodeTextBytes(bytes);
-                    if (!cancelled) setTextContent(text);
+                    if (!cancelled) {
+                        setTextContent(text);
+                        if (previewKind === 'delimited') {
+                            setDelimitedPreview(parseDelimitedPreview(text, {
+                                delimiter: inferDelimitedPreviewDelimiter(info?.content_type, filename),
+                            }));
+                        }
+                    }
                     return;
                 }
 
@@ -249,7 +281,11 @@ export function AttachmentPreviewModal({ mediaId, info, onClose }) {
             } catch (loadError) {
                 if (!cancelled) {
                     const detail = loadError instanceof Error ? loadError.message : String(loadError || 'Unknown error');
-                    setError(previewKind === 'archive' ? `Failed to load ZIP preview. ${detail}` : `Failed to load text preview. ${detail}`);
+                    setError(previewKind === 'archive'
+                        ? `Failed to load ZIP preview. ${detail}`
+                        : previewKind === 'delimited'
+                            ? `Failed to load table preview. ${detail}`
+                            : `Failed to load text preview. ${detail}`);
                 }
             } finally {
                 if (!cancelled) setLoading(false);
@@ -261,11 +297,11 @@ export function AttachmentPreviewModal({ mediaId, info, onClose }) {
         return () => {
             cancelled = true;
         };
-    }, [mediaId, previewKind]);
+    }, [mediaId, previewKind, info?.content_type, filename]);
 
     return html`
         <${BodyPortal} className="attachment-preview-portal-root">
-            <div class="image-modal attachment-preview-modal" onClick=${onClose}>
+            <div class=${buildAttachmentPreviewModalClassName(maximized)} onClick=${onClose}>
                 <div class="attachment-preview-shell" onClick=${(e) => { e.stopPropagation(); }}>
                     <div class="attachment-preview-header">
                         <div class="attachment-preview-heading">
@@ -273,6 +309,16 @@ export function AttachmentPreviewModal({ mediaId, info, onClose }) {
                             <div class="attachment-preview-subtitle">${previewLabel}</div>
                         </div>
                         <div class="attachment-preview-header-actions">
+                            <button
+                                class="attachment-preview-zen"
+                                type="button"
+                                onClick=${() => setMaximized((value) => !value)}
+                                title=${maximized ? 'Exit zen mode' : 'Enter zen mode'}
+                                aria-label=${maximized ? 'Exit zen mode' : 'Enter zen mode'}
+                                aria-pressed=${maximized ? 'true' : 'false'}
+                            >
+                                ${maximized ? 'Restore' : 'Maximize'}
+                            </button>
                             ${frameUrl && html`
                                 <a
                                     href=${frameUrl}
@@ -312,6 +358,36 @@ export function AttachmentPreviewModal({ mediaId, info, onClose }) {
                         `}
                         ${!loading && !error && addonPreviewNote && html`
                             <div class="attachment-preview-readonly-note">${addonPreviewNote}</div>
+                        `}
+                        ${!loading && !error && previewKind === 'delimited' && delimitedPreview && html`
+                            <div class="attachment-preview-delimited">
+                                ${(delimitedPreview.truncatedRows || delimitedPreview.truncatedColumns) && html`
+                                    <div class="attachment-preview-delimited-note">
+                                        Showing first ${delimitedPreview.rowCount} rows and ${delimitedPreview.columnCount} columns.
+                                        Download the file for the complete dataset.
+                                    </div>
+                                `}
+                                <div class="attachment-preview-delimited-table-wrap">
+                                    <table class="attachment-preview-delimited-table">
+                                        <thead>
+                                            <tr>
+                                                ${delimitedPreview.headers.map((header, index) => html`
+                                                    <th key=${`h-${index}`}>${header}</th>
+                                                `)}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            ${delimitedPreview.rows.map((row, rowIndex) => html`
+                                                <tr key=${`r-${rowIndex}`}>
+                                                    ${row.map((cell, cellIndex) => html`
+                                                        <td key=${`c-${rowIndex}-${cellIndex}`}>${cell}</td>
+                                                    `)}
+                                                </tr>
+                                            `)}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
                         `}
                         ${!loading && !error && previewKind === 'archive' && archivePreview && html`
                             <div class="attachment-preview-archive">

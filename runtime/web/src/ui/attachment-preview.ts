@@ -31,6 +31,7 @@ import {
   getAddonAttachmentPreviewLabel,
   resolveAddonAttachmentPreview,
 } from './addon-web-extensions.js';
+import { isDelimitedAttachment } from './delimited-preview.js';
 
 const EML_PREVIEW_TYPES = new Set([
   "application/eml",
@@ -95,7 +96,7 @@ function isTextFilename(filename: unknown): boolean {
   );
 }
 
-export type AttachmentPreviewKind = "image" | "video" | "pdf" | "office" | "eml" | "html" | "text" | "archive" | "unsupported" | string;
+export type AttachmentPreviewKind = "image" | "video" | "pdf" | "office" | "eml" | "html" | "text" | "delimited" | "archive" | "unsupported" | string;
 
 export function getAttachmentPreviewKind(contentType: unknown, filename?: unknown): AttachmentPreviewKind {
   const addonPreview = resolveAddonAttachmentPreview(contentType, filename);
@@ -106,6 +107,7 @@ export function getAttachmentPreviewKind(contentType: unknown, filename?: unknow
   if (isEmlFilename(filename) || EML_PREVIEW_TYPES.has(normalized)) return "eml";
   if (isArchiveFilename(filename) || ARCHIVE_PREVIEW_TYPES.has(normalized)) return "archive";
   if (isHtmlFilename(filename) || normalized === "text/html") return "html";
+  if (isDelimitedAttachment(normalized, filename)) return "delimited";
   if (isTextFilename(filename)) return "text";
   if (!normalized) return "unsupported";
   if (normalized.startsWith("video/")) return "video";
@@ -135,6 +137,8 @@ export function getAttachmentPreviewLabel(kind: AttachmentPreviewKind): string {
       return "HTML preview";
     case "text":
       return "Text preview";
+    case "delimited":
+      return "Table preview";
     case "archive":
       return "ZIP archive preview";
     default:

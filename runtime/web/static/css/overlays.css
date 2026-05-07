@@ -32,6 +32,12 @@
     z-index: 2300;
 }
 
+.attachment-preview-modal.maximized {
+    padding: 0;
+    align-items: stretch;
+    justify-content: stretch;
+}
+
 .attachment-preview-shell {
     width: min(1100px, 96vw);
     max-height: 92vh;
@@ -43,6 +49,14 @@
     border-radius: var(--radius-lg);
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
     overflow: hidden;
+}
+
+.attachment-preview-modal.maximized .attachment-preview-shell {
+    width: 100vw;
+    height: 100vh;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
 }
 
 .attachment-preview-header {
@@ -79,6 +93,7 @@
 }
 
 .attachment-preview-download,
+.attachment-preview-zen,
 .attachment-preview-close {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
@@ -95,6 +110,10 @@
     min-height: 240px;
     overflow: auto;
     background: var(--bg-primary);
+}
+
+.attachment-preview-modal.maximized .attachment-preview-body {
+    min-height: 0;
 }
 
 .attachment-preview-state {
@@ -119,6 +138,12 @@
     min-height: 60vh;
     border: 0;
     background: white;
+}
+
+.attachment-preview-modal.maximized .attachment-preview-image,
+.attachment-preview-modal.maximized .attachment-preview-frame {
+    height: 100%;
+    min-height: 0;
 }
 
 .attachment-preview-text {
@@ -146,11 +171,73 @@
     padding: var(--spacing-md);
 }
 
+.attachment-preview-delimited,
 .attachment-preview-archive {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-md);
     padding: var(--spacing-lg);
+}
+
+.attachment-preview-delimited-note {
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+}
+
+.attachment-preview-delimited-table-wrap {
+    overflow: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    max-height: 65vh;
+}
+
+.attachment-preview-modal.maximized .attachment-preview-delimited,
+.attachment-preview-modal.maximized .attachment-preview-archive {
+    min-height: 0;
+}
+
+.attachment-preview-modal.maximized .attachment-preview-delimited-table-wrap,
+.attachment-preview-modal.maximized .attachment-preview-archive-table-wrap {
+    flex: 1;
+    max-height: none;
+    min-height: 0;
+}
+
+.attachment-preview-delimited-table {
+    width: max-content;
+    min-width: 100%;
+    border-collapse: collapse;
+    font-size: var(--font-size-sm);
+}
+
+.attachment-preview-delimited-table th,
+.attachment-preview-delimited-table td {
+    max-width: 360px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-color);
+    border-right: 1px solid var(--border-color);
+    text-align: left;
+    vertical-align: top;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.attachment-preview-delimited-table th {
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-weight: 600;
+    z-index: 1;
+}
+
+.attachment-preview-delimited-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.attachment-preview-delimited-table th:last-child,
+.attachment-preview-delimited-table td:last-child {
+    border-right: 0;
 }
 
 .attachment-preview-archive-summary {
@@ -324,6 +411,12 @@
     padding: 24px;
 }
 
+.floating-widget-backdrop.maximized {
+    padding: 0;
+    align-items: stretch;
+    justify-content: stretch;
+}
+
 .floating-widget-pane {
     width: min(1080px, 100%);
     height: min(82vh, 860px);
@@ -334,6 +427,13 @@
     border-radius: 18px;
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
     overflow: hidden;
+}
+
+.floating-widget-pane.maximized {
+    width: 100vw;
+    height: 100vh;
+    border: 0;
+    border-radius: 0;
 }
 
 .floating-widget-header {
@@ -372,6 +472,14 @@
     line-height: 1.45;
 }
 
+.floating-widget-header-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: center;
+    flex: 0 0 auto;
+}
+
+.floating-widget-action,
 .floating-widget-close {
     border: 1px solid var(--border-color);
     background: var(--bg-primary);
@@ -608,8 +716,14 @@
         align-items: stretch;
     }
 
-    .floating-widget-close {
+    .floating-widget-header-actions {
         width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .floating-widget-action,
+    .floating-widget-close {
+        flex: 1 1 140px;
         justify-content: center;
     }
 

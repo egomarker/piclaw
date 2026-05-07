@@ -101,6 +101,28 @@ function buildExportPath(id: number, filename: string): string {
   return resolve(workspaceDir, "tmp", `${id}-${safeName}`);
 }
 
+const ATTACHMENT_WORKING_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+type AttachmentUiContext = {
+  hasUI?: boolean;
+  ui?: {
+    setWorkingIndicator: (options?: { frames?: string[]; intervalMs?: number }) => void;
+    setWorkingMessage: (message?: string) => void;
+  };
+};
+
+function startAttachmentProgress(ctx: AttachmentUiContext | undefined, message: string): void {
+  if (!ctx?.hasUI || !ctx.ui) return;
+  ctx.ui.setWorkingIndicator({ frames: ATTACHMENT_WORKING_FRAMES, intervalMs: 90 });
+  ctx.ui.setWorkingMessage(message);
+}
+
+function finishAttachmentProgress(ctx: AttachmentUiContext | undefined): void {
+  if (!ctx?.hasUI || !ctx.ui) return;
+  ctx.ui.setWorkingMessage(undefined);
+  ctx.ui.setWorkingIndicator({ frames: [] });
+}
+
 // ── Tool execute ──────────────────────────────────────────
 
 async function execute(
@@ -109,7 +131,7 @@ async function execute(
   params: AttachmentParams,
   _signal?: AbortSignal,
   _onUpdate?: unknown,
-  _ctx?: ExtensionContext,
+  ctx?: ExtensionContext & AttachmentUiContext,
 ): Promise<AgentToolResult<Record<string, unknown>>> {
   const resolved = resolveWorkspacePath(params.path);
   if (!resolved) {
@@ -121,32 +143,40 @@ async function execute(
     return { content: [{ type: "text", text: `File not found: ${params.path}` }], details: {} };
   }
 
-  const data = new Uint8Array(await file.arrayBuffer());
   const filename = params.name || basename(resolved);
-  const contentType = detectContentType(resolved, params.content_type);
-  const size = file.size;
-  const kind: AttachmentKind = params.kind || (contentType.startsWith("image/") ? "image" : "file");
+  startAttachmentProgress(ctx, `Attachment: uploading ${filename}…`);
+  try {
+    const data = new Uint8Array(await file.arrayBuffer());
+    const contentType = detectContentType(resolved, params.content_type);
+    const size = file.size;
+    const kind: AttachmentKind = params.kind || (contentType.startsWith("image/") ? "image" : "file");
 
-  const mediaId = createMedia(filename, contentType, data, null, { size, source_path: resolved, kind });
+    const mediaId = createMedia(filename, contentType, data, null, { size, source_path: resolved, kind });
 
-  registry.register(getChatJid("web:default"), {
-    id: mediaId,
-    name: filename,
-    contentType,
-    size,
-    kind,
-    sourcePath: resolved,
-  });
+    registry.register(getChatJid("web:default"), {
+      id: mediaId,
+      name: filename,
+      contentType,
+      size,
+      kind,
+      sourcePath: resolved,
+    });
 
-  return {
-    content: [{ type: "text", text: `Attached "${filename}" (${Math.round(size / 1024)} KB). A download card will appear in the chat automatically.` }],
-    details: { filename, content_type: contentType, size, kind },
-  };
+    return {
+      content: [{ type: "text", text: `Attached "${filename}" (${Math.round(size / 1024)} KB). A download card will appear in the chat automatically.` }],
+      details: { filename, content_type: contentType, size, kind },
+    };
+  } finally {
+    finishAttachmentProgress(ctx);
+  }
 }
 
 async function executeReadAttachment(
   _toolCallId: string,
   params: ReadAttachmentParams,
+  _signal?: AbortSignal,
+  _onUpdate?: unknown,
+  ctx?: ExtensionContext & AttachmentUiContext,
 ): Promise<AgentToolResult<Record<string, unknown>>> {
   const id = Number(params.id);
   if (!Number.isFinite(id) || id <= 0) {
@@ -168,7 +198,9 @@ async function executeReadAttachment(
   const isImage = contentType.startsWith("image/");
   const isText = isTextContentType(contentType);
 
-  if (mode === "image" || (mode === "auto" && isImage)) {
+  startAttachmentProgress(ctx, `Attachment: loading ${filename}…`);
+  try {
+    if (mode === "image" || (mode === "auto" && isImage)) {
     if (!VALID_IMAGE_MIMES.has(contentType)) {
       return {
         content: [{ type: "text", text: `Attachment ${filename} (${contentType}, ${formatBytes(size)}) cannot be returned as an image — only jpeg, png, gif, and webp are supported. Use mode: "text" or "base64" instead.` }],
@@ -218,15 +250,21 @@ async function executeReadAttachment(
 
   const base64 = Buffer.from(slice).toString("base64");
   const note = truncated ? ` (truncated to ${formatBytes(maxBytes)})` : "";
-  return {
-    content: [{ type: "text", text: `Attachment ${filename} (${contentType}, ${formatBytes(size)}) base64${note}:\n${base64}` }],
-    details: { id, filename, content_type: contentType, size, truncated, mode: "base64" },
-  };
+    return {
+      content: [{ type: "text", text: `Attachment ${filename} (${contentType}, ${formatBytes(size)}) base64${note}:\n${base64}` }],
+      details: { id, filename, content_type: contentType, size, truncated, mode: "base64" },
+    };
+  } finally {
+    finishAttachmentProgress(ctx);
+  }
 }
 
 async function executeExportAttachment(
   _toolCallId: string,
   params: ExportAttachmentParams,
+  _signal?: AbortSignal,
+  _onUpdate?: unknown,
+  ctx?: ExtensionContext & AttachmentUiContext,
 ): Promise<AgentToolResult<Record<string, unknown>>> {
   const id = Number(params.id);
   if (!Number.isFinite(id) || id <= 0) {
@@ -240,7 +278,12 @@ async function executeExportAttachment(
 
   const filename = params.filename || record.filename || `attachment-${id}`;
   const outputPath = buildExportPath(id, filename);
-  await Bun.write(outputPath, record.data);
+  startAttachmentProgress(ctx, `Attachment: exporting ${filename}…`);
+  try {
+    await Bun.write(outputPath, record.data);
+  } finally {
+    finishAttachmentProgress(ctx);
+  }
 
   return {
     content: [{ type: "text", text: `Attachment ${filename} exported to ${outputPath}.` }],

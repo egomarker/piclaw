@@ -15,6 +15,27 @@ import { runBunScript } from "../tools/bun-runner.js";
 import { buildSubprocessExecutionHint } from "../utils/process-spawn.js";
 
 const BUN_STATUS_ICON_SVG = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3.2C7.4 5.2 2 7.8 1.1 11.8c-1 4.2 4 8.2 10.9 8.2s11.9-4 10.9-8.2C22 7.8 16.6 5.2 12 3.2Z"></path><path d="M12 3.2c-.8 1.1-1.3 2.3-1.6 3.6"></path><path d="M12 3.2c.1 1.2.4 2.4.7 3.5"></path><ellipse cx="7.8" cy="12" rx="1.7" ry="1.8" fill="currentColor" stroke="none"></ellipse><ellipse cx="16.2" cy="12" rx="1.7" ry="1.8" fill="currentColor" stroke="none"></ellipse><circle cx="7.25" cy="11.4" r="0.5" fill="white" stroke="none"></circle><circle cx="15.65" cy="11.4" r="0.5" fill="white" stroke="none"></circle><path d="M9.6 15.2h4.8a2.4 2.4 0 0 1-4.8 0Z" fill="currentColor" stroke="none"></path></svg>`;
+const BUN_WORKING_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+type BunRunUiContext = {
+  hasUI?: boolean;
+  ui?: {
+    setWorkingIndicator: (options?: { frames?: string[]; intervalMs?: number }) => void;
+    setWorkingMessage: (message?: string) => void;
+  };
+};
+
+function startBunRunUiProgress(ctx: BunRunUiContext | undefined, message: string): void {
+  if (!ctx?.hasUI || !ctx.ui) return;
+  ctx.ui.setWorkingIndicator({ frames: BUN_WORKING_FRAMES, intervalMs: 90 });
+  ctx.ui.setWorkingMessage(message);
+}
+
+function finishBunRunUiProgress(ctx: BunRunUiContext | undefined): void {
+  if (!ctx?.hasUI || !ctx.ui) return;
+  ctx.ui.setWorkingMessage(undefined);
+  ctx.ui.setWorkingIndicator({ frames: [] });
+}
 
 const BunRunSchema = Type.Object({
   script: Type.String({ description: "Workspace-relative script file to execute with Bun (for example `runtime/scripts/foo.ts`)." }),
@@ -143,7 +164,10 @@ export const bunRunner: ExtensionFactory = (pi: ExtensionAPI) => {
       _toolCallId: string,
       params: BunRunParams,
       signal?: AbortSignal,
+      _onUpdate?: unknown,
+      ctx?: BunRunUiContext,
     ): Promise<AgentToolResult<Record<string, unknown>>> {
+      startBunRunUiProgress(ctx, `Bun: running ${params.script}…`);
       try {
         const result = await runBunScript({
           script: params.script,
@@ -207,6 +231,8 @@ export const bunRunner: ExtensionFactory = (pi: ExtensionAPI) => {
             error: message,
           },
         };
+      } finally {
+        finishBunRunUiProgress(ctx);
       }
     },
   });

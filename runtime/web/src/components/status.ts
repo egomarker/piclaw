@@ -31,6 +31,17 @@ const CLOCK_ICON_SVG = html`
 `;
 
 const STATUS_TIME_HINT_THRESHOLD_MS = 10_000;
+export const TOOL_OUTPUT_COLLAPSED_MAX_CHARS_PER_LINE = 132;
+
+export function truncateCollapsedToolOutputLines(text, maxChars = TOOL_OUTPUT_COLLAPSED_MAX_CHARS_PER_LINE) {
+    const limit = Number.isFinite(maxChars) && maxChars > 0 ? Math.floor(maxChars) : TOOL_OUTPUT_COLLAPSED_MAX_CHARS_PER_LINE;
+    return String(text || '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .split('\n')
+        .map((line) => line.length > limit ? `${line.slice(0, limit)}…` : line)
+        .join('\n');
+}
 
 export function normalizeStatusHints(value) {
     const source = Array.isArray(value)
@@ -459,7 +470,9 @@ export function AgentStatus({ status, draft, plan, thought, pendingRequest, inte
         const truncated = isCollapsible
             ? truncateLines(sourceText, maxLines, totalLines, { direction: collapseFromTail ? 'tail' : 'head' })
             : { text: sourceText || '', omitted: 0, totalLines: Number.isFinite(totalLines) ? totalLines : 0 };
-        const displayText = collapseFromTail && !isExpanded ? truncated.text : sourceText;
+        const displayText = collapseFromTail && !isExpanded
+            ? truncateCollapsedToolOutputLines(truncated.text)
+            : sourceText;
         if (!sourceText && !(Number.isFinite(truncated.totalLines) && truncated.totalLines > 0)) return null;
         const bodyClass = `agent-thinking-body${isCollapsible ? ' agent-thinking-body-collapsible' : ''}`;
         const bodyStyle = isCollapsible ? `--agent-thinking-collapsed-lines: ${maxLines};` : '';
@@ -881,7 +894,7 @@ export function AgentStatus({ status, draft, plan, thought, pendingRequest, inte
                 panelKey: 'thought',
             })}
             ${showCorePanels && hasToolOutput && renderThinkingPanel({
-                panelTitle: panelTitle(status?.output_truncated || status?.outputTruncated ? 'Tool output preview' : 'Tool output'),
+                panelTitle: panelTitle('Output'),
                 text: toolOutputInfo.text,
                 fullText: toolOutputInfo.fullText,
                 totalLines: toolOutputInfo.totalLines,

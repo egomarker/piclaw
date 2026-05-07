@@ -399,13 +399,13 @@ function GeneratedWidgetLaunch({ block, post, onOpenWidget }) {
                     type="button"
                     disabled=${!supportsRender}
                     onClick=${launchWidget}
-                    title=${supportsRender ? 'Open widget in a floating pane' : 'Unsupported widget artifact'}
+                    title=${supportsRender ? 'Open widget in a floating pane with a zen-mode toggle' : 'Unsupported widget artifact'}
                 >
                     ${openLabel}
                 </button>
                 <span class="generated-widget-launch-note">
                     ${supportsRender
-                        ? 'Opens in a dismissible floating pane.'
+                        ? 'Opens in a dismissible floating pane with a zen-mode toggle.'
                         : 'This widget artifact is missing or unsupported.'}
                 </span>
             </div>
