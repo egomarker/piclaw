@@ -22,7 +22,7 @@ test("ssh before_agent_start tells the model that SSH tool redirection is turn-s
   const handler = fake.handlers.find((entry) => entry.event === "before_agent_start")?.handler;
   const result = await handler?.({ systemPrompt: "base prompt" });
 
-  expect(result?.systemPrompt).toContain("Live SSH tool redirection clears at the end of each agent turn; stored SSH profiles remain available.");
+  expect(result?.systemPrompt).toContain("Live SSH tool redirection and stored SSH profiles are cleared at the end of each agent turn.");
 });
 
 test("ssh set stores config through registered handlers", async () => {

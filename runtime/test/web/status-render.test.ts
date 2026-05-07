@@ -176,7 +176,9 @@ test('thinking panel markdown tables match post table formatting while inheritin
   expect(css).toContain('.agent-thinking-body td');
   expect(css).toContain('border-collapse: collapse;');
   expect(css).toContain('padding: 0.4em 0.75em;');
-  expect(css).toContain('background: color-mix(in srgb, var(--bg-secondary, #f5f5f5) 50%, transparent);');
+  expect(css).toContain('background: var(--bg-secondary);');
+  expect(css).toContain('.agent-thinking-body tbody tr:nth-child(even) td');
+  expect(css).toContain('.agent-thinking-body tbody tr:nth-child(odd) td');
   expect(css).toContain('font-family: inherit;');
   expect(css).toContain('font-size: inherit;');
   expect(css).toContain('color: inherit;');
@@ -355,9 +357,25 @@ test('AgentStatus renders trailing tool status text as lowercase pills', async (
   const textOutput = collectText(host);
   expect(textOutput).toContain(`bash: ${command} working`);
   expect(textOutput).not.toContain(': Working...');
+  let argumentSpans = findElements(host, (node) => getAttr(node, 'class').includes('agent-tool-argument'));
+  expect(argumentSpans).toHaveLength(1);
+  expect(collectText(argumentSpans[0])).toBe(command);
   let pills = findElements(host, (node) => getAttr(node, 'class').includes('agent-tool-status-pill'));
   expect(pills).toHaveLength(1);
   expect(collectText(pills[0])).toBe('working');
+
+  render(h(AgentStatus, {
+    status: {
+      type: 'tool_status',
+      status: 'Working...',
+      tool_name: 'bash',
+      tool_args: { command },
+    },
+  }), host);
+
+  argumentSpans = findElements(host, (node) => getAttr(node, 'class').includes('agent-tool-argument'));
+  expect(argumentSpans).toHaveLength(1);
+  expect(collectText(argumentSpans[0])).toBe(command);
 
   render(h(AgentStatus, {
     status: {

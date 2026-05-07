@@ -192,6 +192,7 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
   let draftDeltaActive = false;
   const { remember, lookup, forget } = createToolTitleTracker();
   const toolExecutionContext = new Map<string, { toolName: string; args: unknown }>();
+  const toolStartedAt = new Map<string, string>();
   const widgetStreams = new Map<number, { toolCallId: string | null; widgetId: string | null }>();
 
   const base = {
@@ -473,7 +474,9 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
     }
 
     if (event.type === "tool_execution_start") {
+      const startedAt = new Date().toISOString();
       const title = remember(event.toolCallId, event.toolName, event.args);
+      toolStartedAt.set(event.toolCallId, startedAt);
       toolExecutionContext.set(event.toolCallId, { toolName: event.toolName, args: event.args });
       options.emitter.status({
         ...base,
@@ -481,11 +484,16 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
         title,
         tool_name: event.toolName,
         tool_args: event.args,
+        started_at: startedAt,
+        last_event_at: startedAt,
       });
     }
 
     if (event.type === "tool_execution_update") {
+      const lastEventAt = new Date().toISOString();
       const title = lookup(event.toolCallId, event.toolName, event.args);
+      const startedAt = toolStartedAt.get(event.toolCallId) || lastEventAt;
+      toolStartedAt.set(event.toolCallId, startedAt);
       toolExecutionContext.set(event.toolCallId, { toolName: event.toolName, args: event.args });
       const outputPreview = buildToolOutputStatusPreview((event as { partialResult?: unknown }).partialResult);
       options.emitter.status({
@@ -495,13 +503,17 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
         status: Object.keys(outputPreview).length > 0 ? "Streaming output..." : "Working...",
         tool_name: event.toolName,
         tool_args: event.args,
+        started_at: startedAt,
+        last_event_at: lastEventAt,
         ...outputPreview,
       });
     }
 
     if (event.type === "tool_execution_end") {
-      const title = lookup(event.toolCallId, event.toolName);
+      const lastEventAt = new Date().toISOString();
       const toolContext = toolExecutionContext.get(event.toolCallId) || null;
+      const title = lookup(event.toolCallId, event.toolName, toolContext?.args);
+      const startedAt = toolStartedAt.get(event.toolCallId) || lastEventAt;
       if (event.toolName === "show_widget" && event.isError) {
         let matchedState: { toolCallId: string | null; widgetId: string | null } | null = null;
         for (const [contentIndex, state] of widgetStreams.entries()) {
@@ -531,8 +543,11 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
         status: event.isError ? "Failed" : "Done",
         tool_name: toolContext?.toolName || event.toolName,
         tool_args: toolContext?.args,
+        started_at: startedAt,
+        last_event_at: lastEventAt,
       });
       toolExecutionContext.delete(event.toolCallId);
+      toolStartedAt.delete(event.toolCallId);
     }
 
     if (event.type === "message_end") {

@@ -583,7 +583,15 @@
 
 .agent-thinking-body th {
     font-weight: 600;
-    background: color-mix(in srgb, var(--bg-secondary, #f5f5f5) 50%, transparent);
+    background: var(--bg-secondary);
+}
+
+.agent-thinking-body tbody tr:nth-child(even) td {
+    background: color-mix(in srgb, var(--bg-secondary, #f5f5f5) 38%, transparent);
+}
+
+.agent-thinking-body tbody tr:nth-child(odd) td {
+    background: color-mix(in srgb, var(--bg-primary, #ffffff) 92%, var(--bg-secondary, #f5f5f5) 8%);
 }
 
 .agent-thinking-body th:first-child,

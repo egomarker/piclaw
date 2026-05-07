@@ -33,6 +33,9 @@ export function resolveStatusPanelTitle(status: Record<string, unknown> | null |
   const rawTitle = status.title;
   if (typeof rawTitle === "string" && rawTitle.trim()) return rawTitle.trim();
 
+  const toolName = status.tool_name ?? status.toolName;
+  if (typeof toolName === "string" && toolName.trim()) return toolName.trim();
+
   const statusText = status.status;
   if (typeof statusText === "string" && statusText.trim()) return statusText.trim();
 

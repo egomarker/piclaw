@@ -126,6 +126,9 @@ describe("web agent streaming", () => {
       expect(toolStatus).toBeDefined();
       expect(toolStatus?.data?.tool_name).toBe("bash");
       expect(toolStatus?.data?.tool_args).toEqual({ command: "echo hi" });
+      expect(toolStatus?.data?.title).toBe("bash: echo hi");
+      expect(typeof toolStatus?.data?.started_at).toBe("string");
+      expect(typeof toolStatus?.data?.last_event_at).toBe("string");
       expect(toolStatus?.data?.output_preview).toBe(Array.from({ length: 100 }, (_, index) => `line ${index + 6}`).join("\n"));
       expect(toolStatus?.data?.output_total_lines).toBe(105);
       expect(toolStatus?.data?.output_preview_lines).toBe(100);

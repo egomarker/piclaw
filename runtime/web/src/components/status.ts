@@ -168,9 +168,22 @@ function renderToolStatusPill(label) {
     return label ? html`<span class="agent-tool-status-pill">${label}</span>` : null;
 }
 
+function resolveAuditableStatusTitle(status) {
+    const title = typeof status?.title === 'string' && status.title.trim() ? status.title.trim() : '';
+    if (title) return title;
+
+    const toolName = typeof (status?.tool_name || status?.toolName) === 'string'
+        ? String(status.tool_name || status.toolName).trim()
+        : '';
+    if (!toolName) return '';
+
+    const [argument] = getStatusToolTitleArgumentCandidates(status);
+    return argument ? `${toolName}: ${argument}` : toolName;
+}
+
 export function resolveAgentStatusContent(status, options = {}) {
     const isLastActivity = options?.isLastActivity ?? Boolean(status?.last_activity || status?.lastActivity);
-    const title = status?.title;
+    const title = resolveAuditableStatusTitle(status);
     const statusText = status?.status;
     let content = '';
     if (status?.type === 'plan') {
@@ -282,7 +295,7 @@ function renderToolArgumentInText(text, payload) {
     const statusText = payload?.status || payload?.tool_status || payload?.toolStatus;
     const pillLabel = resolveToolStatusPillLabel(payload);
     const value = pillLabel ? stripTrailingToolStatusText(text, statusText) : (typeof text === 'string' ? text : '');
-    const title = typeof payload?.title === 'string' ? payload.title.trim() : '';
+    const title = resolveAuditableStatusTitle(payload);
     const parts = resolveToolTitleArgumentParts(title, payload);
 
     if (!parts?.argument) {

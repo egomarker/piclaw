@@ -878,6 +878,14 @@
     font-weight: 600;
 }
 
+.post-content tbody tr:nth-child(even) td {
+    background: color-mix(in srgb, var(--bg-secondary, #f5f5f5) 38%, transparent);
+}
+
+.post-content tbody tr:nth-child(odd) td {
+    background: color-mix(in srgb, var(--bg-primary, #ffffff) 92%, var(--bg-secondary, #f5f5f5) 8%);
+}
+
 .post-content tr:nth-child(even) {
     background-color: var(--bg-secondary);
 }

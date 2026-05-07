@@ -11,6 +11,7 @@ import { ensureSessionDir } from "../../src/agent-pool/session.js";
 import { getAttachmentRegistry } from "../../src/agent-pool/attachments.js";
 import { AgentTurnCoordinator } from "../../src/agent-pool/turn-coordinator.js";
 import { createToolExecutionWatchdogHeartbeatController, runAgentPrompt } from "../../src/agent-pool/run-agent-orchestrator.js";
+import { getSshConfig, initDatabase, upsertSshConfig } from "../../src/db.js";
 import { getToolUseMessageBudget, setToolUseMessageBudget } from "../../src/core/config.js";
 import {
   applyLiveSshConfig,
@@ -106,7 +107,7 @@ function createAssistantMessage(text: string) {
   } as const;
 }
 
-test("runAgentPrompt clears live SSH tool redirection at turn end", async () => {
+test("runAgentPrompt clears live SSH tool redirection and stored profile at turn end", async () => {
   const chatJid = "web:ssh-turn-scope";
   class StubSession {
     private listeners: Array<(event: any) => void> = [];
@@ -143,6 +144,15 @@ test("runAgentPrompt clears live SSH tool redirection at turn end", async () => 
     tempDir: "/tmp/piclaw-ssh-test",
   }) as any);
 
+  initDatabase();
+  upsertSshConfig({
+    chat_jid: chatJid,
+    ssh_target: "agent@example.com:/srv/project",
+    ssh_port: 22,
+    private_key_keychain: "ssh/piclaw",
+    known_hosts_keychain: null,
+    strict_host_key_checking: "yes",
+  });
   await registerLiveChatSshSession(chatJid, { localCwd: "/workspace", localHome: "/home/agent" });
   await applyLiveSshConfig(chatJid, {
     target: "agent@example.com:/srv/project",
@@ -151,6 +161,7 @@ test("runAgentPrompt clears live SSH tool redirection at turn end", async () => 
     strictHostKeyChecking: "yes",
   });
   expect(hasLiveChatSshConnection(chatJid)).toBe(true);
+  expect(getSshConfig(chatJid)?.ssh_target).toBe("agent@example.com:/srv/project");
 
   try {
     const result = await runAgentPrompt("test", chatJid, { timeoutMs: 0 }, {
@@ -168,6 +179,7 @@ test("runAgentPrompt clears live SSH tool redirection at turn end", async () => 
 
     expect(result.status).toBe("success");
     expect(hasLiveChatSshConnection(chatJid)).toBe(false);
+    expect(getSshConfig(chatJid)).toBeNull();
   } finally {
     await unregisterLiveChatSshSession(chatJid);
   }

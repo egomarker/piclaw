@@ -11,6 +11,7 @@ import {
   updateSessionStreaming,
   updateSessionModel,
 } from "../extensions/session-status.js";
+import { deleteSshConfig } from "../db.js";
 import { clearLiveSshConfig } from "../extensions/ssh-core.js";
 
 import {
@@ -829,10 +830,12 @@ async function runPromptAttempt(
         // side effect (for example posting an Adaptive Card/dashboard widget or
         // requesting process exit). If such a tool completed successfully, a
         // missing closing assistant text is informational, not a failed turn.
+        // This must remain true even if the assistant streamed a short lead-in
+        // before the tool call; otherwise the UI side effect can be hidden by
+        // recovery/error handling.
         // Read-only tool-only stops remain recoverable so we can retry and ask
         // the provider for the final prose reply.
         const isTerminalSideEffectCompletion = hadToolActivity
-          && !hadPartialOutput
           && !isBlankTurnSessionDelta(blankTurnDelta)
           && sawTerminalSideEffectToolActivity;
         const isRecoverableToolOnlyStop = hadToolActivity
@@ -1298,13 +1301,14 @@ export async function runAgentPrompt(
     }
     try {
       await clearLiveSshConfig(chatJid);
+      deleteSshConfig(chatJid);
     } catch (error) {
-      options.onWarn?.("Failed to clear turn-scoped SSH tool redirection", {
+      options.onWarn?.("Failed to clear turn-scoped SSH profile", {
         operation: "run_agent.ssh_clear_turn_scope",
         chatJid,
         error,
       });
-      debugSuppressedError(log, "Failed to clear turn-scoped SSH tool redirection.", error, { chatJid });
+      debugSuppressedError(log, "Failed to clear turn-scoped SSH profile.", error, { chatJid });
     }
     options.clearActiveForkBaseLeaf(chatJid);
   }

@@ -13,6 +13,12 @@ test('resolveAgentStatusContent omits redundant streaming-output suffixes when o
   expect(resolveAgentStatusContent({ type: 'tool_status', title: 'read: /workspace/file.txt', status: 'Streaming output...' })).toBe('read: /workspace/file.txt');
 });
 
+test('resolveAgentStatusContent remains auditable when tool status title is missing', () => {
+  expect(resolveAgentStatusContent({ type: 'tool_call', tool_name: 'bash', tool_args: { command: 'echo hi' } })).toBe('Running: bash: echo hi');
+  expect(resolveAgentStatusContent({ type: 'tool_status', status: 'Working...', tool_name: 'read', tool_args: { path: '/workspace/AGENTS.md' } })).toBe('read: /workspace/AGENTS.md: Working...');
+  expect(resolveAgentStatusContent({ type: 'tool_status', status: 'Streaming output...', tool_name: 'portainer' })).toBe('portainer');
+});
+
 test('resolveStatusActivityAgeLabel formats the activity age for recent activity and tool output meta rows after the clutter threshold', () => {
   expect(resolveStatusActivityAgeLabel({ type: 'tool_call', last_event_at: '2026-04-22T06:00:00.000Z' }, Date.parse('2026-04-22T06:00:05.000Z'))).toBeNull();
   expect(resolveStatusActivityAgeLabel({ type: 'tool_call', last_event_at: '2026-04-22T06:00:00.000Z' }, Date.parse('2026-04-22T06:00:10.000Z'))).toBe('10s ago');
