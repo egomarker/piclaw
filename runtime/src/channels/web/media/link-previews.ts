@@ -143,10 +143,61 @@ async function isSafeUrl(raw: string): Promise<boolean> {
   }
 }
 
-/** Extract HTTP/HTTPS URLs from a text string. */
+export function stripMarkdownCodeBlocks(text: string): string {
+  if (!text) return "";
+  const lines = String(text).split(/(\r?\n)/);
+  const kept: string[] = [];
+  let inFence = false;
+  let fenceChar = "";
+  let fenceLength = 0;
+  let atLineStart = true;
+  let currentLine = "";
+
+  const flushLine = (newline = "") => {
+    const fenceMatch = currentLine.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1];
+      if (!inFence) {
+        inFence = true;
+        fenceChar = marker[0];
+        fenceLength = marker.length;
+        currentLine = "";
+        atLineStart = true;
+        return;
+      }
+      if (marker[0] === fenceChar && marker.length >= fenceLength) {
+        inFence = false;
+        fenceChar = "";
+        fenceLength = 0;
+      }
+      currentLine = "";
+      atLineStart = true;
+      return;
+    }
+
+    const isIndentedCode = /^ {4,}\S/.test(currentLine) || /^\t\S/.test(currentLine);
+    if (!inFence && !isIndentedCode) kept.push(currentLine, newline);
+    currentLine = "";
+    atLineStart = true;
+  };
+
+  for (const part of lines) {
+    if (part === "\n" || part === "\r\n") {
+      flushLine(part);
+      continue;
+    }
+    if (atLineStart) atLineStart = false;
+    currentLine += part;
+  }
+  if (currentLine) flushLine("");
+  return kept.join("");
+}
+
+/** Extract HTTP/HTTPS URLs from a text string, ignoring Markdown code blocks. */
 export function extractUrls(text: string, limit = MAX_URLS): string[] {
   if (!text) return [];
-  const matches = text.match(URL_REGEX) ?? [];
+  const searchableText = stripMarkdownCodeBlocks(text);
+  const matches = searchableText.match(URL_REGEX) ?? [];
   const unique: string[] = [];
   for (const raw of matches) {
     const cleaned = trimUrl(raw);

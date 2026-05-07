@@ -22,6 +22,20 @@ test("extractUrls trims punctuation and limits", async () => {
   expect(urls).toEqual(["https://example.com"]);
 });
 
+test("extractUrls ignores links inside markdown code blocks", async () => {
+  const { extractUrls } = await import("../../../../src/channels/web/media/link-previews.js");
+  const urls = extractUrls([
+    "See https://example.com/outside.",
+    "```ts",
+    "const docs = 'https://example.com/in-fence';",
+    "```",
+    "    curl https://example.com/indented",
+    "And https://example.org/after.",
+  ].join("\n"));
+
+  expect(urls).toEqual(["https://example.com/outside", "https://example.org/after"]);
+});
+
 test("scheduleLinkPreviews stores metadata, caches image, and broadcasts update", async () => {
   const ws = getTestWorkspace();
   restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
