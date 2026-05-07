@@ -2,7 +2,7 @@
  * messages-crud – unified message CRUD tool for internal agent operations.
  */
 import { Type, type Static } from "typebox";
-import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
 import {
   attachMediaToMessage,

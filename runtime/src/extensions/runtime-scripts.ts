@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isPathWithin } from "../utils/path-safety.js";
 import { Type } from "typebox";
-import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { WORKSPACE_DIR } from "../core/config.js";
 import { normalizeScriptJDoc, type ScriptDiscoveryRole, type ScriptJDoc } from "./discovery-jdoc.js";
 

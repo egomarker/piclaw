@@ -6,7 +6,7 @@
  * so new workspaces get these tools automatically.
  */
 
-import { isBashToolResult } from "@mariozechner/pi-coding-agent";
+import { isBashToolResult } from "@earendil-works/pi-coding-agent";
 
 import {
   createBatchExecTool,

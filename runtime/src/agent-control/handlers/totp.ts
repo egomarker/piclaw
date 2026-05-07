@@ -7,7 +7,7 @@
  *   /totp reset <code>     – verify current code, then show single-card reset confirmation flow
  */
 
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AgentControlCommand, AgentControlResult } from "../agent-control-types.js";
 import { getIdentityConfig, getWebRuntimeConfig } from "../../core/config.js";
 import { getChatChannel } from "../../core/chat-context.js";

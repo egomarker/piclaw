@@ -9,7 +9,7 @@
  * Consumers: channels/web.ts sets up the UI bridge during agent runs.
  */
 
-import type { AgentSessionRuntime, ExtensionUIContext } from "@mariozechner/pi-coding-agent";
+import type { AgentSessionRuntime, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 
 import { createLogger, debugSuppressedError } from "../../../utils/logger.js";
 import { setServerUiThemeConfig } from "../ui-state.js";

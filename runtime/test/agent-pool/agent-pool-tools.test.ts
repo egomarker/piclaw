@@ -10,7 +10,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import "../helpers.js";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { builtinExtensionFactories } from "../../src/extensions/index.js";
 import { closeDbQuietly } from "../helpers.js";
 

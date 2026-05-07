@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { execFileSync } from "node:child_process";
 import { PassThrough, Writable } from "node:stream";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import sshCoreExtension, {
   applyLiveSshConfig,

@@ -1,7 +1,7 @@
 import { beforeEach, afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import "../helpers.js";
 import { withTempWorkspaceEnv, importFresh } from "../helpers.js";

@@ -8,9 +8,9 @@
 
 import { existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "fs";
 import { join } from "path";
-import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
-import type { ImageContent, Message, TextContent } from "@mariozechner/pi-ai";
-import type { AgentSession, SessionContext, SessionEntry, SessionManager } from "@mariozechner/pi-coding-agent";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
+import type { AgentSession, SessionContext, SessionEntry, SessionManager } from "@earendil-works/pi-coding-agent";
 
 import { seedRotatedSession } from "../session-rotation.js";
 import { ensureSessionDir } from "./session.js";

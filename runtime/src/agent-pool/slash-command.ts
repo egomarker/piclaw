@@ -15,7 +15,7 @@
  *     extension command).
  */
 
-import type { AgentSession, AgentSessionEvent } from "@mariozechner/pi-coding-agent";
+import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
 import type { AgentControlResult } from "../agent-control/agent-control-types.js";
 import { getAgentRuntimeConfig } from "../core/config.js";

@@ -9,7 +9,7 @@
  * Consumers: channels/web.ts wires this up during agent runs.
  */
 
-import type { AgentSessionEvent } from "@mariozechner/pi-coding-agent";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { WebChannelLike } from "../core/web-channel-contracts.js";
 import { buildPreview, createToolTitleTracker, type AgentProfileBuilder } from "../agent/agent-utils.js";
 

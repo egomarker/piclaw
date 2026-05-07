@@ -7,7 +7,7 @@
  *
  * Activated unconditionally (no env-var gate).
  */
-import { isBashToolResult } from "@mariozechner/pi-coding-agent";
+import { isBashToolResult } from "@earendil-works/pi-coding-agent";
 
 import {
   buildPreview,

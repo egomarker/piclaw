@@ -11,7 +11,7 @@
  * This extension is observational — it never modifies the response or session.
  */
 
-import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
 import { createLogger } from "../utils/logger.js";
 

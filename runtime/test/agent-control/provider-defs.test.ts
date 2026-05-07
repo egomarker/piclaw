@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AuthStorage, ModelRegistry } from "@mariozechner/pi-coding-agent";
+import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 import { PROVIDER_DEFS, getProviderDefs, getProviderDisplayName } from "../../src/agent-control/provider-defs.js";
 

@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { pruneOrphanToolResults } from "../../src/agent-pool/orphan-tool-results.js";
 
 type MessageRow = {

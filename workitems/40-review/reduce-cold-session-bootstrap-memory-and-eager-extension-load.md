@@ -107,7 +107,7 @@ This is not the biggest RAM spike, but it is still real cold-path work. The inte
 The SDK awaits `session_start` handlers before session startup completes.
 
 Evidence:
-- `@mariozechner/pi-coding-agent/dist/core/agent-session.js`
+- `@earendil-works/pi-coding-agent/dist/core/agent-session.js`
 - `await this._extensionRunner.emit(this._sessionStartEvent)`
 
 Implication:

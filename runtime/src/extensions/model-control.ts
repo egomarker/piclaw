@@ -4,10 +4,10 @@
  *
  * Tools: get_model_state, list_models, switch_model, switch_thinking
  */
-import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
-import type { Api, Model } from "@mariozechner/pi-ai";
-import { getSupportedThinkingLevels } from "@mariozechner/pi-ai";
-import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
+import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { findModel, parseModelInput } from "../utils/model-utils.js";
 import { getChatContext } from "../core/chat-context.js";

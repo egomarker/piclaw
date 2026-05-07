@@ -8,8 +8,8 @@
  * Consumers: agent-control-handlers.ts dispatches to these handlers.
  */
 
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
-import { getOpenAICodexWebSocketDebugStats } from "@mariozechner/pi-ai/openai-codex-responses";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { getOpenAICodexWebSocketDebugStats } from "@earendil-works/pi-ai/openai-codex-responses";
 import { statSync } from "fs";
 import type { AgentControlCommand, AgentControlResult } from "../agent-control-types.js";
 import { formatBytes, formatCompactNumber, formatCurrency } from "../agent-control-helpers.js";
@@ -306,7 +306,7 @@ export async function handleCommands(session: AgentSession, _command: CommandsCo
     const extCommands = extensionRunner.getRegisteredCommands();
     const isPiBuiltin = (path: string | undefined) => {
       if (!path) return false;
-      return path.includes("node_modules/@mariozechner/pi-");
+      return path.includes("node_modules/@earendil-works/pi-");
     };
     for (const entry of extCommands) {
       const name = entry.invocationName || entry.name;

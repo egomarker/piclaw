@@ -49,7 +49,7 @@ Recommended stance:
   - `before_provider_request` payload mutation
   - shortcut cycling
   - `FooterComponent` monkeypatch for inline verbosity display
-- Upstream docs in installed `@mariozechner/pi-coding-agent` confirm
+- Upstream docs in installed `@earendil-works/pi-coding-agent` confirm
   `before_provider_request` is a supported extension event.
 - PiClaw codebase already mutates OpenAI-family payloads in Azure extension
   (`extensions/integrations/azure-openai.ts`, sets `text.verbosity = "medium"` under specific conditions).
@@ -128,7 +128,7 @@ Recommended stance:
 ## Links
 
 - `https://www.npmjs.com/package/pi-verbosity-control`
-- `piclaw/node_modules/@mariozechner/pi-coding-agent/docs/extensions.md`
+- `piclaw/node_modules/@earendil-works/pi-coding-agent/docs/extensions.md`
 - `piclaw/extensions/integrations/azure-openai.ts`
 - `piclaw/src/agent-pool.ts`
 - `piclaw/src/extensions/model-control.ts`

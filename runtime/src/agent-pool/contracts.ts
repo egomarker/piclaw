@@ -2,7 +2,7 @@
  * agent-pool/contracts.ts – Shared public contracts for AgentPool and its helpers.
  */
 
-import type { AgentSessionEvent, AgentSessionRuntime, SettingsManager } from "@mariozechner/pi-coding-agent";
+import type { AgentSessionEvent, AgentSessionRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type {
   Api,
   AssistantMessageEvent,
@@ -10,7 +10,7 @@ import type {
   Model,
   Usage,
   streamSimple,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
 
 import type { AttachmentInfo } from "./attachments.js";
 
@@ -122,7 +122,7 @@ export interface RetrySettingsProvider {
 export interface AgentPoolOptions {
   createSession?: (chatJid: string, sessionDir: string) => Promise<AgentSessionRuntime>;
   createSideSession?: (chatJid: string, sessionDir: string) => Promise<AgentSessionRuntime>;
-  modelRegistry?: import("@mariozechner/pi-coding-agent").ModelRegistry;
+  modelRegistry?: import("@earendil-works/pi-coding-agent").ModelRegistry;
   sideStreamSimple?: (
     model: Model<Api>,
     context: Parameters<typeof streamSimple>[1],

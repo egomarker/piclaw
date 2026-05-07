@@ -4,8 +4,8 @@
  * Registers a PowerShell-native shell tool on Windows and ensures it is the
  * active shell tool instead of the generic bash label.
  */
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { createBashToolDefinition } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
 import { registerToolStatusHintProvider } from "../../../../src/tool-status-hints.js";
 import { getSshStatusHintTarget } from "../../../../src/extensions/ssh.js";
 import { createTrackedPowerShellOperations } from "../../../../src/tools/tracked-bash.js";

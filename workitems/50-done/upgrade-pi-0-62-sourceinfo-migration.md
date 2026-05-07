@@ -30,11 +30,11 @@ Two files require changes:
    - Mock `getRegisteredCommandsWithPaths` → `getRegisteredCommands`
    - Mock entries: `{ command, extensionPath }` → `{ command, invocationName, sourceInfo: { path, source, scope, origin } }`
 
-Also: bump `@mariozechner/pi-coding-agent` from `0.61.1` to `0.62.0` globally.
+Also: bump `@earendil-works/pi-coding-agent` from `0.61.1` to `0.62.0` globally.
 
 ## Acceptance criteria
 
-- [ ] `bun add -g @mariozechner/pi-coding-agent@0.62.0` succeeds
+- [ ] `bun add -g @earendil-works/pi-coding-agent@0.62.0` succeeds
 - [ ] `info.ts` compiles with new API shape
 - [ ] Test mock updated and all agent-control tests pass
 - [ ] Full test suite green
@@ -51,5 +51,5 @@ Also: bump `@mariozechner/pi-coding-agent` from `0.61.1` to `0.62.0` globally.
 - `renderCall`/`renderResult` semantics changed but we don't define custom tool renderers.
 
 ## Links
-- Upstream changelog: `@mariozechner/pi-coding-agent` 0.62.0
+- Upstream changelog: `@earendil-works/pi-coding-agent` 0.62.0
 - Migration notes in CHANGELOG.md under "Breaking Changes"

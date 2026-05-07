@@ -5,9 +5,9 @@
  * control command (`/session-rotate`) and automatic rotation in AgentPool.
  */
 
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import type { AgentSession, AgentSessionRuntime, SessionContext, SessionManager } from "@mariozechner/pi-coding-agent";
-import { closeOpenAICodexWebSocketSessions } from "@mariozechner/pi-ai/openai-codex-responses";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentSession, AgentSessionRuntime, SessionContext, SessionManager } from "@earendil-works/pi-coding-agent";
+import { closeOpenAICodexWebSocketSessions } from "@earendil-works/pi-ai/openai-codex-responses";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { basename, dirname, extname, join } from "path";
 import { formatBytes } from "./agent-control/agent-control-helpers.js";

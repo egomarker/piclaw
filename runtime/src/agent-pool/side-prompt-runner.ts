@@ -2,8 +2,8 @@
  * agent-pool/side-prompt-runner.ts – runSidePrompt orchestration helpers.
  */
 
-import type { AgentSession, AgentSessionEvent, AgentSessionRuntime, ModelRegistry } from "@mariozechner/pi-coding-agent";
-import { type AssistantMessageEvent, streamSimple, type AssistantMessageEventStream, type Model, type Api, type Usage } from "@mariozechner/pi-ai";
+import type { AgentSession, AgentSessionEvent, AgentSessionRuntime, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { type AssistantMessageEvent, streamSimple, type AssistantMessageEventStream, type Model, type Api, type Usage } from "@earendil-works/pi-ai";
 
 import { getAgentRuntimeConfig } from "../core/config.js";
 import { detectChannel } from "../router.js";

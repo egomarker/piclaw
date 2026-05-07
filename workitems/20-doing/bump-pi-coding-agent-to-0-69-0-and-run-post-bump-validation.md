@@ -22,7 +22,7 @@ owner: pi
 
 ## Summary
 
-After the TypeBox migration is stable, bump `@mariozechner/pi-coding-agent` to
+After the TypeBox migration is stable, bump `@earendil-works/pi-coding-agent` to
 `0.70.x`, revalidate the full Piclaw runtime, and confirm that the upstream
 behavior changes do not regress Piclaw-specific flows.
 
@@ -30,7 +30,7 @@ This is the final PR in the planned sequence.
 
 ## Acceptance Criteria
 
-- [ ] `@mariozechner/pi-coding-agent` is bumped to `0.70.x` cleanly.
+- [ ] `@earendil-works/pi-coding-agent` is bumped to `0.70.x` cleanly.
 - [ ] Full Piclaw tests pass after the bump.
 - [ ] Targeted validation passes for:
   - `before_agent_start` prompt chaining

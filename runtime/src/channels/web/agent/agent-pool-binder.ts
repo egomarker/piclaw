@@ -3,7 +3,7 @@
  */
 
 import type { AgentPool } from "../../../agent-pool.js";
-import type { AgentSessionRuntime } from "@mariozechner/pi-coding-agent";
+import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
 type SessionBinder = (runtime: AgentSessionRuntime, chatJid: string) => Promise<void> | void;
 

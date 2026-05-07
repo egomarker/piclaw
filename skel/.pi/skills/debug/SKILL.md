@@ -45,6 +45,6 @@ Diagnose and fix issues with the Pibox container environment.
 
 - *bun not found:* `source ~/.bashrc` or check `~/.bun/bin` is in PATH
 - *brew not found:* `eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"`
-- *pi not found:* `bun add -g @mariozechner/pi-coding-agent`
+- *pi not found:* `bun add -g @earendil-works/pi-coding-agent`
 - *Permission denied:* `sudo chown -R agent:agent /workspace`
 - *Config not persisting:* Check `/config` volume is mounted and `~/.pi` is symlinked

@@ -6,7 +6,7 @@
  * screenshots, sleeping, and PDF export.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { registerToolStatusHintProvider } from "../../../src/tool-status-hints.js";
 import * as fs from "node:fs";

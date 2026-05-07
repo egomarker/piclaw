@@ -2,7 +2,7 @@
  * agent-pool/session-binder.ts – Session binder lifecycle helper.
  */
 
-import type { AgentSessionRuntime } from "@mariozechner/pi-coding-agent";
+import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
 import type { PoolEntry } from "./session-manager.js";
 

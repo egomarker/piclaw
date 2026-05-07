@@ -40,7 +40,7 @@ BUN_BIN_REAL ?= $(shell readlink -f $(shell command -v bun 2>/dev/null) 2>/dev/n
 BUN_ROOT ?= $(or $(BUN_INSTALL),$(patsubst %/bin/bun,%,$(BUN_BIN_REAL)),/usr/local/lib/bun)
 GLOBAL_PKG := $(BUN_ROOT)/install/global/package.json
 GLOBAL_LOCK := $(BUN_ROOT)/install/global/bun.lock
-PI_AGENT_VERSION ?= $(shell jq -r '.dependencies["@mariozechner/pi-coding-agent"] // "0.58.3"' package.json)
+PI_AGENT_VERSION ?= $(shell jq -r '.dependencies["@earendil-works/pi-coding-agent"] // "0.74.0"' package.json)
 WEB_BUILD_TEST_TIMEOUT_MS ?= 20000
 
 .PHONY: help up down enter build build-piclaw build-web build-ts build-desktop vendor update-mermaid-vendor pack portable portable-linux portable-mac portable-windows portable-experimental-shell \
@@ -172,7 +172,7 @@ local-install: pack ## Pack and install piclaw globally (no restart)
 	TGZ="$$(find $(PACK_DIR) -maxdepth 1 -type f -name 'piclaw-*.tgz' | sort | tail -1)"; \
 	if [ -z "$$TGZ" ]; then printf '%s\n' "[local-install] No package tarball found in $(PACK_DIR)"; exit 1; fi; \
 	printf '%s\n' "[local-install] Installing v$${VERSION} globally..."; \
-	printf '{"dependencies":{"@mariozechner/pi-coding-agent":"$(PI_AGENT_VERSION)","@mariozechner/pi-agent-core":"$(PI_AGENT_VERSION)","@mariozechner/pi-ai":"$(PI_AGENT_VERSION)","@mariozechner/pi-tui":"$(PI_AGENT_VERSION)","piclaw":"%s"}}\n' \
+	printf '{"dependencies":{"@earendil-works/pi-coding-agent":"$(PI_AGENT_VERSION)","@earendil-works/pi-agent-core":"$(PI_AGENT_VERSION)","@earendil-works/pi-ai":"$(PI_AGENT_VERSION)","@earendil-works/pi-tui":"$(PI_AGENT_VERSION)","piclaw":"%s"}}\n' \
 		"$$TGZ" | sudo tee $(GLOBAL_PKG) >/dev/null; \
 	sudo rm -f $(GLOBAL_LOCK); \
 	sudo mkdir -p $(PICLAW_TMPDIR) $(BUN_CACHE_DIR); \

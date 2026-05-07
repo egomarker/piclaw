@@ -8,8 +8,8 @@
 
 import { expect, test } from "bun:test";
 import "../helpers.js";
-import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
-import type { AgentSessionRuntime } from "@mariozechner/pi-coding-agent";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import { applyControlCommand, parseControlCommand } from "../../src/agent-control/index.js";
 
 const modelReasoning = { provider: "openai", id: "gpt-test", reasoning: true } as any;

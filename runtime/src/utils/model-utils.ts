@@ -13,8 +13,8 @@
  *   - agent-pool.ts uses resolveModelLabel() when overriding the model for a run.
  */
 
-import type { Api, Model } from "@mariozechner/pi-ai";
-import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 /** Result of splitting a raw model input string into provider + modelId. */
 export interface ParsedModelInput {

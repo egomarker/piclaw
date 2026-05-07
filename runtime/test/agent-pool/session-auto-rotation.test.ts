@@ -6,8 +6,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, truncateSync } from "fs";
 import { basename, join } from "path";
-import type { AgentSessionRuntime } from "@mariozechner/pi-coding-agent";
-import { SessionManager } from "@mariozechner/pi-coding-agent";
+import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { createTempWorkspace, importFresh, setEnv, type TempWorkspace } from "../helpers.js";
 
 let restoreEnv: (() => void) | null = null;

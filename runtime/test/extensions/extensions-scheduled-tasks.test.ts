@@ -7,7 +7,7 @@
 
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import "../helpers.js";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { scheduledTasks } from "../../src/extensions/scheduled-tasks.js";
 import { createTask, getDb, initDatabase, logTaskRun } from "../../src/db.js";
 

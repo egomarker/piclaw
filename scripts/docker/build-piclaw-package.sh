@@ -39,9 +39,9 @@ TARBALL="$(realpath "$TARBALL")"
 
 GLOBAL_PKG="$BUN_INSTALL/install/global/package.json"
 GLOBAL_LOCK="$BUN_INSTALL/install/global/bun.lock"
-PI_AGENT_VERSION="$(jq -r '.dependencies["@mariozechner/pi-coding-agent"] // "0.58.3"' package.json)"
+PI_AGENT_VERSION="$(jq -r '.dependencies["@earendil-works/pi-coding-agent"] // "0.74.0"' package.json)"
 printf '[build-piclaw-package] install-global\n'
-printf '{"dependencies":{"@mariozechner/pi-coding-agent":"%s","piclaw":"%s"}}\n' "$PI_AGENT_VERSION" "$TARBALL" | sudo tee "$GLOBAL_PKG" >/dev/null
+printf '{"dependencies":{"@earendil-works/pi-coding-agent":"%s","piclaw":"%s"}}\n' "$PI_AGENT_VERSION" "$TARBALL" | sudo tee "$GLOBAL_PKG" >/dev/null
 sudo rm -f "$GLOBAL_LOCK"
 sudo BUN_INSTALL="$BUN_INSTALL" BUN_INSTALL_CACHE_DIR="$BUN_INSTALL_CACHE_DIR" "$BUN_INSTALL/bin/bun" install -g "$TARBALL" --registry https://registry.npmjs.org --ignore-scripts
 

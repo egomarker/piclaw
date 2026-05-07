@@ -113,12 +113,12 @@ function buildLargeConversation(messageCount: number) {
 // ---------------------------------------------------------------------------
 
 // Mock completeSimple before importing the module under test
-vi.mock("@mariozechner/pi-ai", () => ({
+vi.mock("@earendil-works/pi-ai", () => ({
   completeSimple: vi.fn(),
 }));
 
 // Mock convertToLlm with the upstream behaviors we care about in these tests.
-vi.mock("@mariozechner/pi-coding-agent", () => ({
+vi.mock("@earendil-works/pi-coding-agent", () => ({
   convertToLlm: (msgs: any[]) => msgs.flatMap((m: any) => {
     switch (m.role) {
       case "compactionSummary":
@@ -151,7 +151,7 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
   }),
 }));
 
-import { completeSimple } from "@mariozechner/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai";
 import {
   buildProgressiveCompactionChunks,
   getProgressiveCompactionBudget,

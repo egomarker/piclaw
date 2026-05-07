@@ -8,7 +8,7 @@
  */
 
 import { statSync } from "fs";
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AgentControlCommand, AgentControlResult } from "../agent-control-types.js";
 import { getIdentityConfig, setAssistantAvatar, setAssistantName } from "../../core/config.js";
 import { ensureAvatarCache } from "../../channels/web/media/avatar-service.js";

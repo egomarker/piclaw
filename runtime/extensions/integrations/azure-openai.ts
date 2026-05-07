@@ -16,7 +16,7 @@
  * utilities belong in runtime/src/utils/azure-tool-call-limit.ts.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import OpenAI from "openai";
 import {
   AssistantMessageEventStream,
@@ -25,7 +25,7 @@ import {
   type Model,
   type ToolCall,
   type ToolResultMessage,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
 import {
   applySessionCorrelationHeaders,
   applyToolCallLimit,
@@ -37,7 +37,7 @@ import {
   resolveCacheSessionId,
 } from "../../src/extensions/azure-openai-api.js";
 import { estimateAzureRequestTokens } from "../../src/utils/azure-tool-call-limit.js";
-import { streamSimpleOpenAICompletions } from "@mariozechner/pi-ai";
+import { streamSimpleOpenAICompletions } from "@earendil-works/pi-ai";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const PROVIDER = "azure-openai";

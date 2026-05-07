@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadMcpConfig } from "pi-mcp-adapter/config.ts";
 import { loadMetadataCache, type MetadataCache } from "pi-mcp-adapter/metadata-cache.ts";
 import { resourceNameToToolName } from "pi-mcp-adapter/resource-tools.ts";

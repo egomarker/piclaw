@@ -5,7 +5,7 @@
  * top-level AgentPool coordinator while preserving the existing branch semantics.
  */
 
-import type { AgentSession, AgentSessionRuntime } from "@mariozechner/pi-coding-agent";
+import type { AgentSession, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
 import { getIdentityConfig } from "../core/config.js";
 import {

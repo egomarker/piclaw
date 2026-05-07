@@ -60,7 +60,7 @@ sudo BUN_INSTALL=/usr/local/bun bash -c "$(curl -fsSL https://bun.sh/install)"
 Global installs:
 ```
 # pi CLI
-sudo /usr/local/bun/bin/bun add -g @mariozechner/pi-coding-agent
+sudo /usr/local/bun/bin/bun add -g @earendil-works/pi-coding-agent
 
 # piclaw from workspace repo root
 sudo /usr/local/bun/bin/bun add -g --no-save file:/workspace/piclaw

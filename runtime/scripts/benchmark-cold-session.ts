@@ -135,7 +135,7 @@ async function runChild(): Promise<void> {
     const before = process.memoryUsage().rss;
     const started = performance.now();
     const [{ AuthStorage, ModelRegistry, SettingsManager, getAgentDir }, { createSessionInDir }] = await Promise.all([
-      import("@mariozechner/pi-coding-agent"),
+      import("@earendil-works/pi-coding-agent"),
       import("../src/agent-pool/session.ts"),
     ]);
 

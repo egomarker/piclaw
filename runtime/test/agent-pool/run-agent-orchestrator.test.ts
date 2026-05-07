@@ -3,9 +3,9 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, truncateSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { DEFAULT_COMPACTION_SETTINGS } from "@mariozechner/pi-coding-agent";
-import { SessionManager } from "@mariozechner/pi-coding-agent";
-import type { AgentSessionRuntime } from "@mariozechner/pi-coding-agent";
+import { DEFAULT_COMPACTION_SETTINGS } from "@earendil-works/pi-coding-agent";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
 import { ensureSessionDir } from "../../src/agent-pool/session.js";
 import { getAttachmentRegistry } from "../../src/agent-pool/attachments.js";

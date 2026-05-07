@@ -7,7 +7,7 @@
  * Placement: ~/.pi/agent/extensions/powershell.ts
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 const DEFAULT_MAX_BYTES = 50 * 1024;
 const DEFAULT_MAX_LINES = 2000;
 import { Type } from "@sinclair/typebox";

@@ -7,7 +7,7 @@
  * and before manual session compaction.
  */
 
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { createLogger } from "../utils/logger.js";
 
 interface AgentContentBlock {

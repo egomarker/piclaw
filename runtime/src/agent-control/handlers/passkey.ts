@@ -7,7 +7,7 @@
  *   /passkey delete <id>   – delete a passkey by ID prefix
  */
 
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AgentControlCommand, AgentControlResult } from "../agent-control-types.js";
 import { getWebRuntimeConfig } from "../../core/config.js";
 import { getChatChannel, getChatJid } from "../../core/chat-context.js";

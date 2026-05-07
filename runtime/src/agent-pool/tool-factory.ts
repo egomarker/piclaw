@@ -5,8 +5,8 @@
  * compose a focused factory instead of owning direct SDK tool wiring.
  */
 
-import { createBashTool, createBashToolDefinition } from "@mariozechner/pi-coding-agent";
-import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
+import { createBashTool, createBashToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 import { getDefaultActiveToolNames } from "../extensions/tool-activation.js";
 

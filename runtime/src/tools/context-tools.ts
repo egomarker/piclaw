@@ -17,7 +17,7 @@
 
 import { existsSync } from "fs";
 import { Type } from "typebox";
-import { createBashTool } from "@mariozechner/pi-coding-agent";
+import { createBashTool } from "@earendil-works/pi-coding-agent";
 
 import { buildPreview, saveToolOutput, searchToolOutput, getToolOutput, readToolOutputFile } from "../tool-output.js";
 import { createTrackedBashOperations } from "./tracked-bash.js";

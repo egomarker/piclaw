@@ -3,7 +3,7 @@
  * scheduled_tasks tool surface for create/list/get/pause/resume/delete.
  */
 import { Type } from "typebox";
-import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { createTask, deleteTask, getTaskById, updateTask } from "../db.js";
 import {
   getScheduledTaskInspection,

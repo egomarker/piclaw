@@ -23,7 +23,7 @@ blocked-by: []
 
 ## Summary
 
-Piclaw already handled the two blocking adoption issues from `@mariozechner/pi-coding-agent@0.70.x`:
+Piclaw already handled the two blocking adoption issues from `@earendil-works/pi-coding-agent@0.70.x`:
 
 - built-in tool selection now uses tool-name allowlists
 - `ExtensionUIContext` now requires `setWorkingIndicator()`

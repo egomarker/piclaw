@@ -31,7 +31,7 @@ import {
   type AuthStorage,
   type ModelRegistry,
   type SettingsManager,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 import { SESSIONS_DIR, WORKSPACE_DIR } from "../core/config.js";
 import { buildChannelSystemPromptAppendix } from "../channels/formatting.js";
@@ -92,12 +92,12 @@ type AgentSessionCreateOptions = {
 /**
  * Bundled extension paths that are loaded when their activation env vars
  * are present.  The files live inside the piclaw package tree so that
- * node_modules resolution (for @mariozechner/pi-ai internals etc.) works.
+ * node_modules resolution (for @earendil-works/pi-ai internals etc.) works.
  *
  * Because bun may hoist dependencies, we create a node_modules symlink
  * next to the extensions directory pointing to the nearest real
  * node_modules so that jiti's fallback resolution finds packages like
- * @mariozechner/pi-ai/dist/providers/*.
+ * @earendil-works/pi-ai/dist/providers/*.
  */
 const EXTENSIONS_DIR = resolve(process.env.PICLAW_RUNTIME_ROOT || resolve(__dirname, "../.."), "extensions");
 const log = createLogger("agent-pool.session");
@@ -145,12 +145,12 @@ function getBundledExtensionEnvSignature(chatJid?: string): string {
   ].join("|");
 }
 
-/** Walk up from startDir looking for a node_modules that contains @mariozechner/pi-ai. */
+/** Walk up from startDir looking for a node_modules that contains @earendil-works/pi-ai. */
 function findNodeModules(startDir: string): string | null {
   let dir = startDir;
   for (let i = 0; i < 10; i++) {
     const candidate = join(dir, "node_modules");
-    if (existsSync(join(candidate, "@mariozechner", "pi-ai"))) return candidate;
+    if (existsSync(join(candidate, "@earendil-works", "pi-ai"))) return candidate;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;

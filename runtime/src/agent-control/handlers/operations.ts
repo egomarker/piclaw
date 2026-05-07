@@ -7,7 +7,7 @@
  * Consumers: agent-control-handlers.ts dispatches to these handlers.
  */
 
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AgentControlCommand, AgentControlResult } from "../agent-control-types.js";
 import { createTrackedBashOperations } from "../../tools/tracked-bash.js";
 import { formatShellBlock, resolveShellCwd } from "../agent-control-helpers.js";

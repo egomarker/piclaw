@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import type { AgentSessionRuntime } from "@mariozechner/pi-coding-agent";
+import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import { AgentSessionBinder } from "../../src/agent-pool/session-binder.js";
 
 function createRuntime(session: any): AgentSessionRuntime {

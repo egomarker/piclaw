@@ -434,10 +434,10 @@ Pick and justify one recommended approach that:
 
 ## Links
 
-- `piclaw/piclaw/node_modules/@mariozechner/pi-coding-agent/docs/session.md`
-- `piclaw/piclaw/node_modules/@mariozechner/pi-coding-agent/docs/tree.md`
-- `piclaw/piclaw/node_modules/@mariozechner/pi-coding-agent/examples/sdk/11-sessions.ts`
-- `piclaw/piclaw/node_modules/@mariozechner/pi-coding-agent/examples/extensions/session-name.ts`
+- `piclaw/piclaw/node_modules/@earendil-works/pi-coding-agent/docs/session.md`
+- `piclaw/piclaw/node_modules/@earendil-works/pi-coding-agent/docs/tree.md`
+- `piclaw/piclaw/node_modules/@earendil-works/pi-coding-agent/examples/sdk/11-sessions.ts`
+- `piclaw/piclaw/node_modules/@earendil-works/pi-coding-agent/examples/extensions/session-name.ts`
 - `piclaw/piclaw/src/db/connection.ts`
 - `piclaw/piclaw/src/db/chat-cursors.ts`
 - `piclaw/piclaw/src/channels/web/handlers/agent.ts`

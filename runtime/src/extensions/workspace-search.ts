@@ -6,7 +6,7 @@ import type {
   AgentToolResult,
   ExtensionContext,
   ExtensionFactory,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { refreshWorkspaceIndex, searchWorkspace, type WorkspaceSearchRow } from "../workspace-search.js";
 
 const WorkspaceSearchSchema = Type.Object({

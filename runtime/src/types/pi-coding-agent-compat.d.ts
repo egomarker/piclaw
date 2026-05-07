@@ -1,8 +1,8 @@
-import "@mariozechner/pi-coding-agent";
+import "@earendil-works/pi-coding-agent";
 
-declare module "@mariozechner/pi-coding-agent" {
+declare module "@earendil-works/pi-coding-agent" {
   interface AgentSessionRuntime {
-    session: import("@mariozechner/pi-coding-agent").AgentSession;
+    session: import("@earendil-works/pi-coding-agent").AgentSession;
     cwd: string;
     diagnostics: unknown[];
     modelFallbackMessage?: string;

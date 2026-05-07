@@ -6,7 +6,7 @@
  * /tint off       → clear tint and restore default light/dark
  */
 import { formatThemeList, labelForTheme, normalizeTheme } from "../channels/web/theming/ui-theme-data.js";
-import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
 const CLEAR_VALUES = new Set(["off", "clear", "none", "reset", "default"]);
 

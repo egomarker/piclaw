@@ -18,7 +18,7 @@
 
 import { spawn } from "child_process";
 import { existsSync } from "fs";
-import type { BashOperations } from "@mariozechner/pi-coding-agent";
+import type { BashOperations } from "@earendil-works/pi-coding-agent";
 import { buildInjectedShellEnv, resolveKeychainPlaceholders } from "../secure/keychain.js";
 
 import { killProcessTree, registerProcess, unregisterProcess } from "../utils/process-tracker.js";

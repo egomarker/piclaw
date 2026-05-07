@@ -7,7 +7,7 @@
  * Consumers: channels/web.ts creates a UIContext for each agent session.
  */
 
-import type { AgentSessionRuntime, ExtensionUIContext } from "@mariozechner/pi-coding-agent";
+import type { AgentSessionRuntime, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 
 import type { WebChannelLike } from "./core/web-channel-contracts.js";
 import { UiBridge, type UiBridgeChannel } from "./theming/ui-bridge.js";

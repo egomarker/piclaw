@@ -4,7 +4,7 @@
  * These helpers are available at runtime but not part of the package export map,
  * so we provide a narrow declaration seam to keep TypeScript builds strict.
  */
-declare module "@mariozechner/pi-ai/dist/providers/openai-responses-shared.js" {
+declare module "@earendil-works/pi-ai/dist/providers/openai-responses-shared.js" {
   export const convertResponsesMessages: (...args: unknown[]) => unknown;
   export const convertResponsesTools: (...args: unknown[]) => unknown;
   export const processResponsesStream: (...args: unknown[]) => Promise<void>;

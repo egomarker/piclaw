@@ -23,7 +23,7 @@ blocked-by: []
 
 ## Summary
 
-Piclaw is still pinned to `@mariozechner/pi-coding-agent@0.67.6`, while upstream
+Piclaw is still pinned to `@earendil-works/pi-coding-agent@0.67.6`, while upstream
 has moved to `0.70.x`.
 
 A temporary bump assessment against `0.70.x` passed Piclaw typecheck and a
@@ -49,7 +49,7 @@ This ticket tracks both:
 
 ## Acceptance Criteria
 
-- [ ] Piclaw is bumped to `@mariozechner/pi-coding-agent@0.70.x` with lockfile
+- [ ] Piclaw is bumped to `@earendil-works/pi-coding-agent@0.70.x` with lockfile
       updates.
 - [ ] Matching transitive runtime packages (`pi-agent-core`, `pi-ai`, `pi-tui`)
       are updated via the lockfile.
@@ -263,7 +263,7 @@ Path B if time permits, but keep the work split into reviewable commits:
   - the ticket is already well-scoped for a medium-sized upstream adoption tranche and has concrete validation surfaces
   - acceptance criteria are strong, but execution should stay ordered so the dependency bump itself lands before broader Piclaw-side hardening grows the scope too far
   - keep the first implementation pass to:
-    1. bump `@mariozechner/pi-coding-agent` to `0.70.x`
+    1. bump `@earendil-works/pi-coding-agent` to `0.70.x`
     2. rerun the already-proven focused regression slice
     3. land `after_provider_response` diagnostics as the first Piclaw-local follow-up
 - Recommendation: keep in `10-next/`; quality is high enough to pick up, but the implementation should be deliberately staged rather than attempted as one blended mega-change.
@@ -273,7 +273,7 @@ Path B if time permits, but keep the work split into reviewable commits:
 - Queued for agent audit (board batch action). Agent should review quality score, acceptance criteria, and test plan.
 
 ### 2026-04-17
-- Created after assessing upstream `@mariozechner/pi-coding-agent` updates.
+- Created after assessing upstream `@earendil-works/pi-coding-agent` updates.
 - Temporary bump to `0.70.x` passed Piclaw typecheck and a focused regression
   slice, so the dependency change itself looks safe.
 - Captured Piclaw-local follow-up work for provider-response diagnostics,
@@ -292,7 +292,7 @@ Path B if time permits, but keep the work split into reviewable commits:
 
 ## Links
 
-- Upstream package currently used by Piclaw: `@mariozechner/pi-coding-agent@0.67.6`
+- Upstream package currently used by Piclaw: `@earendil-works/pi-coding-agent@0.67.6`
 - Assessed upstream target: `0.70.x`
 - Upstream docs: `after_provider_response`, `session_shutdown`, packaged asset
   resolution fixes, and built-in `find` behavior fixes

@@ -3,7 +3,7 @@
 Date: 2026-04-22
 
 Scope audited:
-- `@mariozechner/pi-coding-agent` `0.68.1 -> 0.69.0`
+- `@earendil-works/pi-coding-agent` `0.68.1 -> 0.69.0`
 - related upstream package deltas in `packages/ai` and `packages/tui`
 - current Piclaw codebase usage and likely impact areas
 
@@ -260,7 +260,7 @@ Checklist:
 
 ## Recommended upgrade order
 
-1. **Do not bump `@mariozechner/pi-coding-agent` blindly.**
+1. **Do not bump `@earendil-works/pi-coding-agent` blindly.**
 2. Land a dedicated TypeBox migration plan first, or at minimum define whether Piclaw will intentionally stay on the compatibility path for one more upstream cycle.
 3. When bumping, run at least:
    - [ ] `bun run test`

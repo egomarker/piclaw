@@ -193,7 +193,7 @@ least:
 - author / maintainer
 - source repo / homepage
 - compatible Piclaw version range
-- compatible `@mariozechner/pi-coding-agent` version range if needed
+- compatible `@earendil-works/pi-coding-agent` version range if needed
 - extension entrypoint paths
 - shipped skill paths
 - tags/categories

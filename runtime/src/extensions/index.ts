@@ -29,7 +29,7 @@
  * Consumers:
  *   - agent-pool/session.ts passes builtinExtensionFactories to the resource loader.
  */
-import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { AttachmentRegistry } from "../agent-pool/attachments.js";
 import { createFileAttachmentsExtension } from "./file-attachments.js";
 import { messagesCrud } from "./messages-crud.js";

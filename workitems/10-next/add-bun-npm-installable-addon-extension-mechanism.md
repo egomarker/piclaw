@@ -135,7 +135,7 @@ path with a stable, supported install location and metadata model.
   - a bundle of skills + extension code + metadata?
 - How is compatibility declared?
   - semver against Piclaw
-  - semver against `@mariozechner/pi-coding-agent`
+  - semver against `@earendil-works/pi-coding-agent`
   - both?
 - Should addon installation be per-user, per-workspace, or both?
 - How are dependency conflicts and duplicate extension IDs handled?

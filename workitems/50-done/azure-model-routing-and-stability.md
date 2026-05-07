@@ -222,10 +222,10 @@ production port hostage to the larger refactor.
   - `runtime/src/extensions/azure-openai-api.ts`
 - Recorded the harness bundling-path fix: the harness now bundles under `/workspace/piclaw/.tmp/azure-openai.harness.bundle.mjs` so Bun resolves this repo's dependency tree instead of `/workspace/node_modules`.
 - Upgraded the pi-mono package set to `0.67.2`:
-  - `@mariozechner/pi-coding-agent`
-  - `@mariozechner/pi-agent-core`
-  - `@mariozechner/pi-ai`
-  - `@mariozechner/pi-tui`
+  - `@earendil-works/pi-coding-agent`
+  - `@earendil-works/pi-agent-core`
+  - `@earendil-works/pi-ai`
+  - `@earendil-works/pi-tui`
 - Updated the live Azure Responses path to mirror the active session id into:
   - `prompt_cache_key`
   - `session_id`

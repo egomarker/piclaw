@@ -1,4 +1,4 @@
-declare module "@mariozechner/pi-coding-agent" {
+declare module "@earendil-works/pi-coding-agent" {
 	export interface ExtensionToolResult {
 		content: Array<{ type: string; text: string }>;
 		details?: any;

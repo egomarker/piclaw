@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { AuthStorage, ModelRegistry, SettingsManager, getAgentDir } from "@mariozechner/pi-coding-agent";
+import { AuthStorage, ModelRegistry, SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 import { createAgentPoolServices } from "../../src/agent-pool/service-factory.js";
 

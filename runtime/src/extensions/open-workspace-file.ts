@@ -13,7 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Type } from "typebox";
-import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { getChatChannel, getChatJid } from "../core/chat-context.js";
 
 const OpenWorkspaceFileSchema = Type.Object({

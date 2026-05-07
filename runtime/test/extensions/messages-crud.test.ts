@@ -2,7 +2,7 @@
  * test/extensions/messages-crud.test.ts – Tests for the unified messages tool.
  */
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createTempWorkspace, importFresh, setEnv } from "../helpers.js";
 import { withChatContext } from "../../src/core/chat-context.js";
 

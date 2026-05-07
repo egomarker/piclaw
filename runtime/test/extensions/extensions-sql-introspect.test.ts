@@ -3,7 +3,7 @@
  */
 
 import { beforeEach, afterEach, describe, expect, test } from "bun:test";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createTempWorkspace, importFresh, setEnv } from "../helpers.js";
 
 function makeFakeApi() {

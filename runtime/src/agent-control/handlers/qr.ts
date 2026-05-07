@@ -5,7 +5,7 @@
  *   /qr <text or URL>
  */
 
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AgentControlCommand, AgentControlResult } from "../agent-control-types.js";
 import { getChatChannel } from "../../core/chat-context.js";
 import { generateQrSvg } from "../../utils/totp-qr.js";

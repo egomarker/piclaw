@@ -8,7 +8,7 @@
  *       record with a base_url.
  */
 
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AgentControlCommand, AgentControlResult } from "../agent-control-types.js";
 import { getRemoteInteropConfig } from "../../core/config.js";
 import { getRemotePeer, getRemotePeerByDisplayName, getRemotePeerByFingerprint } from "../../db/remote-interop.js";

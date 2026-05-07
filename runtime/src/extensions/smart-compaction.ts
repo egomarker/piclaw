@@ -26,11 +26,11 @@
  *   - LLM call fails or produces an inadequate summary
  */
 
-import type { ExtensionAPI, ExtensionFactory, FileOperations } from "@mariozechner/pi-coding-agent";
-import { convertToLlm } from "@mariozechner/pi-coding-agent";
-import { completeSimple } from "@mariozechner/pi-ai";
-import type { Message } from "@mariozechner/pi-ai";
-import type { CompactionResult } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionFactory, FileOperations } from "@earendil-works/pi-coding-agent";
+import { convertToLlm } from "@earendil-works/pi-coding-agent";
+import { completeSimple } from "@earendil-works/pi-ai";
+import type { Message } from "@earendil-works/pi-ai";
+import type { CompactionResult } from "@earendil-works/pi-coding-agent";
 import { resolveModelRequestAuth } from "../utils/model-auth.js";
 import { createLogger } from "../utils/logger.js";
 

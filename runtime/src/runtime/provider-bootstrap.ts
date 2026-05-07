@@ -2,7 +2,7 @@
  * runtime/provider-bootstrap.ts – Optional model provider registration at startup.
  */
 
-import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { createLogger } from "../utils/logger.js";
 
 export type AzureProviderBootstrapHandle = { stop: () => void; refresh: () => Promise<void> };

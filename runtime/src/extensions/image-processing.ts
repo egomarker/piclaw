@@ -11,7 +11,7 @@ import type {
   AgentToolResult,
   ExtensionAPI,
   ExtensionFactory,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { existsSync, statSync } from "node:fs";
 import { resolve, basename, extname, dirname, join } from "node:path";
 import { stripBaseDirForDisplay } from "../utils/path-safety.js";

@@ -7,7 +7,7 @@
  * Consumers: agent-control-handlers.ts dispatches to this handler.
  */
 
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AgentControlCommand, AgentControlResult } from "../agent-control-types.js";
 import { extractTextFromContent, truncateText } from "../agent-control-helpers.js";
 import { getWidgetKindRenderer } from "../../channels/web/http/extension-routes.js";

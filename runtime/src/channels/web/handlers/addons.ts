@@ -164,14 +164,14 @@ function findBundledNodeModulesDir(startDir = __dirname): string | null {
   let dir = startDir;
   for (let i = 0; i < 10; i++) {
     const candidate = join(dir, "node_modules");
-    if (existsSync(join(candidate, "@mariozechner", "pi-ai"))) return candidate;
+    if (existsSync(join(candidate, "@earendil-works", "pi-ai"))) return candidate;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
 
   const globalCandidate = "/usr/local/lib/bun/install/global/node_modules";
-  return existsSync(join(globalCandidate, "@mariozechner", "pi-ai")) ? globalCandidate : null;
+  return existsSync(join(globalCandidate, "@earendil-works", "pi-ai")) ? globalCandidate : null;
 }
 
 function linkBundledNodeModulesIntoAddon(addonDir: string): void {

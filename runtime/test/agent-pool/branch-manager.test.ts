@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "fs";
 
-import type { AgentSessionRuntime } from "@mariozechner/pi-coding-agent";
-import { SessionManager } from "@mariozechner/pi-coding-agent";
+import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { join } from "path";
 import { ensureSessionDir } from "../../src/agent-pool/session.js";
 import { AgentBranchManager } from "../../src/agent-pool/branch-manager.js";

@@ -9,7 +9,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { getTestWorkspace, setEnv } from "../helpers.js";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { withChatContext } from "../../src/core/chat-context.js";
 
 let restoreEnv: (() => void) | null = null;

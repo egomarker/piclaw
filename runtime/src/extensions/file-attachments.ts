@@ -14,7 +14,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
   ExtensionFactory,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 import { createMedia, getMediaById } from "../db.js";
 import { WORKSPACE_DIR } from "../core/config.js";

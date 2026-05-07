@@ -2,7 +2,7 @@
  * keychain-tools – registers a keychain tool for listing and retrieving entries.
  */
 import { Type } from "typebox";
-import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
 import { registerToolStatusHintProvider } from "../tool-status-hints.js";
 import {

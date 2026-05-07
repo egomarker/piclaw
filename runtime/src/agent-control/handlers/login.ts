@@ -13,7 +13,7 @@
  * Works without a running model.
  */
 
-import type { AgentSession, ModelRegistry } from "@mariozechner/pi-coding-agent";
+import type { AgentSession, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AgentControlCommand, AgentControlResult } from "../agent-control-types.js";
 import { writeFileSync, readFileSync, existsSync, copyFileSync } from "fs";
 import { join } from "path";

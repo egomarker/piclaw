@@ -58,7 +58,7 @@ export function findImportBoundaryViolations(projectDir: string): string[] {
       if (specifier.includes("../node_modules/")) {
         violations.push(`${rel}: disallowed node_modules relative import (${specifier})`);
       }
-      if (specifier.startsWith("@mariozechner/pi-ai/dist/")) {
+      if (specifier.startsWith("@earendil-works/pi-ai/dist/")) {
         violations.push(`${rel}: disallowed direct pi-ai dist import (${specifier})`);
       }
       if (specifier.startsWith("../src/") && !specifier.startsWith(ALLOWED_ENTRY_SRC_IMPORT_PREFIX)) {
@@ -73,7 +73,7 @@ export function findImportBoundaryViolations(projectDir: string): string[] {
 
     const specifiers = extractModuleSpecifiers(readFileSync(file, "utf8"));
     for (const specifier of specifiers) {
-      if (specifier.startsWith("@mariozechner/pi-ai/dist/")) {
+      if (specifier.startsWith("@earendil-works/pi-ai/dist/")) {
         violations.push(`${rel}: disallowed pi-ai dist import outside allowlist (${specifier})`);
       }
     }

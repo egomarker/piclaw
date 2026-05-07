@@ -7,7 +7,7 @@
 
 import { describe, test, expect } from "bun:test";
 import "../../helpers.js";
-import type { AgentSessionRuntime } from "@mariozechner/pi-coding-agent";
+import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import { UiBridge } from "../../../src/channels/web/theming/ui-bridge.js";
 import { bindSessionUiContext, createUiContext } from "../../../src/channels/web/ui-context.js";
 

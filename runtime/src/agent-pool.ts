@@ -30,7 +30,7 @@ import {
   ModelRegistry,
   SettingsManager,
   getAgentDir,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 import { type AgentControlCommand, type AgentControlResult } from "./agent-control/index.js";
 import { SESSIONS_DIR, WORKSPACE_DIR } from "./core/config.js";

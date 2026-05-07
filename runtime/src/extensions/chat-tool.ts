@@ -6,7 +6,7 @@
  * semantics, follow-up handling, and agent execution remain unchanged.
  */
 import { Type } from "typebox";
-import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { getChatJid } from "../core/chat-context.js";
 
 type ChatRelayMode = "auto" | "queue" | "steer";

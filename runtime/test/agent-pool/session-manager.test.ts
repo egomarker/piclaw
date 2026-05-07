@@ -2,7 +2,7 @@ import { afterEach, expect, test, spyOn } from "bun:test";
 import { renameSync, writeFileSync } from "fs";
 import { join } from "path";
 
-import type { AgentSessionRuntime } from "@mariozechner/pi-coding-agent";
+import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import { readDeferredBranchSeed, restoreClaimedDeferredBranchSeed, writeDeferredBranchSeed } from "../../src/agent-pool/branch-seeding.js";
 import { ensureSessionDir } from "../../src/agent-pool/session.js";
 import { AgentSessionManager } from "../../src/agent-pool/session-manager.js";

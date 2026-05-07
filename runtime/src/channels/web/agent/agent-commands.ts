@@ -9,7 +9,7 @@
  *   - compose-box.ts fetches this on mount to populate autocomplete.
  */
 
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { CONTROL_COMMAND_DEFINITIONS } from "../../../agent-control/command-registry.js";
 import type { AgentPool } from "../../../agent-pool.js";
 import { appendServerTiming, measureAsync } from "../http/server-timing.js";
@@ -45,7 +45,7 @@ function buildCommandList(session: AgentSession): CommandEntry[] {
   // Extension commands
   if (session.extensionRunner) {
     const isPiBuiltin = (path: string | undefined) =>
-      !!path && path.includes("node_modules/@mariozechner/pi-");
+      !!path && path.includes("node_modules/@earendil-works/pi-");
     const extCommands = session.extensionRunner.getRegisteredCommands();
     for (const entry of extCommands) {
       const name = entry.invocationName || entry.name;

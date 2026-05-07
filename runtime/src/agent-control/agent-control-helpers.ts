@@ -13,8 +13,8 @@
  *   - agent-pool.ts for model label resolution.
  */
 
-import type { AgentSession, AgentSessionEvent } from "@mariozechner/pi-coding-agent";
-import type { Api, Model } from "@mariozechner/pi-ai";
+import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import { existsSync } from "fs";
 import { getConfigPath, WORKSPACE_DIR } from "../core/config.js";
 import { readJsonConfig, writeJsonConfig } from "../core/config-store.js";

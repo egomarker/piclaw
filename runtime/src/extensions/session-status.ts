@@ -13,7 +13,7 @@
  * sessions are active.
  */
 
-import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 // ── Session isolation setting ────────────────────────────────────

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import fs from 'node:fs';
 
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { withChatContext } from '../../src/core/chat-context.js';
 import { createTempWorkspace, importFresh } from '../helpers.js';
 

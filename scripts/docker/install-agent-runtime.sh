@@ -224,13 +224,13 @@ PI_CODING_AGENT_VERSION="${PI_CODING_AGENT_VERSION:-}"
 if [ -z "$PI_CODING_AGENT_VERSION" ]; then
   for pkg in /tmp/piclaw-package.json "$HOME/piclaw/package.json"; do
     if [ -f "$pkg" ]; then
-      PI_CODING_AGENT_VERSION="$(jq -r '.dependencies["@mariozechner/pi-coding-agent"] // empty' "$pkg")"
+      PI_CODING_AGENT_VERSION="$(jq -r '.dependencies["@earendil-works/pi-coding-agent"] // empty' "$pkg")"
       [ -n "$PI_CODING_AGENT_VERSION" ] && break
     fi
   done
 fi
-PI_CODING_AGENT_VERSION="${PI_CODING_AGENT_VERSION:-0.58.3}"
-sudo BUN_INSTALL="$BUN_INSTALL" BUN_INSTALL_CACHE_DIR="$BUN_INSTALL_CACHE_DIR" "$BUN_INSTALL/bin/bun" add -g "@mariozechner/pi-coding-agent@${PI_CODING_AGENT_VERSION}"
+PI_CODING_AGENT_VERSION="${PI_CODING_AGENT_VERSION:-0.74.0}"
+sudo BUN_INSTALL="$BUN_INSTALL" BUN_INSTALL_CACHE_DIR="$BUN_INSTALL_CACHE_DIR" "$BUN_INSTALL/bin/bun" add -g "@earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION}"
 
 sudo chmod -R a+rX "$BUN_INSTALL"
 sudo ln -sf "$BUN_INSTALL/bin/pi" /usr/local/bin/pi

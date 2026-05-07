@@ -2,7 +2,7 @@
  * agent-pool/compaction.ts – Shared compaction helpers for orchestrated and manual compaction paths.
  */
 
-import { type AgentSession, type AgentSessionEvent } from "@mariozechner/pi-coding-agent";
+import { type AgentSession, type AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
 import { getCompactionRuntimeConfig } from "../core/config.js";
 import {

@@ -11,7 +11,7 @@
  *   - channels/web/request-router-service.ts calls it for web commands.
  */
 
-import type { AgentSessionRuntime, ModelRegistry } from "@mariozechner/pi-coding-agent";
+import type { AgentSessionRuntime, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AgentControlCommand, AgentControlResult } from "./agent-control-types.js";
 import {
   handleAbort,

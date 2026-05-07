@@ -2,7 +2,7 @@
  * agent-pool/service-factory.ts – Constructor wiring for AgentPool helper services.
  */
 
-import type { AuthStorage, ExtensionFactory, ModelRegistry, SettingsManager } from "@mariozechner/pi-coding-agent";
+import type { AuthStorage, ExtensionFactory, ModelRegistry, SettingsManager } from "@earendil-works/pi-coding-agent";
 
 import { getAttachmentRegistry } from "./attachments.js";
 import { getSshConfig } from "../db.js";

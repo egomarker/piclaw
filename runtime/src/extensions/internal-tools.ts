@@ -6,7 +6,7 @@ import type {
   AgentToolResult,
   ExtensionAPI,
   ExtensionFactory,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { getToolsetsForTool, getEffectiveDefaultActiveToolNames } from "./tool-activation.js";
 import { getToolCapability, type ToolActivation, type ToolCapability } from "./tool-capabilities.js";
 import type { ToolJDoc } from "./discovery-jdoc.js";

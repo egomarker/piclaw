@@ -260,7 +260,7 @@ test('handleInstallAddon installs peer-only tarball addons without bun install',
     const packageJson = {
       name: '@rcarmo/piclaw-addon-peerless',
       version: '0.2.0',
-      peerDependencies: { '@mariozechner/pi-coding-agent': '*' },
+      peerDependencies: { '@earendil-works/pi-coding-agent': '*' },
       pi: { extensions: ['index.ts'] },
     };
     const tarballPath = createAddonTarball(workspace.workspace, 'piclaw-addon-peerless-0.2.0.tgz', {

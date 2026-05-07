@@ -1,4 +1,4 @@
-import { initTheme } from "@mariozechner/pi-coding-agent";
+import { initTheme } from "@earendil-works/pi-coding-agent";
 import type { ServerWebSocket } from "bun";
 
 import { purgeExpiredLinkPreviewImageCache } from "../../db.js";

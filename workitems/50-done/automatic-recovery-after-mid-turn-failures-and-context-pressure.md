@@ -360,7 +360,7 @@ turn paths should use the shared engine from the start.
     - formatting the tooltip text shown on the visible chip
 - Attempted the broader cross-path verification sweep using the ticket’s planned runtime test set plus `bunx tsc --noEmit -p runtime/tsconfig.json`.
 - The closure sweep is currently blocked by **repo/environment baseline issues unrelated to the recovery changes**:
-  - Dream / scheduler / some orchestrator-path tests fail immediately because the installed `/workspace/node_modules/@mariozechner/pi-coding-agent` package does not export `createAgentSessionServices` from its public entrypoint, while `runtime/src/agent-pool/session.ts` still imports that symbol
+  - Dream / scheduler / some orchestrator-path tests fail immediately because the installed `/workspace/node_modules/@earendil-works/pi-coding-agent` package does not export `createAgentSessionServices` from its public entrypoint, while `runtime/src/agent-pool/session.ts` still imports that symbol
   - local TypeScript verification is also blocked in this container by missing `bun-types`
 - User field report confirmed two still-live failure modes on `main` during long context-pressure runs:
   - the terminal persisted warning `⚠️ Your message was received but the agent produced no response. You may need to re-send it.` was still being emitted after stalled compaction / automatic recovery, which is the wrong classification for that failure path
@@ -380,7 +380,7 @@ turn paths should use the shared engine from the start.
   - `runtime/test/channels/web/agent-error-classification.test.ts`
   - `runtime/test/channels/web/web-channel.test.ts`
   - result: `97 pass / 0 fail`
-- Closure blocker resolved by adapting `runtime/src/agent-pool/session.ts` to the current `@mariozechner/pi-coding-agent` session-creation API and adding a local compatibility typing for `AgentSessionRuntime`, which restored Dream/scheduler verification for the broader recovery matrix.
+- Closure blocker resolved by adapting `runtime/src/agent-pool/session.ts` to the current `@earendil-works/pi-coding-agent` session-creation API and adding a local compatibility typing for `AgentSessionRuntime`, which restored Dream/scheduler verification for the broader recovery matrix.
 - Full closure verification now passes:
   - broader recovery-focused suite:
     - `runtime/test/agent-pool/automatic-recovery.test.ts`

@@ -6,7 +6,7 @@
  * higher-level run flow.
  */
 
-import type { AgentSession, AgentSessionEvent } from "@mariozechner/pi-coding-agent";
+import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
 import type { AttachmentInfo } from "./attachments.js";
 

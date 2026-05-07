@@ -213,7 +213,7 @@ interactions are proven in tests.
 
 - `piclaw/piclaw/src/agent-pool/session.ts` — session creation and directory management
 - `piclaw/piclaw/src/agent-pool.ts` — session lifecycle, `getOrCreate`, idle eviction
-- `@mariozechner/pi-coding-agent` — `SessionManager`, `findMostRecentSession`, `newSession`, `createBranchedSession`
+- `@earendil-works/pi-coding-agent` — `SessionManager`, `findMostRecentSession`, `newSession`, `createBranchedSession`
 - `piclaw/piclaw/src/channels/web/handlers/agent.ts` — turn lifecycle / active-turn safety
 - `piclaw/piclaw/src/db/chat-cursors.ts` — cursor and deferred queue state
 - `piclaw/piclaw/src/channels/web.ts` — placeholder / steering stores and web runtime state
@@ -233,8 +233,8 @@ interactions are proven in tests.
 - `piclaw/piclaw/src/channels/web/handlers/agent.ts`
 - `piclaw/piclaw/src/db/chat-cursors.ts`
 - `piclaw/piclaw/src/channels/web.ts`
-- `piclaw/piclaw/node_modules/@mariozechner/pi-coding-agent/docs/session.md`
-- `piclaw/piclaw/node_modules/@mariozechner/pi-coding-agent/dist/core/session-manager.js`
+- `piclaw/piclaw/node_modules/@earendil-works/pi-coding-agent/docs/session.md`
+- `piclaw/piclaw/node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.js`
 
 ## Updates
 
