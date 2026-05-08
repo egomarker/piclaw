@@ -391,6 +391,11 @@ export class AgentPool {
 
   scheduleRecentChatWarmup(options: { limit?: number; excludeChatJids?: string[] } = {}): string[] {
     if (this.shuttingDown) return [];
+    const shouldSkipWarmupChat = (chatJid: string): boolean => (
+      chatJid.startsWith("dream:")
+      || chatJid.startsWith("control:")
+      || chatJid.startsWith("web:ipc-")
+    );
     const targetCount = Math.max(1, Math.min(8, Math.trunc(options.limit ?? 3) || 3));
     const excluded = new Set(
       Array.isArray(options.excludeChatJids)
@@ -417,6 +422,7 @@ export class AgentPool {
         if (seen.has(chatJid)) continue;
         seen.add(chatJid);
         if (excluded.has(chatJid)) continue;
+        if (shouldSkipWarmupChat(chatJid)) continue;
         if (this.pool.has(chatJid)) continue;
         if (now - (cooldownByChat.get(chatJid) ?? 0) < 30_000) continue;
         scheduled.push(chatJid);

@@ -416,6 +416,31 @@ test("agent pool schedules lightweight warmup for the most recent inactive chats
   await pool.shutdown();
 });
 
+test("agent pool recent-chat warmup skips internal maintenance chats", async () => {
+  const ws = getTestWorkspace();
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+
+  const db = await importFresh<typeof import("../src/db.js")>("../src/db.js");
+  db.initDatabase();
+  db.storeChatMetadata("web:ipc-fts-123", "2099-04-14T14:00:00.000Z", "IPC");
+  db.storeChatMetadata("dream:auto:web-default:123", "2099-04-14T13:00:00.000Z", "Dream");
+  db.storeChatMetadata("control:/compact", "2099-04-14T12:00:00.000Z", "Control");
+  db.storeChatMetadata("web:user", "2099-04-14T11:00:00.000Z", "User");
+
+  const { AgentPool } = await importFresh<typeof import("../src/agent-pool.js")>("../src/agent-pool.js");
+  const pool = new AgentPool({
+    createSession: async () => createRuntime({ subscribe: () => () => {}, prompt: async () => {}, abort: async () => {}, dispose() {} }) as any,
+  });
+
+  const scheduled = (pool as any).scheduleRecentChatWarmup({ limit: 4, excludeChatJids: ["web:default"] });
+  expect(scheduled).toContain("web:user");
+  expect(scheduled).not.toContain("web:ipc-fts-123");
+  expect(scheduled).not.toContain("dream:auto:web-default:123");
+  expect(scheduled).not.toContain("control:/compact");
+
+  await pool.shutdown();
+});
+
 test("agent pool keeps expanding recent-chat warmup past already-warm top rows", async () => {
   const ws = getTestWorkspace();
   restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
@@ -438,7 +463,10 @@ test("agent pool keeps expanding recent-chat warmup past already-warm top rows",
     (pool as any).pool.set(chatJid, { runtime: createRuntime({ dispose() {} }), lastUsed: Date.now() });
   }
 
-  const scheduled = (pool as any).scheduleRecentChatWarmup({ limit: 1, excludeChatJids: ["web:default"] });
+  const scheduled = (pool as any).scheduleRecentChatWarmup({
+    limit: 1,
+    excludeChatJids: ["web:default", "web:user", "web:newest", "web:newer", "web:older"],
+  });
   expect(scheduled).toEqual(["web:chat-100"]);
 
   await pool.shutdown();
