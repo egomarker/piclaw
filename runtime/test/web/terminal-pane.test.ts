@@ -5,7 +5,16 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { tryRun } from "../helpers.js";
 
-import { buildTerminalTheme, focusTerminalCleanly, getOrCreateAnonymousTerminalClientToken, relocateTerminalPaneRoot, resetTerminalImeState } from '../../web/src/panes/terminal-pane.js';
+import {
+    buildTerminalTheme,
+    focusTerminalCleanly,
+    getOrCreateAnonymousTerminalClientToken,
+    isTerminalClipboardCopyShortcut,
+    isTerminalClipboardPasteShortcut,
+    readClipboardTextBestEffort,
+    relocateTerminalPaneRoot,
+    resetTerminalImeState,
+} from '../../web/src/panes/terminal-pane.js';
 
 function parseHexColor(input: string) {
     const raw = String(input || '').trim().replace('#', '');
@@ -340,6 +349,37 @@ test('focusTerminalCleanly blurs previous focus before focusing terminal', () =>
 
     expect(events).toEqual(['blur', 'focus']);
     expect(terminal.isComposing).toBe(false);
+});
+
+test('terminal clipboard shortcut detection matches terminal conventions', () => {
+    expect(isTerminalClipboardCopyShortcut({ code: 'KeyC', ctrlKey: true, shiftKey: true })).toBe(true);
+    expect(isTerminalClipboardCopyShortcut({ key: 'c', ctrlKey: true, shiftKey: true })).toBe(true);
+    expect(isTerminalClipboardCopyShortcut({ code: 'KeyC', ctrlKey: true, shiftKey: false })).toBe(false);
+
+    expect(isTerminalClipboardPasteShortcut({ code: 'KeyV', ctrlKey: true, shiftKey: true })).toBe(true);
+    expect(isTerminalClipboardPasteShortcut({ key: 'Insert', shiftKey: true })).toBe(true);
+    expect(isTerminalClipboardPasteShortcut({ code: 'KeyV', ctrlKey: true, shiftKey: false })).toBe(false);
+});
+
+test('readClipboardTextBestEffort gracefully handles missing API and failures', async () => {
+    expect(await readClipboardTextBestEffort(null as any)).toBeNull();
+    expect(await readClipboardTextBestEffort({ clipboard: {} } as any)).toBeNull();
+
+    const failingNavigator = {
+        clipboard: {
+            readText: async () => {
+                throw new Error('denied');
+            },
+        },
+    } as any;
+    expect(await readClipboardTextBestEffort(failingNavigator)).toBeNull();
+
+    const okNavigator = {
+        clipboard: {
+            readText: async () => 'hello',
+        },
+    } as any;
+    expect(await readClipboardTextBestEffort(okNavigator)).toBe('hello');
 });
 
 test('getOrCreateAnonymousTerminalClientToken persists a stable client token', () => {
