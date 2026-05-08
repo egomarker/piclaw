@@ -1737,10 +1737,17 @@
 /* Thread view */
 .btw-panel {
     display: flex;
+    flex: 0 1 auto;
     flex-direction: column;
     gap: 10px;
-    margin: 6px var(--spacing-sm) 0;
+    min-height: 0;
+    max-height: min(42vh, 360px);
+    margin: 6px 0 0;
     padding: 10px 12px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-gutter: stable;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);

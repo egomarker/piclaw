@@ -2,7 +2,8 @@
 .settings-portal {
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
-    z-index: 2400;
+    /* Must stay above workspace/editor drag previews and tab context menus. */
+    z-index: 12000;
 }
 
 .settings-dialog-backdrop {
@@ -959,7 +960,7 @@
 }
 
 .settings-dialog-backdrop-loader {
-    z-index: 2399;
+    z-index: 11999;
     pointer-events: auto;
 }
 

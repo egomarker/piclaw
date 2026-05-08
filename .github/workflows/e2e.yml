@@ -35,6 +35,7 @@ jobs:
           - stage: compose-visibility
             specs: >-
               steps/us17-compose-instant-visibility.spec.ts
+              steps/us24-btw-panel.spec.ts
           - stage: theme-tint
             specs: >-
               steps/theme-tint-commands.spec.ts

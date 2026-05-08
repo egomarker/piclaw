@@ -209,11 +209,21 @@ test('applyExtensionUiWorkingState does not handle non-extension-ui events', () 
   }
 });
 
-test('extension_ui_status does not update working state', () => {
-  // setStatus() fires extension_ui_status — it should dispatch as a browser
-  // event only, not mutate extensionWorkingState (treated as secondary text).
-  const state = { message: null, indicator: null, visible: true };
-  expect(applyExtensionUiWorkingState(state, 'extension_ui_status', { text: 'SSH connected' })).toBeUndefined();
+test('extension_ui_status updates working text for standard extension progress', () => {
+  // setStatus() fires extension_ui_status — for standard Pi extensions this is
+  // often the only progress text paired with a working indicator, so it must
+  // replace the generic Working… fallback in the compose working row.
+  const state = { message: null, indicator: { mode: 'custom' as const, frames: ['⠋'], intervalMs: 90 }, visible: true };
+  expect(applyExtensionUiWorkingState(state, 'extension_ui_status', { key: 'ssh-core', text: 'SSH connecting…' })).toEqual({
+    message: 'SSH connecting…',
+    indicator: { mode: 'custom', frames: ['⠋'], intervalMs: 90 },
+    visible: true,
+  });
+});
+
+test('extension_ui_status keeps structured context usage out of working text', () => {
+  const state = { message: null, indicator: { mode: 'custom' as const, frames: ['⠋'], intervalMs: 90 }, visible: true };
+  expect(applyExtensionUiWorkingState(state, 'extension_ui_status', { key: 'context_usage', text: '{"percent":42}' })).toBeUndefined();
 });
 
 // ---------------------------------------------------------------------------
