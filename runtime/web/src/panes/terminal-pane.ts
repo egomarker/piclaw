@@ -826,6 +826,10 @@ class TerminalPaneInstance implements PaneInstance {
 
             terminal.onData?.((data) => {
                 if (socket.readyState === WebSocket.OPEN) {
+                    // Suppress kitty graphics protocol responses (ESC_Gi=...;OK/FAIL ST)
+                    // from being sent back to the PTY — the shell doesn't consume them
+                    // and they'd appear as visible garbage.
+                    if (typeof data === 'string' && data.includes('\x1b_G')) return;
                     socket.send(JSON.stringify({ type: 'input', data }));
                 }
             });
