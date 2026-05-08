@@ -35,6 +35,23 @@ test("serveStatic falls back to runtime gzip when brotli is accepted but no side
   expect(response.headers.get("Content-Encoding")).toBe("gzip");
 });
 
+test("serveStatic gzip-compresses wasm assets when requested", async () => {
+  const req = new Request("https://example.test/static/js/vendor/ghostty-vt.wasm", {
+    headers: { "Accept-Encoding": "gzip" },
+  });
+
+  const response = await serveStatic("js/vendor/ghostty-vt.wasm", notFound, req);
+
+  expect(response.status).toBe(200);
+  expect(response.headers.get("Content-Encoding")).toBe("gzip");
+  expect(response.headers.get("Vary")).toBe("Accept-Encoding");
+  expect(response.headers.get("Content-Type")).toBe("application/wasm");
+
+  const compressed = new Uint8Array(await response.arrayBuffer());
+  const wasm = new Uint8Array(gunzipSync(Buffer.from(compressed)));
+  expect(Array.from(wasm.slice(0, 4))).toEqual([0x00, 0x61, 0x73, 0x6d]);
+});
+
 test("serveStatic leaves already-compressed assets unencoded", async () => {
   const req = new Request("https://example.test/static/favicon.ico", {
     headers: { "Accept-Encoding": "gzip" },

@@ -55,7 +55,6 @@ const SKIP_COMPRESSION_EXTS = new Set([
   ".jpg",
   ".mp4",
   ".png",
-  ".wasm",
   ".webm",
   ".webp",
   ".woff2",
