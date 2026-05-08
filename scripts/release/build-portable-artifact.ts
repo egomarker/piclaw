@@ -205,6 +205,11 @@ function buildWindowsInstallScript(bundleName: string): string {
   ].join("\r\n");
 }
 
+function buildLinuxRunReadme(bundleName: string, version: string, arch: string): string {
+  const artifactName = `${bundleName}.run`;
+  return `# Piclaw ${version} Linux .run bundle (${arch})\n\nThis directory was extracted from \`${artifactName}\`, a self-extracting Piclaw Linux bundle. It contains the bundled Bun runtime, Piclaw application files, production dependencies, and launch/install scripts.\n\n## Running without installing\n\n\`\`\`sh\n./bin/piclaw --version\n./bin/piclaw --help\n./bin/piclaw\n\`\`\`\n\nThe launcher sets \`BUN_INSTALL\` and \`PATH\` to use the bundled runtime under \`./bun\`.\n\n## Installing or upgrading from the .run file\n\nFrom the directory that contains the downloaded \`.run\` file:\n\n\`\`\`sh\nchmod +x ${artifactName}\nsudo ./${artifactName} --install /opt/piclaw\n\`\`\`\n\nBy default this installs the release under \`/opt/piclaw/releases/${bundleName}\`, updates \`/opt/piclaw/current\`, and writes \`/usr/local/bin/piclaw\`.\n\n## Extracting without installing\n\n\`\`\`sh\n./${artifactName} --extract /tmp/piclaw-run-test\n/tmp/piclaw-run-test/${bundleName}/bin/piclaw --version\n\`\`\`\n\n## Installer options\n\n\`\`\`text\n${artifactName} --install [PREFIX]       Install to PREFIX (default: /opt/piclaw)\n${artifactName} --extract DIR            Extract payload under DIR without installing\n${artifactName} --version                Print bundled Piclaw version\n${artifactName} --help                   Show installer help\n\`\`\`\n\nEnvironment variables for \`--install\`:\n\n- \`PICLAW_BIN_DIR=DIR\` — write the launcher to \`DIR/piclaw\` instead of \`/usr/local/bin/piclaw\`.\n- \`PICLAW_SKIP_BIN_LINK=1\` — install files but do not write a launcher.\n\n## Bundle layout\n\n- \`bin/piclaw\` — launcher script for the bundled app.\n- \`bun/bin/bun\` — bundled Bun runtime.\n- \`app/\` — packaged Piclaw application tree.\n- \`install.sh\` — install script used by the \`.run\` wrapper.\n- \`MANIFEST.json\` — build metadata.\n- \`VERSION\` — bundled Piclaw version.\n\n## Notes\n\nThe \`linux-x64-baseline\` build uses Bun's non-AVX baseline runtime for older x64 CPUs. If your host is modern, the regular \`linux-x64\` artifact is fine; if it grumbles about CPU instructions, use the baseline one and pretend this was wisdom rather than hardware archaeology.\n`;
+}
+
 function buildSelfExtractingStub(bundleName: string, version: string, arch: string): string {
   return `#!/usr/bin/env sh
 set -eu
@@ -275,6 +280,7 @@ EOF
   fi
 
   echo "Installed Piclaw $PICLAW_VERSION to $prefix/current"
+  echo "Usage notes: $prefix/current/README.md"
   if [ "\${PICLAW_SKIP_BIN_LINK:-0}" != "1" ]; then
     echo "Launcher: $bin_dir/piclaw"
   fi
@@ -297,6 +303,7 @@ case "$command" in
     fi
     extract_payload "$2"
     echo "Extracted $BUNDLE_NAME to $2/$BUNDLE_NAME"
+    echo "Usage notes: $2/$BUNDLE_NAME/README.md"
     exit 0
     ;;
   --install)
@@ -460,6 +467,9 @@ async function buildPortableArtifact(options: Options): Promise<void> {
     writeLaunchers(bundleDir, info.platform, info.bundleName);
 
     writeFileSync(join(bundleDir, "VERSION"), `${version}\n`);
+    if (info.platform === "linux") {
+      writeFileSync(join(bundleDir, "README.md"), buildLinuxRunReadme(info.bundleName, version, info.arch));
+    }
     writeFileSync(join(bundleDir, "MANIFEST.json"), JSON.stringify({
       name: "piclaw-portable",
       version,
