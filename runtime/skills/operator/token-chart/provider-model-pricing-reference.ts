@@ -22,7 +22,7 @@ interface ProviderModelPricingRule extends ProviderModelPricingReference {
 
 // Tag this reference snapshot with the commit date that introduced it so future
 // updates can track pricing provenance without guessing.
-export const PROVIDER_MODEL_PRICING_REFERENCE_TAG = "2026-05-02";
+export const PROVIDER_MODEL_PRICING_REFERENCE_TAG = "2026-05-09";
 
 const PRIMARY_SOURCE = "exports/ai-provider-pricing-2026-04.docx";
 const GPT4O_FALLBACK_SOURCE = "projects/openviktor/apps/bot/src/agent/pricing.ts";
@@ -213,6 +213,39 @@ const PRICING_RULES: ProviderModelPricingRule[] = [
     cacheWritePerMTok: 0,
     notes: "Cerebras-specific pricing should replace this proxy if direct account pricing differs; current local rows have zero tokens.",
   },
+  {
+    id: "kimi-k2.6-fire-pass",
+    models: ["kimi-k2p6-turbo"],
+    canonicalModel: "Kimi K2.6 Turbo (Fire Pass router)",
+    basis: "Fireworks Fire Pass docs, accessed 2026-05-09",
+    inputPerMTok: 0,
+    outputPerMTok: 0,
+    cacheReadPerMTok: 0,
+    cacheWritePerMTok: 0,
+    notes: "Fire Pass is $49/month early access for personal agentic coding; the covered router is accounts/fireworks/routers/kimi-k2p6-turbo and covered token usage is shown as $0 while the pass is active.",
+  },
+  {
+    id: "kimi-k2.6",
+    models: ["kimi-k2.6", "kimi-k2p6"],
+    canonicalModel: "Kimi K2.6",
+    basis: "Fireworks model page, accessed 2026-05-09",
+    inputPerMTok: 0.95,
+    outputPerMTok: 4,
+    cacheReadPerMTok: 0.16,
+    cacheWritePerMTok: 0.95,
+    notes: "Fireworks serverless PAYG row; page lists input/cached-input/output only, so cache writes are treated as normal input.",
+  },
+  {
+    id: "kimi-k2.5",
+    models: ["kimi-k2.5", "kimi-k2p5"],
+    canonicalModel: "Kimi K2.5 (legacy/deprecated)",
+    basis: "Fireworks model page, accessed 2026-05-09",
+    inputPerMTok: 0.6,
+    outputPerMTok: 3,
+    cacheReadPerMTok: 0.1,
+    cacheWritePerMTok: 0.6,
+    notes: "Legacy K2.5 row retained for historical charts; prefer Kimi K2.6 or the Fire Pass K2.6 Turbo router for new usage.",
+  },
 ];
 
 function normalizeModel(model: string): string {
@@ -225,6 +258,14 @@ function normalizeModel(model: string): string {
     "gpt-5-2-codex": "gpt-5.2-codex",
     "gpt-5-1-codex": "gpt-5.1-codex",
     "gpt-5-1-codex-mini": "gpt-5.1-codex-mini",
+    "accounts/fireworks/routers/kimi-k2p6-turbo": "kimi-k2p6-turbo",
+    "fireworks/kimi-k2p6-turbo": "kimi-k2p6-turbo",
+    "moonshotai/kimi-k2.6": "kimi-k2.6",
+    "accounts/fireworks/models/kimi-k2p6": "kimi-k2.6",
+    "fireworks/kimi-k2p6": "kimi-k2.6",
+    "moonshotai/kimi-k2.5": "kimi-k2.5",
+    "accounts/fireworks/models/kimi-k2p5": "kimi-k2.5",
+    "fireworks/kimi-k2p5": "kimi-k2.5",
   };
   return aliasMap[trimmed] || trimmed;
 }

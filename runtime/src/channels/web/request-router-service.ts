@@ -37,7 +37,7 @@ import { handleWorkspaceRoutes } from "./http/dispatch-workspace.js";
 import { handleWidgetStateRoutes } from "./state-api.js";
 import { handleSessionRecordingRoutes } from "./handlers/session-recordings.js";
 import "./http/editor-vendor-route.js";
-import "./http/csv-viewer-route.js";
+import "./http/data-viewer-route.js";
 import "./http/image-viewer-route.js";
 import "./http/video-viewer-route.js";
 import "./http/pdf-viewer-route.js";

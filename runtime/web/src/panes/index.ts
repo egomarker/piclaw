@@ -12,7 +12,7 @@ export { terminalPaneExtension, terminalTabPaneExtension, TERMINAL_TAB_PATH } fr
 export { vncPaneExtension, VNC_TAB_PREFIX, buildVncTabPath } from './vnc-pane.js';
 export { workspacePreviewPaneExtension, workspaceMarkdownPreviewPaneExtension } from './workspace-preview-pane.js';
 export { officeViewerPaneExtension } from './office-viewer-pane.js';
-export { csvViewerPaneExtension } from './csv-viewer-pane.js';
+export { dataViewerPaneExtension } from './data-viewer-pane.js';
 export { pdfViewerPaneExtension } from './pdf-viewer-pane.js';
 export { imageViewerPaneExtension } from './image-viewer-pane.js';
 export { htmlViewerPaneExtension } from './html-viewer-pane.js';

@@ -1,5 +1,5 @@
 /**
- * csv-viewer-pane.ts — WebPaneExtension for CSV/TSV preview + readonly tab viewing.
+ * data-viewer-pane.ts — WebPaneExtension for CSV/TSV preview + readonly tab viewing.
  *
  * In preview mode (workspace browser): shows a launch card with "Open in Tab" button.
  * In edit/tab mode: loads the dedicated CSV viewer route in an iframe.
@@ -44,7 +44,7 @@ class CsvPreviewCard implements PaneInstance {
         const btn = wrapper.querySelector('#csv-open-tab') as HTMLButtonElement;
         if (btn) {
             btn.addEventListener('click', () => {
-                const evt = new CustomEvent('csv-viewer:open-tab', {
+                const evt = new CustomEvent('data-viewer:open-tab', {
                     bubbles: true,
                     detail: { path: filePath },
                 });
@@ -72,7 +72,7 @@ class CsvViewerInstance implements PaneInstance {
     constructor(container: HTMLElement, context: PaneContext) {
         this.container = container;
         const filePath = context.path || '';
-        const viewerUrl = `/csv-viewer/?path=${encodeURIComponent(filePath)}`;
+        const viewerUrl = `/data-viewer/?path=${encodeURIComponent(filePath)}`;
 
         this.iframe = document.createElement('iframe');
         this.iframe.src = viewerUrl;
@@ -95,9 +95,9 @@ class CsvViewerInstance implements PaneInstance {
     }
 }
 
-export const csvViewerPaneExtension: WebPaneExtension = {
-    id: 'csv-viewer',
-    label: 'CSV Viewer',
+export const dataViewerPaneExtension: WebPaneExtension = {
+    id: 'data-viewer',
+    label: 'Data Viewer',
     icon: 'table',
     capabilities: ['readonly', 'preview'] as PaneCapability[],
     placement: 'tabs',

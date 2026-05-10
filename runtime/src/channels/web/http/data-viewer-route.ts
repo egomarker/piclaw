@@ -1,5 +1,5 @@
 /**
- * csv-viewer-route.ts — Lightweight authenticated CSV/TSV viewer route.
+ * data-viewer-route.ts — Lightweight authenticated CSV/TSV viewer route.
  *
  * Serves a same-origin HTML viewer that fetches workspace files through
  * /workspace/raw and renders an interactive table in-browser.
@@ -7,7 +7,7 @@
 
 import { registerExtensionRoute } from "./extension-routes.js";
 
-const ROUTE_PREFIX = "/csv-viewer";
+const ROUTE_PREFIX = "/data-viewer";
 const VIEWER_CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline'",
@@ -193,7 +193,7 @@ function handleCsvViewerRoute(req: Request, pathname: string): Response | null {
     return new Response("Method Not Allowed", { status: 405 });
   }
 
-  const relative = pathname.replace(/^\/csv-viewer\/?/, "");
+  const relative = pathname.replace(/^\/data-viewer\/?/, "");
   if (relative && !relative.startsWith("?")) {
     return new Response("Not Found", { status: 404 });
   }

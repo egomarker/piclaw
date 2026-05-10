@@ -24,7 +24,7 @@ test('getStandaloneTabUrl still resolves standalone viewer routes for non-addon 
   expect(getStandaloneTabUrl('/workspace/report.docx', { hasPopOutTab: true })).toBe(
     '/office-viewer/?url=' + encodeURIComponent('/workspace/raw?path=%2Fworkspace%2Freport.docx') + '&name=report.docx',
   );
-  expect(getStandaloneTabUrl('/workspace/chart.csv', { hasPopOutTab: true })).toBe('/csv-viewer/?path=%2Fworkspace%2Fchart.csv');
+  expect(getStandaloneTabUrl('/workspace/chart.csv', { hasPopOutTab: true })).toBe('/data-viewer/?path=%2Fworkspace%2Fchart.csv');
   expect(getStandaloneTabUrl('/workspace/manual.pdf', { hasPopOutTab: true })).toBe('/workspace/raw?path=%2Fworkspace%2Fmanual.pdf');
   expect(getStandaloneTabUrl('/workspace/image.png', { hasPopOutTab: true })).toBe('/image-viewer/?path=%2Fworkspace%2Fimage.png');
 });

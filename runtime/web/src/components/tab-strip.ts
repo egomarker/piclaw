@@ -55,7 +55,7 @@ export function getStandaloneTabUrl(path, { hasPopOutTab = false } = {}) {
         return '/office-viewer/?url=' + encodeURIComponent(rawUrl) + '&name=' + encodeURIComponent(name);
     }
     if (CSV_EXTENSIONS.test(normalizedPath)) {
-        return '/csv-viewer/?path=' + encodeURIComponent(normalizedPath);
+        return '/data-viewer/?path=' + encodeURIComponent(normalizedPath);
     }
     if (PDF_EXTENSIONS.test(normalizedPath)) {
         return '/workspace/raw?path=' + encodeURIComponent(normalizedPath);

@@ -9,7 +9,7 @@ import {
   workspacePreviewPaneExtension,
   workspaceMarkdownPreviewPaneExtension,
   officeViewerPaneExtension,
-  csvViewerPaneExtension,
+  dataViewerPaneExtension,
   pdfViewerPaneExtension,
   imageViewerPaneExtension,
   htmlViewerPaneExtension,
@@ -61,7 +61,7 @@ export function registerAppPaneExtensions(): void {
   paneRegistry.register(workspacePreviewPaneExtension);
   paneRegistry.register(workspaceMarkdownPreviewPaneExtension);
   paneRegistry.register(officeViewerPaneExtension);
-  paneRegistry.register(csvViewerPaneExtension);
+  paneRegistry.register(dataViewerPaneExtension);
   paneRegistry.register(pdfViewerPaneExtension);
   paneRegistry.register(imageViewerPaneExtension);
   paneRegistry.register(htmlViewerPaneExtension);
