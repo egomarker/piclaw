@@ -211,6 +211,40 @@ export function installStandaloneMobileViewportFix(runtime = {}) {
     scheduleSettledSync();
   };
 
+  // On iOS standalone without a fixed root, the visual viewport can scroll
+  // when the keyboard opens. Aggressively reset scroll on focus events to
+  // counteract this. The --app-height sync handles resizing the shell.
+  const resetScroll = () => {
+    try {
+      if (typeof win.scrollTo === 'function') win.scrollTo(0, 0);
+      if (doc.scrollingElement) { doc.scrollingElement.scrollTop = 0; doc.scrollingElement.scrollLeft = 0; }
+      if (doc.documentElement) { doc.documentElement.scrollTop = 0; doc.documentElement.scrollLeft = 0; }
+      if (doc.body) { doc.body.scrollTop = 0; doc.body.scrollLeft = 0; }
+    } catch (e) {
+      console.debug('[mobile-viewport] Ignoring scroll reset failure.', e);
+    }
+  };
+
+  const handleFocusIn = () => {
+    resetScroll();
+    scheduleSettledSync();
+    // iOS may scroll the visual viewport after focusin with a slight delay.
+    // Fire additional resets to counteract.
+    for (const delay of [16, 50, 100, 200]) {
+      const t = win.setTimeout?.(() => { timers.delete(t); resetScroll(); }, delay);
+      if (t != null) timers.add(t);
+    }
+  };
+
+  const handleFocusOut = () => {
+    resetScroll();
+    scheduleSettledSync();
+    for (const delay of [16, 50, 100]) {
+      const t = win.setTimeout?.(() => { timers.delete(t); resetScroll(); }, delay);
+      if (t != null) timers.add(t);
+    }
+  };
+
   const viewport = win.visualViewport;
   scheduleSettledSync();
   win.addEventListener('focus', scheduleSettledSync);
@@ -218,10 +252,10 @@ export function installStandaloneMobileViewportFix(runtime = {}) {
   win.addEventListener('resize', scheduleSettledSync);
   win.addEventListener('orientationchange', scheduleSettledSync);
   doc.addEventListener('visibilitychange', handleVisibility);
-  doc.addEventListener('focusin', scheduleSettledSync, true);
-  doc.addEventListener('focusout', scheduleSettledSync, true);
+  doc.addEventListener('focusin', handleFocusIn, true);
+  doc.addEventListener('focusout', handleFocusOut, true);
   viewport?.addEventListener?.('resize', scheduleSettledSync);
-  viewport?.addEventListener?.('scroll', scheduleSettledSync);
+  viewport?.addEventListener?.('scroll', resetScroll);
 
   return () => {
     clearScheduled();
@@ -230,9 +264,9 @@ export function installStandaloneMobileViewportFix(runtime = {}) {
     win.removeEventListener('resize', scheduleSettledSync);
     win.removeEventListener('orientationchange', scheduleSettledSync);
     doc.removeEventListener('visibilitychange', handleVisibility);
-    doc.removeEventListener('focusin', scheduleSettledSync, true);
-    doc.removeEventListener('focusout', scheduleSettledSync, true);
+    doc.removeEventListener('focusin', handleFocusIn, true);
+    doc.removeEventListener('focusout', handleFocusOut, true);
     viewport?.removeEventListener?.('resize', scheduleSettledSync);
-    viewport?.removeEventListener?.('scroll', scheduleSettledSync);
+    viewport?.removeEventListener?.('scroll', resetScroll);
   };
 }
