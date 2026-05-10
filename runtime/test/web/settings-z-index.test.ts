@@ -41,3 +41,16 @@ test('settings status bar is height-capped so long add-on errors cannot cover th
   expect(body).toContain('overflow: auto;');
   expect(body).toContain('overflow-wrap: anywhere;');
 });
+
+test('add-on busy indicator sticks to the visible add-on list viewport', () => {
+  const settingsCss = readFileSync(join(import.meta.dir, '../../web/static/css/settings.css'), 'utf8');
+  const overlay = cssRuleBody(settingsCss, '.settings-addon-panel-overlay');
+  const card = cssRuleBody(settingsCss, '.settings-addon-panel-overlay-card');
+  const source = readFileSync(join(import.meta.dir, '../../web/src/components/settings/addons.ts'), 'utf8');
+
+  expect(overlay).toContain('position: sticky;');
+  expect(overlay).toContain('top: 50%;');
+  expect(overlay).toContain('height: 0;');
+  expect(card).toContain('transform: translateY(-50%);');
+  expect(source.indexOf('<div class="settings-addon-list">')).toBeLessThan(source.indexOf('class="settings-addon-panel-overlay"'));
+});

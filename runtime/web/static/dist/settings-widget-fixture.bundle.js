@@ -1230,15 +1230,15 @@ ${b}`;if(!window.confirm(B))return;if(H&&!window.confirm(`Task ${K.id} is intern
                     `}
                 </div>
             </div>
-            ${s&&u`
-                <div class="settings-addon-panel-overlay" role="status" aria-live="polite" aria-label=${G}>
-                    <div class="settings-addon-panel-overlay-card">
-                        <div class="settings-spinner"></div>
-                        <span>${G}</span>
-                    </div>
-                </div>
-            `}
             <div class="settings-addon-list">
+                ${s&&u`
+                    <div class="settings-addon-panel-overlay" role="status" aria-live="polite" aria-label=${G}>
+                        <div class="settings-addon-panel-overlay-card">
+                            <div class="settings-spinner"></div>
+                            <span>${G}</span>
+                        </div>
+                    </div>
+                `}
                 ${h.map((g)=>{let K=(g.skills||[]).length>0,H=g.type==="extension",b=K&&H?"extension + skill":K?"skill":"extension",B=K&&!H?"settings-tag-skill":"",N=typeof g.homepage==="string"&&g.homepage.trim()?g.homepage.trim():"";return u`
                     <div class=${`settings-addon-card${g.installed?" installed":""}`}>
                         <div class="settings-addon-card-header">
@@ -1479,5 +1479,5 @@ ${b}`;if(!window.confirm(B))return;if(H&&!window.confirm(`Task ${K.id} is intern
     </div>
   `}function il(){S_(),m_(),nl();let n=new URLSearchParams(window.location.search);wt(n.get("section")||"general");let r=document.getElementById("settings-widget-fixture-root")||document.body.appendChild(document.createElement("div"));r.id="settings-widget-fixture-root",An(u`<${rl} />`,r),window.piclawWidget?.ready?.({title:"Settings fixture",mockMode:En})}il();
 
-//# debugId=DB01E23C8B762B2B64756E2164756E21
+//# debugId=3611806E7BE9BA0964756E2164756E21
 //# sourceMappingURL=settings-widget-fixture.bundle.js.map

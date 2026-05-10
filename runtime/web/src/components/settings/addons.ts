@@ -161,15 +161,15 @@ export function AddonsSection({ setStatus, filter = '' }) {
                     `}
                 </div>
             </div>
-            ${busy && html`
-                <div class="settings-addon-panel-overlay" role="status" aria-live="polite" aria-label=${busyLabel}>
-                    <div class="settings-addon-panel-overlay-card">
-                        <div class="settings-spinner"></div>
-                        <span>${busyLabel}</span>
-                    </div>
-                </div>
-            `}
             <div class="settings-addon-list">
+                ${busy && html`
+                    <div class="settings-addon-panel-overlay" role="status" aria-live="polite" aria-label=${busyLabel}>
+                        <div class="settings-addon-panel-overlay-card">
+                            <div class="settings-spinner"></div>
+                            <span>${busyLabel}</span>
+                        </div>
+                    </div>
+                `}
                 ${filtered.map(a => {
                     const hasSkills = (a.skills || []).length > 0;
                     const isExtension = a.type === 'extension';
