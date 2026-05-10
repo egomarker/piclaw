@@ -38,10 +38,10 @@ import { handleWidgetStateRoutes } from "./state-api.js";
 import { handleSessionRecordingRoutes } from "./handlers/session-recordings.js";
 import "./http/editor-vendor-route.js";
 import "./http/csv-viewer-route.js";
-// image-viewer route → @rcarmo/piclaw-addon-web-viewer
-// video-viewer route → @rcarmo/piclaw-addon-web-viewer
+import "./http/image-viewer-route.js";
+import "./http/video-viewer-route.js";
 import "./http/pdf-viewer-route.js";
-// html-viewer route → @rcarmo/piclaw-addon-web-viewer
+import "./http/html-viewer-route.js";
 import { handleExtensionRoutes } from "./http/extension-routes.js";
 import { enforceRequestGuards } from "./http/request-guards.js";
 import { getRouteFlags } from "./http/route-flags.js";

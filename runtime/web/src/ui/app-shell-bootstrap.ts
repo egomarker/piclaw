@@ -11,9 +11,9 @@ import {
   officeViewerPaneExtension,
   csvViewerPaneExtension,
   pdfViewerPaneExtension,
-  // imageViewerPaneExtension → addon
-  // htmlViewerPaneExtension → addon
-  // videoViewerPaneExtension → addon
+  imageViewerPaneExtension,
+  htmlViewerPaneExtension,
+  videoViewerPaneExtension,
   mindmapPaneExtension,
 } from '../panes/index.js';
 import {
@@ -63,9 +63,9 @@ export function registerAppPaneExtensions(): void {
   paneRegistry.register(officeViewerPaneExtension);
   paneRegistry.register(csvViewerPaneExtension);
   paneRegistry.register(pdfViewerPaneExtension);
-  // imageViewerPaneExtension registered by @rcarmo/piclaw-addon-web-viewer
-  // htmlViewerPaneExtension registered by @rcarmo/piclaw-addon-web-viewer
-  // videoViewerPaneExtension registered by @rcarmo/piclaw-addon-web-viewer
+  paneRegistry.register(imageViewerPaneExtension);
+  paneRegistry.register(htmlViewerPaneExtension);
+  paneRegistry.register(videoViewerPaneExtension);
   paneRegistry.register(mindmapPaneExtension);
   paneRegistry.register(vncPaneExtension);
   preloadEditorBundle();
