@@ -159,9 +159,18 @@ test.describe('US-22: Settings Dialog Layering', () => {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(500);
 
-    // Backdrop should be gone
-    const backdrop = page.locator('.settings-dialog-backdrop');
-    await expect(backdrop).not.toBeVisible();
+    // Backdrop should be gone. Hidden portals can remain mounted briefly between
+    // settings open/close cycles, so avoid strict-mode visibility checks across
+    // multiple matching nodes and assert that none are actually visible.
+    const visibleBackdropCount = await page.locator('.settings-dialog-backdrop').evaluateAll((nodes) =>
+      nodes.filter((node) => {
+        const el = node as HTMLElement;
+        const style = getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0;
+      }).length
+    );
+    expect(visibleBackdropCount).toBe(0);
 
     // Workspace should be interactive again
     const workspaceRow = page.locator(sel.workspaceRow).first();
