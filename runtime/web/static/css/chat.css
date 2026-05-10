@@ -143,7 +143,7 @@
 .compose-box {
     flex-shrink: 0;
     border-top: none;
-    padding: var(--spacing-sm) 0 2px;
+    padding: var(--spacing-sm) 0 max(2px, env(safe-area-inset-bottom, 2px));
     background-color: var(--bg-primary);
     display: flex;
     flex-direction: column;
