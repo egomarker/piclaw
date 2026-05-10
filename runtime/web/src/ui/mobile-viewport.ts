@@ -62,8 +62,16 @@ export function syncStandaloneMobileViewport(runtime = {}, options = {}) {
 
   const keyboardActive = isTextEntryFocused(doc);
   const height = readViewportHeight({ window: win }, { ignoreStandaloneChromeGap: true, keyboardActive });
-  if (height && height > 0) {
-    doc.documentElement.style.setProperty('--app-height', `${height}px`);
+  if (keyboardActive) {
+    if (height && height > 0) {
+      doc.documentElement.style.setProperty('--app-height', `${height}px`);
+    }
+  } else {
+    // In iOS standalone, both visualViewport.height and innerHeight can briefly
+    // under-report after app resume or keyboard dismissal. Do not persist that
+    // false short measurement into the app shell; use standalone 100vh while the
+    // keyboard is closed so the compose box remains flush with the viewport.
+    doc.documentElement.style.setProperty('--app-height', '100vh');
   }
 
   // Do not force the page back to the top during normal viewport sync.
@@ -169,6 +177,7 @@ export function installStandaloneMobileViewportFix(runtime = {}) {
   win.addEventListener('orientationchange', scheduleSettledSync);
   doc.addEventListener('visibilitychange', handleVisibility);
   doc.addEventListener('focusin', scheduleSettledSync, true);
+  doc.addEventListener('focusout', scheduleSettledSync, true);
   viewport?.addEventListener?.('resize', scheduleSettledSync);
   viewport?.addEventListener?.('scroll', scheduleSettledSync);
 
@@ -180,6 +189,7 @@ export function installStandaloneMobileViewportFix(runtime = {}) {
     win.removeEventListener('orientationchange', scheduleSettledSync);
     doc.removeEventListener('visibilitychange', handleVisibility);
     doc.removeEventListener('focusin', scheduleSettledSync, true);
+    doc.removeEventListener('focusout', scheduleSettledSync, true);
     viewport?.removeEventListener?.('resize', scheduleSettledSync);
     viewport?.removeEventListener?.('scroll', scheduleSettledSync);
   };

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import {
+  installStandaloneMobileViewportFix,
   readViewportHeight,
   shouldUseStandaloneMobileViewportFix,
   syncStandaloneMobileViewport,
@@ -45,7 +46,7 @@ test('readViewportHeight prefers visualViewport height when available', () => {
   })).toBe(844);
 });
 
-test('syncStandaloneMobileViewport ignores small standalone visual viewport gaps that create bottom whitespace', () => {
+test('syncStandaloneMobileViewport uses standalone 100vh instead of short visual viewport gaps when keyboard is closed', () => {
   const cssVars = new Map<string, string>();
   const documentElement = {
     style: {
@@ -70,10 +71,10 @@ test('syncStandaloneMobileViewport ignores small standalone visual viewport gaps
   });
 
   expect(height).toBe(800);
-  expect(cssVars.get('--app-height')).toBe('800px');
+  expect(cssVars.get('--app-height')).toBe('100vh');
 });
 
-test('syncStandaloneMobileViewport ignores large standalone visual viewport gaps when keyboard is closed', () => {
+test('syncStandaloneMobileViewport does not persist false short standalone viewport measurements when keyboard is closed', () => {
   const cssVars = new Map<string, string>();
   const documentElement = {
     style: {
@@ -90,7 +91,7 @@ test('syncStandaloneMobileViewport ignores large standalone visual viewport gaps
     window: {
       matchMedia: () => ({ matches: true }),
       visualViewport: { height: 701.9 },
-      innerHeight: 900,
+      innerHeight: 812,
     },
     document: {
       documentElement,
@@ -98,8 +99,8 @@ test('syncStandaloneMobileViewport ignores large standalone visual viewport gaps
     },
   });
 
-  expect(height).toBe(900);
-  expect(cssVars.get('--app-height')).toBe('900px');
+  expect(height).toBe(812);
+  expect(cssVars.get('--app-height')).toBe('100vh');
 });
 
 test('syncStandaloneMobileViewport keeps large visual viewport shrink for virtual keyboard', () => {
@@ -164,7 +165,7 @@ test('syncStandaloneMobileViewport writes app height without resetting page scro
   });
 
   expect(height).toBe(900);
-  expect(cssVars.get('--app-height')).toBe('900px');
+  expect(cssVars.get('--app-height')).toBe('100vh');
   expect(windowScrolls).toEqual([]);
   expect(scrollingElement.scrollTop).toBe(91);
   expect(scrollingElement.scrollLeft).toBe(17);
@@ -207,7 +208,7 @@ test('syncStandaloneMobileViewport can reset page scroll when explicitly request
   }, { resetScroll: true });
 
   expect(height).toBe(900);
-  expect(cssVars.get('--app-height')).toBe('900px');
+  expect(cssVars.get('--app-height')).toBe('100vh');
   expect(windowScrolls).toEqual([[0, 0]]);
   expect(scrollingElement.scrollTop).toBe(0);
   expect(scrollingElement.scrollLeft).toBe(0);
@@ -215,4 +216,68 @@ test('syncStandaloneMobileViewport can reset page scroll when explicitly request
   expect(documentElement.scrollLeft).toBe(0);
   expect(body.scrollTop).toBe(0);
   expect(body.scrollLeft).toBe(0);
+});
+
+test('installStandaloneMobileViewportFix restores standalone 100vh on focusout after keyboard sizing', () => {
+  const cssVars = new Map<string, string>();
+  const listeners = new Map<string, Set<Function>>();
+  const addEventListener = (type: string, listener: Function) => {
+    const set = listeners.get(type) ?? new Set<Function>();
+    set.add(listener);
+    listeners.set(type, set);
+  };
+  const removeEventListener = (type: string, listener: Function) => {
+    listeners.get(type)?.delete(listener);
+  };
+  const dispatch = (type: string) => {
+    for (const listener of listeners.get(type) ?? []) listener();
+  };
+  const documentElement = {
+    style: {
+      setProperty: (name: string, value: string) => cssVars.set(name, value),
+    },
+  };
+  const document = {
+    documentElement,
+    activeElement: { tagName: 'TEXTAREA', type: 'textarea' } as any,
+    addEventListener,
+    removeEventListener,
+  };
+  const timeoutCallbacks: Function[] = [];
+  const window = {
+    matchMedia: () => ({ matches: true }),
+    visualViewport: { height: 430, addEventListener, removeEventListener },
+    innerHeight: 800,
+    addEventListener,
+    removeEventListener,
+    requestAnimationFrame: (callback: Function) => {
+      callback();
+      return 1;
+    },
+    cancelAnimationFrame: () => {},
+    setTimeout: (callback: Function) => {
+      timeoutCallbacks.push(callback);
+      return timeoutCallbacks.length;
+    },
+    clearTimeout: () => {},
+  };
+
+  const dispose = installStandaloneMobileViewportFix({
+    navigator: {
+      standalone: true,
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
+      maxTouchPoints: 5,
+    },
+    window,
+    document,
+  });
+
+  expect(cssVars.get('--app-height')).toBe('430px');
+
+  document.activeElement = null;
+  dispatch('focusout');
+
+  expect(cssVars.get('--app-height')).toBe('100vh');
+
+  dispose();
 });
