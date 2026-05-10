@@ -219,6 +219,9 @@ html, body {
 
 html {
     background-color: var(--bg-primary);
+    /* Browser default is 100dvh; iOS standalone must override to 100vh before CSS loads.
+       Do not remove the early index.html bootstrap or mobile-viewport.ts override without
+       reading docs/PWA.md — 100dvh cold-starts too short in iOS standalone PWAs. */
     --app-height: 100dvh;
     text-size-adjust: 100%;
     -webkit-text-size-adjust: 100%;

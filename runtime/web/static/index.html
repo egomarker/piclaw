@@ -35,6 +35,22 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>PiClaw</title>
     <meta name="apple-mobile-web-app-title" content="PiClaw">
+    <script>
+        // iOS standalone PWA guard: set --app-height before CSS loads.
+        // WebKit can cold-start 100dvh too short, leaving a bottom gap below compose.
+        // Keep this in sync with docs/PWA.md and mobile-viewport.ts.
+        (function() {
+            try {
+                var standalone = Boolean(navigator.standalone);
+                if (!standalone && window.matchMedia) {
+                    standalone = window.matchMedia('(display-mode: standalone)').matches ||
+                        window.matchMedia('(display-mode: fullscreen)').matches ||
+                        window.matchMedia('(display-mode: minimal-ui)').matches;
+                }
+                if (standalone) document.documentElement.style.setProperty('--app-height', '100vh');
+            } catch(e) {}
+        })();
+    </script>
     <link rel="stylesheet" href="/static/dist/app.bundle.css?v=88cd42120121">
     <link id="dynamic-manifest" rel="manifest" href="/manifest.json?v=88cd42120121">
     <link id="dynamic-favicon" rel="icon" href="/favicon.ico">

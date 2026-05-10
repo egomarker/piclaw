@@ -120,9 +120,11 @@ export function installStandaloneMobileViewportFix(runtime = {}) {
     return () => {};
   }
 
-  // In standalone mode, override --app-height to 100vh immediately.
-  // 100dvh is broken on iOS standalone cold start (reports ~59px too short).
-  // 100vh is correct in standalone because there's no browser chrome.
+  // Keep this paired with the pre-CSS bootstrap in static/index.html.
+  // 100dvh is correct for browser chrome, but iOS standalone PWAs can
+  // cold-start it ~safe-area-top too short, leaving a bottom gap below compose.
+  // Standalone mode has no URL bar, so 100vh is the stable full-screen unit.
+  // See docs/PWA.md before changing this path.
   doc.documentElement?.style?.setProperty?.('--app-height', '100vh');
 
   let rafId = 0;

@@ -1,10 +1,12 @@
 # iOS PWA Viewport & Safe Area Reference
 
-> Last updated: 2026-04-15
+> Last updated: 2026-05-10
 > Applies to: iOS 17.x–18.x, iOS 26, Safari/WebKit, standalone PWA mode
 > Validated on: iPhone 15 Pro and iPad Pro running iOS 26.x
 
 This document captures every failure mode, attempted fix, and the final confirmed solution for the iOS standalone PWA viewport height bug. It exists to prevent regressions. **Read this before changing any layout CSS, viewport meta tags, or mobile-viewport JS.**
+
+> **2026-05 regression addendum:** the `100dvh` CSS default only remains safe if standalone mode sets `--app-height: 100vh` **before the bundled CSS can paint** and the runtime restores `100vh` whenever text entry is not focused. Do not remove the inline `index.html` bootstrap, the `mobile-viewport.ts` override, or the code comments pointing here without testing a freshly installed iOS standalone PWA.
 
 ---
 
@@ -146,15 +148,24 @@ html {
 
 `100dvh` is correct for Safari browser mode — it matches the visible viewport and responds to URL bar changes.
 
-#### Layer 2: JS override (standalone mode)
+#### Layer 2: pre-CSS bootstrap + runtime JS override (standalone mode)
+
+```html
+<!-- index.html, before app.bundle.css -->
+<script>
+  if (navigator.standalone) {
+    document.documentElement.style.setProperty('--app-height', '100vh');
+  }
+</script>
+```
 
 ```javascript
 // mobile-viewport.ts — installStandaloneMobileViewportFix()
-// Runs once on init, only when isStandaloneWebAppMode() && isMobileBrowserMode()
+// Runs on app init, only when isStandaloneWebAppMode() && isMobileBrowserMode()
 doc.documentElement.style.setProperty('--app-height', '100vh');
 ```
 
-In standalone mode, this overrides `--app-height` to `100vh`, which equals the full screen height from cold start. The `100dvh` fallback in CSS is never reached because the JS sets the variable first.
+In standalone mode, these override `--app-height` to `100vh`, which equals the full screen height from cold start. The inline `index.html` bootstrap exists so the `100dvh` fallback is not allowed to paint first in iOS standalone mode; the runtime path keeps the invariant true after resume, focus, keyboard, and viewport events.
 
 #### Why this works
 
@@ -443,8 +454,8 @@ window.matchMedia('(display-mode: standalone)').matches
 
 | File | Role | Key properties |
 |---|---|---|
-| `runtime/web/static/index.html` | Meta tags | `viewport-fit=cover`, `apple-mobile-web-app-capable`, `status-bar-style=black-translucent` |
-| `runtime/web/static/css/base.css` | Root layout | `--app-height: 100dvh`, `body { position: fixed; inset: 0 }`, `text-size-adjust: 100%` |
+| `runtime/web/static/index.html` | Meta tags + pre-CSS bootstrap | `viewport-fit=cover`, `apple-mobile-web-app-capable`, `status-bar-style=black-translucent`, inline standalone `--app-height: 100vh` before bundled CSS |
+| `runtime/web/static/css/base.css` | Root layout | `--app-height: 100dvh` browser default plus comments pointing here, `body { position: fixed; inset: 0 }`, `text-size-adjust: 100%` |
 | `runtime/web/static/css/editor.css` | Container & editor pane | `.container { height: var(--app-height, 100dvh); padding-top: env(safe-area-inset-top) }`, `.editor-pane-container { height: var(--app-height, 100dvh) }` |
 | `runtime/web/static/css/workspace.css` | Workspace sidebar | `.workspace-sidebar { height: var(--app-height, 100dvh) }` |
 | `runtime/web/static/css/agent.css` | Agent panel | `max-height: calc(var(--app-height, 100dvh) - 32px)` |
@@ -456,13 +467,13 @@ window.matchMedia('(display-mode: standalone)').matches
 ### Dependency chain
 
 ```
-index.html (meta tags)
-  → base.css (--app-height: 100dvh, body fixed)
+index.html (meta tags + standalone pre-CSS --app-height: 100vh bootstrap)
+  → base.css (--app-height: 100dvh browser default, body fixed)
     → editor.css / workspace.css / agent.css (use --app-height with 100dvh fallback)
-      → mobile-viewport.ts (overrides --app-height to 100vh in standalone)
+      → mobile-viewport.ts (keeps --app-height at 100vh in standalone unless keyboard/text entry is active)
 ```
 
-**Critical invariant**: The CSS fallback (`100dvh`) must be correct for browser mode. The JS override (`100vh`) must be correct for standalone mode. If either is wrong, one mode breaks.
+**Critical invariant**: The CSS fallback (`100dvh`) must be correct for browser mode. The inline/runtime JS override (`100vh`) must run before standalone iOS paints and must be restored after keyboard/focusout. If either side is wrong, one mode breaks.
 
 ---
 
@@ -556,6 +567,7 @@ After any change to layout CSS, meta tags, or mobile-viewport.ts:
 
 | Date | Commit | Change |
 |---|---|---|
+| 2026-05-10 | pending | Added pre-CSS standalone `--app-height: 100vh` bootstrap plus code comments/tests so the April PWA notes are enforced |
 | 2026-04-15 | `078054c6` | Final fix: `100dvh` default, `100vh` override in standalone JS |
 | 2026-04-15 | `ca7d3db2` | Replaced all `100dvh` with `100vh` (too aggressive — broke browser mode) |
 | 2026-04-15 | `3f0fca88` | Tried `calc(100dvh + 1px)` (caused animation on keyboard close) |
