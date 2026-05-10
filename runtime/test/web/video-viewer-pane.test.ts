@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { videoViewerPaneExtension } from "../../web/src/panes/video-viewer-pane.js";
+import { videoViewerPaneExtension } from "../../../../piclaw-addons/addons/web-viewer/web/index.ts";
 
 describe("video viewer pane", () => {
   test("claims common video files for both preview and tab contexts", () => {
