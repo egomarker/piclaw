@@ -83,6 +83,8 @@ interface TokenSegment {
   cls: string;
 }
 
+const MAX_HIGHLIGHT_CHARS = 96 * 1024;
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -539,6 +541,7 @@ export function parserForCodeFenceLanguage(lang: string): { parse: (input: strin
 }
 
 export function highlightCodeToHtml(code: string, lang: string): string {
+  if (String(code || '').length > MAX_HIGHLIGHT_CHARS) return escapeHtml(code);
   const parser = parserForCodeFenceLanguage(lang);
   if (!parser) return escapeHtml(code);
 
@@ -570,6 +573,7 @@ export function highlightCodeToHtml(code: string, lang: string): string {
 export function highlightCodeLinesAsHtml(code: string, lang: string): string[] {
   const lines = String(code || '').split('\n');
   if (!code) return lines;
+  if (String(code || '').length > MAX_HIGHLIGHT_CHARS) return lines.map((line) => escapeHtml(line) || '&nbsp;');
 
   const parser = parserForCodeFenceLanguage(lang);
   if (!parser) return lines.map((line) => escapeHtml(line));
@@ -596,14 +600,17 @@ export function highlightCodeLinesAsHtml(code: string, lang: string): string[] {
   }
 
   const result: string[] = [];
+  let tokenIndex = 0;
   for (let i = 0; i < lines.length; i += 1) {
     const start = lineStarts[i];
     const end = start + lines[i].length;
     let html = '';
     let cursor = start;
 
-    for (const token of tokens) {
-      if (token.to <= start) continue;
+    while (tokenIndex < tokens.length && tokens[tokenIndex].to <= start) tokenIndex += 1;
+
+    for (let j = tokenIndex; j < tokens.length; j += 1) {
+      const token = tokens[j];
       if (token.from >= end) break;
 
       const tokenFrom = Math.max(start, token.from);

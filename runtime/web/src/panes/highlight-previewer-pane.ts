@@ -10,6 +10,19 @@ import type { PaneCapability, PaneContext, PaneInstance, WebPaneExtension } from
 import { highlightCodeLinesAsHtml, parserForCodeFenceLanguage, normalizeCodeLanguageLabel, extensionToLanguage } from '../utils/code-highlighting.js';
 
 const MARKDOWN_EXTENSIONS = /\.(md|mdx|markdown)$/i;
+const LARGE_PREVIEW_CHARS = 96 * 1024;
+const LARGE_PREVIEW_LINES = 2_500;
+
+function countLinesUpTo(text: string, limit: number): number {
+    let lines = 1;
+    for (let i = 0; i < text.length; i++) {
+        if (text.charCodeAt(i) === 10) {
+            lines += 1;
+            if (lines > limit) return lines;
+        }
+    }
+    return lines;
+}
 
 /** Map file extension to language identifier for highlighting. */
 
@@ -51,6 +64,24 @@ class HighlightPreviewInstance implements PaneInstance {
 
     private render() {
         const langLabel = this.lang ? normalizeCodeLanguageLabel(this.lang) : 'Plain text';
+        const lineCount = countLinesUpTo(this.content, LARGE_PREVIEW_LINES);
+        const largePreview = this.content.length > LARGE_PREVIEW_CHARS || lineCount > LARGE_PREVIEW_LINES;
+
+        if (largePreview) {
+            this.container.innerHTML = `
+                <div class="highlight-preview" style="height:100%;display:flex;flex-direction:column;overflow:hidden;background:var(--bg-primary,#1e1e1e);">
+                    <div class="hl-toolbar" style="flex:0 0 auto;padding:4px 12px;background:var(--bg-secondary,#252526);border-bottom:1px solid var(--border-color,#333);font-size:11px;color:var(--text-secondary,#888);display:flex;justify-content:space-between;">
+                        <span>${this.escapeHtml(langLabel)} · large file mode</span>
+                        <span>${lineCount > LARGE_PREVIEW_LINES ? `${LARGE_PREVIEW_LINES}+` : lineCount} lines</span>
+                    </div>
+                    <div class="hl-code-container" style="flex:1;overflow:auto;font-family:var(--code-font,'JetBrains Mono',monospace);font-size:13px;line-height:1.5;">
+                        <pre class="hl-code" style="padding:8px 12px;margin:0;white-space:pre;overflow-x:auto;">${this.escapeHtml(this.content)}</pre>
+                    </div>
+                </div>
+            `;
+            return;
+        }
+
         const hasParser = this.lang ? !!parserForCodeFenceLanguage(this.lang) : false;
         const lines = hasParser
             ? highlightCodeLinesAsHtml(this.content, this.lang)

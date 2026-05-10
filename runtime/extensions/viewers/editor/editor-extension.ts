@@ -73,6 +73,11 @@ import {
 
 const MONO_STACK = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
 const EDITOR_MAX_BYTES = 256 * 1024;
+const LARGE_DOCUMENT_CHARS = 48 * 1024;
+const LARGE_DOCUMENT_LINES = 1_000;
+const LARGE_DOCUMENT_LINE_CHARS = 2_000;
+const DIRTY_RECHECK_DELAY_MS = 500;
+const CONTENT_CHANGE_DEBOUNCE_MS = 180;
 
 const shellLanguage = StreamLanguage.define(shell);
 
@@ -97,6 +102,30 @@ function getLocalBool(key: string, fallback: boolean): boolean {
 
 function setLocalBool(key: string, value: boolean): void {
     setLocalBoolBestEffort(() => localStorage, key, value);
+}
+
+function getDocumentSizeProfile(text: string): { lines: number; maxLineChars: number } {
+    let lines = 1;
+    let currentLineChars = 0;
+    let maxLineChars = 0;
+    for (let i = 0; i < text.length; i++) {
+        if (text.charCodeAt(i) === 10) {
+            lines += 1;
+            if (currentLineChars > maxLineChars) maxLineChars = currentLineChars;
+            currentLineChars = 0;
+        } else {
+            currentLineChars += 1;
+        }
+        if (lines > LARGE_DOCUMENT_LINES || currentLineChars > LARGE_DOCUMENT_LINE_CHARS) {
+            return { lines, maxLineChars: Math.max(maxLineChars, currentLineChars) };
+        }
+    }
+    return { lines, maxLineChars: Math.max(maxLineChars, currentLineChars) };
+}
+
+function isLargeDocumentContent(content: string): boolean {
+    const profile = getDocumentSizeProfile(content);
+    return content.length > LARGE_DOCUMENT_CHARS || profile.lines > LARGE_DOCUMENT_LINES || profile.maxLineChars > LARGE_DOCUMENT_LINE_CHARS;
 }
 
 /** Map file extension → CodeMirror language extension. */
@@ -245,6 +274,10 @@ export class StandaloneEditorInstance implements PaneInstance {
     private vimEnabled: boolean;
     private showWhitespace: boolean;
     private livePreviewEnabled: boolean;
+    private largeDocumentMode = false;
+    private initialContentLength = 0;
+    private dirtyRecheckTimer: number | null = null;
+    private contentChangeTimer: number | null = null;
     private diffMode: 'saved' | null = null;
     private vimEnabledRef: { current: boolean };
 
@@ -476,6 +509,8 @@ export class StandaloneEditorInstance implements PaneInstance {
             if (this.disposed) return;
 
             this.initialContent = value;
+            this.initialContentLength = value.length;
+            this.largeDocumentMode = isLargeDocumentContent(value);
             this.currentMtime = result?.mtime || this.currentMtime;
             this.conflictMonitor?.onSaved(this.currentMtime);
             if (this.isDiffMode()) {
@@ -499,6 +534,8 @@ export class StandaloneEditorInstance implements PaneInstance {
     /** Create the CodeMirror editor with content. */
     private mountEditor(content: string, mtime?: string | null): void {
         this.initialContent = content;
+        this.initialContentLength = content.length;
+        this.largeDocumentMode = isLargeDocumentContent(content);
         this.currentMtime = mtime || null;
         this.setLoadingUI(false);
         this.renderEditorSurface(content, this.diffMode === 'saved' ? 'saved' : null, null);
@@ -507,6 +544,9 @@ export class StandaloneEditorInstance implements PaneInstance {
         this.updateWhitespaceControlState();
         this.updateGutterWidth();
         this.initConflictMonitor();
+        if (this.largeDocumentMode) {
+            this.updateStatusText('Large file mode: live preview, whitespace markers, wrapping, and syntax parsing disabled');
+        }
     }
 
     private renderEditorSurface(content: string, diffMode: 'saved' | null, viewState: { cursorLine?: number; cursorCol?: number; scrollTop?: number } | null): void {
@@ -551,23 +591,21 @@ export class StandaloneEditorInstance implements PaneInstance {
 
     private buildEditableEditorExtensions(options: { scrollPastEnd?: boolean } = {}): any[] {
         const isDark = getThemeMode(this.ownerDocument) === 'dark';
-        const lang = languageForPath(this.path);
+        const enableRichFeatures = !this.largeDocumentMode;
+        const lang = enableRichFeatures ? languageForPath(this.path) : null;
         const extensions: any[] = [
             minimalSetup,
             lineNumbers(),
             highlightActiveLine(),
             highlightActiveLineGutter(),
-            this.whitespaceCompartment.of(this.showWhitespace ? highlightWhitespace() : []),
+            this.whitespaceCompartment.of(enableRichFeatures && this.showWhitespace ? highlightWhitespace() : []),
             this.livePreviewCompartment.of([]),
-            this.wrappingCompartment.of(EditorView.lineWrapping),
+            this.wrappingCompartment.of(enableRichFeatures ? EditorView.lineWrapping : []),
             ...(options.scrollPastEnd === false ? [] : [scrollPastEnd()]),
-            indentOnInput(),
+            ...(enableRichFeatures ? [indentOnInput()] : []),
             closeBrackets(),
-            autocompletion(),
-            highlightSelectionMatches(),
-            indentationMarkers(),
-            syntaxHighlighting(headingStyle),
-            syntaxHighlighting(classHighlighter),
+            ...(enableRichFeatures ? [autocompletion(), highlightSelectionMatches(), indentationMarkers()] : []),
+            ...(enableRichFeatures ? [syntaxHighlighting(headingStyle), syntaxHighlighting(classHighlighter)] : []),
             search(),
             this.vimCompartment.of(this.vimEnabled ? vim() : []),
             this.themeCompartment.of(isDark ? githubDark : githubLight),
@@ -583,9 +621,7 @@ export class StandaloneEditorInstance implements PaneInstance {
             EditorView.updateListener.of((update: any) => {
                 if (update.docChanged) {
                     this.checkDirty();
-                    if (this.contentChangeCb) {
-                        this.contentChangeCb(update.state.doc.toString());
-                    }
+                    this.scheduleContentChangeCallback();
                 }
                 if ((update.selectionSet || update.docChanged) && this.viewStateChangeCb) {
                     const pos = update.state.selection.main.head;
@@ -603,16 +639,15 @@ export class StandaloneEditorInstance implements PaneInstance {
 
     private buildBaselineEditorExtensions(): any[] {
         const isDark = getThemeMode(this.ownerDocument) === 'dark';
-        const lang = languageForPath(this.path);
+        const enableRichFeatures = !this.largeDocumentMode;
+        const lang = enableRichFeatures ? languageForPath(this.path) : null;
         const extensions: any[] = [
             minimalSetup,
             lineNumbers(),
-            this.baselineWhitespaceCompartment.of(this.showWhitespace ? highlightWhitespace() : []),
+            this.baselineWhitespaceCompartment.of(enableRichFeatures && this.showWhitespace ? highlightWhitespace() : []),
             this.baselineThemeCompartment.of(isDark ? githubDark : githubLight),
             this.baselineAccentCompartment.of(this.buildAccentTheme()),
-            EditorView.lineWrapping,
-            syntaxHighlighting(headingStyle),
-            syntaxHighlighting(classHighlighter),
+            ...(enableRichFeatures ? [EditorView.lineWrapping, syntaxHighlighting(headingStyle), syntaxHighlighting(classHighlighter)] : []),
             EditorState.readOnly.of(true),
             EditorView.editable.of(false),
             this.buildSharedEditorTheme(),
@@ -629,7 +664,7 @@ export class StandaloneEditorInstance implements PaneInstance {
         });
         this.view = new EditorView({ state, parent: this.cmHost });
         if (viewState) requestAnimationFrame(() => this.restoreViewState(viewState));
-        if (this.supportsMarkdownLivePreview() && this.livePreviewEnabled) {
+        if (this.isLivePreviewAvailable() && this.livePreviewEnabled) {
             void this.applyLivePreview(true);
         }
     }
@@ -678,13 +713,13 @@ export class StandaloneEditorInstance implements PaneInstance {
     }
 
     private isLivePreviewAvailable(): boolean {
-        return !this.isDiffMode() && this.supportsMarkdownLivePreview();
+        return !this.largeDocumentMode && !this.isDiffMode() && this.supportsMarkdownLivePreview();
     }
 
     /** Lazy-load and apply/remove markdown live preview extensions. */
     private async applyLivePreview(enabled: boolean): Promise<void> {
         if (!this.view || this.disposed || this.isDiffMode()) return;
-        const wrapEffect = this.wrappingCompartment.reconfigure(EditorView.lineWrapping);
+        const wrapEffect = this.wrappingCompartment.reconfigure(this.largeDocumentMode ? [] : EditorView.lineWrapping);
 
         if (enabled) {
             try {
@@ -728,7 +763,7 @@ export class StandaloneEditorInstance implements PaneInstance {
     }
 
     private isWhitespaceDisabledInCurrentMode(): boolean {
-        return this.isLivePreview();
+        return this.largeDocumentMode || this.isLivePreview();
     }
 
     private updateLivePreviewControlState(): void {
@@ -739,15 +774,18 @@ export class StandaloneEditorInstance implements PaneInstance {
         this._lpBtn.classList.toggle('active', available && this.livePreviewEnabled);
         this._lpBtn.title = available
             ? 'Toggle live preview (Alt+P)'
-            : (this.isDiffMode() ? 'Live Preview is unavailable in Compare to Saved' : 'Live Preview is unavailable for this file');
+            : (this.largeDocumentMode
+                ? 'Live Preview is disabled in Large File Mode'
+                : (this.isDiffMode() ? 'Live Preview is unavailable in Compare to Saved' : 'Live Preview is unavailable for this file'));
     }
 
     private updateWhitespaceControlState(): void {
         if (!this._wsBtn) return;
         const disabled = this.isWhitespaceDisabledInCurrentMode();
         this._wsBtn.disabled = disabled;
+        this._wsBtn.classList.toggle('active', !disabled && this.showWhitespace);
         this._wsBtn.title = disabled
-            ? 'Whitespace is unavailable in Live Preview'
+            ? (this.largeDocumentMode ? 'Whitespace is disabled in Large File Mode' : 'Whitespace is unavailable in Live Preview')
             : 'Toggle whitespace (Alt+W)';
     }
 
@@ -791,10 +829,59 @@ export class StandaloneEditorInstance implements PaneInstance {
     }
 
     /** Compare content to baseline and update dirty state. */
-    private checkDirty(): void {
+    private checkDirty(fullCompare = false): void {
         if (!this.view) return;
-        const current = this.view.state.doc.toString();
-        this.setDirty(current !== this.initialContent);
+        if (fullCompare) {
+            this.clearDirtyRecheckTimer();
+            this.setDirty(this.view.state.doc.toString() !== this.initialContent);
+            return;
+        }
+        const docLength = this.view.state.doc.length;
+        if (docLength !== this.initialContentLength) {
+            this.clearDirtyRecheckTimer();
+            this.setDirty(true);
+            return;
+        }
+
+        // Avoid serializing large documents synchronously on every keystroke.
+        // Same-length edits are dirty immediately. In normal mode an idle
+        // recheck clears the marker after undo-to-saved; in large-file mode we
+        // keep the dirty marker until save/reload rather than janking typing.
+        this.setDirty(true);
+        if (!this.largeDocumentMode) this.scheduleDirtyRecheck();
+    }
+
+    private clearDirtyRecheckTimer(): void {
+        if (this.dirtyRecheckTimer !== null) {
+            this.ownerWindow.clearTimeout(this.dirtyRecheckTimer);
+            this.dirtyRecheckTimer = null;
+        }
+    }
+
+    private scheduleDirtyRecheck(): void {
+        this.clearDirtyRecheckTimer();
+        this.dirtyRecheckTimer = this.ownerWindow.setTimeout(() => {
+            this.dirtyRecheckTimer = null;
+            if (!this.view || this.disposed) return;
+            this.setDirty(this.view.state.doc.toString() !== this.initialContent);
+        }, DIRTY_RECHECK_DELAY_MS);
+    }
+
+    private clearContentChangeTimer(): void {
+        if (this.contentChangeTimer !== null) {
+            this.ownerWindow.clearTimeout(this.contentChangeTimer);
+            this.contentChangeTimer = null;
+        }
+    }
+
+    private scheduleContentChangeCallback(): void {
+        if (!this.contentChangeCb || this.largeDocumentMode) return;
+        this.clearContentChangeTimer();
+        this.contentChangeTimer = this.ownerWindow.setTimeout(() => {
+            this.contentChangeTimer = null;
+            if (!this.view || this.disposed || !this.contentChangeCb || this.largeDocumentMode) return;
+            this.contentChangeCb(this.view.state.doc.toString());
+        }, CONTENT_CHANGE_DEBOUNCE_MS);
     }
 
     private setDirty(dirty: boolean): void {
@@ -819,7 +906,7 @@ export class StandaloneEditorInstance implements PaneInstance {
 
     private toggleWhitespace(): void {
         if (this.isWhitespaceDisabledInCurrentMode()) {
-            this.updateStatusText('Whitespace is disabled in Live Preview');
+            this.updateStatusText(this.largeDocumentMode ? 'Whitespace is disabled in Large File Mode' : 'Whitespace is disabled in Live Preview');
             return;
         }
         this.showWhitespace = !this.showWhitespace;
@@ -1001,6 +1088,8 @@ export class StandaloneEditorInstance implements PaneInstance {
                     if (data?.error) { this.updateStatusText(`Reload failed: ${data.error}`); return; }
                     const viewState = this.captureViewState();
                     this.initialContent = data?.text || '';
+                    this.initialContentLength = this.initialContent.length;
+                    this.largeDocumentMode = isLargeDocumentContent(this.initialContent);
                     this.currentMtime = data?.mtime || null;
                     this.renderEditorSurface(this.initialContent, this.diffMode, viewState);
                     this.setDirty(false);
@@ -1055,6 +1144,8 @@ export class StandaloneEditorInstance implements PaneInstance {
         }
         const viewState = this.captureViewState();
         this.initialContent = content;
+        this.initialContentLength = content.length;
+        this.largeDocumentMode = isLargeDocumentContent(content);
         this.currentMtime = mtime;
         this.renderEditorSurface(content, this.diffMode, viewState);
         this.setDirty(false);
@@ -1074,6 +1165,8 @@ export class StandaloneEditorInstance implements PaneInstance {
         if (this.disposed) return;
         this.disposed = true;
         this.conflictMonitor?.dispose();
+        this.clearDirtyRecheckTimer();
+        this.clearContentChangeTimer();
         this.unbindHostListeners();
         this.destroyEditorViews();
         this.container.innerHTML = '';
@@ -1157,7 +1250,10 @@ export class StandaloneEditorInstance implements PaneInstance {
         const current = this.getContent();
         if (typeof current === 'string') cb(current);
         return () => {
-            if (this.contentChangeCb === cb) this.contentChangeCb = null;
+            if (this.contentChangeCb === cb) {
+                this.contentChangeCb = null;
+                this.clearContentChangeTimer();
+            }
         };
     }
 
@@ -1194,7 +1290,7 @@ export class StandaloneEditorInstance implements PaneInstance {
         this.updateLivePreviewControlState();
         this.updateWhitespaceControlState();
         this.updateGutterWidth();
-        this.checkDirty();
+        this.checkDirty(true);
     }
 }
 

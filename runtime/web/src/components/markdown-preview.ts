@@ -15,6 +15,7 @@ import { readStoredPanelHeight, writeStoredPanelHeight } from './markdown-previe
 
 const RENDER_DEBOUNCE_MS = 120;
 const SUBSCRIBE_RETRY_MS = 100;
+const MAX_RENDER_CHARS = 96 * 1024;
 const MIN_H = 60;
 const DEFAULT_H = 220;
 const LS_KEY = 'mdPreviewHeight';
@@ -69,6 +70,10 @@ export function MarkdownPreview({ getContent, subscribeContentChange, path, onCl
             if (disposed) return;
             if (text === prevTextRef.current) return;
             prevTextRef.current = text;
+            if (String(text || '').length > MAX_RENDER_CHARS) {
+                setRenderedHtml('<p style="color:var(--text-secondary)">Preview disabled for large documents to keep the editor responsive.</p>');
+                return;
+            }
             try {
                 const h = renderMarkdown(text, null);
                 setRenderedHtml(h);
