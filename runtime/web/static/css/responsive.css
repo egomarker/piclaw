@@ -53,7 +53,7 @@
     }
 
     .compose-session-trigger-top + .compose-input-main textarea {
-        padding-right: max(calc(var(--spacing-xs) + 28px), min(44vw, 156px));
+        padding-right: calc(var(--spacing-xs) + 28px);
     }
 
     .compose-queue-stack {
@@ -224,7 +224,7 @@
     }
 
     .compose-session-trigger-top + .compose-input-main textarea {
-        padding-right: max(calc(var(--spacing-xs) + 28px), min(44vw, 156px));
+        padding-right: calc(var(--spacing-xs) + 28px);
     }
 
     .compose-model-hint,

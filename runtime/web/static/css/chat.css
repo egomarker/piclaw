@@ -1336,7 +1336,7 @@
 
 .compose-session-trigger-top + .compose-input-main textarea {
     padding-top: 2px;
-    padding-right: max(calc(var(--spacing-xs) + 28px), min(36vw, 148px));
+    padding-right: calc(var(--spacing-xs) + 28px);
 }
 
 
