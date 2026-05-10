@@ -52,6 +52,9 @@
         margin-bottom: 0;
     }
 
+    .compose-session-trigger-top + .compose-input-main textarea {
+        padding-right: max(calc(var(--spacing-xs) + 28px), min(44vw, 156px));
+    }
 
     .compose-queue-stack {
         margin: var(--chat-surface-stack-gap) 0 0;
@@ -220,6 +223,9 @@
         margin-bottom: 0;
     }
 
+    .compose-session-trigger-top + .compose-input-main textarea {
+        padding-right: max(calc(var(--spacing-xs) + 28px), min(44vw, 156px));
+    }
 
     .compose-model-hint,
     .compose-model-usage-hint {

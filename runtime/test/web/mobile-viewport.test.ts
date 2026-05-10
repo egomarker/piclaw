@@ -41,33 +41,34 @@ test('shouldUseStandaloneMobileViewportFix only enables for standalone mobile ru
   })).toBe(false);
 });
 
-test('index does not contain a pre-CSS standalone bootstrap', () => {
+test('index bootstraps standalone app height before loading bundled CSS', () => {
   const html = readFileSync(new URL('../../web/static/index.html', import.meta.url), 'utf8');
-  // The bootstrap was removed — it interfered with the working 078054c6d layout.
-  // The runtime JS (installStandaloneMobileViewportFix) handles --app-height.
-  expect(html).not.toContain('iOS standalone PWA guard');
+  const bootstrapIndex = html.indexOf('iOS standalone PWA guard: set --app-height before CSS loads');
+  const cssIndex = html.indexOf('rel="stylesheet" href="/static/dist/app.bundle.css');
+  expect(bootstrapIndex).toBeGreaterThan(0);
+  expect(cssIndex).toBeGreaterThan(bootstrapIndex);
+  expect(html).toContain("document.documentElement.style.setProperty('--app-height', '100vh')");
 });
 
-test('container CSS has height:100% and --app-height declarations', () => {
+test('container CSS uses height:100% as primary with --app-height fallback', () => {
   const css = readFileSync(new URL('../../web/static/css/editor.css', import.meta.url), 'utf8');
   const rule = readCssRule(css, '.container');
-  // Container needs both height:100% (for the inset:0 body chain) and
-  // height:var(--app-height) (for standalone JS override). The minifier
-  // reorders so height:100% wins — this is correct for the inset:0 approach.
-  expect(rule).toContain('height: var(--app-height, 100dvh);');
+  // Container must have height:100% so it inherits body's inset:0 geometry.
+  // The --app-height declaration is a progressive enhancement for keyboard handling
+  // but Bun's CSS minifier reorders duplicates so height:100% wins — this is correct.
   expect(rule).toContain('height: 100%;');
+  expect(rule).toContain('height: var(--app-height, 100dvh);');
 });
 
-test('body uses position:fixed with inset:0', () => {
+test('body uses position:fixed + inset:0 for reliable viewport stretch', () => {
   const css = readFileSync(new URL('../../web/static/css/base.css', import.meta.url), 'utf8');
   const rule = readCssRule(css, 'body');
-  expect(rule).toMatch(/position:\s*fixed/);
-  expect(rule).toMatch(/inset:\s*0/);
-});
-
-test('html,body reset includes height:100%', () => {
-  const css = readFileSync(new URL('../../web/static/css/base.css', import.meta.url), 'utf8');
-  expect(css).toMatch(/html, body \{[^}]*height:\s*100%/);
+  // body must use inset:0 for edge-to-edge viewport coverage via CSS geometry.
+  // Do NOT replace with height:var(--app-height) — iOS standalone reports
+  // wrong values for 100vh/100dvh on cold start, but inset:0 stretches correctly.
+  const declarations = rule.replace(/\/\*[\s\S]*?\*\//g, '');
+  expect(declarations).toMatch(/inset\s*:\s*0/);
+  expect(declarations).toMatch(/position\s*:\s*fixed/);
 });
 
 test('readViewportHeight prefers visualViewport height when available', () => {
@@ -85,9 +86,122 @@ test('readViewportHeight prefers visualViewport height when available', () => {
   })).toBe(844);
 });
 
+test('syncStandaloneMobileViewport uses standalone 100vh instead of short visual viewport gaps when keyboard is closed', () => {
+  const cssVars = new Map<string, string>();
+  const documentElement = {
+    style: {
+      setProperty: (name: string, value: string) => cssVars.set(name, value),
+    },
+  };
 
+  const height = syncStandaloneMobileViewport({
+    navigator: {
+      standalone: true,
+      userAgent: 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X)',
+      maxTouchPoints: 5,
+    },
+    window: {
+      matchMedia: () => ({ matches: true }),
+      visualViewport: { height: 741 },
+      innerHeight: 800,
+    },
+    document: {
+      documentElement,
+    },
+  });
 
+  expect(height).toBe(800);
+  expect(cssVars.get('--app-height')).toBe('100vh');
+});
 
+test('syncStandaloneMobileViewport does not persist false short standalone viewport measurements when keyboard is closed', () => {
+  const cssVars = new Map<string, string>();
+  const documentElement = {
+    style: {
+      setProperty: (name: string, value: string) => cssVars.set(name, value),
+    },
+  };
+
+  const height = syncStandaloneMobileViewport({
+    navigator: {
+      standalone: true,
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
+      maxTouchPoints: 5,
+    },
+    window: {
+      matchMedia: () => ({ matches: true }),
+      visualViewport: { height: 701.9 },
+      innerHeight: 812,
+    },
+    document: {
+      documentElement,
+      activeElement: null,
+    },
+  });
+
+  expect(height).toBe(812);
+  expect(cssVars.get('--app-height')).toBe('100vh');
+});
+
+test('syncStandaloneMobileViewport ignores focused textarea when iOS standalone viewport only has the cold-start safe-area gap', () => {
+  const cssVars = new Map<string, string>();
+  const documentElement = {
+    style: {
+      setProperty: (name: string, value: string) => cssVars.set(name, value),
+    },
+  };
+
+  const height = syncStandaloneMobileViewport({
+    navigator: {
+      standalone: true,
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
+      maxTouchPoints: 5,
+    },
+    window: {
+      matchMedia: () => ({ matches: true }),
+      visualViewport: { height: 793, offsetTop: 0 },
+      innerHeight: 793,
+      innerWidth: 393,
+      screen: { width: 393, height: 852 },
+    },
+    document: {
+      documentElement,
+      activeElement: { tagName: 'TEXTAREA', type: 'textarea' },
+    },
+  });
+
+  expect(height).toBe(793);
+  expect(cssVars.get('--app-height')).toBe('100vh');
+});
+
+test('syncStandaloneMobileViewport keeps large visual viewport shrink for virtual keyboard', () => {
+  const cssVars = new Map<string, string>();
+  const documentElement = {
+    style: {
+      setProperty: (name: string, value: string) => cssVars.set(name, value),
+    },
+  };
+
+  const height = syncStandaloneMobileViewport({
+    navigator: {
+      standalone: true,
+      userAgent: 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X)',
+      maxTouchPoints: 5,
+    },
+    window: {
+      matchMedia: () => ({ matches: true }),
+      visualViewport: { height: 430 },
+      innerHeight: 800,
+    },
+    document: {
+      documentElement,
+      activeElement: { tagName: 'TEXTAREA', type: 'textarea' },
+    },
+  });
+
+  expect(height).toBe(430);
+  expect(cssVars.get('--app-height')).toBe('430px');
+});
 
 test('syncStandaloneMobileViewport writes app height without resetting page scroll by default', () => {
   const cssVars = new Map<string, string>();
@@ -121,8 +235,8 @@ test('syncStandaloneMobileViewport writes app height without resetting page scro
     },
   });
 
-  expect(height).toBe(702);
-  expect(cssVars.get('--app-height')).toBe('702px');
+  expect(height).toBe(900);
+  expect(cssVars.get('--app-height')).toBe('100vh');
   expect(windowScrolls).toEqual([]);
   expect(scrollingElement.scrollTop).toBe(91);
   expect(scrollingElement.scrollLeft).toBe(17);
@@ -164,8 +278,8 @@ test('syncStandaloneMobileViewport can reset page scroll when explicitly request
     },
   }, { resetScroll: true });
 
-  expect(height).toBe(702);
-  expect(cssVars.get('--app-height')).toBe('702px');
+  expect(height).toBe(900);
+  expect(cssVars.get('--app-height')).toBe('100vh');
   expect(windowScrolls).toEqual([[0, 0]]);
   expect(scrollingElement.scrollTop).toBe(0);
   expect(scrollingElement.scrollLeft).toBe(0);
@@ -175,3 +289,66 @@ test('syncStandaloneMobileViewport can reset page scroll when explicitly request
   expect(body.scrollLeft).toBe(0);
 });
 
+test('installStandaloneMobileViewportFix restores standalone 100vh on focusout after keyboard sizing', () => {
+  const cssVars = new Map<string, string>();
+  const listeners = new Map<string, Set<Function>>();
+  const addEventListener = (type: string, listener: Function) => {
+    const set = listeners.get(type) ?? new Set<Function>();
+    set.add(listener);
+    listeners.set(type, set);
+  };
+  const removeEventListener = (type: string, listener: Function) => {
+    listeners.get(type)?.delete(listener);
+  };
+  const dispatch = (type: string) => {
+    for (const listener of listeners.get(type) ?? []) listener();
+  };
+  const documentElement = {
+    style: {
+      setProperty: (name: string, value: string) => cssVars.set(name, value),
+    },
+  };
+  const document = {
+    documentElement,
+    activeElement: { tagName: 'TEXTAREA', type: 'textarea' } as any,
+    addEventListener,
+    removeEventListener,
+  };
+  const timeoutCallbacks: Function[] = [];
+  const window = {
+    matchMedia: () => ({ matches: true }),
+    visualViewport: { height: 430, addEventListener, removeEventListener },
+    innerHeight: 800,
+    addEventListener,
+    removeEventListener,
+    requestAnimationFrame: (callback: Function) => {
+      callback();
+      return 1;
+    },
+    cancelAnimationFrame: () => {},
+    setTimeout: (callback: Function) => {
+      timeoutCallbacks.push(callback);
+      return timeoutCallbacks.length;
+    },
+    clearTimeout: () => {},
+  };
+
+  const dispose = installStandaloneMobileViewportFix({
+    navigator: {
+      standalone: true,
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
+      maxTouchPoints: 5,
+    },
+    window,
+    document,
+  });
+
+  expect(cssVars.get('--app-height')).toBe('430px');
+
+  document.activeElement = null;
+  dispatch('focusout');
+
+  expect(cssVars.get('--app-height')).toBe('100vh');
+
+  dispose();
+});

@@ -1,12 +1,10 @@
 # iOS PWA Viewport & Safe Area Reference
 
-> Last updated: 2026-05-10
+> Last updated: 2026-04-15
 > Applies to: iOS 17.x–18.x, iOS 26, Safari/WebKit, standalone PWA mode
 > Validated on: iPhone 15 Pro and iPad Pro running iOS 26.x
 
 This document captures every failure mode, attempted fix, and the final confirmed solution for the iOS standalone PWA viewport height bug. It exists to prevent regressions. **Read this before changing any layout CSS, viewport meta tags, or mobile-viewport JS.**
-
-> **2026-05 regression addendum:** the `100dvh` CSS default only remains safe if standalone mode sets `--app-height: 100vh` **before the bundled CSS can paint** and the runtime restores `100vh` whenever the software keyboard is not actually visible. Focus alone is not enough: iOS can leave the textarea focused after the keyboard is hidden while `visualViewport.height` is still the cold-start short value, recreating the bottom gap. Do not remove the inline `index.html` bootstrap, the `mobile-viewport.ts` override, or the code comments pointing here without testing a freshly installed iOS standalone PWA. Also keep `.container` to a **single** `height: var(--app-height, ...)` declaration; a duplicate `height: 100%` can be reordered after it by the CSS minifier and silently disable every `--app-height` fix.
 
 ---
 
@@ -148,24 +146,15 @@ html {
 
 `100dvh` is correct for Safari browser mode — it matches the visible viewport and responds to URL bar changes.
 
-#### Layer 2: pre-CSS bootstrap + runtime JS override (standalone mode)
-
-```html
-<!-- index.html, before app.bundle.css -->
-<script>
-  if (navigator.standalone) {
-    document.documentElement.style.setProperty('--app-height', '100vh');
-  }
-</script>
-```
+#### Layer 2: JS override (standalone mode)
 
 ```javascript
 // mobile-viewport.ts — installStandaloneMobileViewportFix()
-// Runs on app init, only when isStandaloneWebAppMode() && isMobileBrowserMode()
+// Runs once on init, only when isStandaloneWebAppMode() && isMobileBrowserMode()
 doc.documentElement.style.setProperty('--app-height', '100vh');
 ```
 
-In standalone mode, these override `--app-height` to `100vh`, which equals the full screen height from cold start. The inline `index.html` bootstrap exists so the `100dvh` fallback is not allowed to paint first in iOS standalone mode; the runtime path keeps the invariant true after resume, focus, keyboard, and viewport events.
+In standalone mode, this overrides `--app-height` to `100vh`, which equals the full screen height from cold start. The `100dvh` fallback in CSS is never reached because the JS sets the variable first.
 
 #### Why this works
 
@@ -268,7 +257,7 @@ Currently not handled. If landscape support is added, use:
 
 ### Browser mode (Safari)
 
-iOS Safari natively scrolls the visual viewport to keep the focused input visible above the keyboard. The body stays `position: fixed` with `height: var(--app-height)`. No JS intervention needed. `100dvh` does NOT resize when the keyboard opens — the keyboard simply overlays the page and Safari scrolls the visual viewport.
+iOS Safari natively scrolls the visual viewport to keep the focused input visible above the keyboard. The body stays `position: fixed; inset: 0`. No JS intervention needed. `100dvh` does NOT resize when the keyboard opens — the keyboard simply overlays the page and Safari scrolls the visual viewport.
 
 ### Standalone PWA mode
 
@@ -290,10 +279,7 @@ When the keyboard closes:
 ```css
 body {
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: var(--app-height, 100dvh);
+    inset: 0;
     overflow: hidden;
     overscroll-behavior: none;
 }
@@ -334,11 +320,11 @@ html, body { height: calc(100dvh + 1px); }
 document.documentElement.style.setProperty('--app-height', screen.height + 'px');
 ```
 
-**Why it fails (with position: fixed)**: The body has `position: fixed` and its height is determined by the viewport. Fixed elements are constrained to the viewport (their containing block). Even though `--app-height` is set to 852px on the container, the body is only 793px (the lying viewport) if it uses `inset: 0` or `bottom: 0` instead of an explicit `height: var(--app-height)`. The container tries to be 852px but is clipped by the body.
+**Why it fails (with position: fixed)**: The body has `position: fixed; inset: 0`. Fixed elements are constrained to the viewport (their containing block). Even though `--app-height` is set to 852px on the container, the body is only 793px (the lying viewport). The container tries to be 852px but is clipped by the body.
 
 **Why it fails (without position: fixed)**: Removing `position: fixed` from the body allows `screen.height` to work, but the keyboard pushes the entire page upward on focus (see §8.6).
 
-### ❌ 8.4: Negative `bottom` on fixed body (and `inset: 0`)
+### ❌ 8.4: Negative `bottom` on fixed body
 
 ```css
 body {
@@ -351,8 +337,6 @@ body {
 **Theory**: Extend the fixed body past the lying viewport by the amount it's short.
 
 **Why it fails**: iOS does not render fixed elements beyond the viewport boundary, even with `viewport-fit=cover`. The negative bottom is ignored or clipped. No visible change.
-
-**Also applies to `inset: 0`**: using `inset: 0` (which is shorthand for `top: 0; right: 0; bottom: 0; left: 0`) makes the body height equal to the lying viewport (793px), because `bottom: 0` pins the bottom edge to the viewport's lying bottom. The container at `height: 100vh` (852px) then overflows the body and is clipped by `overflow: hidden`. **Fix**: use `height: var(--app-height, 100dvh)` instead of `inset: 0` so the body height is set by the CSS variable rather than inferred from the lying viewport edges.
 
 ### ❌ 8.5: `env(safe-area-inset-bottom)` padding on compose box
 
@@ -459,9 +443,9 @@ window.matchMedia('(display-mode: standalone)').matches
 
 | File | Role | Key properties |
 |---|---|---|
-| `runtime/web/static/index.html` | Meta tags + pre-CSS bootstrap | `viewport-fit=cover`, `apple-mobile-web-app-capable`, `status-bar-style=black-translucent`, inline standalone `--app-height: 100vh` before bundled CSS |
-| `runtime/web/static/css/base.css` | Root layout | `--app-height: 100dvh` browser default plus comments pointing here, `body { position: fixed; height: var(--app-height) }`, `text-size-adjust: 100%` |
-| `runtime/web/static/css/editor.css` | Container & editor pane | `.container` must have exactly one height declaration: `height: var(--app-height, 100dvh)` plus `padding-top: env(safe-area-inset-top)`; `.editor-pane-container { height: var(--app-height, 100dvh) }` |
+| `runtime/web/static/index.html` | Meta tags | `viewport-fit=cover`, `apple-mobile-web-app-capable`, `status-bar-style=black-translucent` |
+| `runtime/web/static/css/base.css` | Root layout | `--app-height: 100dvh`, `body { position: fixed; inset: 0 }`, `text-size-adjust: 100%` |
+| `runtime/web/static/css/editor.css` | Container & editor pane | `.container { height: var(--app-height, 100dvh); padding-top: env(safe-area-inset-top) }`, `.editor-pane-container { height: var(--app-height, 100dvh) }` |
 | `runtime/web/static/css/workspace.css` | Workspace sidebar | `.workspace-sidebar { height: var(--app-height, 100dvh) }` |
 | `runtime/web/static/css/agent.css` | Agent panel | `max-height: calc(var(--app-height, 100dvh) - 32px)` |
 | `runtime/web/static/css/chat.css` | Compose box | `.compose-box { padding: var(--spacing-sm) var(--spacing-md) 2px }` |
@@ -472,13 +456,13 @@ window.matchMedia('(display-mode: standalone)').matches
 ### Dependency chain
 
 ```
-index.html (meta tags + standalone pre-CSS --app-height: 100vh bootstrap)
-  → base.css (--app-height: 100dvh browser default, body { position:fixed; height: var(--app-height) })
+index.html (meta tags)
+  → base.css (--app-height: 100dvh, body fixed)
     → editor.css / workspace.css / agent.css (use --app-height with 100dvh fallback)
-      → mobile-viewport.ts (keeps --app-height at 100vh in standalone unless keyboard/text entry is active)
+      → mobile-viewport.ts (overrides --app-height to 100vh in standalone)
 ```
 
-**Critical invariant**: The CSS fallback (`100dvh`) must be correct for browser mode. The inline/runtime JS override (`100vh`) must run before standalone iOS paints and must be restored whenever the software keyboard is not measurably shrinking the viewport. Text focus alone is not keyboard visibility on iOS PWA. `.container` must not also declare `height: 100%`; duplicate height declarations can be reordered during bundling so the fixed value wins and the app-height override is ignored. The body **must not** use `inset: 0` or `bottom: 0`; fixed elements with those constraints inherit the iOS standalone lying viewport height, clipping the container. Body must use `height: var(--app-height, 100dvh)` so it tracks the same variable as the container. If either side is wrong, one mode breaks.
+**Critical invariant**: The CSS fallback (`100dvh`) must be correct for browser mode. The JS override (`100vh`) must be correct for standalone mode. If either is wrong, one mode breaks.
 
 ---
 
@@ -572,7 +556,6 @@ After any change to layout CSS, meta tags, or mobile-viewport.ts:
 
 | Date | Commit | Change |
 |---|---|---|
-| 2026-05-10 | pending | Added pre-CSS standalone `--app-height: 100vh` bootstrap and removed duplicate `.container height: 100%` so bundled CSS cannot override app-height |
 | 2026-04-15 | `078054c6` | Final fix: `100dvh` default, `100vh` override in standalone JS |
 | 2026-04-15 | `ca7d3db2` | Replaced all `100dvh` with `100vh` (too aggressive — broke browser mode) |
 | 2026-04-15 | `3f0fca88` | Tried `calc(100dvh + 1px)` (caused animation on keyboard close) |
