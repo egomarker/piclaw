@@ -1276,7 +1276,9 @@
     width: 100%;
     max-width: 800px;
     margin: 0 auto;
-    height: 100%;
+    /* Single height declaration — do NOT add height:100% here.
+       Bun’s CSS minifier reorders duplicate height props so 100% wins,
+       silently disabling --app-height.  See docs/PWA.md. */
     height: var(--app-height, 100dvh);
     min-height: 0;
     padding-top: env(safe-area-inset-top, 0px);

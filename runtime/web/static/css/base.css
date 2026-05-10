@@ -210,10 +210,16 @@ button .ui-disclosure-triangle {
     padding: 0;
 }
 
-/* Base styles */
-html, body {
+/* Base styles — html and body separated so html can use 100vh (full screen)
+   instead of 100% (which resolves to the lying viewport in iOS standalone
+   and breaks viewport-fit=cover per docs/PWA.md §8.1). */
+html {
     width: 100%;
-    height: 100%;
+    overflow: hidden;
+}
+
+body {
+    width: 100%;
     overflow: hidden;
 }
 
@@ -229,8 +235,14 @@ html {
 
 body {
     position: fixed;
-    inset: 0;
-    min-height: 100%;
+    /* Do NOT use inset:0 or bottom:0 — fixed elements with those constraints
+       inherit the iOS standalone lying viewport height (~59px too short).
+       Use height:var(--app-height) so body tracks the same variable as the
+       container.  See docs/PWA.md §8.4 before changing this. */
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--app-height, 100dvh);
     font-family: var(--font-family);
     font-size: var(--font-size-md);
     line-height: var(--line-height);
