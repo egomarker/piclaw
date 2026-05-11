@@ -67,6 +67,7 @@ export const CONTROL_COMMAND_DEFINITIONS: ControlCommandDefinition[] = [
   { name: "/logout", description: "Logout from an AI model provider" },
   { name: "/settings", description: "Open the settings dialog" },
   { name: "/commands", description: "List available commands" },
+  { name: "/meters", description: "Show or hide CPU/RAM meters HUD" },
   { name: "/ask", description: "Send a prompt to a paired remote instance (/ask <instance_id|fingerprint> <prompt>)" },
 ];
 
