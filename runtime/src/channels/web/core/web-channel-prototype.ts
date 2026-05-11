@@ -235,8 +235,10 @@ export function installWebChannelPrototype(
     getExtensionWorkingState: {
       configurable: true,
       writable: true,
-      value: withRuntimePublicSurface((service, chatJid: string): Record<string, unknown> | null =>
-        service.getExtensionWorkingState(chatJid)),
+      value: withRuntimePublicSurface((service, chatJid: string): Record<string, unknown> | null => {
+        const state = service.getExtensionWorkingState(chatJid);
+        return state as unknown as Record<string, unknown> | null;
+      }),
     },
     setContextUsage: {
       configurable: true,

@@ -529,11 +529,16 @@ export class AgentSessionManager {
         // so GC can reclaim the fileEntries array and byId Map without waiting
         // for all closure/reference paths to be collected.
         try {
-          const sm = runtime.session.sessionManager as { fileEntries?: unknown[]; byId?: Map<unknown, unknown> };
+          const sm = runtime.session.sessionManager as unknown as { fileEntries?: unknown[]; byId?: Map<unknown, unknown> };
           if (sm.fileEntries) sm.fileEntries = [];
           if (sm.byId) sm.byId.clear();
-          (runtime.session as { agent?: { state?: { messages?: unknown[] } } }).agent?.state && ((runtime.session as any).agent.state.messages = []);
-        } catch { void 0; }
+          const agentState = (runtime.session as { agent?: { state?: { messages?: unknown[] } } }).agent?.state;
+          if (agentState) {
+            (runtime.session as any).agent.state.messages = [];
+          }
+        } catch (err) {
+          this.options.onWarn?.("Failed to release disposed session references", { err });
+        }
       }
     })();
     this.runtimeDisposeInFlight.set(runtime, task);
