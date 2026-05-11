@@ -122,7 +122,7 @@ export function TimelineMenu({
         </button>
         ${open && html`
             <div class="workspace-menu-dropdown timeline-menu-dropdown" ref=${menuRef} role="menu">
-                <button class="workspace-menu-item" role="menuitem" disabled=${chatOnlyMode} onClick=${() => run(toggleWorkspace)}>
+                <button class="workspace-menu-item" role="menuitem" onClick=${() => run(toggleWorkspace)}>
                     ${workspaceOpen ? 'Hide workspace' : 'Show workspace'}
                 </button>
                 ${!workspaceOpen && !chatOnlyMode && html`
@@ -135,15 +135,15 @@ export function TimelineMenu({
                 </button>
 
                 ${(onOpenTerminalTab || onOpenVncTab || onToggleTerminal) && html`<div class="workspace-menu-separator"></div>`}
-                ${onOpenTerminalTab && html`<button class="workspace-menu-item" role="menuitem" disabled=${chatOnlyMode} onClick=${() => run(onOpenTerminalTab)}>Open terminal in tab</button>`}
-                ${onOpenVncTab && html`<button class="workspace-menu-item" role="menuitem" disabled=${chatOnlyMode} onClick=${() => run(onOpenVncTab)}>Open VNC in tab</button>`}
-                ${onToggleTerminal && !chatOnlyMode && workspaceOpen && html`<button class="workspace-menu-item" role="menuitem" onClick=${() => run(onToggleTerminal)}>${terminalVisible ? 'Hide terminal dock' : 'Show terminal dock'}</button>`}
+                ${onOpenTerminalTab && html`<button class="workspace-menu-item" role="menuitem" disabled=${!workspaceOpen || chatOnlyMode} onClick=${() => run(onOpenTerminalTab)}>Open terminal in tab</button>`}
+                ${onOpenVncTab && html`<button class="workspace-menu-item" role="menuitem" disabled=${!workspaceOpen || chatOnlyMode} onClick=${() => run(onOpenVncTab)}>Open VNC in tab</button>`}
+                ${onToggleTerminal && html`<button class="workspace-menu-item" role="menuitem" disabled=${!workspaceOpen || chatOnlyMode} onClick=${() => run(onToggleTerminal)}>${terminalVisible ? 'Hide terminal dock' : 'Show terminal dock'}</button>`}
 
                 <div class="workspace-menu-separator"></div>
-                <button class="workspace-menu-item" role="menuitem" disabled=${chatOnlyMode} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'new-file' } })))}>New file</button>
-                <button class="workspace-menu-item" role="menuitem" disabled=${chatOnlyMode} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'refresh' } })))}>Refresh tree</button>
-                <button class="workspace-menu-item" role="menuitem" disabled=${chatOnlyMode} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'reindex' } })))}>Reindex workspace</button>
-                <button class=${`workspace-menu-item${showHidden ? ' active' : ''}`} role="menuitem" onClick=${() => run(() => {
+                <button class="workspace-menu-item" role="menuitem" disabled=${!workspaceOpen} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'new-file' } })))}>New file</button>
+                <button class="workspace-menu-item" role="menuitem" disabled=${!workspaceOpen} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'refresh' } })))}>Refresh tree</button>
+                <button class="workspace-menu-item" role="menuitem" disabled=${!workspaceOpen} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'reindex' } })))}>Reindex workspace</button>
+                <button class=${`workspace-menu-item${showHidden ? ' active' : ''}`} role="menuitem" disabled=${!workspaceOpen} onClick=${() => run(() => {
                     const next = !showHidden;
                     setShowHidden(next);
                     try { localStorage.setItem('workspaceShowHidden', String(next)); } catch {}
