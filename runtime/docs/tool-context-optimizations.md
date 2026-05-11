@@ -1,144 +1,151 @@
 # Tool Context Optimizations
 
-This document describes the tool-output context reduction system used by PiClaw to reduce prompt bloat from large tool outputs, while keeping results searchable and retrievable.
+This document describes PiClaw's tool-result compaction path that reduces provider-request payload size while keeping full outputs searchable.
 
 ## Goals
 
-- Reduce context usage when tools (especially `bash`) return large outputs.
-- Persist full output for later reference.
-- Provide fast search over stored output.
-- Automatically clean up old stored outputs.
+- Minimize large inline `tool_result` payloads in model context.
+- Preserve full fidelity output on disk + SQLite metadata.
+- Keep retrieval/search first-class via `search_tool_output`.
+- Prune old stored outputs automatically.
 
-## How it works
+## Current MVP behavior (RTK-like subset)
 
-### 1) Intercept large tool outputs
+PiClaw applies threshold-based compaction for **eligible** `tool_result` events in `runtime/extensions/integrations/context-mode.ts`.
 
-PiClaw includes optional context-aware tool helpers. When output exceeds a configured threshold (bytes or line count), they:
+When eligible output crosses configured thresholds, PiClaw:
 
-1. Reads the full tool output (including from `fullOutputPath` when the base tool truncates).
-2. Stores the full output to disk and indexes it in SQLite FTS.
-3. Replaces the tool result with a compact summary and a handle.
+1. Reads full output text (prefers `details.fullOutputPath` when present).
+2. Persists full output via core `saveToolOutput()`.
+3. Returns compact replacement text with:
+   - `tool-output:<id>` handle
+   - line/byte counts
+   - preview
+   - retrieval hint for `search_tool_output`
+4. Attaches metadata in `details`:
+   - `storedOutputId`
+   - `storedOutputPath`
+   - `storedOutputLines`
+   - `storedOutputBytes`
+   - `storedOutputSource`
 
-The summary includes:
+Small outputs remain inline.
 
-- A storage handle (`tool-output:<id>`)
-- Line and byte counts
-- A short preview
-- Instructions to use `search_tool_output`
+## Optional provider-request-time layer (legacy history)
 
-### 2) Persist output for later retrieval
+In addition to live `tool_result` interception, `context-mode` now applies an optional request-time pass on outbound provider context:
 
-Tool outputs are stored under:
+- scans legacy inline tool-result messages in `context` events
+- compacts oversized eligible tool-result text blocks on-the-fly
+- stores full output via `saveToolOutput()` and replaces only outbound context payload text
+- leaves persisted session history untouched (fail-open if storage fails)
 
-- `DATA_DIR/tool-output/<id>.log`
+This layer helps shrink provider payloads for older sessions that still contain oversized inline tool-result history.
 
-Metadata and FTS indexing are stored in the `messages.db` SQLite database.
+## Eligibility + idempotency rules
 
-### 3) Search stored output
+Compaction is skipped when:
 
-A custom tool `search_tool_output` searches stored output using SQLite FTS and returns compact snippets:
+- `event.isError` is true.
+- existing stored-output metadata is already present (camel/snake/add-on-style keys).
+- payload includes image/binary-heavy blocks.
+- payload already includes stored-handle marker text (e.g. `tool-output:<id>`).
+- output is below threshold.
+
+If persistence fails, behavior is **fail-open** (original inline output is preserved).
+
+## Search and retrieval
+
+`search_tool_output` performs FTS lookup over persisted chunks:
 
 ```text
 search_tool_output
 - handle: out_...
-- query: <search terms>
+- query: <terms>
 - limit: 5 (optional)
 ```
 
-### 4) Batch exec helper
+This returns compact snippets and keeps large logs out of model context.
 
-A second tool, `exec_batch`, runs multiple shell commands and returns concise summaries for each. It uses the same context-aware bash wrapper for output handling.
+## Storage and data model
 
-## Enabling the helpers
+- Log files: `DATA_DIR/tool-output/<id>.log`
+- Metadata table: `tool_outputs`
+- FTS table: `tool_outputs_fts` (FTS5)
 
-These helpers are not wired into the default tool list. To enable them, register the context-aware bash tool and search tool when constructing your tool list:
+Schema lives in:
 
-- `createContextBashTool()`
-- `createToolOutputSearchTool()`
-
-Both are defined in `src/tools/context-tools.ts`.
-
-## Data model
-
-The following tables are created in `messages.db`:
-
-- `tool_outputs`
-  - `id` (TEXT, primary key)
-  - `created_at` (TEXT)
-  - `source` (TEXT)
-  - `size_bytes` (INTEGER)
-  - `line_count` (INTEGER)
-  - `summary` (TEXT)
-  - `path` (TEXT)
-- `tool_outputs_fts` (FTS5)
-  - `content`
-  - `output_id`
-
-These tables are created by `initDatabase()` in `src/db.ts`.
+- `runtime/src/db/connection.ts`
+- `runtime/src/db/tool-outputs.ts`
+- `runtime/src/tool-output.ts`
 
 ## Cleanup and retention
 
-Tool outputs are pruned on startup and periodically thereafter.
+Cleanup starts at runtime startup (`runtime/src/runtime/startup.ts`) via `startToolOutputCleanup(...)`.
 
-- Default retention: 7 days
-- Default cleanup interval: 12 hours
+Defaults:
 
-The cleanup removes:
+- retention: **4 hours** (`14400000` ms)
+- cleanup interval: **15 minutes** (`900000` ms)
 
-- Database records from `tool_outputs` and `tool_outputs_fts`
-- Corresponding files under `DATA_DIR/tool-output`
+Configuration:
 
-The cleanup loop is started in `src/runtime.ts` via:
+- `PICLAW_TOOL_OUTPUT_RETENTION_MS`
+- `PICLAW_TOOL_OUTPUT_RETENTION_DAYS` (legacy fallback)
+- `PICLAW_TOOL_OUTPUT_CLEANUP_INTERVAL_MS`
 
-```ts
-startToolOutputCleanup(TOOL_OUTPUT_RETENTION_DAYS, TOOL_OUTPUT_CLEANUP_INTERVAL_MS);
+## Threshold and preview knobs
+
+Storage threshold (either condition triggers compaction):
+
+- `PICLAW_TOOL_OUTPUT_STORE_BYTES` (default `4096`)
+- `PICLAW_TOOL_OUTPUT_STORE_LINES` (default `40`)
+- `PICLAW_TOOL_OUTPUT_STORE_THRESHOLDS_BY_TOOL` (optional JSON map override), e.g.
+  - `{"proxmox":{"bytes":16384,"lines":200},"portainer":{"bytes":8192}}`
+
+Preview formatting:
+
+- `PICLAW_TOOL_OUTPUT_PREVIEW_LINES` (default `8`)
+- `PICLAW_TOOL_OUTPUT_PREVIEW_LINE_CHARS` (default `200`)
+
+## Runtime gate (Settings checkbox)
+
+Tool-result compaction is runtime-gated and can be toggled in **Settings → Compaction** via:
+
+- **Enable tool-result compaction** checkbox (persisted through `/agent/settings/compaction`)
+
+Persisted/runtime key:
+
+- `compaction.toolResultCompactionEnabled` in `.piclaw/config.json`
+- `PICLAW_TOOL_RESULT_COMPACTION_ENABLED` env override (`1/0`, `true/false`, etc.)
+
+When disabled, `context-mode` skips compaction and leaves tool results inline.
+
+## Optional legacy cleanup/migration utility
+
+For historical sessions with oversized inline `toolResult` entries, run:
+
+```bash
+bun scripts/migrate-legacy-inline-tool-results.ts --dry-run --max-files 20
 ```
 
-## Environment configuration
+Then apply changes:
 
-### Storage thresholds
-
-- `PICLAW_TOOL_OUTPUT_STORE_BYTES` (default: `4096`)
-- `PICLAW_TOOL_OUTPUT_STORE_LINES` (default: `40`)
-
-If either threshold is exceeded, the output is stored and summarized.
-
-### Preview size
-
-- `PICLAW_TOOL_OUTPUT_PREVIEW_LINES` (default: `8`)
-- `PICLAW_TOOL_OUTPUT_PREVIEW_LINE_CHARS` (default: `200`)
-
-### Retention
-
-- `PICLAW_TOOL_OUTPUT_RETENTION_DAYS` (default: `7`)
-- `PICLAW_TOOL_OUTPUT_CLEANUP_INTERVAL_MS` (default: `43200000`)
-
-## Implementation files
-
-- `src/tool-output.ts`
-  - Stores full output, builds preview, chunks text for FTS, handles cleanup.
-- `src/tools/context-tools.ts`
-  - Context-aware bash wrapper, `search_tool_output`, `exec_batch`.
-- Integration: register the tools in your extension or tool list.
-- `src/db.ts`
-  - Database schema and FTS operations for tool outputs.
-- `src/core/config.ts`
-  - Retention and cleanup interval configuration.
-
-## Typical flow example
-
-1. `bash` runs a command that outputs 500 lines.
-2. Extension stores the output and replaces the tool result with a preview and handle.
-3. User searches the output:
-
-```text
-search_tool_output
-- handle: out_1700000000000_abcdef12
-- query: error
+```bash
+bun scripts/migrate-legacy-inline-tool-results.ts --write --max-files 20
 ```
 
-## Troubleshooting
+Useful flags:
 
-- If you see raw, large outputs in the assistant response, check the thresholds and ensure the extension is loaded.
-- If `search_tool_output` returns no results, verify that `messages.db` contains `tool_outputs` rows and the `.log` file exists.
-- If results appear but links are missing, confirm the handle is correct and the output wasn’t pruned.
+- `--sessions-dir <path>` (default `/workspace/.piclaw/data/sessions`)
+- `--chat <chatDirName>` (limit to one chat directory)
+- `--store-bytes <n>` / `--store-lines <n>`
+- `--thresholds-by-tool '<json>'`
+- `--verbose`
+
+## Operator notes
+
+- If inline tool payloads look too large, lower store thresholds.
+- If summaries are too terse/noisy, tune preview lines/chars.
+- If `search_tool_output` misses expected text, confirm handle and retention window.
+- Add-ons that already emit stored-output handles are intentionally not re-compacted.

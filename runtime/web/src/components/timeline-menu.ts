@@ -146,7 +146,7 @@ export function TimelineMenu({
                 <button class=${`workspace-menu-item${showHidden ? ' active' : ''}`} role="menuitem" disabled=${!workspaceOpen} onClick=${() => run(() => {
                     const next = !showHidden;
                     setShowHidden(next);
-                    try { localStorage.setItem('workspaceShowHidden', String(next)); } catch {}
+                    try { localStorage.setItem('workspaceShowHidden', String(next)); } catch { setShowHidden(next); }
                     window.dispatchEvent(new CustomEvent('piclaw:toggle-hidden-files', { detail: { showHidden: next } }));
                 })}>
                     ${showHidden ? 'Hide hidden files' : 'Show hidden files'}

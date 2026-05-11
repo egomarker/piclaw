@@ -127,26 +127,25 @@ export class WebChannelRuntimePublicSurfaceService {
     }
 
     const previous = this.extensionWorkingStates.get(chatJid) ?? DEFAULT_EXTENSION_WORKING_STATE;
-    let next: ExtensionWorkingStateSnapshot | null = null;
 
-    if (eventType === "extension_ui_working") {
-      next = {
+    const next: ExtensionWorkingStateSnapshot = eventType === "extension_ui_working"
+      ? {
         ...previous,
         message: typeof payload.message === "string" && payload.message.trim() ? payload.message.trim() : null,
-      };
-    } else if (eventType === "extension_ui_status") {
-      if (payload.key === "context_usage") return;
-      next = {
-        ...previous,
-        message: typeof payload.text === "string" && payload.text.trim() ? payload.text.trim() : null,
-      };
-    } else if (eventType === "extension_ui_working_visible") {
-      next = { ...previous, visible: payload.visible !== false };
-    } else {
-      next = { ...previous, indicator: resolveWorkingIndicatorSnapshot(payload) };
-    }
+      }
+      : eventType === "extension_ui_status"
+        ? (() => {
+          if (payload.key === "context_usage") return previous;
+          return {
+            ...previous,
+            message: typeof payload.text === "string" && payload.text.trim() ? payload.text.trim() : null,
+          };
+        })()
+        : eventType === "extension_ui_working_visible"
+          ? { ...previous, visible: payload.visible !== false }
+          : { ...previous, indicator: resolveWorkingIndicatorSnapshot(payload) };
 
-    if (!next || isClearedWorkingState(next)) {
+    if (isClearedWorkingState(next)) {
       this.extensionWorkingStates.delete(chatJid);
       return;
     }

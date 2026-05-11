@@ -317,13 +317,14 @@ test('syncStandaloneMobileViewport can reset page scroll when explicitly request
 
 test('installStandaloneMobileViewportFix restores standalone 100vh on focusout after keyboard sizing', () => {
   const cssVars = new Map<string, string>();
-  const listeners = new Map<string, Set<Function>>();
-  const addEventListener = (type: string, listener: Function) => {
-    const set = listeners.get(type) ?? new Set<Function>();
+  type VoidListener = () => void;
+  const listeners = new Map<string, Set<VoidListener>>();
+  const addEventListener = (type: string, listener: VoidListener) => {
+    const set = listeners.get(type) ?? new Set<VoidListener>();
     set.add(listener);
     listeners.set(type, set);
   };
-  const removeEventListener = (type: string, listener: Function) => {
+  const removeEventListener = (type: string, listener: VoidListener) => {
     listeners.get(type)?.delete(listener);
   };
   const dispatch = (type: string) => {
@@ -340,19 +341,19 @@ test('installStandaloneMobileViewportFix restores standalone 100vh on focusout a
     addEventListener,
     removeEventListener,
   };
-  const timeoutCallbacks: Function[] = [];
+  const timeoutCallbacks: Array<() => void> = [];
   const window = {
     matchMedia: () => ({ matches: true }),
     visualViewport: { height: 430, addEventListener, removeEventListener },
     innerHeight: 800,
     addEventListener,
     removeEventListener,
-    requestAnimationFrame: (callback: Function) => {
+    requestAnimationFrame: (callback: () => void) => {
       callback();
       return 1;
     },
     cancelAnimationFrame: () => {},
-    setTimeout: (callback: Function) => {
+    setTimeout: (callback: () => void) => {
       timeoutCallbacks.push(callback);
       return timeoutCallbacks.length;
     },

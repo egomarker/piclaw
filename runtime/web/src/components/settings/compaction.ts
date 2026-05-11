@@ -11,6 +11,7 @@ function normalizeCompactionSettings(data: Record<string, any> = {}) {
         compactionBackoffMaxMin: data.compactionBackoffMaxMin ?? 360,
         compactionThresholdPercent: data.compactionThresholdPercent ?? 75,
         compactionBackoffDecayFactor: data.compactionBackoffDecayFactor ?? 0.5,
+        toolResultCompactionEnabled: Boolean(data.toolResultCompactionEnabled ?? true),
         progressWatchdogEnabled: Boolean(data.progressWatchdogEnabled ?? false),
         progressWatchdogTimeoutSec: data.progressWatchdogTimeoutSec ?? 120,
         compactionBackoffs: Array.isArray(data.compactionBackoffs) ? data.compactionBackoffs : [],
@@ -32,6 +33,7 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
     const [compactionBackoffMaxMin, setCompactionBackoffMaxMin] = useState(360);
     const [compactionThresholdPercent, setCompactionThresholdPercent] = useState(75);
     const [compactionBackoffDecayFactor, setCompactionBackoffDecayFactor] = useState(0.5);
+    const [toolResultCompactionEnabled, setToolResultCompactionEnabled] = useState(true);
     const [progressWatchdogEnabled, setProgressWatchdogEnabled] = useState(false);
     const [progressWatchdogTimeoutSec, setProgressWatchdogTimeoutSec] = useState(120);
     const [compactionBackoffs, setCompactionBackoffs] = useState([]);
@@ -53,6 +55,7 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
         setCompactionBackoffMaxMin(next.compactionBackoffMaxMin);
         setCompactionThresholdPercent(next.compactionThresholdPercent);
         setCompactionBackoffDecayFactor(next.compactionBackoffDecayFactor);
+        setToolResultCompactionEnabled(next.toolResultCompactionEnabled);
         setProgressWatchdogEnabled(next.progressWatchdogEnabled);
         setProgressWatchdogTimeoutSec(next.progressWatchdogTimeoutSec);
         setCompactionBackoffs(next.compactionBackoffs);
@@ -63,6 +66,7 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
             compactionBackoffMaxMin: next.compactionBackoffMaxMin,
             compactionThresholdPercent: next.compactionThresholdPercent,
             compactionBackoffDecayFactor: next.compactionBackoffDecayFactor,
+            toolResultCompactionEnabled: next.toolResultCompactionEnabled,
             progressWatchdogEnabled: next.progressWatchdogEnabled,
             progressWatchdogTimeoutSec: next.progressWatchdogTimeoutSec,
         });
@@ -78,9 +82,10 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
         compactionBackoffMaxMin,
         compactionThresholdPercent,
         compactionBackoffDecayFactor,
+        toolResultCompactionEnabled,
         progressWatchdogEnabled,
         progressWatchdogTimeoutSec,
-    }), [compactionTimeoutSec, compactionBackoffBaseMin, compactionBackoffMaxMin, compactionThresholdPercent, compactionBackoffDecayFactor, progressWatchdogEnabled, progressWatchdogTimeoutSec]);
+    }), [compactionTimeoutSec, compactionBackoffBaseMin, compactionBackoffMaxMin, compactionThresholdPercent, compactionBackoffDecayFactor, toolResultCompactionEnabled, progressWatchdogEnabled, progressWatchdogTimeoutSec]);
 
     useEffect(() => {
         if (currentSnapshot === savedSnapshotRef.current) return;
@@ -152,6 +157,13 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
             `}
 
             <h3>Automatic compaction</h3>
+            <div class="settings-row">
+                <label>Enable tool-result compaction</label>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <input type="checkbox" checked=${toolResultCompactionEnabled} onChange=${e => setToolResultCompactionEnabled(Boolean(e.target.checked))} />
+                    <span class="settings-hint" style="margin:0">When disabled, large tool results stay inline and are not externalized into searchable tool-output handles.</span>
+                </div>
+            </div>
             <div class="settings-row">
                 <label>Compaction threshold (%)</label>
                 <${NumberStepper}

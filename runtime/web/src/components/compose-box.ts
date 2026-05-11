@@ -1111,7 +1111,9 @@ export function ComposeBox({
         if (!searchMode) return;
         fetch('/agent/settings-data').then(r => r.json()).then(data => {
             if (data?.searchMatchMode) setSearchMatchMode(data.searchMatchMode);
-        }).catch(() => {});
+        }).catch(() => {
+            setSearchMatchMode((prev) => prev || 'or');
+        });
     }, [searchMode]);
 
     // Fetch dynamic commands from the server for autocomplete

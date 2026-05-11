@@ -4,7 +4,9 @@ import {
 } from "../../../db.js";
 import {
   getCompactionRuntimeConfig,
+  getToolResultCompactionEnabled,
   setCompactionRuntimeConfig,
+  setToolResultCompactionEnabled,
 } from "../../../core/config.js";
 import { getTrackedPhasesSnapshot } from "../../../runtime/progress-watchdog.js";
 import {
@@ -20,6 +22,7 @@ export interface CompactionSettingsData {
   compactionBackoffDecayFactor: number;
   progressWatchdogEnabled: boolean;
   progressWatchdogTimeoutSec: number;
+  toolResultCompactionEnabled: boolean;
   compactionBackoffs: Array<{
     chatJid: string;
     failureCount: number;
@@ -44,6 +47,7 @@ export interface CompactionSettingsInput {
   compactionBackoffDecayFactor?: unknown;
   progressWatchdogEnabled?: unknown;
   progressWatchdogTimeoutSec?: unknown;
+  toolResultCompactionEnabled?: unknown;
 }
 
 function normalizeOptionalInt(value: unknown, min: number, max: number): number | undefined {
@@ -68,6 +72,7 @@ export function getCompactionSettingsData(): CompactionSettingsData {
     compactionBackoffDecayFactor: config.backoffDecayFactor,
     progressWatchdogEnabled: config.progressWatchdogEnabled,
     progressWatchdogTimeoutSec: Math.max(0, Math.round(config.progressWatchdogTimeoutMs / 1000)),
+    toolResultCompactionEnabled: getToolResultCompactionEnabled(),
     compactionBackoffs: getAllChatCompactionBackoffs()
       .filter((entry) => {
         const untilMs = Date.parse(entry.backoffUntil);
@@ -141,6 +146,8 @@ export async function saveCompactionSettings(input: CompactionSettingsInput): Pr
     patch.backoffDecayFactor = nextDecay;
   }
 
+  const nextToolResultCompactionEnabled = normalizeOptionalBoolean(input.toolResultCompactionEnabled);
+
   if (Object.keys(patch).length > 0) {
     const saved = setCompactionRuntimeConfig(patch);
     if (saved.progressWatchdogEnabled) {
@@ -148,6 +155,10 @@ export async function saveCompactionSettings(input: CompactionSettingsInput): Pr
     } else {
       await stopExternalProgressWatchdogMonitor();
     }
+  }
+
+  if (nextToolResultCompactionEnabled !== undefined) {
+    setToolResultCompactionEnabled(nextToolResultCompactionEnabled);
   }
 
   return getCompactionSettingsData();

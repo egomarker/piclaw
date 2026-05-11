@@ -12,6 +12,7 @@ test('saveCompactionSettings persists and applies compaction settings immediatel
     PICLAW_COMPACTION_BACKOFF_MAX_MS: undefined,
     PICLAW_PROGRESS_WATCHDOG_ENABLED: undefined,
     PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS: undefined,
+    PICLAW_TOOL_RESULT_COMPACTION_ENABLED: undefined,
   }, async (workspace) => {
     const db = await importFresh<typeof import('../../src/db.js')>('../src/db.js');
     db.initDatabase();
@@ -27,6 +28,7 @@ test('saveCompactionSettings persists and applies compaction settings immediatel
       compactionBackoffDecayFactor: 0.25,
       progressWatchdogEnabled: true,
       progressWatchdogTimeoutSec: 75,
+      toolResultCompactionEnabled: false,
     });
 
     expect(saved).toMatchObject({
@@ -37,6 +39,7 @@ test('saveCompactionSettings persists and applies compaction settings immediatel
       compactionBackoffDecayFactor: 0.25,
       progressWatchdogEnabled: true,
       progressWatchdogTimeoutSec: 75,
+      toolResultCompactionEnabled: false,
     });
 
     const persisted = JSON.parse(readFileSync(join(workspace.workspace, '.piclaw', 'config.json'), 'utf8'));
@@ -49,6 +52,7 @@ test('saveCompactionSettings persists and applies compaction settings immediatel
         backoffDecayFactor: 0.25,
         progressWatchdogEnabled: true,
         progressWatchdogTimeoutMs: 75000,
+        toolResultCompactionEnabled: false,
       },
     });
   });
@@ -61,6 +65,7 @@ test('saveCompactionSettings can disable watchdog without clearing its timeout',
     PICLAW_COMPACTION_BACKOFF_MAX_MS: undefined,
     PICLAW_PROGRESS_WATCHDOG_ENABLED: undefined,
     PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS: undefined,
+    PICLAW_TOOL_RESULT_COMPACTION_ENABLED: undefined,
   }, async (workspace) => {
     const db = await importFresh<typeof import('../../src/db.js')>('../src/db.js');
     db.initDatabase();
@@ -91,6 +96,7 @@ test('saveCompactionSettings can disable watchdog without clearing its timeout',
 test('getCompactionSettingsData exposes active backoffs and tracked phases and reset clears them', async () => {
   await withTempWorkspaceEnv('piclaw-compaction-settings-state-', {
     PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS: '30',
+    PICLAW_TOOL_RESULT_COMPACTION_ENABLED: undefined,
   }, async () => {
     const db = await importFresh<typeof import('../../src/db.js')>('../src/db.js');
     db.initDatabase();
@@ -115,6 +121,7 @@ test('getCompactionSettingsData exposes active backoffs and tracked phases and r
     );
 
     const beforeReset = handler.getCompactionSettingsData();
+    expect(typeof beforeReset.toolResultCompactionEnabled).toBe('boolean');
     expect(beforeReset.compactionBackoffs).toEqual([
       expect.objectContaining({ chatJid: 'web:test-1', failureCount: 2, lastErrorMessage: 'Compaction timed out' }),
     ]);

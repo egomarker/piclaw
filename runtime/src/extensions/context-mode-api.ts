@@ -16,3 +16,8 @@ export {
   saveToolOutput,
   startToolOutputCleanup,
 } from "../tool-output.js";
+
+export {
+  getToolResultCompactionEnabled,
+  getToolResultCompactionThresholdsByTool,
+} from "../core/config.js";

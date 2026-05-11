@@ -98,6 +98,8 @@ const envConfig = readEnvFile([
   "PICLAW_TURN_MAX_TOOL_USE_MESSAGES",
   "PICLAW_PROGRESS_WATCHDOG_ENABLED",
   "PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS",
+  "PICLAW_TOOL_RESULT_COMPACTION_ENABLED",
+  "PICLAW_TOOL_OUTPUT_STORE_THRESHOLDS_BY_TOOL",
   "PICLAW_WORKSPACE_SEARCH_ROOTS",
   "PICLAW_INTERNAL_SECRET",
   "PICLAW_REMOTE_INTEROP_ENABLED",
@@ -898,6 +900,11 @@ const configProgressWatchdogEnabled = pickBoolean(compactionConfig, PROGRESS_WAT
 const configProgressWatchdogTimeoutMs = pickNumber(compactionConfig, PROGRESS_WATCHDOG_TIMEOUT_CONFIG_KEYS);
 const configCompactionThresholdPercent = pickNumber(compactionConfig, ["thresholdPercent", "threshold_percent", "PICLAW_COMPACTION_THRESHOLD_PERCENT"]);
 const configCompactionBackoffDecayFactor = pickNumber(compactionConfig, ["backoffDecayFactor", "backoff_decay_factor", "PICLAW_COMPACTION_BACKOFF_DECAY_FACTOR"]);
+const configToolResultCompactionEnabled = pickBoolean(compactionConfig, [
+  "toolResultCompactionEnabled",
+  "tool_result_compaction_enabled",
+  "PICLAW_TOOL_RESULT_COMPACTION_ENABLED",
+]);
 const hasExplicitConfigProgressWatchdogTimeout = hasDefinedConfigValue(compactionConfig, PROGRESS_WATCHDOG_TIMEOUT_CONFIG_KEYS);
 const envProgressWatchdogEnabled = pickBoolean({
   PICLAW_PROGRESS_WATCHDOG_ENABLED: process.env.PICLAW_PROGRESS_WATCHDOG_ENABLED ?? envConfig.PICLAW_PROGRESS_WATCHDOG_ENABLED,
@@ -905,6 +912,13 @@ const envProgressWatchdogEnabled = pickBoolean({
 const envProgressWatchdogTimeoutMs = pickNumber({
   PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS: process.env.PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS ?? envConfig.PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS,
 }, ["PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS"]);
+const envToolResultCompactionEnabled = pickBoolean({
+  PICLAW_TOOL_RESULT_COMPACTION_ENABLED: process.env.PICLAW_TOOL_RESULT_COMPACTION_ENABLED ?? envConfig.PICLAW_TOOL_RESULT_COMPACTION_ENABLED,
+}, ["PICLAW_TOOL_RESULT_COMPACTION_ENABLED"]);
+const configToolResultThresholdsByToolRaw =
+  compactionConfig.toolResultThresholdsByTool ?? compactionConfig.tool_result_thresholds_by_tool;
+const envToolResultThresholdsByToolRaw =
+  process.env.PICLAW_TOOL_OUTPUT_STORE_THRESHOLDS_BY_TOOL ?? envConfig.PICLAW_TOOL_OUTPUT_STORE_THRESHOLDS_BY_TOOL;
 const hasExplicitEnvProgressWatchdogTimeout = hasDefinedConfigValue({
   PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS: process.env.PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS ?? envConfig.PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS,
 }, ["PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS"]);
@@ -1039,6 +1053,63 @@ export let TOOL_OUTPUT_STORE_THRESHOLD =
     "PICLAW_TOOL_OUTPUT_STORE_BYTES",
   ]) ?? 5000;
 
+export interface ToolResultCompactionThresholdPolicy {
+  bytes?: number;
+  lines?: number;
+}
+
+function normalizeToolPolicyThreshold(value: unknown): number | undefined {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return Math.max(1, Math.round(parsed));
+}
+
+function normalizeToolResultCompactionThresholdsByTool(
+  input: unknown,
+): Record<string, ToolResultCompactionThresholdPolicy> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  const out: Record<string, ToolResultCompactionThresholdPolicy> = {};
+  for (const [rawToolName, rawPolicy] of Object.entries(input as Record<string, unknown>)) {
+    const toolName = rawToolName.trim().toLowerCase();
+    if (!toolName) continue;
+    if (!rawPolicy || typeof rawPolicy !== "object" || Array.isArray(rawPolicy)) continue;
+    const policyRecord = rawPolicy as Record<string, unknown>;
+    const bytes = normalizeToolPolicyThreshold(policyRecord.bytes);
+    const lines = normalizeToolPolicyThreshold(policyRecord.lines);
+    if (bytes === undefined && lines === undefined) continue;
+    out[toolName] = {
+      ...(bytes !== undefined ? { bytes } : {}),
+      ...(lines !== undefined ? { lines } : {}),
+    };
+  }
+  return out;
+}
+
+function parseToolResultCompactionThresholdsByTool(
+  raw: unknown,
+): Record<string, ToolResultCompactionThresholdPolicy> | null {
+  if (raw === undefined || raw === null || raw === "") return null;
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      return normalizeToolResultCompactionThresholdsByTool(parsed);
+    } catch {
+      return null;
+    }
+  }
+  return normalizeToolResultCompactionThresholdsByTool(raw);
+}
+
+/** Runtime toggle for universal tool-result compaction. Default on. */
+export let TOOL_RESULT_COMPACTION_ENABLED =
+  envToolResultCompactionEnabled ?? configToolResultCompactionEnabled ?? true;
+
+/** Optional per-tool compaction threshold overrides. */
+export let TOOL_RESULT_COMPACTION_THRESHOLDS_BY_TOOL = Object.freeze(
+  parseToolResultCompactionThresholdsByTool(envToolResultThresholdsByToolRaw)
+  ?? normalizeToolResultCompactionThresholdsByTool(configToolResultThresholdsByToolRaw)
+);
+
 export function getToolOutputStoreThreshold(): number {
   return TOOL_OUTPUT_STORE_THRESHOLD;
 }
@@ -1048,6 +1119,43 @@ export function setToolOutputStoreThreshold(value: number): number {
   TOOL_OUTPUT_STORE_THRESHOLD = next;
   process.env.PICLAW_TOOL_OUTPUT_STORE_BYTES = String(next);
   return next;
+}
+
+/** Return whether runtime tool-result compaction is enabled. */
+export function getToolResultCompactionEnabled(): boolean {
+  return parseOptionalBooleanFlag(process.env.PICLAW_TOOL_RESULT_COMPACTION_ENABLED, TOOL_RESULT_COMPACTION_ENABLED);
+}
+
+/** Return optional per-tool compaction thresholds (tool name -> bytes/lines). */
+export function getToolResultCompactionThresholdsByTool(): Readonly<Record<string, ToolResultCompactionThresholdPolicy>> {
+  return parseToolResultCompactionThresholdsByTool(process.env.PICLAW_TOOL_OUTPUT_STORE_THRESHOLDS_BY_TOOL)
+    ?? TOOL_RESULT_COMPACTION_THRESHOLDS_BY_TOOL;
+}
+
+/** Persist and apply the runtime tool-result compaction toggle. */
+export function setToolResultCompactionEnabled(enabled: boolean): boolean {
+  const next = Boolean(enabled);
+  const config = readJsonConfig(getConfigPath());
+  const compaction =
+    config.compaction && typeof config.compaction === "object"
+      ? { ...(config.compaction as Record<string, unknown>) }
+      : {};
+  const clearKeys = [
+    "toolResultCompactionEnabled",
+    "tool_result_compaction_enabled",
+    "PICLAW_TOOL_RESULT_COMPACTION_ENABLED",
+  ];
+  for (const key of clearKeys) {
+    delete compaction[key];
+    delete config[key];
+  }
+  compaction.toolResultCompactionEnabled = next;
+  config.compaction = compaction;
+  writeJsonConfig(getConfigPath(), config);
+
+  TOOL_RESULT_COMPACTION_ENABLED = next;
+  process.env.PICLAW_TOOL_RESULT_COMPACTION_ENABLED = next ? "1" : "0";
+  return TOOL_RESULT_COMPACTION_ENABLED;
 }
 
 export function getToolUseMessageBudget(): number {

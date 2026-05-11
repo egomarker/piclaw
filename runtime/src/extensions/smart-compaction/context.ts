@@ -7,10 +7,6 @@
 
 import { SYSTEM_PROMPT_OVERHEAD_TOKENS } from "./config.js";
 
-
-/** Hard cap on generated summary tokens per compaction LLM call. */
-const MAX_COMPACTION_OUTPUT_TOKENS = 8_192;
-
 // ---------------------------------------------------------------------------
 // Live context usage estimates
 // ---------------------------------------------------------------------------

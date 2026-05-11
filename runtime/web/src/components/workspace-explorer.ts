@@ -862,7 +862,7 @@ export function WorkspaceExplorer({
             const next = Boolean(e?.detail?.showHidden);
             setShowHidden(next);
             showHiddenRef.current = next;
-            setWorkspaceVisibility(true, next).catch(() => {});
+            setWorkspaceVisibility(true, next).catch(() => { setShowHidden(next); });
             lastSigRef.current = '';
             loadTreeFnRef.current?.();
         };
