@@ -2,18 +2,19 @@
  * image-annotator.ts — iPad-oriented image/diagram annotation overlay.
  *
  * Renders a transparent canvas on top of an image for freehand drawing,
- * arrows, and rectangles using Apple Pencil or touch. Exports the overlay
- * as a PNG and optionally composites it with the source image.
+ * arrows, rectangles, and text labels using Apple Pencil or touch.
+ * Exports the composited result as a PNG and uploads it.
  *
  * Design:
- *   - Pencil draws (pointerType === 'pen'); finger scrolls/pinches unless
+ *   - Uses native addEventListener with { passive: false } for touch events
+ *     because Preact/Safari register JSX pointer handlers as passive,
+ *     preventing preventDefault() from stopping scroll/bounce.
+ *   - Pencil draws (pointerType === 'pen'); finger scrolls unless
  *     no pencil is detected, in which case finger also draws.
- *   - Tools: pen, highlighter, arrow, rectangle, eraser, undo
- *   - Colors: preset palette row
- *   - Done → flatten overlay PNG → upload via API → compose into chat
- *   - Cancel → discard
+ *   - Tools: pen, highlighter, arrow, rectangle, text, eraser, undo
+ *   - Done → flatten overlay PNG → upload via API
  *
- * Consumers: ImageModal wraps this when the user taps "Annotate" on iPad.
+ * Consumers: Post component wraps this inline when the user taps an image on iPad.
  */
 
 import { html, useState, useEffect, useRef, useCallback } from '../vendor/preact-htm.js';
@@ -77,24 +78,18 @@ function isShapeTool(tool: Tool): boolean {
   return tool === 'arrow' || tool === 'rectangle';
 }
 
-function isTextTool(tool: Tool): boolean {
-  return tool === 'text';
-}
-
-function canvasPointFromEvent(canvas: HTMLCanvasElement, e: PointerEvent): Point {
+function canvasPointFromTouch(canvas: HTMLCanvasElement, t: Touch | { clientX: number; clientY: number }): Point {
   const rect = canvas.getBoundingClientRect();
   return {
-    x: (e.clientX - rect.left) * (canvas.width / rect.width),
-    y: (e.clientY - rect.top) * (canvas.height / rect.height),
+    x: (t.clientX - rect.left) * (canvas.width / rect.width),
+    y: (t.clientY - rect.top) * (canvas.height / rect.height),
   };
 }
 
 function drawTextStroke(ctx: CanvasRenderingContext2D, entry: TextStroke): void {
   ctx.save();
   ctx.font = `bold ${entry.fontSize}px ${TEXT_FONT_FAMILY}`;
-  ctx.fillStyle = entry.color;
   ctx.textBaseline = 'top';
-  // Draw background pill for legibility
   const metrics = ctx.measureText(entry.text);
   const pad = 6;
   const bgH = entry.fontSize + pad * 2;
@@ -114,7 +109,6 @@ function drawTextStroke(ctx: CanvasRenderingContext2D, entry: TextStroke): void 
   ctx.lineTo(x, y + radius);
   ctx.quadraticCurveTo(x, y, x + radius, y);
   ctx.fill();
-  // Draw text
   ctx.fillStyle = entry.color;
   ctx.fillText(entry.text, entry.position.x, entry.position.y);
   ctx.restore();
@@ -128,13 +122,11 @@ function drawStroke(ctx: CanvasRenderingContext2D, entry: HistoryEntry): void {
     return;
   }
   if ('points' in entry) {
-    // Freehand stroke
     const { tool, color, lineWidth, points } = entry;
     if (points.length < 2) { ctx.restore(); return; }
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.lineWidth = lineWidth;
-
     if (tool === 'eraser') {
       ctx.globalCompositeOperation = 'destination-out';
       ctx.strokeStyle = 'rgba(0,0,0,1)';
@@ -144,27 +136,20 @@ function drawStroke(ctx: CanvasRenderingContext2D, entry: HistoryEntry): void {
     } else {
       ctx.strokeStyle = color;
     }
-
     ctx.beginPath();
     ctx.moveTo(points[0]!.x, points[0]!.y);
-    for (let i = 1; i < points.length; i++) {
-      ctx.lineTo(points[i]!.x, points[i]!.y);
-    }
+    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i]!.x, points[i]!.y);
     ctx.stroke();
   } else {
-    // Shape stroke (arrow or rectangle)
     const { tool, color, lineWidth, start, end } = entry;
     ctx.strokeStyle = color;
     ctx.lineWidth = lineWidth;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-
     if (tool === 'rectangle') {
       ctx.strokeRect(
-        Math.min(start.x, end.x),
-        Math.min(start.y, end.y),
-        Math.abs(end.x - start.x),
-        Math.abs(end.y - start.y),
+        Math.min(start.x, end.x), Math.min(start.y, end.y),
+        Math.abs(end.x - start.x), Math.abs(end.y - start.y),
       );
     } else if (tool === 'arrow') {
       const dx = end.x - start.x;
@@ -174,18 +159,11 @@ function drawStroke(ctx: CanvasRenderingContext2D, entry: HistoryEntry): void {
       ctx.moveTo(start.x, start.y);
       ctx.lineTo(end.x, end.y);
       ctx.stroke();
-      // Arrow head
       ctx.beginPath();
       ctx.moveTo(end.x, end.y);
-      ctx.lineTo(
-        end.x - ARROW_HEAD_LENGTH * Math.cos(angle - Math.PI / 6),
-        end.y - ARROW_HEAD_LENGTH * Math.sin(angle - Math.PI / 6),
-      );
+      ctx.lineTo(end.x - ARROW_HEAD_LENGTH * Math.cos(angle - Math.PI / 6), end.y - ARROW_HEAD_LENGTH * Math.sin(angle - Math.PI / 6));
       ctx.moveTo(end.x, end.y);
-      ctx.lineTo(
-        end.x - ARROW_HEAD_LENGTH * Math.cos(angle + Math.PI / 6),
-        end.y - ARROW_HEAD_LENGTH * Math.sin(angle + Math.PI / 6),
-      );
+      ctx.lineTo(end.x - ARROW_HEAD_LENGTH * Math.cos(angle + Math.PI / 6), end.y - ARROW_HEAD_LENGTH * Math.sin(angle + Math.PI / 6));
       ctx.stroke();
     }
   }
@@ -203,7 +181,6 @@ function isIPad(): boolean {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent || '';
   if (/iPad/i.test(ua)) return true;
-  // iPadOS 13+ reports as Mac with touch
   if (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1) return true;
   return false;
 }
@@ -222,7 +199,6 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
   const drawingRef = useRef(false);
   const shapeStartRef = useRef<Point | null>(null);
   const currentPointsRef = useRef<Point[]>([]);
-  const seenPenRef = useRef(false);
 
   const [tool, setTool] = useState<Tool>('pen');
   const [color, setColor] = useState(DEFAULT_COLOR);
@@ -232,15 +208,25 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
   const [textValue, setTextValue] = useState('');
   const textInputRef = useRef<HTMLInputElement>(null);
 
-  // Initialize canvas to match the displayed image size (not natural size)
-  // so pointer coordinates align with what the user sees.
+  // Refs for current tool/color so native event listeners always see latest values
+  const toolRef = useRef(tool);
+  const colorRef = useRef(color);
+  useEffect(() => { toolRef.current = tool; }, [tool]);
+  useEffect(() => { colorRef.current = color; }, [color]);
+
+  const getLineWidth = useCallback((t?: Tool) => {
+    const activeTool = t ?? toolRef.current;
+    if (activeTool === 'highlighter') return HIGHLIGHTER_WIDTH;
+    if (activeTool === 'eraser') return ERASER_WIDTH;
+    return PEN_WIDTH;
+  }, []);
+
+  // Initialize canvas to match displayed image size
   const initCanvas = useCallback(() => {
     const img = imgRef.current;
     const canvas = canvasRef.current;
     const overlay = overlayRef.current;
     if (!img || !canvas || !overlay) return;
-
-    // Use the displayed (CSS) dimensions so canvas coords match pointer events
     const rect = img.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     const w = Math.round(rect.width * dpr);
@@ -255,37 +241,15 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
   useEffect(() => {
     const img = imgRef.current;
     if (!img) return;
-    if (img.complete && img.naturalWidth > 0) {
-      initCanvas();
-    } else {
-      img.onload = initCanvas;
-    }
+    if (img.complete && img.naturalWidth > 0) initCanvas();
+    else img.onload = initCanvas;
   }, [initCanvas]);
-
-  // Resolve line width for current tool
-  const getLineWidth = useCallback(() => {
-    if (tool === 'highlighter') return HIGHLIGHTER_WIDTH;
-    if (tool === 'eraser') return ERASER_WIDTH;
-    return PEN_WIDTH;
-  }, [tool]);
-
-  // Should this pointer event draw?
-  const shouldDraw = useCallback((e: PointerEvent): boolean => {
-    if (e.pointerType === 'pen') {
-      seenPenRef.current = true;
-      return true;
-    }
-    // If pencil has been used, ignore finger (let it scroll)
-    if (seenPenRef.current) return false;
-    // No pencil detected: allow finger drawing
-    return e.pointerType === 'touch' || e.pointerType === 'mouse';
-  }, []);
 
   const commitTextLabel = useCallback(() => {
     if (!textValue.trim() || !textInput.visible) return;
     const entry: TextStroke = {
       tool: 'text',
-      color,
+      color: colorRef.current,
       text: textValue.trim(),
       position: textInput.position,
       fontSize: TEXT_FONT_SIZE,
@@ -298,138 +262,157 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
     }
     setTextInput({ position: { x: 0, y: 0 }, visible: false });
     setTextValue('');
-  }, [textValue, textInput, color]);
+  }, [textValue, textInput]);
 
   const cancelTextLabel = useCallback(() => {
     setTextInput({ position: { x: 0, y: 0 }, visible: false });
     setTextValue('');
   }, []);
 
-  const handlePointerDown = useCallback((e: PointerEvent) => {
-    if (!shouldDraw(e)) return;
-    e.preventDefault();
+  // ── Native touch event handlers (registered with { passive: false }) ──
+  // This is the critical fix: Preact/Safari registers JSX event props as
+  // passive listeners, so preventDefault() is ignored and the browser
+  // consumes touches for scrolling. We must use native addEventListener.
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const pt = canvasPointFromEvent(canvas, e);
 
-    if (isTextTool(tool)) {
-      // Commit any pending text first
-      if (textInput.visible && textValue.trim()) commitTextLabel();
-      // Show input at tap position
-      const rect = canvas.getBoundingClientRect();
-      const displayX = e.clientX - rect.left;
-      const displayY = e.clientY - rect.top;
-      setTextInput({ position: pt, visible: true });
-      setTextValue('');
-      // Focus the input after render
-      requestAnimationFrame(() => textInputRef.current?.focus());
-      return;
-    }
+    const onTouchStart = (e: TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.touches.length !== 1) return;
+      const touch = e.touches[0]!;
+      const pt = canvasPointFromTouch(canvas, touch);
+      const currentTool = toolRef.current;
 
-    drawingRef.current = true;
-    (canvas as any).setPointerCapture?.(e.pointerId);
+      if (currentTool === 'text') {
+        setTextInput({ position: pt, visible: true });
+        setTextValue('');
+        requestAnimationFrame(() => textInputRef.current?.focus());
+        return;
+      }
 
-    if (isShapeTool(tool)) {
-      shapeStartRef.current = pt;
-    } else {
-      currentPointsRef.current = [pt];
-    }
-  }, [tool, shouldDraw, textInput, textValue, commitTextLabel]);
+      drawingRef.current = true;
+      if (isShapeTool(currentTool)) {
+        shapeStartRef.current = pt;
+      } else {
+        currentPointsRef.current = [pt];
+      }
+    };
 
-  const handlePointerMove = useCallback((e: PointerEvent) => {
-    if (!drawingRef.current || !shouldDraw(e)) return;
-    e.preventDefault();
-    const canvas = canvasRef.current;
-    const overlay = overlayRef.current;
-    if (!canvas || !overlay) return;
-    const pt = canvasPointFromEvent(canvas, e);
+    const onTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!drawingRef.current || e.touches.length !== 1) return;
+      const touch = e.touches[0]!;
+      const pt = canvasPointFromTouch(canvas, touch);
+      const currentTool = toolRef.current;
+      const currentColor = colorRef.current;
+      const lineWidth = getLineWidth(currentTool);
+      const overlay = overlayRef.current;
 
-    if (isShapeTool(tool) && shapeStartRef.current) {
-      // Live preview on overlay canvas
-      const octx = overlay.getContext('2d');
-      if (!octx) return;
-      octx.clearRect(0, 0, overlay.width, overlay.height);
-      drawStroke(octx, {
-        tool: tool as 'arrow' | 'rectangle',
-        color,
-        lineWidth: getLineWidth(),
-        start: shapeStartRef.current,
-        end: pt,
-      });
-    } else {
-      currentPointsRef.current.push(pt);
-      // Incremental draw on main canvas for performance
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      const pts = currentPointsRef.current;
-      if (pts.length < 2) return;
-      ctx.save();
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.lineWidth = getLineWidth();
-      if (tool === 'eraser') {
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.strokeStyle = 'rgba(0,0,0,1)';
-      } else if (tool === 'highlighter') {
-        // For highlighter, redraw full stroke each move for consistent alpha
-        redrawAll(ctx, historyRef.current, canvas.width, canvas.height);
-        ctx.globalAlpha = HIGHLIGHTER_ALPHA;
-        ctx.strokeStyle = color;
+      if (isShapeTool(currentTool) && shapeStartRef.current) {
+        if (!overlay) return;
+        const octx = overlay.getContext('2d');
+        if (!octx) return;
+        octx.clearRect(0, 0, overlay.width, overlay.height);
+        drawStroke(octx, {
+          tool: currentTool as 'arrow' | 'rectangle',
+          color: currentColor,
+          lineWidth,
+          start: shapeStartRef.current,
+          end: pt,
+        });
+      } else {
+        currentPointsRef.current.push(pt);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        const pts = currentPointsRef.current;
+        if (pts.length < 2) return;
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = lineWidth;
+        if (currentTool === 'eraser') {
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.strokeStyle = 'rgba(0,0,0,1)';
+        } else if (currentTool === 'highlighter') {
+          redrawAll(ctx, historyRef.current, canvas.width, canvas.height);
+          ctx.globalAlpha = HIGHLIGHTER_ALPHA;
+          ctx.strokeStyle = currentColor;
+          ctx.beginPath();
+          ctx.moveTo(pts[0]!.x, pts[0]!.y);
+          for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y);
+          ctx.stroke();
+          ctx.restore();
+          return;
+        } else {
+          ctx.strokeStyle = currentColor;
+        }
         ctx.beginPath();
-        ctx.moveTo(pts[0]!.x, pts[0]!.y);
-        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y);
+        ctx.moveTo(pts[pts.length - 2]!.x, pts[pts.length - 2]!.y);
+        ctx.lineTo(pts[pts.length - 1]!.x, pts[pts.length - 1]!.y);
         ctx.stroke();
         ctx.restore();
-        return;
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      e.preventDefault();
+      if (!drawingRef.current) return;
+      drawingRef.current = false;
+      const currentTool = toolRef.current;
+      const currentColor = colorRef.current;
+      const lineWidth = getLineWidth(currentTool);
+      const overlay = overlayRef.current;
+
+      if (isShapeTool(currentTool) && shapeStartRef.current) {
+        // Use last known touch point from the changedTouches
+        const touch = e.changedTouches[0];
+        const end = touch ? canvasPointFromTouch(canvas, touch) : shapeStartRef.current;
+        const entry: ShapeStroke = {
+          tool: currentTool as 'arrow' | 'rectangle',
+          color: currentColor,
+          lineWidth,
+          start: shapeStartRef.current,
+          end,
+        };
+        historyRef.current.push(entry);
+        const ctx = canvas.getContext('2d');
+        if (ctx) drawStroke(ctx, entry);
+        if (overlay) {
+          const octx = overlay.getContext('2d');
+          if (octx) octx.clearRect(0, 0, overlay.width, overlay.height);
+        }
+        shapeStartRef.current = null;
       } else {
-        ctx.strokeStyle = color;
+        const pts = currentPointsRef.current;
+        if (pts.length >= 2) {
+          historyRef.current.push({
+            tool: currentTool,
+            color: currentColor,
+            lineWidth,
+            points: [...pts],
+          });
+        }
+        currentPointsRef.current = [];
       }
-      ctx.beginPath();
-      ctx.moveTo(pts[pts.length - 2]!.x, pts[pts.length - 2]!.y);
-      ctx.lineTo(pts[pts.length - 1]!.x, pts[pts.length - 1]!.y);
-      ctx.stroke();
-      ctx.restore();
-    }
-  }, [tool, color, getLineWidth, shouldDraw]);
+    };
 
-  const handlePointerUp = useCallback((e: PointerEvent) => {
-    if (!drawingRef.current) return;
-    drawingRef.current = false;
-    const canvas = canvasRef.current;
-    const overlay = overlayRef.current;
-    if (!canvas) return;
+    // Register with { passive: false } — this is the iPad Safari fix
+    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+    canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+    canvas.addEventListener('touchcancel', onTouchEnd, { passive: false });
 
-    if (isShapeTool(tool) && shapeStartRef.current) {
-      const pt = canvasPointFromEvent(canvas, e);
-      const entry: ShapeStroke = {
-        tool: tool as 'arrow' | 'rectangle',
-        color,
-        lineWidth: getLineWidth(),
-        start: shapeStartRef.current,
-        end: pt,
-      };
-      historyRef.current.push(entry);
-      // Draw on main canvas, clear overlay
-      const ctx = canvas.getContext('2d');
-      if (ctx) drawStroke(ctx, entry);
-      if (overlay) {
-        const octx = overlay.getContext('2d');
-        if (octx) octx.clearRect(0, 0, overlay.width, overlay.height);
-      }
-      shapeStartRef.current = null;
-    } else {
-      const pts = currentPointsRef.current;
-      if (pts.length >= 2) {
-        historyRef.current.push({
-          tool,
-          color,
-          lineWidth: getLineWidth(),
-          points: [...pts],
-        });
-      }
-      currentPointsRef.current = [];
-    }
-  }, [tool, color, getLineWidth]);
+    return () => {
+      canvas.removeEventListener('touchstart', onTouchStart);
+      canvas.removeEventListener('touchmove', onTouchMove);
+      canvas.removeEventListener('touchend', onTouchEnd);
+      canvas.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [canvasReady, getLineWidth]);
 
   const handleUndo = useCallback(() => {
     historyRef.current.pop();
@@ -446,15 +429,12 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
     if (!canvas || !img) return;
     setSaving(true);
     try {
-      // Build composited image at the annotation canvas resolution
       const out = document.createElement('canvas');
       out.width = canvas.width;
       out.height = canvas.height;
       const octx = out.getContext('2d');
       if (!octx) return;
-      // Draw source image scaled to canvas size
       octx.drawImage(img, 0, 0, out.width, out.height);
-      // Draw annotation overlay on top
       octx.drawImage(canvas, 0, 0);
 
       const blob: Blob = await new Promise((resolve, reject) => {
@@ -481,7 +461,7 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
   }, [tool]);
 
   return html`
-    <div class="image-annotator" style="touch-action: none">
+    <div class="image-annotator">
       <div class="image-annotator-canvas-wrap">
         <img
           ref=${imgRef}
@@ -494,16 +474,10 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
           <canvas
             ref=${canvasRef}
             class="image-annotator-draw-canvas"
-            onPointerDown=${handlePointerDown}
-            onPointerMove=${handlePointerMove}
-            onPointerUp=${handlePointerUp}
-            onPointerCancel=${handlePointerUp}
-            style="touch-action: none"
           />
           <canvas
             ref=${overlayRef}
             class="image-annotator-preview-canvas"
-            style="touch-action: none; pointer-events: none"
           />
           ${textInput.visible && html`
             <div
