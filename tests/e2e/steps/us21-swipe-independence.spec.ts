@@ -119,7 +119,7 @@ test.describe('US-21: Session Swipe Independence', () => {
     await page.waitForSelector(sel.timeline);
 
     // Check if thinking panel exists
-    const thinking = page.locator('.agent-thinking');
+    const thinking = page.locator('.agent-thinking').first();
     if (!(await thinking.isVisible())) {
       test.skip(undefined, 'No thinking panel visible');
       return;
