@@ -63,7 +63,80 @@ describe("context-mode integration", () => {
     });
   }, 15_000);
 
-  test("stores large non-bash text tool results", async () => {
+  test("uses semantic summary text when semantic summarization succeeds", async () => {
+    await withTempWorkspaceEnv("piclaw-context-mode-", compactionEnv({
+      PICLAW_TOOL_OUTPUT_STORE_BYTES: "8",
+      PICLAW_TOOL_OUTPUT_STORE_LINES: "2",
+      PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED: "1",
+    }), async () => {
+      const db = await importFresh<typeof import("../src/db.js")>("../src/db.js");
+      db.initDatabase();
+
+      const contextMode = await importFresh<any>("../extensions/integrations/context-mode.ts");
+      contextMode.__setSemanticToolResultSummarizerForTests(async () => "Summary:\n- Detected semantic facts\n\nKey facts:\n- line count: 3\n\nWarnings/Errors:\n- none\n\nFollow-up cues:\n- Use search_tool_output for details");
+
+      try {
+        const fake = createFakeExtensionApi({ allTools: [] });
+        contextMode.default(fake.api);
+
+        const toolResult = fake.handlers.find((entry) => entry.event === "tool_result")?.handler;
+        const result = await toolResult?.({
+          toolName: "bash",
+          content: [{ type: "text", text: "alpha\nbeta\ngamma\n" }],
+          details: {},
+          input: { command: "printf" },
+          isError: false,
+          toolCallId: "tool-sem-1",
+          type: "tool_result",
+        });
+
+        expect(result?.content?.[0]?.text).toContain("Semantic summary:");
+        expect(result?.content?.[0]?.text).toContain("Detected semantic facts");
+        expect(result?.content?.[0]?.text).not.toContain("Preview:");
+      } finally {
+        contextMode.__setSemanticToolResultSummarizerForTests(null);
+      }
+    });
+  });
+
+  test("falls back to preview when semantic summarization fails", async () => {
+    await withTempWorkspaceEnv("piclaw-context-mode-", compactionEnv({
+      PICLAW_TOOL_OUTPUT_STORE_BYTES: "8",
+      PICLAW_TOOL_OUTPUT_STORE_LINES: "2",
+      PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED: "1",
+    }), async () => {
+      const db = await importFresh<typeof import("../src/db.js")>("../src/db.js");
+      db.initDatabase();
+
+      const contextMode = await importFresh<any>("../extensions/integrations/context-mode.ts");
+      contextMode.__setSemanticToolResultSummarizerForTests(async () => {
+        throw new Error("semantic summary timeout");
+      });
+
+      try {
+        const fake = createFakeExtensionApi({ allTools: [] });
+        contextMode.default(fake.api);
+
+        const toolResult = fake.handlers.find((entry) => entry.event === "tool_result")?.handler;
+        const result = await toolResult?.({
+          toolName: "bash",
+          content: [{ type: "text", text: "delta\nepsilon\nzeta\n" }],
+          details: {},
+          input: { command: "printf delta" },
+          isError: false,
+          toolCallId: "tool-sem-2",
+          type: "tool_result",
+        });
+
+        expect(result?.content?.[0]?.text).toContain("Preview:");
+        expect(result?.content?.[0]?.text).not.toContain("Semantic summary:");
+      } finally {
+        contextMode.__setSemanticToolResultSummarizerForTests(null);
+      }
+    });
+  });
+
+  test("does not compact large non-configured tool results", async () => {
     await withTempWorkspaceEnv("piclaw-context-mode-", compactionEnv({
       PICLAW_TOOL_OUTPUT_STORE_BYTES: "16",
       PICLAW_TOOL_OUTPUT_STORE_LINES: "2",
@@ -82,6 +155,33 @@ describe("context-mode integration", () => {
         details: {},
         isError: false,
         toolCallId: "tool-2",
+        type: "tool_result",
+      });
+
+      expect(result).toBeUndefined();
+    });
+  });
+
+  test("compacts large tool results when tool is explicitly enabled", async () => {
+    await withTempWorkspaceEnv("piclaw-context-mode-", compactionEnv({
+      PICLAW_TOOL_OUTPUT_STORE_BYTES: "16",
+      PICLAW_TOOL_OUTPUT_STORE_LINES: "2",
+      PICLAW_TOOL_RESULT_COMPACTION_TOOLS: "bash,proxmox",
+    }), async () => {
+      const db = await importFresh<typeof import("../src/db.js")>("../src/db.js");
+      db.initDatabase();
+
+      const contextMode = await importFresh<any>("../extensions/integrations/context-mode.ts");
+      const fake = createFakeExtensionApi({ allTools: [] });
+      contextMode.default(fake.api);
+
+      const toolResult = fake.handlers.find((entry) => entry.event === "tool_result")?.handler;
+      const result = await toolResult?.({
+        toolName: "proxmox",
+        content: [{ type: "text", text: "alpha\nbeta\ngamma\n" }],
+        details: {},
+        isError: false,
+        toolCallId: "tool-2-enabled",
         type: "tool_result",
       });
 
@@ -185,9 +285,10 @@ describe("context-mode integration", () => {
       expect(imageResult).toBeUndefined();
 
       const markerResult = await toolResult?.({
-        toolName: "portainer",
+        toolName: "bash",
         content: [{ type: "text", text: "Output stored as tool-output:out_existing_3\nUse search_tool_output with handle \"out_existing_3\"" }],
         details: {},
+        input: { command: "cat existing" },
         isError: false,
         toolCallId: "tool-5",
         type: "tool_result",
@@ -210,9 +311,10 @@ describe("context-mode integration", () => {
 
       const toolResult = fake.handlers.find((entry) => entry.event === "tool_result")?.handler;
       const result = await toolResult?.({
-        toolName: "proxmox",
+        toolName: "bash",
         content: [{ type: "text", text: "ok" }],
         details: {},
+        input: { command: "echo ok" },
         isError: false,
         toolCallId: "tool-6",
         type: "tool_result",
@@ -237,9 +339,10 @@ describe("context-mode integration", () => {
 
       const toolResult = fake.handlers.find((entry) => entry.event === "tool_result")?.handler;
       const result = await toolResult?.({
-        toolName: "proxmox",
+        toolName: "bash",
         content: [{ type: "text", text: "alpha\nbeta\ngamma\n" }],
         details: {},
+        input: { command: "printf" },
         isError: false,
         toolCallId: "tool-6b",
         type: "tool_result",
@@ -251,7 +354,7 @@ describe("context-mode integration", () => {
       const contextResult = await context?.({
         messages: [{
           role: "toolResult",
-          toolName: "proxmox",
+          toolName: "bash",
           content: [{ type: "text", text: "alpha\nbeta\ngamma\n" }],
         }],
       });
@@ -275,7 +378,7 @@ describe("context-mode integration", () => {
       const result = await context?.({
         messages: [{
           role: "toolResult",
-          toolName: "proxmox",
+          toolName: "bash",
           content: [{ type: "text", text: "alpha\nbeta\ngamma\n" }],
         }],
       });
@@ -344,6 +447,7 @@ describe("context-mode integration", () => {
     await withTempWorkspaceEnv("piclaw-context-mode-", compactionEnv({
       PICLAW_TOOL_OUTPUT_STORE_BYTES: "8",
       PICLAW_TOOL_OUTPUT_STORE_LINES: "2",
+      PICLAW_TOOL_RESULT_COMPACTION_TOOLS: "bash,proxmox",
       PICLAW_TOOL_OUTPUT_STORE_THRESHOLDS_BY_TOOL: JSON.stringify({
         proxmox: { bytes: 100_000, lines: 10_000 },
       }),
@@ -410,9 +514,10 @@ describe("context-mode integration", () => {
 
         const toolResult = fake.handlers.find((entry) => entry.event === "tool_result")?.handler;
         const result = await toolResult?.({
-          toolName: "proxmox",
+          toolName: "bash",
           content: [{ type: "text", text: "blocked-write-only\nline-1\nline-2\nline-3\n" }],
           details: {},
+          input: { command: "printf blocked" },
           isError: false,
           toolCallId: "tool-7",
           type: "tool_result",

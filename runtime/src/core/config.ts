@@ -100,6 +100,10 @@ const envConfig = readEnvFile([
   "PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS",
   "PICLAW_TOOL_RESULT_COMPACTION_ENABLED",
   "PICLAW_TOOL_RESULT_COMPACTION_TOOLS",
+  "PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED",
+  "PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_INPUT_CHARS",
+  "PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_TOKENS",
+  "PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS",
   "PICLAW_TOOL_OUTPUT_STORE_THRESHOLDS_BY_TOOL",
   "PICLAW_WORKSPACE_SEARCH_ROOTS",
   "PICLAW_INTERNAL_SECRET",
@@ -929,6 +933,42 @@ const configToolResultCompactionToolsRaw =
   compactionConfig.toolResultCompactionTools ?? compactionConfig.tool_result_compaction_tools;
 const envToolResultCompactionToolsRaw =
   process.env.PICLAW_TOOL_RESULT_COMPACTION_TOOLS ?? envConfig.PICLAW_TOOL_RESULT_COMPACTION_TOOLS;
+const configToolResultSemanticSummaryEnabled = pickBoolean(compactionConfig, [
+  "toolResultSemanticSummaryEnabled",
+  "tool_result_semantic_summary_enabled",
+  "PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED",
+]);
+const configToolResultSemanticSummaryMaxInputChars = pickNumber(compactionConfig, [
+  "toolResultSemanticSummaryMaxInputChars",
+  "tool_result_semantic_summary_max_input_chars",
+  "PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_INPUT_CHARS",
+]);
+const configToolResultSemanticSummaryMaxTokens = pickNumber(compactionConfig, [
+  "toolResultSemanticSummaryMaxTokens",
+  "tool_result_semantic_summary_max_tokens",
+  "PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_TOKENS",
+]);
+const configToolResultSemanticSummaryTimeoutMs = pickNumber(compactionConfig, [
+  "toolResultSemanticSummaryTimeoutMs",
+  "tool_result_semantic_summary_timeout_ms",
+  "PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS",
+]);
+const envToolResultSemanticSummaryEnabled = pickBoolean({
+  PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED:
+    process.env.PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED ?? envConfig.PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED,
+}, ["PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED"]);
+const envToolResultSemanticSummaryMaxInputChars = pickNumber({
+  PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_INPUT_CHARS:
+    process.env.PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_INPUT_CHARS ?? envConfig.PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_INPUT_CHARS,
+}, ["PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_INPUT_CHARS"]);
+const envToolResultSemanticSummaryMaxTokens = pickNumber({
+  PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_TOKENS:
+    process.env.PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_TOKENS ?? envConfig.PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_TOKENS,
+}, ["PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_TOKENS"]);
+const envToolResultSemanticSummaryTimeoutMs = pickNumber({
+  PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS:
+    process.env.PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS ?? envConfig.PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS,
+}, ["PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS"]);
 const hasExplicitEnvProgressWatchdogTimeout = hasDefinedConfigValue({
   PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS: process.env.PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS ?? envConfig.PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS,
 }, ["PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS"]);
@@ -1149,6 +1189,24 @@ function parseToolResultCompactionTools(raw: unknown): string[] | null {
   return normalizeToolResultCompactionTools(raw);
 }
 
+export interface ToolResultSemanticSummaryConfig {
+  enabled: boolean;
+  maxInputChars: number;
+  maxTokens: number;
+  timeoutMs: number;
+}
+
+const DEFAULT_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED = true;
+const DEFAULT_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_INPUT_CHARS = 12_000;
+const DEFAULT_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_TOKENS = 320;
+const DEFAULT_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS = 12_000;
+
+function parsePositiveIntegerWithBounds(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(max, Math.max(min, Math.round(parsed)));
+}
+
 /** Runtime toggle for universal tool-result compaction. Default on. */
 export let TOOL_RESULT_COMPACTION_ENABLED =
   envToolResultCompactionEnabled ?? configToolResultCompactionEnabled ?? true;
@@ -1165,6 +1223,32 @@ export let TOOL_RESULT_COMPACTION_THRESHOLDS_BY_TOOL = Object.freeze(
   parseToolResultCompactionThresholdsByTool(envToolResultThresholdsByToolRaw)
   ?? normalizeToolResultCompactionThresholdsByTool(configToolResultThresholdsByToolRaw)
 );
+
+/** Semantic summarization config for compacted tool results. */
+export let TOOL_RESULT_SEMANTIC_SUMMARY_CONFIG = Object.seal<ToolResultSemanticSummaryConfig>({
+  enabled: envToolResultSemanticSummaryEnabled
+    ?? configToolResultSemanticSummaryEnabled
+    ?? DEFAULT_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED,
+  maxInputChars: parsePositiveIntegerWithBounds(
+    envToolResultSemanticSummaryMaxInputChars
+      ?? configToolResultSemanticSummaryMaxInputChars,
+    DEFAULT_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_INPUT_CHARS,
+    500,
+    200_000,
+  ),
+  maxTokens: parsePositiveIntegerWithBounds(
+    envToolResultSemanticSummaryMaxTokens
+      ?? configToolResultSemanticSummaryMaxTokens,
+    DEFAULT_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_TOKENS,
+    64,
+    4_096,
+  ),
+  timeoutMs: parsePositiveDurationMs(
+    envToolResultSemanticSummaryTimeoutMs
+      ?? configToolResultSemanticSummaryTimeoutMs,
+    DEFAULT_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS,
+  ),
+});
 
 export function getToolOutputStoreThreshold(): number {
   return TOOL_OUTPUT_STORE_THRESHOLD;
@@ -1192,6 +1276,93 @@ export function getToolResultCompactionThresholdsByTool(): Readonly<Record<strin
 export function getToolResultCompactionTools(): ReadonlyArray<string> {
   return parseToolResultCompactionTools(process.env.PICLAW_TOOL_RESULT_COMPACTION_TOOLS)
     ?? TOOL_RESULT_COMPACTION_TOOLS;
+}
+
+/** Return semantic summarization config for compacted tool results. */
+export function getToolResultSemanticSummaryConfig(): Readonly<ToolResultSemanticSummaryConfig> {
+  return Object.freeze({
+    enabled: parseOptionalBooleanFlag(
+      process.env.PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED,
+      TOOL_RESULT_SEMANTIC_SUMMARY_CONFIG.enabled,
+    ),
+    maxInputChars: parsePositiveIntegerWithBounds(
+      process.env.PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_INPUT_CHARS,
+      TOOL_RESULT_SEMANTIC_SUMMARY_CONFIG.maxInputChars,
+      500,
+      200_000,
+    ),
+    maxTokens: parsePositiveIntegerWithBounds(
+      process.env.PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_TOKENS,
+      TOOL_RESULT_SEMANTIC_SUMMARY_CONFIG.maxTokens,
+      64,
+      4_096,
+    ),
+    timeoutMs: parsePositiveDurationMs(
+      process.env.PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS,
+      TOOL_RESULT_SEMANTIC_SUMMARY_CONFIG.timeoutMs,
+    ),
+  });
+}
+
+/** Persist and apply semantic summarization config for compacted tool results. */
+export function setToolResultSemanticSummaryConfig(patch: {
+  enabled?: boolean;
+  maxInputChars?: number;
+  maxTokens?: number;
+  timeoutMs?: number;
+}): Readonly<ToolResultSemanticSummaryConfig> {
+  const current = getToolResultSemanticSummaryConfig();
+  const next: ToolResultSemanticSummaryConfig = {
+    enabled: typeof patch.enabled === "boolean" ? patch.enabled : current.enabled,
+    maxInputChars: patch.maxInputChars === undefined
+      ? current.maxInputChars
+      : parsePositiveIntegerWithBounds(patch.maxInputChars, current.maxInputChars, 500, 200_000),
+    maxTokens: patch.maxTokens === undefined
+      ? current.maxTokens
+      : parsePositiveIntegerWithBounds(patch.maxTokens, current.maxTokens, 64, 4_096),
+    timeoutMs: patch.timeoutMs === undefined
+      ? current.timeoutMs
+      : parsePositiveDurationMs(patch.timeoutMs, current.timeoutMs),
+  };
+
+  const config = readJsonConfig(getConfigPath());
+  const compaction =
+    config.compaction && typeof config.compaction === "object"
+      ? { ...(config.compaction as Record<string, unknown>) }
+      : {};
+  const clearKeys = [
+    "toolResultSemanticSummaryEnabled",
+    "tool_result_semantic_summary_enabled",
+    "PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED",
+    "toolResultSemanticSummaryMaxInputChars",
+    "tool_result_semantic_summary_max_input_chars",
+    "PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_INPUT_CHARS",
+    "toolResultSemanticSummaryMaxTokens",
+    "tool_result_semantic_summary_max_tokens",
+    "PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_TOKENS",
+    "toolResultSemanticSummaryTimeoutMs",
+    "tool_result_semantic_summary_timeout_ms",
+    "PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS",
+  ];
+  for (const key of clearKeys) {
+    delete compaction[key];
+    delete config[key];
+  }
+
+  compaction.toolResultSemanticSummaryEnabled = next.enabled;
+  compaction.toolResultSemanticSummaryMaxInputChars = next.maxInputChars;
+  compaction.toolResultSemanticSummaryMaxTokens = next.maxTokens;
+  compaction.toolResultSemanticSummaryTimeoutMs = next.timeoutMs;
+  config.compaction = compaction;
+  writeJsonConfig(getConfigPath(), config);
+
+  process.env.PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED = next.enabled ? "1" : "0";
+  process.env.PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_INPUT_CHARS = String(next.maxInputChars);
+  process.env.PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_TOKENS = String(next.maxTokens);
+  process.env.PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS = String(next.timeoutMs);
+
+  TOOL_RESULT_SEMANTIC_SUMMARY_CONFIG = Object.seal(next);
+  return getToolResultSemanticSummaryConfig();
 }
 
 /** Persist and apply tool names eligible for tool-result compaction. */

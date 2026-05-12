@@ -3,7 +3,7 @@
  */
 
 import type { InteractionRow } from "../../db.js";
-import { getMessageAnnotations, updateMessageAnnotations } from "../../db/messages.js";
+import { updateMessageAnnotations } from "../../db/messages.js";
 
 function resolveChatJid(req: Request, defaultChatJid: string, bodyChatJid?: unknown): string {
   const urlChatJid = new URL(req.url).searchParams.get("chat_jid");

@@ -6,9 +6,11 @@ import {
   getCompactionRuntimeConfig,
   getToolResultCompactionEnabled,
   getToolResultCompactionTools,
+  getToolResultSemanticSummaryConfig,
   setCompactionRuntimeConfig,
   setToolResultCompactionEnabled,
   setToolResultCompactionTools,
+  setToolResultSemanticSummaryConfig,
 } from "../../../core/config.js";
 import { getTrackedPhasesSnapshot } from "../../../runtime/progress-watchdog.js";
 import {
@@ -26,6 +28,10 @@ export interface CompactionSettingsData {
   progressWatchdogTimeoutSec: number;
   toolResultCompactionEnabled: boolean;
   toolResultCompactionTools: string[];
+  toolResultSemanticSummaryEnabled: boolean;
+  toolResultSemanticSummaryMaxInputChars: number;
+  toolResultSemanticSummaryMaxTokens: number;
+  toolResultSemanticSummaryTimeoutSec: number;
   compactionBackoffs: Array<{
     chatJid: string;
     failureCount: number;
@@ -52,6 +58,10 @@ export interface CompactionSettingsInput {
   progressWatchdogTimeoutSec?: unknown;
   toolResultCompactionEnabled?: unknown;
   toolResultCompactionTools?: unknown;
+  toolResultSemanticSummaryEnabled?: unknown;
+  toolResultSemanticSummaryMaxInputChars?: unknown;
+  toolResultSemanticSummaryMaxTokens?: unknown;
+  toolResultSemanticSummaryTimeoutSec?: unknown;
 }
 
 function normalizeOptionalInt(value: unknown, min: number, max: number): number | undefined {
@@ -75,6 +85,7 @@ function normalizeOptionalStringArray(value: unknown): string[] | undefined {
 
 export function getCompactionSettingsData(): CompactionSettingsData {
   const config = getCompactionRuntimeConfig();
+  const summaryConfig = getToolResultSemanticSummaryConfig();
   const now = Date.now();
   return {
     compactionTimeoutSec: Math.max(1, Math.round(config.timeoutMs / 1000)),
@@ -86,6 +97,10 @@ export function getCompactionSettingsData(): CompactionSettingsData {
     progressWatchdogTimeoutSec: Math.max(0, Math.round(config.progressWatchdogTimeoutMs / 1000)),
     toolResultCompactionEnabled: getToolResultCompactionEnabled(),
     toolResultCompactionTools: [...getToolResultCompactionTools()],
+    toolResultSemanticSummaryEnabled: summaryConfig.enabled,
+    toolResultSemanticSummaryMaxInputChars: summaryConfig.maxInputChars,
+    toolResultSemanticSummaryMaxTokens: summaryConfig.maxTokens,
+    toolResultSemanticSummaryTimeoutSec: Math.max(1, Math.round(summaryConfig.timeoutMs / 1000)),
     compactionBackoffs: getAllChatCompactionBackoffs()
       .filter((entry) => {
         const untilMs = Date.parse(entry.backoffUntil);
@@ -161,6 +176,10 @@ export async function saveCompactionSettings(input: CompactionSettingsInput): Pr
 
   const nextToolResultCompactionEnabled = normalizeOptionalBoolean(input.toolResultCompactionEnabled);
   const nextToolResultCompactionTools = normalizeOptionalStringArray(input.toolResultCompactionTools);
+  const nextToolResultSemanticSummaryEnabled = normalizeOptionalBoolean(input.toolResultSemanticSummaryEnabled);
+  const nextToolResultSemanticSummaryMaxInputChars = normalizeOptionalInt(input.toolResultSemanticSummaryMaxInputChars, 500, 200_000);
+  const nextToolResultSemanticSummaryMaxTokens = normalizeOptionalInt(input.toolResultSemanticSummaryMaxTokens, 64, 4_096);
+  const nextToolResultSemanticSummaryTimeoutSec = normalizeOptionalInt(input.toolResultSemanticSummaryTimeoutSec, 1, 300);
 
   if (Object.keys(patch).length > 0) {
     const saved = setCompactionRuntimeConfig(patch);
@@ -177,6 +196,20 @@ export async function saveCompactionSettings(input: CompactionSettingsInput): Pr
 
   if (nextToolResultCompactionTools !== undefined) {
     setToolResultCompactionTools(nextToolResultCompactionTools);
+  }
+
+  if (
+    nextToolResultSemanticSummaryEnabled !== undefined
+    || nextToolResultSemanticSummaryMaxInputChars !== undefined
+    || nextToolResultSemanticSummaryMaxTokens !== undefined
+    || nextToolResultSemanticSummaryTimeoutSec !== undefined
+  ) {
+    setToolResultSemanticSummaryConfig({
+      ...(nextToolResultSemanticSummaryEnabled !== undefined ? { enabled: nextToolResultSemanticSummaryEnabled } : {}),
+      ...(nextToolResultSemanticSummaryMaxInputChars !== undefined ? { maxInputChars: nextToolResultSemanticSummaryMaxInputChars } : {}),
+      ...(nextToolResultSemanticSummaryMaxTokens !== undefined ? { maxTokens: nextToolResultSemanticSummaryMaxTokens } : {}),
+      ...(nextToolResultSemanticSummaryTimeoutSec !== undefined ? { timeoutMs: nextToolResultSemanticSummaryTimeoutSec * 1000 } : {}),
+    });
   }
 
   return getCompactionSettingsData();

@@ -21,4 +21,7 @@ export {
   getToolResultCompactionEnabled,
   getToolResultCompactionThresholdsByTool,
   getToolResultCompactionTools,
+  getToolResultSemanticSummaryConfig,
 } from "../core/config.js";
+
+export { resolveModelRequestAuth } from "../utils/model-auth.js";

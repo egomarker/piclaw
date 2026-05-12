@@ -1,5 +1,4 @@
-import { html, useState, useCallback, useMemo, useEffect, useRef } from '../../vendor/preact-htm.js';
-import { NumberStepper } from './number-stepper.js';
+import { html, useState, useCallback, useMemo } from '../../vendor/preact-htm.js';
 
 // Toolset icons derived from the tool-status-hints SVG vocabulary
 const TOOLSET_ICONS = {

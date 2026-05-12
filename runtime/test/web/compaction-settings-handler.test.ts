@@ -13,6 +13,11 @@ test('saveCompactionSettings persists and applies compaction settings immediatel
     PICLAW_PROGRESS_WATCHDOG_ENABLED: undefined,
     PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS: undefined,
     PICLAW_TOOL_RESULT_COMPACTION_ENABLED: undefined,
+    PICLAW_TOOL_RESULT_COMPACTION_TOOLS: undefined,
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED: undefined,
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_INPUT_CHARS: undefined,
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_TOKENS: undefined,
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS: undefined,
   }, async (workspace) => {
     const db = await importFresh<typeof import('../../src/db.js')>('../src/db.js');
     db.initDatabase();
@@ -29,6 +34,11 @@ test('saveCompactionSettings persists and applies compaction settings immediatel
       progressWatchdogEnabled: true,
       progressWatchdogTimeoutSec: 75,
       toolResultCompactionEnabled: false,
+      toolResultCompactionTools: ['bash', 'exec_batch'],
+      toolResultSemanticSummaryEnabled: true,
+      toolResultSemanticSummaryMaxInputChars: 24000,
+      toolResultSemanticSummaryMaxTokens: 640,
+      toolResultSemanticSummaryTimeoutSec: 30,
     });
 
     expect(saved).toMatchObject({
@@ -40,6 +50,11 @@ test('saveCompactionSettings persists and applies compaction settings immediatel
       progressWatchdogEnabled: true,
       progressWatchdogTimeoutSec: 75,
       toolResultCompactionEnabled: false,
+      toolResultCompactionTools: ['bash', 'exec_batch'],
+      toolResultSemanticSummaryEnabled: true,
+      toolResultSemanticSummaryMaxInputChars: 24000,
+      toolResultSemanticSummaryMaxTokens: 640,
+      toolResultSemanticSummaryTimeoutSec: 30,
     });
 
     const persisted = JSON.parse(readFileSync(join(workspace.workspace, '.piclaw', 'config.json'), 'utf8'));
@@ -53,6 +68,80 @@ test('saveCompactionSettings persists and applies compaction settings immediatel
         progressWatchdogEnabled: true,
         progressWatchdogTimeoutMs: 75000,
         toolResultCompactionEnabled: false,
+        toolResultCompactionTools: ['bash', 'exec_batch'],
+        toolResultSemanticSummaryEnabled: true,
+        toolResultSemanticSummaryMaxInputChars: 24000,
+        toolResultSemanticSummaryMaxTokens: 640,
+        toolResultSemanticSummaryTimeoutMs: 30000,
+      },
+    });
+  });
+});
+
+test('saveCompactionSettings normalizes per-tool compaction allowlist', async () => {
+  await withTempWorkspaceEnv('piclaw-compaction-tools-normalization-', {
+    PICLAW_TOOL_RESULT_COMPACTION_ENABLED: undefined,
+    PICLAW_TOOL_RESULT_COMPACTION_TOOLS: undefined,
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED: undefined,
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_INPUT_CHARS: undefined,
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_TOKENS: undefined,
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS: undefined,
+  }, async (workspace) => {
+    const db = await importFresh<typeof import('../../src/db.js')>('../src/db.js');
+    db.initDatabase();
+    const handler = await importFresh<typeof import('../../src/channels/web/handlers/compaction-settings.js')>(
+      '../src/channels/web/handlers/compaction-settings.js',
+    );
+
+    const saved = await handler.saveCompactionSettings({
+      toolResultCompactionTools: [' Bash ', 'proxmox', 'proxmox'],
+    });
+
+    expect(saved.toolResultCompactionTools).toEqual(['bash', 'proxmox']);
+
+    const persisted = JSON.parse(readFileSync(join(workspace.workspace, '.piclaw', 'config.json'), 'utf8'));
+    expect(persisted).toMatchObject({
+      compaction: {
+        toolResultCompactionTools: ['bash', 'proxmox'],
+      },
+    });
+  });
+});
+
+test('saveCompactionSettings normalizes semantic summary settings', async () => {
+  await withTempWorkspaceEnv('piclaw-compaction-semantic-summary-normalization-', {
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED: undefined,
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_INPUT_CHARS: undefined,
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_TOKENS: undefined,
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS: undefined,
+  }, async (workspace) => {
+    const db = await importFresh<typeof import('../../src/db.js')>('../src/db.js');
+    db.initDatabase();
+    const handler = await importFresh<typeof import('../../src/channels/web/handlers/compaction-settings.js')>(
+      '../src/channels/web/handlers/compaction-settings.js',
+    );
+
+    const saved = await handler.saveCompactionSettings({
+      toolResultSemanticSummaryEnabled: true,
+      toolResultSemanticSummaryMaxInputChars: 10,
+      toolResultSemanticSummaryMaxTokens: 99999,
+      toolResultSemanticSummaryTimeoutSec: 999,
+    });
+
+    expect(saved).toMatchObject({
+      toolResultSemanticSummaryEnabled: true,
+      toolResultSemanticSummaryMaxInputChars: 500,
+      toolResultSemanticSummaryMaxTokens: 4096,
+      toolResultSemanticSummaryTimeoutSec: 300,
+    });
+
+    const persisted = JSON.parse(readFileSync(join(workspace.workspace, '.piclaw', 'config.json'), 'utf8'));
+    expect(persisted).toMatchObject({
+      compaction: {
+        toolResultSemanticSummaryEnabled: true,
+        toolResultSemanticSummaryMaxInputChars: 500,
+        toolResultSemanticSummaryMaxTokens: 4096,
+        toolResultSemanticSummaryTimeoutMs: 300000,
       },
     });
   });
@@ -66,6 +155,11 @@ test('saveCompactionSettings can disable watchdog without clearing its timeout',
     PICLAW_PROGRESS_WATCHDOG_ENABLED: undefined,
     PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS: undefined,
     PICLAW_TOOL_RESULT_COMPACTION_ENABLED: undefined,
+    PICLAW_TOOL_RESULT_COMPACTION_TOOLS: undefined,
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED: undefined,
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_INPUT_CHARS: undefined,
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_TOKENS: undefined,
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS: undefined,
   }, async (workspace) => {
     const db = await importFresh<typeof import('../../src/db.js')>('../src/db.js');
     db.initDatabase();
@@ -97,6 +191,11 @@ test('getCompactionSettingsData exposes active backoffs and tracked phases and r
   await withTempWorkspaceEnv('piclaw-compaction-settings-state-', {
     PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS: '30',
     PICLAW_TOOL_RESULT_COMPACTION_ENABLED: undefined,
+    PICLAW_TOOL_RESULT_COMPACTION_TOOLS: 'bash,powershell,exec_batch',
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED: undefined,
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_INPUT_CHARS: undefined,
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_TOKENS: undefined,
+    PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS: undefined,
   }, async () => {
     const db = await importFresh<typeof import('../../src/db.js')>('../src/db.js');
     db.initDatabase();
@@ -122,6 +221,13 @@ test('getCompactionSettingsData exposes active backoffs and tracked phases and r
 
     const beforeReset = handler.getCompactionSettingsData();
     expect(typeof beforeReset.toolResultCompactionEnabled).toBe('boolean');
+    expect(beforeReset.toolResultCompactionTools).toEqual(
+      expect.arrayContaining(['bash', 'powershell', 'exec_batch']),
+    );
+    expect(typeof beforeReset.toolResultSemanticSummaryEnabled).toBe('boolean');
+    expect(typeof beforeReset.toolResultSemanticSummaryMaxInputChars).toBe('number');
+    expect(typeof beforeReset.toolResultSemanticSummaryMaxTokens).toBe('number');
+    expect(typeof beforeReset.toolResultSemanticSummaryTimeoutSec).toBe('number');
     expect(beforeReset.compactionBackoffs).toEqual([
       expect.objectContaining({ chatJid: 'web:test-1', failureCount: 2, lastErrorMessage: 'Compaction timed out' }),
     ]);

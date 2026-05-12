@@ -45,7 +45,12 @@ export function ModelsSection({ filter = '' }) {
         }
         return data;
     }, []);
-    useEffect(() => { loadModels().catch(() => setModels({ models: [], model_options: [] })); }, []);
+    useEffect(() => {
+        loadModels().catch((error) => {
+            console.warn('[settings/models] Failed to load models.', error);
+            setModels({ models: [], model_options: [] });
+        });
+    }, []);
 
     const switchModel = useCallback(async (label) => {
         if (switching) return; setSwitching(true);
@@ -69,7 +74,9 @@ export function ModelsSection({ filter = '' }) {
             await loadModels();
         } catch (e) {
             console.error('Failed to set scoped model filtering:', e);
-            await loadModels().catch(() => {});
+            await loadModels().catch((reloadError) => {
+                console.warn('[settings/models] Reload after scoped model filtering failure failed.', reloadError);
+            });
         } finally {
             setScopedBusy(false);
         }
@@ -83,7 +90,12 @@ export function ModelsSection({ filter = '' }) {
             setSupportsThinking(resp?.command?.supports_thinking !== false);
             // Reload to get updated available levels after model/thinking change
             await loadModels();
-        } catch (e) { console.error('Failed to set thinking:', e); await loadModels().catch((e2) => { void e2; }); }
+        } catch (e) {
+            console.error('Failed to set thinking:', e);
+            await loadModels().catch((reloadError) => {
+                console.warn('[settings/models] Reload after thinking change failure failed.', reloadError);
+            });
+        }
         finally { setThinkingBusy(false); }
     }, [thinkingBusy, loadModels]);
 

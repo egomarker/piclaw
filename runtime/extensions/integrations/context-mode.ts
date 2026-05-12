@@ -8,6 +8,7 @@
  * Activated unconditionally (no env-var gate).
  */
 import { createHash } from "node:crypto";
+import { completeSimple, type Message } from "@earendil-works/pi-ai";
 
 import {
   buildPreview,
@@ -16,7 +17,9 @@ import {
   getToolResultCompactionEnabled,
   getToolResultCompactionThresholdsByTool,
   getToolResultCompactionTools,
+  getToolResultSemanticSummaryConfig,
   readToolOutputFile,
+  resolveModelRequestAuth,
   saveToolOutput,
 } from "../../src/extensions/context-mode-api.js";
 
@@ -26,7 +29,139 @@ const PREVIEW_LINES = parseInt(process.env.PICLAW_TOOL_OUTPUT_PREVIEW_LINES || "
 const PREVIEW_LINE_CHARS = parseInt(process.env.PICLAW_TOOL_OUTPUT_PREVIEW_LINE_CHARS || "200", 10);
 const STORED_OUTPUT_CACHE_MAX = 512;
 
-const storedOutputByDigest = new Map<string, ReturnType<typeof saveToolOutput>>();
+type StoredOutputCacheEntry = {
+  saved: ReturnType<typeof saveToolOutput>;
+  summary: string;
+  semantic: boolean;
+};
+
+const storedOutputByDigest = new Map<string, StoredOutputCacheEntry>();
+
+type RuntimeExtensionContext = {
+  model?: any;
+  modelRegistry?: any;
+  signal?: AbortSignal;
+};
+
+type SemanticSummaryRequest = {
+  toolName: string;
+  source: string;
+  fullOutput: string;
+  lineCount: number;
+  sizeBytes: number;
+};
+
+type SemanticSummarizer = (
+  request: SemanticSummaryRequest,
+  extensionContext: RuntimeExtensionContext | undefined,
+) => Promise<string | null>;
+
+const TOOL_RESULT_SEMANTIC_SYSTEM_PROMPT = [
+  "You summarize tool output for an LLM coding agent.",
+  "Write a compact, factual summary with exactly these sections:",
+  "Summary:",
+  "Key facts:",
+  "Warnings/Errors:",
+  "Follow-up cues:",
+  "Rules:",
+  "- Do not invent information.",
+  "- Keep critical file paths, command names, IDs, and counts exact when present.",
+  "- If there are no warnings/errors, write 'none'.",
+  "- Use terse bullets.",
+].join("\n");
+
+let semanticSummarizerOverride: SemanticSummarizer | null = null;
+
+export function __setSemanticToolResultSummarizerForTests(
+  summarizer: SemanticSummarizer | null,
+): void {
+  semanticSummarizerOverride = summarizer;
+}
+
+function buildSemanticSummaryInput(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const headChars = Math.max(200, Math.floor(maxChars * 0.65));
+  const tailChars = Math.max(120, Math.floor(maxChars * 0.25));
+  const omitted = Math.max(0, text.length - headChars - tailChars);
+  const head = text.slice(0, headChars).trimEnd();
+  const tail = text.slice(-tailChars).trimStart();
+  return `${head}\n\n[... omitted ${omitted} chars ...]\n\n${tail}`;
+}
+
+function extractResponseText(response: { content?: Array<{ type?: string; text?: string }> } | null | undefined): string {
+  if (!response || !Array.isArray(response.content)) return "";
+  return response.content
+    .filter((item) => item?.type === "text" && typeof item.text === "string")
+    .map((item) => item.text as string)
+    .join("\n")
+    .trim();
+}
+
+async function summarizeToolOutputSemantically(
+  request: SemanticSummaryRequest,
+  extensionContext: RuntimeExtensionContext | undefined,
+): Promise<string | null> {
+  if (semanticSummarizerOverride) {
+    try {
+      return await semanticSummarizerOverride(request, extensionContext);
+    } catch {
+      return null;
+    }
+  }
+
+  const config = getToolResultSemanticSummaryConfig();
+  if (!config.enabled) return null;
+  if (!extensionContext?.model || !extensionContext?.modelRegistry) return null;
+
+  try {
+    const auth = await resolveModelRequestAuth(extensionContext.modelRegistry, extensionContext.model);
+    if (!auth.ok) return null;
+
+    const sampledOutput = buildSemanticSummaryInput(request.fullOutput, config.maxInputChars);
+    const promptText = [
+      `Tool: ${request.toolName || "unknown"}`,
+      `Source: ${request.source}`,
+      `Total size: ${request.sizeBytes} bytes`,
+      `Total lines: ${request.lineCount}`,
+      "",
+      "Output sample:",
+      sampledOutput,
+    ].join("\n");
+
+    const messages: Message[] = [{
+      role: "user",
+      content: [{ type: "text", text: promptText }],
+      timestamp: Date.now(),
+    }];
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
+    (timeout as any).unref?.();
+    const onAbort = () => controller.abort();
+    extensionContext.signal?.addEventListener("abort", onAbort, { once: true });
+
+    try {
+      const response = await completeSimple(
+        extensionContext.model,
+        { systemPrompt: TOOL_RESULT_SEMANTIC_SYSTEM_PROMPT, messages },
+        {
+          maxTokens: config.maxTokens,
+          apiKey: auth.apiKey,
+          signal: controller.signal,
+        },
+      );
+
+      if (response.stopReason === "error") return null;
+      const summaryText = extractResponseText(response as any);
+      return summaryText.length >= 24 ? summaryText : null;
+    } finally {
+      clearTimeout(timeout);
+      extensionContext.signal?.removeEventListener?.("abort", onAbort);
+    }
+  } catch {
+    return null;
+  }
+}
 
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes)) return "0 B";
@@ -149,10 +284,14 @@ function shouldStoreOutput(text: string, lineCount: number, toolName: unknown): 
   return bytes > thresholds.bytes || lineCount > thresholds.lines;
 }
 
-function buildStoredOutputSummary(saved: ReturnType<typeof saveToolOutput>, preview: string): string {
+function buildStoredOutputSummary(
+  saved: ReturnType<typeof saveToolOutput>,
+  summary: string,
+  options: { semantic: boolean },
+): string {
   return [
     `Output stored as tool-output:${saved.id} (${saved.lineCount} lines, ${formatBytes(saved.sizeBytes)}).`,
-    preview ? `Preview:\n${preview}` : null,
+    summary ? `${options.semantic ? "Semantic summary" : "Preview"}:\n${summary}` : null,
     `Use search_tool_output with handle "${saved.id}" and a query to retrieve relevant snippets.`,
   ]
     .filter(Boolean)
@@ -167,8 +306,8 @@ function computeOutputDigest(fullOutput: string, source: string): string {
   return hash.digest("hex");
 }
 
-function rememberStoredOutput(digest: string, saved: ReturnType<typeof saveToolOutput>): void {
-  storedOutputByDigest.set(digest, saved);
+function rememberStoredOutput(digest: string, entry: StoredOutputCacheEntry): void {
+  storedOutputByDigest.set(digest, entry);
   while (storedOutputByDigest.size > STORED_OUTPUT_CACHE_MAX) {
     const firstKey = storedOutputByDigest.keys().next().value;
     if (!firstKey) break;
@@ -176,23 +315,32 @@ function rememberStoredOutput(digest: string, saved: ReturnType<typeof saveToolO
   }
 }
 
-function getOrSaveStoredOutput(fullOutput: string, source: string, summary: string): ReturnType<typeof saveToolOutput> {
-  const digest = computeOutputDigest(fullOutput, source);
-  const cached = storedOutputByDigest.get(digest);
-  if (cached) return cached;
-  const saved = saveToolOutput(fullOutput, { source, summary });
-  rememberStoredOutput(digest, saved);
-  return saved;
+function getCachedStoredOutput(digest: string): StoredOutputCacheEntry | null {
+  return storedOutputByDigest.get(digest) ?? null;
 }
 
-function compactTextOutput(
+function saveAndRememberStoredOutput(
+  digest: string,
+  fullOutput: string,
+  source: string,
+  summary: string,
+  semantic: boolean,
+): StoredOutputCacheEntry {
+  const saved = saveToolOutput(fullOutput, { source, summary });
+  const entry: StoredOutputCacheEntry = { saved, summary, semantic };
+  rememberStoredOutput(digest, entry);
+  return entry;
+}
+
+async function compactTextOutput(
   text: string,
   options: {
     fullOutput?: string;
     toolName?: unknown;
     source: string;
+    extensionContext?: RuntimeExtensionContext;
   },
-): { summaryText: string; saved: ReturnType<typeof saveToolOutput> } | null {
+): Promise<{ summaryText: string; saved: ReturnType<typeof saveToolOutput> } | null> {
   const fullOutput = options.fullOutput ?? text;
   if (!fullOutput.trim()) return null;
   if (hasStoredOutputMarker(text) || hasStoredOutputMarker(fullOutput)) return null;
@@ -200,11 +348,35 @@ function compactTextOutput(
   const lineCount = fullOutput ? fullOutput.replace(/\r\n/g, "\n").split("\n").length : 0;
   if (!shouldStoreOutput(fullOutput, lineCount, options.toolName)) return null;
 
+  const digest = computeOutputDigest(fullOutput, options.source);
+  const cachedEntry = getCachedStoredOutput(digest);
+  if (cachedEntry) {
+    return {
+      summaryText: buildStoredOutputSummary(cachedEntry.saved, cachedEntry.summary, { semantic: cachedEntry.semantic }),
+      saved: cachedEntry.saved,
+    };
+  }
+
   const preview = buildPreview(fullOutput, PREVIEW_LINES, PREVIEW_LINE_CHARS);
-  const saved = getOrSaveStoredOutput(fullOutput, options.source, preview);
+  const semanticSummary = await summarizeToolOutputSemantically({
+    toolName: typeof options.toolName === "string" ? options.toolName : "unknown",
+    source: options.source,
+    fullOutput,
+    lineCount,
+    sizeBytes: Buffer.byteLength(fullOutput, "utf8"),
+  }, options.extensionContext);
+
+  const summaryForStorage = semanticSummary || preview;
+  const cacheEntry = saveAndRememberStoredOutput(
+    digest,
+    fullOutput,
+    options.source,
+    summaryForStorage,
+    Boolean(semanticSummary),
+  );
   return {
-    summaryText: buildStoredOutputSummary(saved, preview),
-    saved,
+    summaryText: buildStoredOutputSummary(cacheEntry.saved, cacheEntry.summary, { semantic: cacheEntry.semantic }),
+    saved: cacheEntry.saved,
   };
 }
 
@@ -223,10 +395,14 @@ function resolveToolNameFromUnknown(record: unknown): string {
   return "unknown";
 }
 
-function compactLegacyToolResultContent(content: unknown, toolName: unknown): {
+async function compactLegacyToolResultContent(
+  content: unknown,
+  toolName: unknown,
+  extensionContext?: RuntimeExtensionContext,
+): Promise<{
   content: unknown;
   modified: boolean;
-} {
+}> {
   if (!Array.isArray(content)) return { content, modified: false };
   if (!isToolCompactionEnabledForTool(toolName)) return { content, modified: false };
   if (hasImageOrBinaryBlocks(content)) return { content, modified: false };
@@ -235,9 +411,10 @@ function compactLegacyToolResultContent(content: unknown, toolName: unknown): {
   if (!text.trim()) return { content, modified: false };
 
   try {
-    const compacted = compactTextOutput(text, {
+    const compacted = await compactTextOutput(text, {
       toolName,
       source: resolveOutputSourceFromTool(toolName),
+      extensionContext,
     });
     if (!compacted) return { content, modified: false };
     return {
@@ -249,36 +426,50 @@ function compactLegacyToolResultContent(content: unknown, toolName: unknown): {
   }
 }
 
-function compactNestedToolResultBlocks(content: unknown): {
+async function compactNestedToolResultBlocks(
+  content: unknown,
+  extensionContext?: RuntimeExtensionContext,
+): Promise<{
   content: unknown;
   modified: boolean;
-} {
+}> {
   if (!Array.isArray(content)) return { content, modified: false };
 
   let modified = false;
-  const next = content.map((item) => {
-    if (!isRecord(item)) return item;
+  const next: unknown[] = [];
+  for (const item of content) {
+    if (!isRecord(item)) {
+      next.push(item);
+      continue;
+    }
 
     const type = typeof item.type === "string" ? item.type.trim().toLowerCase() : "";
     if ((type === "tool_result" || type === "toolresult") && Array.isArray(item.content)) {
-      const compacted = compactLegacyToolResultContent(item.content, resolveToolNameFromUnknown(item));
+      const compacted = await compactLegacyToolResultContent(
+        item.content,
+        resolveToolNameFromUnknown(item),
+        extensionContext,
+      );
       if (compacted.modified) {
         modified = true;
-        return { ...item, content: compacted.content };
+        next.push({ ...item, content: compacted.content });
+        continue;
       }
-      return item;
+      next.push(item);
+      continue;
     }
 
     if (Array.isArray(item.content)) {
-      const nested = compactNestedToolResultBlocks(item.content);
+      const nested = await compactNestedToolResultBlocks(item.content, extensionContext);
       if (nested.modified) {
         modified = true;
-        return { ...item, content: nested.content };
+        next.push({ ...item, content: nested.content });
+        continue;
       }
     }
 
-    return item;
-  });
+    next.push(item);
+  }
 
   return { content: next, modified };
 }
@@ -290,7 +481,7 @@ export default function (pi: any) {
   pi.registerTool(createToolOutputSearchTool());
   pi.registerTool(createBatchExecTool(process.cwd()));
 
-  pi.on("tool_result", async (event: any) => {
+  pi.on("tool_result", async (event: any, ctx: RuntimeExtensionContext) => {
     if (!getToolResultCompactionEnabled()) return;
     if (event?.isError) return;
     if (!isToolCompactionEnabledForTool(event?.toolName)) return;
@@ -308,10 +499,11 @@ export default function (pi: any) {
     }
 
     try {
-      const compacted = compactTextOutput(text, {
+      const compacted = await compactTextOutput(text, {
         fullOutput,
         toolName: event?.toolName,
         source: resolveOutputSource(event),
+        extensionContext: ctx,
       });
       if (!compacted) return;
 
@@ -333,18 +525,27 @@ export default function (pi: any) {
 
   // Optional provider-request-time compaction layer:
   // compact legacy oversized inline tool results in outbound context only.
-  pi.on("context", async (event: any) => {
+  pi.on("context", async (event: any, ctx: RuntimeExtensionContext) => {
     if (!getToolResultCompactionEnabled()) return {};
     if (!Array.isArray(event?.messages)) return {};
 
     let modified = false;
-    const messages = event.messages.map((message: any) => {
-      if (!isRecord(message)) return message;
-      let nextMessage = message;
+    const messages: any[] = [];
+    for (const message of event.messages) {
+      if (!isRecord(message)) {
+        messages.push(message);
+        continue;
+      }
+
+      let nextMessage: any = message;
 
       const role = normalizeToolResultRole(message.role);
       if (role === "tool_result" && Array.isArray(nextMessage.content)) {
-        const compacted = compactLegacyToolResultContent(nextMessage.content, resolveToolNameFromUnknown(nextMessage));
+        const compacted = await compactLegacyToolResultContent(
+          nextMessage.content,
+          resolveToolNameFromUnknown(nextMessage),
+          ctx,
+        );
         if (compacted.modified) {
           modified = true;
           nextMessage = { ...nextMessage, content: compacted.content };
@@ -352,15 +553,15 @@ export default function (pi: any) {
       }
 
       if (Array.isArray(nextMessage.content)) {
-        const nested = compactNestedToolResultBlocks(nextMessage.content);
+        const nested = await compactNestedToolResultBlocks(nextMessage.content, ctx);
         if (nested.modified) {
           modified = true;
           nextMessage = { ...nextMessage, content: nested.content };
         }
       }
 
-      return nextMessage;
-    });
+      messages.push(nextMessage);
+    }
 
     if (!modified) return {};
     return { messages };
