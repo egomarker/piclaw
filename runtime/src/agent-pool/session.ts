@@ -534,16 +534,19 @@ function trimPreCompactionEntries(sessionDir: string): void {
   // Only proceed if we actually save meaningful space (>25%)
   if (trimmedContent.length > content.length * 0.75) return;
 
-  // Archive the original file before trimming (first time only).
-  // On subsequent trims (new compaction in same file), the archive already
-  // holds the original full history — just overwrite the active file.
+  // Archive the original untrimmed file (first time only).
+  // On subsequent trims (new compaction appended to already-trimmed file),
+  // the archive already holds the original full history from the first trim.
   const archiveDir = join(sessionDir, "archive");
   const fileName = latestFile.split("/").pop()!;
   const archivePath = join(archiveDir, fileName);
-  if (!existsSync(archivePath)) {
+  const needsArchive = !existsSync(archivePath);
+  if (needsArchive) {
     mkdirSync(archiveDir, { recursive: true });
     try {
-      renameSync(latestFile, archivePath);
+      // Copy rather than rename: if the write below fails we still have the
+      // original active file intact and don't need a rollback path.
+      writeFileSync(archivePath, content, "utf8");
     } catch (e) {
       void e;
       return; // can't archive, don't trim
@@ -564,13 +567,14 @@ function trimPreCompactionEntries(sessionDir: string): void {
       savedPercent: Math.round((1 - trimmedContent.length / content.length) * 100),
     });
   } catch (err) {
-    // Clean up temp file and restore from archive if write fails
+    // Clean up temp file; original latestFile is still intact (we copied,
+    // not renamed, and the atomic rename above is all-or-nothing).
     try { rmSync(tmpPath, { force: true }); } catch (e) { void e; }
-    try {
-      if (!existsSync(latestFile) && existsSync(archivePath)) {
-        renameSync(archivePath, latestFile);
-      }
-    } catch (e) { void e; }
+    // Remove the archive we just created if this was the first trim attempt
+    // — leaving an archive without a matching trimmed file is confusing.
+    if (needsArchive) {
+      try { rmSync(archivePath, { force: true }); } catch (e) { void e; }
+    }
     debugSuppressedError(log, "Failed to write trimmed session file", err, { latestFile });
   }
 }
