@@ -24,11 +24,27 @@ import { sanitiseJid } from "./session.js";
 import type { PoolEntry } from "./session-manager.js";
 
 const log = createLogger("agent-pool.runtime-facade");
+const MAX_PERSISTED_MODEL_STATE_CACHE_CHATS = 512;
 const persistedModelStateCache = new Map<string, {
   signature: string;
   current: string | null;
   thinkingLevel: string | null;
 }>();
+
+function setPersistedModelStateCache(
+  chatJid: string,
+  value: { signature: string; current: string | null; thinkingLevel: string | null },
+): void {
+  if (persistedModelStateCache.has(chatJid)) {
+    persistedModelStateCache.delete(chatJid);
+  }
+  persistedModelStateCache.set(chatJid, value);
+  while (persistedModelStateCache.size > MAX_PERSISTED_MODEL_STATE_CACHE_CHATS) {
+    const oldestKey = persistedModelStateCache.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    persistedModelStateCache.delete(oldestKey);
+  }
+}
 
 function truncateText(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text;
@@ -146,7 +162,7 @@ function getPersistedSessionState(chatJid: string): { current: string | null; th
     thinkingLevel = null;
   }
 
-  persistedModelStateCache.set(chatJid, { signature, current, thinkingLevel });
+  setPersistedModelStateCache(chatJid, { signature, current, thinkingLevel });
   return { current, thinkingLevel };
 }
 
