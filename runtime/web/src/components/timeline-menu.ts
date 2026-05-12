@@ -162,7 +162,7 @@ export function TimelineMenu({
     }, [chatOnlyMode]);
 
     const content = html`
-        <button ref=${btnRef} class=${`timeline-menu-btn${open ? ' active' : ''}`}
+        <button ref=${btnRef} class=${`timeline-menu-btn${open ? ' active' : ''}`} data-testid="hamburger"
             onClick=${() => setOpen(v => !v)} title="Menu" aria-label="Menu"
             aria-haspopup="menu" aria-expanded=${open ? 'true' : 'false'}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"

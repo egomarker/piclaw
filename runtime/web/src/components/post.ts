@@ -940,11 +940,14 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
     const copyResetTimerRef = useRef(null);
 
     const data = post.data;
+    const blocks = data.content_blocks || [];
+    const mediaIds = data.media_ids || [];
+    const peerMessageMeta = getPeerMessageMeta(blocks);
     const isAgent = data.type === 'agent_response';
     const resolvedUserName = userName || 'You';
     const isPeerAgentMessage = Boolean(!isAgent && peerMessageMeta?.sourceAgentName);
     const displayName = isPeerAgentMessage
-        ? (agentName || DEFAULT_AGENT_NAME)
+        ? peerMessageMeta.sourceAgentName
         : isAgent ? (agentName || DEFAULT_AGENT_NAME) : resolvedUserName;
     const searchChatAgentName = typeof post.chat_agent_name === 'string' ? post.chat_agent_name.trim() : '';
     const showSearchChatAgentTag = Boolean(isAgent && highlightQuery && searchChatAgentName && searchChatAgentName !== displayName);
@@ -977,9 +980,6 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
         }
         : null;
 
-    const blocks = data.content_blocks || [];
-    const mediaIds = data.media_ids || [];
-    const peerMessageMeta = getPeerMessageMeta(blocks);
     const showPeerAgentTag = Boolean(peerMessageMeta?.sourceAgentName && isPeerAgentMessage);
 
     // Keep original message text even when link previews are available.

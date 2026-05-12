@@ -68,7 +68,7 @@ export const sel = {
   systemMetersCollapsed: '.system-meters-hud.is-collapsed',
 
   // Hamburger
-  hamburgerMenu: '[data-testid="hamburger"], .hamburger-menu, .timeline-menu-btn',
+  hamburgerMenu: '[data-testid="hamburger"], .hamburger-menu',
 
   // Favicon (for assertion)
   favicon: 'link[rel="icon"]',
