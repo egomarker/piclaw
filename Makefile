@@ -2,7 +2,7 @@
 #
 # Targets:
 #   vendor         – Bundle vendored mermaid (minified ESM).
-#   build-web      – Build web bundles into static/dist/ (+ sourcemaps).
+#   build-web      – Build web bundles into static/classic/dist and static/common/dist (+ sourcemaps).
 #   build-ts       – Type-check TypeScript (tsc --noEmit). No generated/dist/ output.
 #   build-piclaw   – Full build: build-web (vendor + bundles) + build-ts.
 #   build-desktop  – Build the optional Electrobun desktop shell.
@@ -101,24 +101,24 @@ update-mermaid-vendor: ## Rebuild or upgrade vendored mermaid (use MERMAID_VERSI
 	cd runtime && bun run update:vendor:mermaid $(if $(MERMAID_VERSION),--version $(MERMAID_VERSION),)
 	@ls -lh runtime/web/static/js/vendor/beautiful-mermaid.js runtime/web/static/js/vendor/beautiful-mermaid.meta.json
 
-build-web: ## Build web JS/CSS bundles (+ sourcemaps) into static/dist/ (includes vendor bundle)
+build-web: ## Build web JS/CSS bundles (+ sourcemaps) into static/classic/dist and static/common/dist
 	cd runtime && bun run build:web
 	@cd runtime && bun test --timeout $(WEB_BUILD_TEST_TIMEOUT_MS) test/channels/web/web-build.test.ts test/channels/web/post-link-preview-content.test.ts
 	@ls -lh \
-		runtime/web/static/dist/app.bundle.js \
-		runtime/web/static/dist/app.bundle.js.map \
-		runtime/web/static/dist/app.bundle.css \
-		runtime/web/static/dist/editor.bundle.js \
-		runtime/web/static/dist/editor.bundle.js.map \
-		runtime/web/static/dist/login.bundle.js \
-		runtime/web/static/dist/login.bundle.js.map \
-		runtime/web/static/dist/login.bundle.css
+		runtime/web/static/classic/dist/app.bundle.js \
+		runtime/web/static/classic/dist/app.bundle.js.map \
+		runtime/web/static/classic/dist/app.bundle.css \
+		runtime/web/static/classic/dist/editor.bundle.js \
+		runtime/web/static/classic/dist/editor.bundle.js.map \
+		runtime/web/static/common/dist/login.bundle.js \
+		runtime/web/static/common/dist/login.bundle.js.map \
+		runtime/web/static/common/dist/login.bundle.css
 
 build-ts: ## Type-check TypeScript / validate emit (generated/dist is cleaned up after the run)
 	cd runtime && bun run build
 # NOTE: generated/dist/ is produced transiently by tsc for validation, then
 # removed immediately because Bun runs runtime/src/*.ts directly and release
-# artifacts only need runtime/web/static/dist/ bundles plus packaged sources.
+# artifacts only need runtime/web/static/{classic,common}/dist bundles plus packaged sources.
 
 build-piclaw: build-web build-ts ## Full build: vendor + web + ts
 

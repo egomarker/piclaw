@@ -1,4 +1,4 @@
-export const SOURCE_EDITABLE_PANE_IDS = new Set(['html-viewer', 'kanban-editor', 'mindmap-editor']);
+export const SOURCE_EDITABLE_PANE_IDS = new Set(['html-viewer', 'kanban-editor']);
 
 export interface ResolvePaneContext {
   path: string;

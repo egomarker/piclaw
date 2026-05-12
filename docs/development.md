@@ -197,7 +197,7 @@ Notes:
 
 ### Editor file conflict detection
 
-The editor pane now monitors for external file changes via `GET /workspace/stat?path=<file>` (polled every 5s while the tab is focused) and shows a conflict resolution bar when the on-disk mtime advances past the last known mtime. The same `FileConflictMonitor` is shared by the editor and mindmap pane, and add-ons can vendor the same pattern for specialized editors like `kanban-editor`.
+The editor pane now monitors for external file changes via `GET /workspace/stat?path=<file>` (polled every 5s while the tab is focused) and shows a conflict resolution bar when the on-disk mtime advances past the last known mtime. The same `FileConflictMonitor` can be reused by pane-style editors, and add-ons can vendor the same pattern for specialized editors like `kanban-editor`.
 
 Relevant files:
 - `runtime/extensions/viewers/editor/editor-extension.ts`

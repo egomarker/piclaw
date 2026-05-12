@@ -73,7 +73,7 @@ PiClaw is single-user, mobile-friendly, and streams updates over SSE.
 | Workspace | Sidebar browser, drag-and-drop uploads, file-reference pills, explorer search/reindex status |
 | Editor | CodeMirror 6, search/replace, dirty-state tracking, syntax highlighting, lazy local bundle |
 | Terminal | Ghostty-based web terminal as dock or tab; detachable popouts |
-| Viewers | Draw.io, Office docs, CSV/TSV, PDF, images, video, code previews, kanban boards, mindmaps, VNC |
+| Viewers | Draw.io, Office docs, CSV/TSV, PDF, images, video, code previews, kanban boards, VNC |
 | Automation | `/image`, `/flux`, `image_process`, `cdp_browser`, `mcp`, experimental `m365`, Windows-only `win_*` tools |
 
 For the full feature tour, see [docs/web-ui.md](docs/web-ui.md).

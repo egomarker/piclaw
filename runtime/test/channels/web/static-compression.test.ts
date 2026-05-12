@@ -8,11 +8,11 @@ function notFound(): Response {
 }
 
 test("serveStatic gzip-compresses compressible assets when requested", async () => {
-  const req = new Request("https://example.test/static/dist/app.bundle.css", {
+  const req = new Request("https://example.test/static/classic/dist/app.bundle.css", {
     headers: { "Accept-Encoding": "gzip" },
   });
 
-  const response = await serveStatic("dist/app.bundle.css", notFound, req);
+  const response = await serveStatic("classic/dist/app.bundle.css", notFound, req);
 
   expect(response.status).toBe(200);
   expect(response.headers.get("Content-Encoding")).toBe("gzip");
@@ -25,22 +25,22 @@ test("serveStatic gzip-compresses compressible assets when requested", async () 
 });
 
 test("serveStatic falls back to runtime gzip when brotli is accepted but no sidecar exists", async () => {
-  const req = new Request("https://example.test/static/dist/app.bundle.css", {
+  const req = new Request("https://example.test/static/classic/dist/app.bundle.css", {
     headers: { "Accept-Encoding": "br, gzip" },
   });
 
-  const response = await serveStatic("dist/app.bundle.css", notFound, req);
+  const response = await serveStatic("classic/dist/app.bundle.css", notFound, req);
 
   expect(response.status).toBe(200);
   expect(response.headers.get("Content-Encoding")).toBe("gzip");
 });
 
 test("serveStatic gzip-compresses wasm assets when requested", async () => {
-  const req = new Request("https://example.test/static/js/vendor/ghostty-vt.wasm", {
+  const req = new Request("https://example.test/static/common/js/vendor/ghostty-vt.wasm", {
     headers: { "Accept-Encoding": "gzip" },
   });
 
-  const response = await serveStatic("js/vendor/ghostty-vt.wasm", notFound, req);
+  const response = await serveStatic("common/js/vendor/ghostty-vt.wasm", notFound, req);
 
   expect(response.status).toBe(200);
   expect(response.headers.get("Content-Encoding")).toBe("gzip");
@@ -65,7 +65,7 @@ test("serveStatic leaves already-compressed assets unencoded", async () => {
 });
 
 test("serveStatic adds Vary for compressible assets even without compression", async () => {
-  const response = await serveStatic("dist/app.bundle.css", notFound);
+  const response = await serveStatic("classic/dist/app.bundle.css", notFound);
 
   expect(response.status).toBe(200);
   expect(response.headers.get("Content-Encoding")).toBeNull();

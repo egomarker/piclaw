@@ -129,6 +129,17 @@ const PACKAGED_EXTENSION_ENTRIES = [
   { packageName: "pi-mcp-adapter", entry: "index.ts" },
 ] as const;
 
+function getWorkspaceAddonNodeModulesFingerprint(workspaceDir: string): string {
+  const addonNodeModulesDir = join(workspaceDir, ".pi", "extensions", "node_modules");
+  try {
+    const stat = statSync(addonNodeModulesDir);
+    if (!stat.isDirectory()) return "missing";
+    return `${stat.size}:${stat.mtimeMs}`;
+  } catch {
+    return "missing";
+  }
+}
+
 function getBundledExtensionEnvSignature(chatJid?: string): string {
   const channel = chatJid ? detectChannel(chatJid) ?? "" : "";
   const workspaceDir = getWorkspaceDir();
@@ -136,6 +147,7 @@ function getBundledExtensionEnvSignature(chatJid?: string): string {
     `platform=${process.platform}`,
     `channel=${channel}`,
     `workspace=${workspaceDir}`,
+    `addonNodeModules=${getWorkspaceAddonNodeModulesFingerprint(workspaceDir)}`,
     ...OPTIONAL_EXTENSIONS.map(({ envGate, platforms, channels }) => {
       const envPart = envGate ? `${envGate}=${process.env[envGate] ? "1" : "0"}` : "always=1";
       const platformPart = platforms?.length ? `platforms=${platforms.join(",")}` : "platforms=all";
@@ -195,15 +207,17 @@ function ensureBundledExtensionNodeModulesLink(nodeModulesDir: string | null): v
  * to the nearest node_modules containing the pi runtime packages is enough to
  * let standard Node module resolution succeed.
  */
-let ensuredWorkspaceExtensionLink = false;
+let ensuredWorkspaceExtensionLinkKey: string | null = null;
 function ensureWorkspaceExtensionNodeModulesLink(nodeModulesDir: string | null): void {
   if (!nodeModulesDir) return;
-  if (ensuredWorkspaceExtensionLink) return;
   const workspaceExtensionsDir = join(getWorkspaceDir(), ".pi", "extensions");
-  if (existsSync(workspaceExtensionsDir)) {
-    ensureExtensionNodeModulesLink(workspaceExtensionsDir, nodeModulesDir);
-  }
-  ensuredWorkspaceExtensionLink = true;
+  if (!existsSync(workspaceExtensionsDir)) return;
+
+  const ensureKey = `${workspaceExtensionsDir}=>${nodeModulesDir}`;
+  if (ensuredWorkspaceExtensionLinkKey === ensureKey) return;
+
+  ensureExtensionNodeModulesLink(workspaceExtensionsDir, nodeModulesDir);
+  ensuredWorkspaceExtensionLinkKey = ensureKey;
 }
 
 type AddonPackageManifest = {

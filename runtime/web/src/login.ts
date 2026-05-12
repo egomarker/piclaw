@@ -1,7 +1,7 @@
 /**
  * login.ts – Web login page behavior (TOTP + optional passkey login).
  *
- * This module is bundled to /static/dist/login.bundle.js and loaded by
+ * This module is bundled to /static/common/dist/login.bundle.js and loaded by
  * web/static/login.html. It intentionally has no framework/runtime deps.
  */
 

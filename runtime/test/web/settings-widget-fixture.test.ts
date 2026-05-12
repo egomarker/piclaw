@@ -6,8 +6,8 @@ const repoRoot = join(import.meta.dir, "../..");
 
 test("settings widget fixture static shell references the fixture bundle and app CSS", () => {
   const html = readFileSync(join(repoRoot, "web/static/dev/settings-widget-fixture.html"), "utf8");
-  expect(html).toContain('/static/dist/app.bundle.css');
-  expect(html).toContain('/static/dist/settings-widget-fixture.bundle.js');
+  expect(html).toContain('/static/classic/dist/app.bundle.css');
+  expect(html).toContain('/static/classic/dist/settings-widget-fixture.bundle.js');
 });
 
 test("build:web includes the settings widget fixture entrypoint", () => {

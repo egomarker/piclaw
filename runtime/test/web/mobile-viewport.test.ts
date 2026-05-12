@@ -44,7 +44,7 @@ test('shouldUseStandaloneMobileViewportFix only enables for standalone mobile ru
 test('index bootstraps standalone app height before loading bundled CSS', () => {
   const html = readFileSync(new URL('../../web/static/classic/index.html', import.meta.url), 'utf8');
   const bootstrapIndex = html.indexOf('iOS standalone PWA guard: set --app-height before CSS loads');
-  const cssIndex = html.indexOf('rel="stylesheet" href="/static/dist/app.bundle.css');
+  const cssIndex = html.indexOf('rel="stylesheet" href="/static/classic/dist/app.bundle.css');
   expect(bootstrapIndex).toBeGreaterThan(0);
   expect(cssIndex).toBeGreaterThan(bootstrapIndex);
   expect(html).toContain("document.documentElement.style.setProperty('--app-height', '100vh')");

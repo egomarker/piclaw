@@ -216,8 +216,8 @@ async function main() {
   const harness = createTempHarnessRoot();
   const artifactDir = resolve(repoRoot, 'artifacts', 'oobe-local-container');
   mkdirSync(artifactDir, { recursive: true });
-  const currentWebDistDir = resolve(repoRoot, 'runtime', 'web', 'static', 'dist');
-  const containerWebDistDir = '/usr/local/lib/bun/install/global/node_modules/piclaw/runtime/web/static/dist';
+  const currentWebDistDir = resolve(repoRoot, 'runtime', 'web', 'static', 'classic', 'dist');
+  const containerWebDistDir = '/usr/local/lib/bun/install/global/node_modules/piclaw/runtime/web/static/classic/dist';
   const stamp = new Date().toISOString().replace(/[.:]/g, '-');
   const hostPort = await getFreePort();
   const baseUrl = `http://127.0.0.1:${hostPort}`;

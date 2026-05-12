@@ -49,8 +49,8 @@ describe("web http route classification", () => {
     expect(authFlags.isAuthEndpoint).toBe(true);
     expect(authFlags.isMutating).toBe(true);
 
-    const staticReq = new Request("https://example.com/static/dist/login.bundle.js", { method: "GET" });
-    const staticFlags = getRouteFlags(staticReq, "/static/dist/login.bundle.js");
+    const staticReq = new Request("https://example.com/static/common/dist/login.bundle.js", { method: "GET" });
+    const staticFlags = getRouteFlags(staticReq, "/static/common/dist/login.bundle.js");
     expect(staticFlags.isStaticAsset).toBe(true);
     expect(staticFlags.isPublicStatic).toBe(true);
     expect(shouldSkipAuthCheck(staticFlags, false)).toBe(true);
@@ -62,8 +62,8 @@ describe("web http route classification", () => {
     expect(faviconFlags.isFavicon).toBe(true);
     expect(shouldSkipAuthCheck(faviconFlags, false)).toBe(true);
 
-    const appReq = new Request("https://example.com/static/dist/app.bundle.js", { method: "GET" });
-    const appFlags = getRouteFlags(appReq, "/static/dist/app.bundle.js");
+    const appReq = new Request("https://example.com/static/classic/dist/app.bundle.js", { method: "GET" });
+    const appFlags = getRouteFlags(appReq, "/static/classic/dist/app.bundle.js");
     expect(appFlags.isStaticAsset).toBe(true);
     expect(appFlags.isPublicStatic).toBe(false);
     expect(shouldSkipAuthCheck(appFlags, false)).toBe(false);

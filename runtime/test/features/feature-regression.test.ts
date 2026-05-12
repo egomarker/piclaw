@@ -97,7 +97,7 @@ describe("feature: web UI", () => {
     const html = await fetchText(`${base()}/`);
     const cssMatch = html.text.match(/app\.bundle\.css\?v=([a-f0-9]+)/);
     expect(cssMatch).toBeTruthy();
-    const cssRes = await fetchText(`${base()}/static/dist/app.bundle.css?v=${cssMatch![1]}`);
+    const cssRes = await fetchText(`${base()}/static/classic/dist/app.bundle.css?v=${cssMatch![1]}`);
     expect(cssRes.status).toBe(200);
     expect(cssRes.text.length).toBeGreaterThan(1000);
   });
@@ -106,7 +106,7 @@ describe("feature: web UI", () => {
     const html = await fetchText(`${base()}/`);
     const jsMatch = html.text.match(/app\.bundle\.js\?v=([a-f0-9]+)/);
     expect(jsMatch).toBeTruthy();
-    const jsRes = await fetchText(`${base()}/static/dist/app.bundle.js?v=${jsMatch![1]}`);
+    const jsRes = await fetchText(`${base()}/static/classic/dist/app.bundle.js?v=${jsMatch![1]}`);
     expect(jsRes.status).toBe(200);
     expect(jsRes.text.length).toBeGreaterThan(10000);
   });

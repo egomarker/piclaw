@@ -3,7 +3,7 @@
 #
 # Build pipeline:
 #   1. `bun run build`     – Type-check/compile TypeScript for CI parity.
-#   2. `bun run build:web` – Produces web/static/dist/{app,login}.bundle.js.
+#   2. `bun run build:web` – Produces web/static/{classic,common}/dist bundles.
 #   3. Drop browser sourcemaps for the runtime image.
 #   4. `bun pm pack`       – Creates the tarball for global install.
 set -euo pipefail
@@ -20,7 +20,7 @@ bun update --ignore-scripts
 bun install --ignore-scripts
 bun run build
 bun run build:web
-find runtime/web/static/dist -type f -name '*.map' -delete
+find runtime/web/static/classic/dist runtime/web/static/common/dist -type f -name '*.map' -delete
 
 rm -f piclaw-*.tgz
 PACK_DIR="$(mktemp -d)"

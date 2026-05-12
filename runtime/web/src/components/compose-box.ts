@@ -2602,7 +2602,7 @@ export function ComposeBox({
             if (!target || typeof target !== 'object') return false;
             if (target.isContentEditable) return true;
             if (typeof target.closest !== 'function') return false;
-            return Boolean(target.closest('input, textarea, select, [contenteditable="true"], .compose-box, .compose-model-popup, .compose-session-popup, .settings-dialog, .workspace-sidebar, .editor-pane-container, .dock-panel, .timeline-menu-dropdown, .rename-branch-overlay, .agent-request-modal, .attachment-preview-modal, .vnc-pane-shell, .kanban-plugin, .mindmap-editor, .timeline-quick-actions'));
+            return Boolean(target.closest('input, textarea, select, [contenteditable="true"], .compose-box, .compose-model-popup, .compose-session-popup, .settings-dialog, .workspace-sidebar, .editor-pane-container, .dock-panel, .timeline-menu-dropdown, .rename-branch-overlay, .agent-request-modal, .attachment-preview-modal, .vnc-pane-shell, .kanban-plugin, .timeline-quick-actions'));
         };
         const onGlobalKeyDown = (event) => {
             if (event.ctrlKey || event.metaKey || event.altKey) return;

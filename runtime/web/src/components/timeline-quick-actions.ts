@@ -31,7 +31,6 @@ function isEditableTarget(target) {
         '.attachment-preview-modal',
         '.vnc-pane-shell',
         '.kanban-plugin',
-        '.mindmap-editor',
     ].join(', ')));
 }
 

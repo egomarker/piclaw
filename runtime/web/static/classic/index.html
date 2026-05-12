@@ -21,7 +21,7 @@
     - /static/common/dist/login.bundle.css (loaded only by login.html)
 
   Vendor JS globals (marked, KaTeX, Mermaid) remain separate prebuilt files.
-  App/login CSS is bundled into /static/dist/*.bundle.css.
+  App CSS is bundled into /static/classic/dist/*.bundle.css; login CSS uses /static/common/dist/.
   request-router-service.ts auth-gates /static/classic/dist/app.bundle.{js,css} and only
   exposes /static/common/dist/login.bundle.{js,css} to unauthenticated visitors.
 -->
@@ -77,8 +77,8 @@
             } catch(e) {}
         })();
     </script>
-    <link rel="stylesheet" href="/static/classic/dist/app.bundle.css?v=2fdf577fde01">
-    <link id="dynamic-manifest" rel="manifest" href="/manifest.json?v=2fdf577fde01">
+    <link rel="stylesheet" href="/static/classic/dist/app.bundle.css?v=63c3778adf4f">
+    <link id="dynamic-manifest" rel="manifest" href="/manifest.json?v=63c3778adf4f">
     <link id="dynamic-favicon" rel="icon" href="/favicon.ico">
     <link id="dynamic-apple-touch-icon" rel="apple-touch-icon" href="/apple-touch-icon.png">
     <link id="dynamic-apple-touch-icon-180" rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-180x180.png">
@@ -174,6 +174,6 @@
       }
     }
     </script>
-    <script type="module" src="/static/classic/dist/app.bundle.js?v=2fdf577fde01"></script>
+    <script type="module" src="/static/classic/dist/app.bundle.js?v=63c3778adf4f"></script>
 </body>
 </html>

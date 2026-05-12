@@ -7,8 +7,8 @@
  * any module that needs simple JSON-file persistence.
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from "fs";
-import { dirname } from "path";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
 
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
 
@@ -43,7 +43,10 @@ export function readJsonConfig(filePath: string): Record<string, unknown> {
  * @param config   - The object to serialize and persist.
  */
 export function writeJsonConfig(filePath: string, config: Record<string, unknown>): void {
-  mkdirSync(dirname(filePath), { recursive: true });
+  const parentDir = dirname(filePath);
+  mkdirSync(parentDir, { recursive: true });
   const next = JSON.stringify(config, null, 2);
-  writeFileSync(filePath, `${next}\n`, "utf-8");
+  const tempPath = join(parentDir, `.${process.pid}.${Date.now()}.tmp`);
+  writeFileSync(tempPath, `${next}\n`, "utf-8");
+  renameSync(tempPath, filePath);
 }

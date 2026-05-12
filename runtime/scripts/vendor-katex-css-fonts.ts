@@ -31,8 +31,8 @@ const SOURCE_CSS = resolveInstalledPath("node_modules/katex/dist/katex.min.css")
 const SOURCE_FONTS_DIR = resolveInstalledPath("node_modules/katex/dist/fonts");
 const CSS_OUTPUT = resolve(PROJECT_DIR, "web/src/styles/katex.bundle.css");
 const META_OUTPUT = resolve(PROJECT_DIR, "web/src/styles/katex.bundle.meta.json");
-const FONTS_OUTPUT_DIR = resolve(PROJECT_DIR, "web/static/fonts");
-const FONT_URL_PREFIX = "../../static/fonts";
+const FONTS_OUTPUT_DIR = resolve(PROJECT_DIR, "web/static/common/fonts");
+const FONT_URL_PREFIX = "../../static/common/fonts";
 const LOG_PREFIX = "[vendor:katex-css-fonts]";
 
 interface KatexPackageJson {

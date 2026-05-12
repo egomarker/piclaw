@@ -17,17 +17,18 @@ import { existsSync, readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 
 const INDEX = resolve(import.meta.dir, "../web/static/classic/index.html");
-const DIST = resolve(import.meta.dir, "../web/static/classic/dist");
+const CLASSIC_DIST = resolve(import.meta.dir, "../web/static/classic/dist");
+const COMMON_DIST = resolve(import.meta.dir, "../web/static/common/dist");
 
 // Build a content hash from the main bundle files so the stamp is
 // deterministic and tied to actual content, not wall-clock time.
 function computeBundleContentHash(): string {
   const bundleFiles = [
-    resolve(DIST, "app.bundle.js"),
-    resolve(DIST, "app.bundle.css"),
-    resolve(DIST, "login.bundle.js"),
-    resolve(DIST, "login.bundle.css"),
-    resolve(DIST, "editor.bundle.js"),
+    resolve(CLASSIC_DIST, "app.bundle.js"),
+    resolve(CLASSIC_DIST, "app.bundle.css"),
+    resolve(CLASSIC_DIST, "editor.bundle.js"),
+    resolve(COMMON_DIST, "login.bundle.js"),
+    resolve(COMMON_DIST, "login.bundle.css"),
   ];
   const hash = createHash("sha256");
   for (const file of bundleFiles) {

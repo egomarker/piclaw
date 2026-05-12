@@ -27,16 +27,16 @@ test("build:web produces bundle assets", async () => {
   const exitCode = await proc.exited;
   expect(exitCode).toBe(0);
 
-  const appBundlePath = join(root, "web", "static", "dist", "app.bundle.js");
-  const appMapPath = join(root, "web", "static", "dist", "app.bundle.js.map");
-  const appCssPath = join(root, "web", "static", "dist", "app.bundle.css");
+  const appBundlePath = join(root, "web", "static", "classic", "dist", "app.bundle.js");
+  const appMapPath = join(root, "web", "static", "classic", "dist", "app.bundle.js.map");
+  const appCssPath = join(root, "web", "static", "classic", "dist", "app.bundle.css");
 
-  const loginBundlePath = join(root, "web", "static", "dist", "login.bundle.js");
-  const loginMapPath = join(root, "web", "static", "dist", "login.bundle.js.map");
-  const loginCssPath = join(root, "web", "static", "dist", "login.bundle.css");
+  const loginBundlePath = join(root, "web", "static", "common", "dist", "login.bundle.js");
+  const loginMapPath = join(root, "web", "static", "common", "dist", "login.bundle.js.map");
+  const loginCssPath = join(root, "web", "static", "common", "dist", "login.bundle.css");
 
-  const editorBundlePath = join(root, "web", "static", "dist", "editor.bundle.js");
-  const editorMapPath = join(root, "web", "static", "dist", "editor.bundle.js.map");
+  const editorBundlePath = join(root, "web", "static", "classic", "dist", "editor.bundle.js");
+  const editorMapPath = join(root, "web", "static", "classic", "dist", "editor.bundle.js.map");
 
   expect(existsSync(appBundlePath)).toBe(true);
   expect(existsSync(appMapPath)).toBe(true);
