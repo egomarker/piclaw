@@ -304,7 +304,7 @@ export async function listAllKeychainEntries(): Promise<KeychainEntryMetadata[]>
   const merged = [...internal];
   for (const ext of external) {
     if (!internalNames.has(ext.name)) {
-      merged.push({ name: ext.name, type: ext.type, agentNote: "", createdAt: null as any, updatedAt: null as any });
+      merged.push({ name: ext.name, type: ext.type, agentNote: "", createdAt: "", updatedAt: "" });
     }
   }
   return merged;
