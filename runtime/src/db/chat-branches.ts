@@ -456,8 +456,7 @@ function moveChatCursorToLastPosition(chatJid: string): void {
     INSERT INTO chat_cursors (chat_jid, cursor_ts, queued_followups_json)
     VALUES (?, ?, NULL)
     ON CONFLICT(chat_jid) DO UPDATE SET
-      cursor_ts = excluded.cursor_ts,
-      queued_followups_json = NULL
+      cursor_ts = excluded.cursor_ts
   `).run(chatJid, ts);
 }
 

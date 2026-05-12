@@ -24,8 +24,8 @@ export function pickNumber(config: Record<string, unknown>, keys: string[]): num
     const value = config[key];
     if (typeof value === "number" && Number.isFinite(value)) return value;
     if (typeof value === "string" && value.trim()) {
-      const parsed = parseInt(value, 10);
-      if (!Number.isNaN(parsed)) return parsed;
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
     }
   }
   return undefined;

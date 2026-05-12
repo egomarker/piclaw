@@ -540,7 +540,10 @@ export function getWebServerConfig(): Readonly<WebServerConfig> {
 }
 
 /** Mutable web auth/session/runtime settings grouped for auth and UI wiring. */
+export type WebUiMode = 'classic' | 'visual';
+
 export interface WebRuntimeConfig {
+  uiMode: WebUiMode;
   totpSecret: string;
   totpWindow: number;
   sessionTtl: number;
@@ -599,6 +602,7 @@ const envTrustProxy = pickBoolean({ PICLAW_TRUST_PROXY: envTrustProxyRaw }, ["PI
 
 /** Grouped web auth/session/runtime settings. `totpSecret` stays mutable for runtime resets. */
 export const WEB_RUNTIME_CONFIG: WebRuntimeConfig = Object.seal({
+  uiMode: (process.env.PICLAW_WEB_UI_MODE?.trim().toLowerCase() === 'visual' ? 'visual' : 'classic') as WebUiMode,
   totpSecret:
     process.env.PICLAW_WEB_TOTP_SECRET ||
     envConfig.PICLAW_WEB_TOTP_SECRET ||
@@ -869,6 +873,18 @@ const configSessionAutoRotate = pickBoolean(piclawConfig, [
   "session_auto_rotate",
   "PICLAW_SESSION_AUTO_ROTATE",
 ]);
+const configSessionMaxLines = pickNumber(piclawConfig, [
+  "sessionMaxLines",
+  "session_max_lines",
+  "PICLAW_SESSION_MAX_LINES",
+]);
+const configSessionMaxCompactions = pickNumber(piclawConfig, [
+  "sessionMaxCompactions",
+  "session_max_compactions",
+  "maxCompactionsBeforeRotation",
+  "max_compactions_before_rotation",
+  "PICLAW_SESSION_MAX_COMPACTIONS",
+]);
 const configTurnMaxToolUseMessages = pickNumber(piclawConfig, [
   "turnMaxToolUseMessages",
   "turn_max_tool_use_messages",
@@ -1027,14 +1043,19 @@ const sessionMaxSizeMb =
 const sessionMaxLines =
   pickNumber({ PICLAW_SESSION_MAX_LINES: process.env.PICLAW_SESSION_MAX_LINES ?? envConfig.PICLAW_SESSION_MAX_LINES }, [
     "PICLAW_SESSION_MAX_LINES",
-  ]) ?? 8000;
+  ]) ?? configSessionMaxLines ?? 8000;
+
+const sessionMaxCompactionsBeforeRotation =
+  pickNumber({ PICLAW_SESSION_MAX_COMPACTIONS: process.env.PICLAW_SESSION_MAX_COMPACTIONS }, [
+    "PICLAW_SESSION_MAX_COMPACTIONS",
+  ]) ?? configSessionMaxCompactions ?? 3;
 
 /** Grouped session-file safeguards. */
 export let SESSION_STORAGE_CONFIG = Object.freeze<SessionStorageConfig>({
   maxSizeMb: sessionMaxSizeMb,
   maxSizeBytes: sessionMaxSizeMb * 1024 * 1024,
   maxLines: sessionMaxLines,
-  maxCompactionsBeforeRotation: 3,
+  maxCompactionsBeforeRotation: sessionMaxCompactionsBeforeRotation,
   autoRotate:
     pickBoolean({ PICLAW_SESSION_AUTO_ROTATE: process.env.PICLAW_SESSION_AUTO_ROTATE ?? envConfig.PICLAW_SESSION_AUTO_ROTATE }, [
       "PICLAW_SESSION_AUTO_ROTATE",
@@ -1069,6 +1090,14 @@ export function setSessionStorageConfig(patch: { maxSizeMb?: number; maxLines?: 
     "sessionAutoRotate",
     "session_auto_rotate",
     "PICLAW_SESSION_AUTO_ROTATE",
+    "sessionMaxLines",
+    "session_max_lines",
+    "PICLAW_SESSION_MAX_LINES",
+    "sessionMaxCompactions",
+    "session_max_compactions",
+    "maxCompactionsBeforeRotation",
+    "max_compactions_before_rotation",
+    "PICLAW_SESSION_MAX_COMPACTIONS",
   ];
   for (const key of clearRootKeys) {
     delete config[key];
@@ -1082,6 +1111,7 @@ export function setSessionStorageConfig(patch: { maxSizeMb?: number; maxLines?: 
   process.env.PICLAW_SESSION_MAX_SIZE_MB = String(nextMaxSizeMb);
   process.env.PICLAW_SESSION_AUTO_ROTATE = nextAutoRotate ? "1" : "0";
   process.env.PICLAW_SESSION_MAX_LINES = String(nextMaxLines);
+  process.env.PICLAW_SESSION_MAX_COMPACTIONS = String(nextMaxCompactions);
 
   SESSION_STORAGE_CONFIG = Object.freeze<SessionStorageConfig>({
     ...SESSION_STORAGE_CONFIG,
@@ -1514,8 +1544,18 @@ export function getCompactionRuntimeConfig(): Readonly<CompactionRuntimeConfig> 
       process.env.PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS,
       COMPACTION_RUNTIME_CONFIG.progressWatchdogTimeoutMs,
     ),
-    thresholdPercent: COMPACTION_RUNTIME_CONFIG.thresholdPercent,
-    backoffDecayFactor: COMPACTION_RUNTIME_CONFIG.backoffDecayFactor,
+    thresholdPercent: (() => {
+      const parsed = Number(process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT);
+      return Number.isFinite(parsed) && parsed > 0 && parsed <= 100
+        ? parsed
+        : COMPACTION_RUNTIME_CONFIG.thresholdPercent;
+    })(),
+    backoffDecayFactor: (() => {
+      const parsed = Number(process.env.PICLAW_COMPACTION_BACKOFF_DECAY_FACTOR);
+      return Number.isFinite(parsed) && parsed > 0 && parsed <= 1
+        ? parsed
+        : COMPACTION_RUNTIME_CONFIG.backoffDecayFactor;
+    })(),
   });
 }
 
@@ -1603,6 +1643,8 @@ export function setCompactionRuntimeConfig(patch: {
   process.env.PICLAW_COMPACTION_BACKOFF_MAX_MS = String(next.backoffMaxMs);
   process.env.PICLAW_PROGRESS_WATCHDOG_ENABLED = next.progressWatchdogEnabled ? "1" : "0";
   process.env.PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS = String(next.progressWatchdogTimeoutMs);
+  process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT = String(next.thresholdPercent);
+  process.env.PICLAW_COMPACTION_BACKOFF_DECAY_FACTOR = String(next.backoffDecayFactor);
 
   COMPACTION_RUNTIME_CONFIG = Object.seal(next);
   return getCompactionRuntimeConfig();
