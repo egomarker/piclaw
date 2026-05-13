@@ -406,11 +406,9 @@ function downloadBunReleaseBinary(bunTarget: string, workdir: string): string {
 function assertBundledPiCli(appDir: string): void {
   const piPackageJson = join(appDir, "node_modules", "@earendil-works", "pi-coding-agent", "package.json");
   const piCli = join(appDir, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
-  const piBinShim = join(appDir, "node_modules", ".bin", process.platform === "win32" ? "pi.cmd" : "pi");
 
   if (!existsSync(piPackageJson)) throw new Error("Portable bundle is missing @earendil-works/pi-coding-agent");
   if (!existsSync(piCli)) throw new Error("Portable bundle is missing the Pi CLI entrypoint: node_modules/@earendil-works/pi-coding-agent/dist/cli.js");
-  if (!existsSync(piBinShim)) throw new Error(`Portable bundle is missing the Pi package-manager shim: ${piBinShim}`);
 }
 
 function copyBundledBun(bundleDir: string, info: PlatformInfo, workdir: string): void {
