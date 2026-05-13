@@ -61,11 +61,19 @@ describe("session recording routes", () => {
     expect((await deleted!.json()).deleted).toBe(true);
   });
 
-  test("serves standalone playback html", async () => {
+  test("serves standalone playback html with valid inline script", async () => {
     const response = await handleSessionRecordingRoutes(new Request("https://example.com/recordings/playback"), "/recordings/playback", json);
     expect(response?.status).toBe(200);
     expect(response?.headers.get("Content-Type")).toContain("text/html");
-    expect(await response!.text()).toContain("Session Playback");
+
+    const html = await response!.text();
+    expect(html).toContain("Session Playback");
+    expect(html).toContain('new RegExp("\\\\n+")');
+    expect(html).not.toContain("split(/\n+/)");
+
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+    expect(script).toBeTruthy();
+    expect(() => new Function(script!)).not.toThrow();
   });
 
   test("exports recordings and previews redaction", async () => {
