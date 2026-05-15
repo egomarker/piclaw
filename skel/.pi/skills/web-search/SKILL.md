@@ -1,6 +1,6 @@
 ---
 name: web-search
-description: Search the web via SearXNG and optionally fetch result pages as raw Markdown content.
+description: Search the web via SearXNG (or DuckDuckGo fallback) and optionally fetch result pages as raw Markdown content.
 distribution: public
 ---
 
@@ -9,6 +9,11 @@ distribution: public
 Use this when you want **search results plus raw fetched page content**.
 
 If you only need short summaries rather than full converted page content, use `web-search-summary` instead.
+
+## Search engine selection
+
+- If `PICLAW_SEARX_URL` is set or `--searx-url` is passed, uses SearXNG.
+- Otherwise, falls back to **DuckDuckGo HTML search** (no API key required).
 
 ## Examples
 
@@ -58,7 +63,7 @@ The script prints JSON like:
 - `--limit` — number of search results to return (default `5`)
 - `--fetch` — fetch and convert result pages (`true` / `1`)
 - `--fetch-limit` — how many results to fetch and convert (default `2`)
-- `--searx-url` — override the SearXNG endpoint (default `http://192.168.1.100:3080/search`)
+- `--searx-url` — override the SearXNG endpoint (env: `PICLAW_SEARX_URL`; falls back to DuckDuckGo if unset)
 - `--timeout` — fetch timeout in milliseconds (default `15000`)
 
 ## Notes

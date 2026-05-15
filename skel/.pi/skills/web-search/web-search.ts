@@ -22,14 +22,22 @@ type SearxResponse = {
   }>;
 };
 
-/** Default SearXNG instance URL. */
+/** Default SearXNG instance URL (override with PICLAW_SEARX_URL env var). */
 const DEFAULT_SEARX_URL = "http://192.168.1.100:3080/search";
+/** DuckDuckGo HTML search URL used when no SearXNG instance is configured. */
+const DUCKDUCKGO_HTML_URL = "https://html.duckduckgo.com/html/";
 /** Default max number of search results to return. */
 const DEFAULT_LIMIT = 5;
 /** Default max number of result pages to fetch and convert. */
 const DEFAULT_FETCH_LIMIT = 2;
 /** Default HTTP fetch timeout in milliseconds. */
 const DEFAULT_TIMEOUT = 15000;
+
+function resolveSearxUrl(): string | null {
+  const envUrl = process.env.PICLAW_SEARX_URL?.trim();
+  if (envUrl) return envUrl;
+  return null;
+}
 
 
 // --help support
@@ -73,7 +81,8 @@ function parseNumber(value: string | undefined, fallback: number) {
 
 const options = parseArgs(args);
 const query = options.query || options.q;
-const searxUrl = options["searx-url"] || options.searxUrl || DEFAULT_SEARX_URL;
+const searxUrl = options["searx-url"] || options.searxUrl || resolveSearxUrl();
+const useDuckDuckGo = !searxUrl;
 const limit = parseNumber(options.limit, DEFAULT_LIMIT);
 const fetchLimit = parseNumber(options["fetch-limit"], DEFAULT_FETCH_LIMIT);
 const shouldFetch = options.fetch === "true" || options.fetch === "1";
@@ -137,19 +146,58 @@ function htmlToMarkdown(html: string) {
   return turndown.turndown(main);
 }
 
+/** Parse DuckDuckGo HTML search results into structured results. */
+function parseDuckDuckGoResults(html: string, maxResults: number): SearchResult[] {
+  const { document } = parseHTML(html);
+  const results: SearchResult[] = [];
+  const links = document.querySelectorAll(".result__a, .result__title a");
+  for (const link of Array.from(links)) {
+    if (results.length >= maxResults) break;
+    const anchor = link as unknown as HTMLAnchorElement;
+    const href = anchor.getAttribute("href") || "";
+    const title = (anchor.textContent || "").trim();
+    if (!href || !title || href.startsWith("javascript:")) continue;
+    // DuckDuckGo wraps URLs in a redirect; extract the actual URL
+    let url = href;
+    try {
+      const parsed = new URL(href, "https://duckduckgo.com");
+      const uddg = parsed.searchParams.get("uddg");
+      if (uddg) url = uddg;
+    } catch { /* use href as-is */ }
+    const snippet = (link as unknown as Element).parentElement?.querySelector(".result__snippet");
+    results.push({
+      url,
+      title,
+      content: snippet?.textContent?.trim() || undefined,
+    });
+  }
+  return results;
+}
+
 /** Search SearXNG, optionally fetch and convert result pages, and print output. */
 async function run() {
-  const params = new URLSearchParams({ q: query, format: "json" });
-  const searchUrl = `${searxUrl}?${params.toString()}`;
-  const data = (await fetchJson(searchUrl)) as SearxResponse;
+  let results: SearchResult[];
+  let engine: string;
 
-  const results: SearchResult[] = (data.results || [])
-    .slice(0, limit)
-    .map((item) => ({
-      url: item.url,
-      title: item.title,
-      content: item.content,
-    }));
+  if (useDuckDuckGo) {
+    engine = "duckduckgo";
+    const params = new URLSearchParams({ q: query });
+    const ddgUrl = `${DUCKDUCKGO_HTML_URL}?${params.toString()}`;
+    const html = await fetchWithTimeout(ddgUrl, timeoutMs);
+    results = parseDuckDuckGoResults(html, limit);
+  } else {
+    engine = "searxng";
+    const params = new URLSearchParams({ q: query, format: "json" });
+    const searchUrl = `${searxUrl}?${params.toString()}`;
+    const data = (await fetchJson(searchUrl)) as SearxResponse;
+    results = (data.results || [])
+      .slice(0, limit)
+      .map((item) => ({
+        url: item.url,
+        title: item.title,
+        content: item.content,
+      }));
+  }
 
   if (shouldFetch) {
     const fetchTargets = results.slice(0, fetchLimit);
@@ -168,7 +216,8 @@ async function run() {
     JSON.stringify(
       {
         query,
-        searxUrl,
+        engine,
+        searxUrl: searxUrl || null,
         limit,
         fetch: shouldFetch,
         results,

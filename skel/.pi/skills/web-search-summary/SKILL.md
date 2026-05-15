@@ -1,6 +1,6 @@
 ---
 name: web-search-summary
-description: Search via SearXNG, fetch top results, and return sentence-level summaries plus optional converted page content.
+description: Search via SearXNG (or DuckDuckGo fallback), fetch top results, and return sentence-level summaries plus optional converted page content.
 distribution: public
 ---
 
@@ -9,6 +9,11 @@ distribution: public
 Use this when you want **quick summaries of the top pages**, not full raw page content.
 
 If you need the fetched Markdown itself as the main artifact, use `web-search` instead.
+
+## Search engine selection
+
+- If `PICLAW_SEARX_URL` is set or `--searx-url` is passed, uses SearXNG.
+- Otherwise, falls back to **DuckDuckGo HTML search** (no API key required).
 
 ## Examples
 
@@ -62,7 +67,7 @@ The script prints JSON like:
 - `--limit` — number of search results to return (default `5`)
 - `--fetch` — set to `false` to skip page fetches (default `true`)
 - `--fetch-limit` — how many results to fetch and convert (default `2`)
-- `--searx-url` — override the SearXNG endpoint (default `http://192.168.1.100:3080/search`)
+- `--searx-url` — override the SearXNG endpoint (env: `PICLAW_SEARX_URL`; falls back to DuckDuckGo if unset)
 - `--timeout` — fetch timeout in milliseconds (default `15000`)
 - `--max-sentences` — summary sentence limit (default `3`)
 - `--max-chars` — summary character limit (default `600`)
