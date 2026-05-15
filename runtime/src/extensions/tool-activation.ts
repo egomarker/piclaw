@@ -109,6 +109,7 @@ const AUTO_ACTIVE_TOOL_NAMES = [
   "attach_file",
   "read_attachment",
   "export_attachment",
+  "ssh",
 ] as const;
 
 const TOOL_ACTIVATION_HINT = [
