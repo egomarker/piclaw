@@ -5,7 +5,9 @@ function ensureHighlighter(): void {
   if (_highlightCodeToHtml || _highlightLoadPromise) return;
   _highlightLoadPromise = import('./utils/code-highlighting.js').then((mod) => {
     _highlightCodeToHtml = mod.highlightCodeToHtml;
-  }).catch(() => { /* highlighting unavailable — will fall through to plain text */ });
+  }).catch(() => {
+    _highlightLoadPromise = Promise.resolve();
+  });
 }
 import { getThemeMode } from './ui/theme.js';
 

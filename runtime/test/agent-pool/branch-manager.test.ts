@@ -372,7 +372,7 @@ test("AgentBranchManager renameChatJid migrates hierarchical descendants and ses
   // Clean up any stale session dirs from prior tests before creating new ones
   for (const prefix of ["web_default_research", "web_default_research-notes"]) {
     for (const entry of readdirSync(SESSIONS_DIR).filter(e => e.startsWith(prefix))) {
-      try { rmSync(join(SESSIONS_DIR, entry), { recursive: true, force: true }); } catch { /* best-effort */ }
+      rmSync(join(SESSIONS_DIR, entry), { recursive: true, force: true });
     }
   }
 
@@ -415,7 +415,7 @@ test("AgentBranchManager renameChatJid migrates hierarchical descendants and ses
 
   // Clean up session dirs created in the static SESSIONS_DIR (not covered by ws.cleanup)
   for (const dir of [newParentDir, newParentSideDir, newChildDir, newChildVariant]) {
-    try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    rmSync(dir, { recursive: true, force: true });
   }
 
   ws.cleanup();
