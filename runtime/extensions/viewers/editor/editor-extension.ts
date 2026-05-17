@@ -205,25 +205,33 @@ function createStatusPanel(doc: Document, vimEnabledRef: { current: boolean }) {
 
         dom.append(left, right);
 
-        const update = () => {
+        let rafPending = false;
+        let lastLeftText = '';
+        let lastRightText = '';
+
+        const flush = () => {
+            rafPending = false;
             const state = view.state;
             const pos = state.selection.main.head;
             const line = state.doc.lineAt(pos);
             const col = pos - line.from + 1;
             const unit = state.facet(indentUnit) || '  ';
             const indentLabel = unit === '\t' ? 'Tabs' : `Spaces:${unit.length}`;
-            left.textContent = `Ln ${line.number}, Col ${col}`;
             const vimLabel = vimEnabledRef.current ? 'Vim' : 'Insert';
-            right.textContent = `${indentLabel} • ${vimLabel}`;
+            const nextLeft = `Ln ${line.number}, Col ${col}`;
+            const nextRight = `${indentLabel} • ${vimLabel}`;
+            if (nextLeft !== lastLeftText) { left.textContent = nextLeft; lastLeftText = nextLeft; }
+            if (nextRight !== lastRightText) { right.textContent = nextRight; lastRightText = nextRight; }
         };
 
-        update();
+        flush();
 
         return {
             dom,
             update: (updateEvent: any) => {
-                if (updateEvent.docChanged || updateEvent.selectionSet || updateEvent.viewportChanged) {
-                    update();
+                if (!rafPending && (updateEvent.docChanged || updateEvent.selectionSet)) {
+                    rafPending = true;
+                    requestAnimationFrame(flush);
                 }
             },
             destroy: () => {},
@@ -277,6 +285,7 @@ export class StandaloneEditorInstance implements PaneInstance {
     private largeDocumentMode = false;
     private initialContentLength = 0;
     private dirtyRecheckTimer: number | null = null;
+    private _viewStateRafPending = false;
     private contentChangeTimer: number | null = null;
     private diffMode: 'saved' | null = null;
     private vimEnabledRef: { current: boolean };
@@ -607,7 +616,7 @@ export class StandaloneEditorInstance implements PaneInstance {
             ...(options.scrollPastEnd === false ? [] : [scrollPastEnd()]),
             ...(enableRichFeatures ? [indentOnInput()] : []),
             closeBrackets(),
-            ...(enableRichFeatures ? [autocompletion(), highlightSelectionMatches(), indentationMarkers()] : []),
+            ...(enableRichFeatures ? [autocompletion()] : []),
             ...(enableRichFeatures ? [syntaxHighlighting(headingStyle), syntaxHighlighting(classHighlighter)] : []),
             search(),
             this.vimCompartment.of(this.vimEnabled ? vim() : []),
@@ -627,11 +636,18 @@ export class StandaloneEditorInstance implements PaneInstance {
                     this.scheduleContentChangeCallback();
                 }
                 if ((update.selectionSet || update.docChanged) && this.viewStateChangeCb) {
-                    const pos = update.state.selection.main.head;
-                    const line = update.state.doc.lineAt(pos);
-                    const col = pos - line.from + 1;
-                    const scrollTop = update.view.scrollDOM?.scrollTop || 0;
-                    this.viewStateChangeCb({ cursorLine: line.number, cursorCol: col, scrollTop });
+                    if (!this._viewStateRafPending) {
+                        this._viewStateRafPending = true;
+                        requestAnimationFrame(() => {
+                            this._viewStateRafPending = false;
+                            if (!this.view || !this.viewStateChangeCb) return;
+                            const pos = this.view.state.selection.main.head;
+                            const line = this.view.state.doc.lineAt(pos);
+                            const col = pos - line.from + 1;
+                            const scrollTop = this.view.scrollDOM?.scrollTop || 0;
+                            this.viewStateChangeCb({ cursorLine: line.number, cursorCol: col, scrollTop });
+                        });
+                    }
                 }
             }),
             this.buildSharedEditorTheme(),
