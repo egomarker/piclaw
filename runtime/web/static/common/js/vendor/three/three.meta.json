@@ -1,0 +1,11 @@
+{
+  "name": "three",
+  "version": "0.184.0",
+  "source": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/",
+  "license": "MIT",
+  "files": [
+    "three.module.min.js",
+    "three.core.min.js"
+  ],
+  "notes": "Vendored Three.js ESM module build. Use via <script type=\"module\"> import * as THREE from '/static/common/js/vendor/three/three.module.min.js'; </script> or the core-only build for smaller footprint."
+}

@@ -41,7 +41,10 @@ window.addEventListener('piclaw:widget-message', (e) => {
 The \`submit({ text })\` call is the main way to get output from the widget back into the conversation.
 
 Vendored libraries (served from \`/static/common/js/vendor/\`):
-- **Babylon.js 7.x** — UMD global build (exposes \`BABYLON\` global), use via script tag:
+
+Widgets load these on demand via \`<script src>\` inside the iframe — they are NOT pre-loaded by the host page. Each widget only pays for the libraries it actually uses.
+
+- **Babylon.js 9.x** — UMD global build (exposes \`BABYLON\` global):
   \`\`\`html
   <script src="/static/common/js/vendor/babylon/babylon.js"></script>
   <script>
@@ -50,8 +53,7 @@ Vendored libraries (served from \`/static/common/js/vendor/\`):
   var scene = new BABYLON.Scene(engine);
   var camera = new BABYLON.ArcRotateCamera('cam', -Math.PI/4, Math.PI/3, 10, BABYLON.Vector3.Zero(), scene);
   camera.attachControl(canvas, true);
-  new BABYLON.HemisphericLight('light', new BABYLON.Vector3(0,1,0), scene);
-  // PBR materials, GlowLayer, MeshBuilder, SceneLoader (STL/glTF) all included
+  scene.add(new BABYLON.HemisphericLight('light', new BABYLON.Vector3(0,1,0), scene));
   engine.runRenderLoop(function(){ scene.render(); });
   </script>
   \`\`\`
@@ -64,7 +66,24 @@ Vendored libraries (served from \`/static/common/js/vendor/\`):
   chart.setOption({ xAxis: { data: ['A','B','C'] }, yAxis: {}, series: [{ type: 'bar', data: [10, 20, 30] }] });
   window.addEventListener('resize', function(){ chart.resize(); });
   </script>
-  \`\`\``;
+  \`\`\`
+- **Three.js r184** — ESM 3D rendering (scenes, geometries, materials, loaders, post-processing):
+  \`\`\`html
+  <script type="module">
+  import * as THREE from '/static/common/js/vendor/three/three.module.min.js';
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(innerWidth, innerHeight);
+  document.body.appendChild(renderer.domElement);
+  const cube = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial({ color: 0x7dd3fc }));
+  scene.add(cube, new THREE.AmbientLight(0xffffff, 0.5), new THREE.DirectionalLight(0xffffff, 1));
+  camera.position.z = 3;
+  (function animate() { cube.rotation.x += 0.01; cube.rotation.y += 0.01; renderer.render(scene, camera); requestAnimationFrame(animate); })();
+  </script>
+  \`\`\`
+- **KaTeX 0.16** — math typesetting (available if the host page has loaded it; check window.katex).
+- **Marked 18** — markdown rendering (available if the host page has loaded it; check window.marked).`;
 
 type Params = {
   html: string;
