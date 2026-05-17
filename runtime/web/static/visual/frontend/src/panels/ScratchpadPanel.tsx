@@ -54,7 +54,9 @@ export function ScratchpadPanel() {
     const title = editorTitle.value.trim();
     if (!title) return;
     const item: ScratchItem = {
-      id: crypto.randomUUID(),
+      id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
       title,
       content: editorContent.value.trim(),
       selected: false,

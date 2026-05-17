@@ -41,7 +41,9 @@ function getTerminalClientId(): string {
   const key = "piclaw-terminal-client-id";
   let id = sessionStorage.getItem(key);
   if (!id) {
-    id = crypto.randomUUID();
+    id = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
     sessionStorage.setItem(key, id);
   }
   return id;
@@ -50,10 +52,33 @@ function getTerminalClientId(): string {
 let wasmInitialized = false;
 let wasmInitPromise: Promise<void> | null = null;
 
+/**
+ * Intercept fetch calls for data: WASM URLs and redirect to the vendored file.
+ * ghostty-web's bundled init() tries to fetch the WASM as a base64 data: URL,
+ * which fails in non-secure contexts. This shim rewrites to the vendored path.
+ */
+const GHOSTTY_WASM_PATH = "/static/common/js/vendor/ghostty-vt.wasm";
+const originalFetch = globalThis.fetch;
+
+async function withWasmFetchShim<T>(fn: () => Promise<T>): Promise<T> {
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (url.startsWith("data:application/wasm")) {
+      return originalFetch(new URL(GHOSTTY_WASM_PATH, window.location.origin).href, init);
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    return await fn();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
 async function ensureWasmInit(): Promise<void> {
   if (wasmInitialized) return;
   if (!wasmInitPromise) {
-    wasmInitPromise = init().then(() => {
+    wasmInitPromise = withWasmFetchShim(() => init()).then(() => {
       wasmInitialized = true;
     });
   }
@@ -86,7 +111,7 @@ export function TerminalComponent() {
       try {
         await ensureWasmInit();
       } catch (err) {
-        log.error(WASM init failed:", err);
+        log.error("WASM init failed:", err);
         if (mountedRef.current) {
           setConnStatus("error");
           setErrorMsg("Failed to load terminal engine. Will retry...");
