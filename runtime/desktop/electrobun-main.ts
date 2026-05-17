@@ -95,6 +95,7 @@ async function configureDesktopRuntime(): Promise<{ url: string; ownsRuntime: bo
   // opt-in until packaged executable path handling is validated per platform.
   setDefaultEnv("PICLAW_EXTERNAL_PROGRESS_WATCHDOG", "0");
   setDefaultEnv("PICLAW_DISABLE_BACKGROUND_WORKSPACE_INDEX", "1");
+  setDefaultEnv("PICLAW_WEB_UI_MODE", "visual");
 
   return {
     url: process.env.PICLAW_WEB_EXTERNAL_URL,
