@@ -21,7 +21,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, clockText }
           className={`tab-bar__tab${tab.id === activeTabId ? " tab-bar__tab--active" : ""}`}
           onClick={() => onSelectTab(tab.id)}
         >
-          {tab.icon && <span className="tab-bar__tab__icon" aria-hidden="true">{tab.icon}</span>}
+          {tab.icon && <span className="tab-bar__tab__icon" aria-hidden="true">{typeof tab.icon === "string" && tab.icon.trim().startsWith("<") ? <span dangerouslySetInnerHTML={{ __html: tab.icon }} /> : tab.icon}</span>}
           <span className="tab-bar__tab__label">{tab.label}</span>
           {tab.closable && (
             <span
