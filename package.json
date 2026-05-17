@@ -1,6 +1,6 @@
 {
   "name": "piclaw",
-  "version": "2.3.13",
+  "version": "2.4.0",
   "description": "Personal pi coding agent assistant. Lightweight nanoclaw-style orchestrator using Bun and pi.",
   "type": "module",
   "license": "MIT",
@@ -172,7 +172,7 @@
     "assemblyscript": "0.28.17",
     "codemirror": "6.0.2",
     "dompurify": "3.4.2",
-    "esbuild": "^0.28.0",
+    "esbuild": "0.28.0",
     "eslint": "10.3.0",
     "globals": "17.6.0",
     "playwright": "1.59.1",

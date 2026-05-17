@@ -448,7 +448,7 @@ test('resolveComposeExtensionWorkingDisplay renders default working state with a
     indicator: { mode: 'custom', frames: ['⠋', '⠙'], intervalMs: 90 },
   }, 1)).toEqual({
     visible: true,
-    title: 'Working…',
+    title: 'Thinking…',
     indicatorText: '⠙',
     animateDot: false,
     animateSpinner: false,
