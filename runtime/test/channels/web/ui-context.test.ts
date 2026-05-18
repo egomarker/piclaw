@@ -119,6 +119,9 @@ describe("ui-context", () => {
     let reloadCalled = false;
     let subscribeCalled = false;
     let unsubscribeCalled = false;
+    let forkArgs: any[] | null = null;
+    let switchArgs: any[] | null = null;
+    let newSessionOptions: any = null;
 
     const session = {
       isStreaming: true,
@@ -139,17 +142,35 @@ describe("ui-context", () => {
       },
     } as any;
 
-    await bindSessionUiContext(channel as any, createRuntime(session), "web:default");
+    const runtime = createRuntime(session) as any;
+    runtime.newSession = async (options: any) => {
+      newSessionOptions = options;
+      return { cancelled: false };
+    };
+    runtime.fork = async (...args: any[]) => {
+      forkArgs = args;
+      return { cancelled: false };
+    };
+    runtime.switchSession = async (...args: any[]) => {
+      switchArgs = args;
+      return { cancelled: true };
+    };
+
+    await bindSessionUiContext(channel as any, runtime, "web:default");
     expect(boundArgs).toBeDefined();
 
     const actions = boundArgs.commandContextActions;
     await actions.waitForIdle();
     expect(subscribeCalled).toBe(true);
     expect(unsubscribeCalled).toBe(true);
-    expect(await actions.newSession({})).toEqual({ cancelled: false });
-    expect(await actions.fork("abc")).toEqual({ cancelled: false });
+    const withSession = async () => {};
+    expect(await actions.newSession({ withSession })).toEqual({ cancelled: false });
+    expect(newSessionOptions).toEqual({ withSession });
+    expect(await actions.fork("abc", { position: "at", withSession })).toEqual({ cancelled: false });
+    expect(forkArgs).toEqual(["abc", { position: "at", withSession }]);
     expect(await actions.navigateTree("abc", {})).toEqual({ cancelled: true });
-    expect(await actions.switchSession("path")).toEqual({ cancelled: true });
+    expect(await actions.switchSession("path", { withSession })).toEqual({ cancelled: true });
+    expect(switchArgs).toEqual(["path", { withSession }]);
     await actions.reload();
     expect(reloadCalled).toBe(true);
 
@@ -160,6 +181,42 @@ describe("ui-context", () => {
     const errorEvent = events.find((event) => event.type === "extension_ui_error");
     expect(errorEvent).toBeDefined();
     expect(errorEvent?.payload?.chat_jid).toBe("web:default");
+  });
+
+  test("bindSessionUiContext suppresses stale ctx errors from replaced sessions", async () => {
+    const { channel, events } = makeChannel();
+    let currentSession: any;
+    const replacementSession = { isStreaming: false, reload: async () => {} };
+    const staleMessage = "This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload().";
+    const oldSession = {
+      isStreaming: false,
+      bindExtensions: async (args: any) => {
+        currentSession = replacementSession;
+        args.onError({
+          error: staleMessage,
+          event: "session_start",
+          extensionPath: "<inline:6>",
+        });
+      },
+      reload: async () => {},
+    } as any;
+    currentSession = oldSession;
+    const runtime = {
+      get session() { return currentSession; },
+      cwd: "/workspace",
+      diagnostics: [],
+      services: {} as any,
+      modelFallbackMessage: undefined,
+      newSession: async () => ({ cancelled: false }),
+      switchSession: async () => ({ cancelled: false }),
+      fork: async () => ({ cancelled: false }),
+      importFromJsonl: async () => ({ cancelled: false }),
+      dispose: async () => {},
+    } as any;
+
+    await bindSessionUiContext(channel as any, runtime, "web:default");
+
+    expect(events.some((event) => event.type === "extension_ui_error")).toBe(false);
   });
 
   test("bindSessionUiContext waitForIdle unsubscribes after a bounded timeout when agent_end never arrives", async () => {

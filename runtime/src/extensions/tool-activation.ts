@@ -236,6 +236,15 @@ function applyActiveToolNames(
   };
 }
 
+function isStaleExtensionContextError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("This extension ctx is stale after session replacement or reload");
+}
+
+function activateDefaultToolsForSession(api: ExtensionAPI): void {
+  const { allTools } = getCatalog(api);
+  api.setActiveTools(getEffectiveDefaultActiveToolNames(allTools));
+}
+
 function formatActivationSummary(result: ReturnType<typeof applyActiveToolNames>, label: string): string {
   const lines = [
     `${label}: ${result.accepted.length} accepted, ${result.newlyActivated.length} newly active, ${result.alreadyActive.length} already active, ${result.missing.length} missing.`,
@@ -252,8 +261,12 @@ function formatActivationSummary(result: ReturnType<typeof applyActiveToolNames>
 /** Extension factory that registers lazy tool activation controls. */
 export const toolActivation: ExtensionFactory = (pi: ExtensionAPI) => {
   pi.on("session_start", async () => {
-    const { allTools } = getCatalog(pi);
-    pi.setActiveTools(getEffectiveDefaultActiveToolNames(allTools));
+    try {
+      activateDefaultToolsForSession(pi);
+    } catch (error) {
+      if (isStaleExtensionContextError(error)) return;
+      throw error;
+    }
   });
 
   pi.on("before_agent_start", async (event) => ({

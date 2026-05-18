@@ -90,9 +90,10 @@ export class UiBridge {
     if (!chatJid.startsWith("web:")) return;
     this.touchChat(chatJid);
 
-    const session = runtime.session;
+    const boundSession = runtime.session;
 
     const waitForIdle = async (): Promise<void> => {
+      const session = runtime.session;
       if (!session.isStreaming) return;
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
       let settled = false;
@@ -134,20 +135,40 @@ export class UiBridge {
     };
 
     const uiContext = this.createUiContext(chatJid);
-    await session.bindExtensions({
+    if (boundSession !== runtime.session) {
+      debugSuppressedError(log, "Skipped binding extension UI context for a replaced session", {
+        operation: "web_theming_ui_bridge.bind_session.replaced_before_bind",
+        chatJid,
+      });
+      return;
+    }
+
+    await boundSession.bindExtensions({
       uiContext,
       commandContextActions: {
         waitForIdle,
         newSession: async (options) => runtime.newSession(options),
-        fork: async (entryId) => runtime.fork(entryId),
+        fork: async (entryId, options) => runtime.fork(entryId, options),
         navigateTree: async (targetId, options) => {
-          const result = await session.navigateTree(targetId, options);
+          const result = await runtime.session.navigateTree(targetId, options);
           return { cancelled: result.cancelled };
         },
-        switchSession: async (sessionPath) => runtime.switchSession(sessionPath),
-        reload: () => session.reload(),
+        switchSession: async (sessionPath, options) => runtime.switchSession(sessionPath, options),
+        reload: () => runtime.session.reload(),
       },
       onError: (error) => {
+        const message = typeof error?.error === "string" ? error.error : String(error?.error ?? error);
+        const staleSessionCtx = message.includes("This extension ctx is stale after session replacement or reload");
+        if (staleSessionCtx && boundSession !== runtime.session) {
+          debugSuppressedError(log, "Suppressed stale extension UI error from replaced session", {
+            operation: "web_theming_ui_bridge.on_error.stale_replaced_session",
+            chatJid,
+            event: error?.event,
+            extensionPath: error?.extensionPath,
+          });
+          return;
+        }
+
         const formattedError = [
           error.error || null,
           error.event ? `during ${error.event}` : null,

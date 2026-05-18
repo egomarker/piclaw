@@ -347,8 +347,8 @@ test('model picker helpers expose searchable names, formatted context windows, a
 
   expect(getModelPickerContextLimit({ ...option, contextWindow: 128000 }, { tokens: 150000 })).toEqual({
     blocked: true,
-    note: 'Needs compaction to switch',
-    title: 'Current context uses 150K tokens (~165K with estimator safety) plus app/tool overhead, but this model effectively fits about 124K (128K raw). Switch will compact first.',
+    note: 'Compact context first',
+    title: 'Current context uses 150K tokens (~165K with estimator safety) plus app/tool overhead, but this model effectively fits about 124K (128K raw). Compact context first, then switch.',
     tokens: 150000,
     safetyAdjustedTokens: 165000,
     contextWindow: 128000,
@@ -357,8 +357,8 @@ test('model picker helpers expose searchable names, formatted context windows, a
 
   expect(getModelPickerContextLimit({ ...option, contextWindow: 4096 }, { tokens: 100 })).toEqual({
     blocked: true,
-    note: 'Needs compaction to switch',
-    title: 'Current context uses 100 tokens (~110 with estimator safety) plus app/tool overhead, but this model effectively fits about 96 (4K raw). Switch will compact first.',
+    note: 'Compact context first',
+    title: 'Current context uses 100 tokens (~110 with estimator safety) plus app/tool overhead, but this model effectively fits about 96 (4K raw). Compact context first, then switch.',
     tokens: 100,
     safetyAdjustedTokens: 110,
     contextWindow: 4096,

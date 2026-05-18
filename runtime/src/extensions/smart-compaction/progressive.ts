@@ -182,6 +182,13 @@ ${chunk.text}
 </chunk>`;
 }
 
+function capPromptSection(value: string | undefined, maxChars: number, label: string): string | undefined {
+  const text = value?.trim();
+  if (!text) return undefined;
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}\n\n… (${label} truncated by ${text.length - maxChars} chars to keep progressive merge prompt inside the target context)`;
+}
+
 function buildMergePrompt(input: {
   summaries: string[];
   rangeLabel: string;
@@ -202,21 +209,25 @@ function buildMergePrompt(input: {
   sections.push("- Preserve exact paths, issue/PR numbers, commands, function names, and errors.");
   sections.push("- Preserve chronological ordering where it matters; newest active work wins over stale background work.");
   sections.push("- Do not drop user corrections or reported failures.");
-  if (input.previousSummary) {
+  const previousSummary = capPromptSection(input.previousSummary, input.final ? 8_000 : 4_000, "previous summary");
+  if (previousSummary) {
     sections.push("\n## Previous Summary To Update");
-    sections.push(input.previousSummary);
+    sections.push(previousSummary);
   }
-  if (input.keptMessagesSummary) {
+  const keptMessagesSummary = capPromptSection(input.keptMessagesSummary, input.final ? 6_000 : 3_000, "kept messages");
+  if (keptMessagesSummary) {
     sections.push("\n## Kept Messages That Survive Compaction (current work)");
-    sections.push(input.keptMessagesSummary);
+    sections.push(keptMessagesSummary);
   }
-  if (input.turnPrefixSummary) {
+  const turnPrefixSummary = capPromptSection(input.turnPrefixSummary, input.final ? 4_000 : 2_000, "split-turn prefix");
+  if (turnPrefixSummary) {
     sections.push("\n## Split Turn Prefix Context");
-    sections.push(input.turnPrefixSummary);
+    sections.push(turnPrefixSummary);
   }
-  if (input.customInstructions?.trim()) {
+  const customInstructions = capPromptSection(input.customInstructions, 2_000, "custom instructions");
+  if (customInstructions) {
     sections.push("\n## User Compaction Note");
-    sections.push(input.customInstructions.trim());
+    sections.push(customInstructions);
   }
   sections.push("\n## Ordered Intermediate Summaries");
   input.summaries.forEach((summary, idx) => {
@@ -381,20 +392,19 @@ async function mergeProgressiveSummaries(input: {
 
   input.ctx.ui.setWorkingMessage?.("Smart compaction: final progressive merge…");
   let finalPrompt = buildFinalPrompt();
-  if (!hasSafeCompactionOutputRoom(input.model, finalPrompt, input.maxTokens) && summaries.length === 1) {
-    const compressPrompt = buildMergePrompt({ summaries, rangeLabel: "final-fit-compress", final: false });
-    if (hasSafeCompactionOutputRoom(input.model, compressPrompt, input.maxTokens)) {
-      input.ctx.ui.setWorkingMessage?.("Smart compaction: compressing final summary to fit context…");
-      input.publishEstimate?.(estimateCompactionPromptTokens(compressPrompt), "merge_final_compress");
-      summaries = [await completeCompactionPrompt(
-        input.model,
-        input.auth,
-        compressPrompt,
-        input.maxTokens,
-        input.abortSignal,
-      )];
-      finalPrompt = buildFinalPrompt();
-    }
+  for (let compressPass = 1; !hasSafeCompactionOutputRoom(input.model, finalPrompt, input.maxTokens) && summaries.length === 1 && compressPass <= 3; compressPass += 1) {
+    const compressPrompt = buildMergePrompt({ summaries, rangeLabel: `final-fit-compress-${compressPass}`, final: false });
+    if (!hasSafeCompactionOutputRoom(input.model, compressPrompt, input.maxTokens)) break;
+    input.ctx.ui.setWorkingMessage?.(`Smart compaction: compressing final summary to fit context (${compressPass}/3)…`);
+    input.publishEstimate?.(estimateCompactionPromptTokens(compressPrompt), `merge_final_compress_${compressPass}`);
+    summaries = [await completeCompactionPrompt(
+      input.model,
+      input.auth,
+      compressPrompt,
+      input.maxTokens,
+      input.abortSignal,
+    )];
+    finalPrompt = buildFinalPrompt();
   }
   input.publishEstimate?.(estimateCompactionPromptTokens(finalPrompt), "merge_final");
   return await completeCompactionPrompt(
@@ -427,35 +437,19 @@ export async function runProgressiveCompaction(input: {
   /** Callback to publish context estimate to the UI meter. */
   publishEstimate?: (tokens: number, phase: string) => void;
 }): Promise<string> {
-  let allChunks = buildProgressiveCompactionChunks(
+  const chunks = buildProgressiveCompactionChunks(
     input.llmMessages,
     input.budget.chunkBudgetChars,
     input.humanUserIndexes,
   );
 
-  // Guard: cap chunk count to prevent cost/time explosion. Size the retry from
-  // the serialized chunk payloads (not raw message text), otherwise tool-call
-  // summaries can be badly undercounted and the cap is only aspirational.
-  if (allChunks.length > MAX_PROGRESSIVE_CHUNKS) {
-    const originalChunkCount = allChunks.length;
-    const totalSerializedChars = allChunks.reduce((total, chunk) => total + chunk.estimatedChars, 0);
-    const enlargedBudget = Math.ceil(totalSerializedChars / MAX_PROGRESSIVE_CHUNKS);
-    allChunks = buildProgressiveCompactionChunks(
-      input.llmMessages,
-      Math.max(input.budget.chunkBudgetChars, enlargedBudget),
-      input.humanUserIndexes,
+  // Optional operational guard only. Never enlarge chunks to satisfy it: doing
+  // so can recreate oversized provider prompts and defeats incremental mode.
+  if (MAX_PROGRESSIVE_CHUNKS > 0 && chunks.length > MAX_PROGRESSIVE_CHUNKS) {
+    throw new Error(
+      `Progressive compaction would require ${chunks.length} chunks (configured max ${MAX_PROGRESSIVE_CHUNKS}); increase PICLAW_PROGRESSIVE_COMPACTION_MAX_CHUNKS or leave it unset for count-unbounded incremental compaction`,
     );
-    input.ctx.ui.setWorkingMessage?.(
-      `Smart compaction: re-chunked to ${allChunks.length} chunks (capped from ${originalChunkCount})…`,
-    );
-    if (allChunks.length > MAX_PROGRESSIVE_CHUNKS) {
-      throw new Error(
-        `Progressive compaction would require ${allChunks.length} chunks after re-chunking (max ${MAX_PROGRESSIVE_CHUNKS}); refusing to run an unbounded compaction`,
-      );
-    }
   }
-
-  const chunks = allChunks;
   const maxTokens = Math.floor(0.8 * input.settings.reserveTokens);
   input.ctx.ui.setWorkingMessage?.(
     `Smart compaction: ${input.llmMessages.length} messages → ${chunks.length} chunks…`,

@@ -79,6 +79,21 @@ describe("tool-activation extension", () => {
     expect(fake.api.getActiveTools()).not.toContain("switch_model");
   });
 
+  test("session_start ignores stale extension context after session replacement", async () => {
+    const { toolActivation } = await import("../../src/extensions/tool-activation.js");
+    const fake = createFakeExtensionApi({ activeTools: ["read"] });
+    const stale = new Error("This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload().");
+    (fake.api as any).getAllTools = () => {
+      throw stale;
+    };
+
+    toolActivation(fake.api);
+
+    const sessionStart = fake.handlers.find((entry) => entry.event === "session_start");
+    expect(sessionStart).toBeDefined();
+    await expect(sessionStart!.handler({}, {})).resolves.toBeUndefined();
+  });
+
   test("windows baseline includes bun_run alongside powershell", async () => {
     const { getDefaultActiveToolNames } = await import("../../src/extensions/tool-activation.js");
     const names = getDefaultActiveToolNames("win32");

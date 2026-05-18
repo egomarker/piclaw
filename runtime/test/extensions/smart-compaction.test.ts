@@ -154,6 +154,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 import { completeSimple } from "@earendil-works/pi-ai";
 import {
   buildProgressiveCompactionChunks,
+  buildTargetContextCompactionInstructions,
   clampKeepRecentTokens,
   estimatePostCompactionFit,
   getProgressiveCompactionBudget,
@@ -390,7 +391,7 @@ describe("smart-compaction", () => {
     expect(readFilesBlock).not.toContain("piclaw/runtime/src/agent-control/handlers/login.ts");
   });
 
-  it.skip("filters junk paths after normalization for both read and modified files", async () => {
+  it("filters junk paths after normalization for both read and modified files", async () => {
     (completeSimple as any).mockResolvedValueOnce({
       content: [{ type: "text", text: "## Goal\nTest\n\n## Constraints\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context" }],
       stopReason: "end",
@@ -429,17 +430,61 @@ describe("smart-compaction", () => {
     const readFilesBlock = result.compaction.summary.split("<read-files>")[1].split("</read-files>")[0];
     const modifiedFilesBlock = result.compaction.summary.split("<modified-files>")[1].split("</modified-files>")[0];
 
-    expect(readFilesBlock).toContain("runtime/src/channels/web/http/dispatch-agent.ts");
+    expect(readFilesBlock).toContain("src/channels/web/http/dispatch-agent.ts");
     expect(readFilesBlock).not.toContain("tmp/pr474-dispatch.patch");
     expect(readFilesBlock).not.toContain(".piclaw/tmp/pi-bash-123.log");
     expect(readFilesBlock).not.toContain(".pi/agent/sessions/abc/session.jsonl");
     expect(readFilesBlock).not.toContain("node_modules/pkg/index.js");
 
-    expect(modifiedFilesBlock).toContain("runtime/src/extensions/observability.ts");
-    expect(modifiedFilesBlock).toContain("runtime/src/utils/logger.ts");
+    expect(modifiedFilesBlock).toContain("src/extensions/observability.ts");
+    expect(modifiedFilesBlock).toContain("src/utils/logger.ts");
     expect(modifiedFilesBlock).not.toContain("tmp/edit_probe.txt");
     expect(modifiedFilesBlock).not.toContain(".piclaw/tmp/pi-edit-123.log");
     expect(modifiedFilesBlock).not.toContain(".pi/agent/models.json");
+  });
+
+  it("includes target-context guidance in compaction prompts", async () => {
+    const summaryText = "## Goal\nTarget context\n\n## Current Active Topic\n- fit smaller model\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- concise\n\n## Progress\n### Done\n- [x] target prompt built\n\n### In Progress\n- [ ] validate\n\n### Blocked\n- none\n\n## Key Decisions\n- **Target**: fit lower context\n\n## Next Steps\n1. continue\n\n## Critical Context\n- target-aware";
+    (completeSimple as any).mockResolvedValueOnce({
+      content: [{ type: "text", text: summaryText }],
+      stopReason: "end",
+    });
+
+    const result = await handler!(
+      {
+        preparation: makePreparation(60, { settings: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 1_000 } }),
+        branchEntries: [],
+        customInstructions: buildTargetContextCompactionInstructions(16_000, "test/small", "keep active work"),
+        signal: new AbortController().signal,
+      },
+      makeCtx({ model: { provider: "test", id: "large", contextWindow: 128_000, reasoning: false } }),
+    );
+
+    expect(result.compaction.summary).toContain("Target context");
+    const prompt = (completeSimple as any).mock.calls[0][1].messages[0].content[0].text as string;
+    expect(prompt).toContain("Target-aware compaction for test/small");
+    expect(prompt).toContain("16000 token raw context window");
+    expect(prompt).toContain("keep active work");
+  });
+
+  it("cancels instead of falling through to built-in when target-aware single-pass compaction errors", async () => {
+    (completeSimple as any).mockResolvedValueOnce({
+      content: [],
+      stopReason: "error",
+      errorMessage: "Rate limited",
+    });
+
+    const result = await handler!(
+      {
+        preparation: makePreparation(60),
+        branchEntries: [],
+        customInstructions: buildTargetContextCompactionInstructions(128_000, "test/target"),
+        signal: new AbortController().signal,
+      },
+      makeCtx(),
+    );
+
+    expect(result).toEqual({ cancel: true });
   });
 
   it("falls through on LLM error", async () => {

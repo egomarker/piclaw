@@ -65,9 +65,43 @@ function getFlagValue(args: string[], flag: string): string | undefined {
 }
 
 const CLI_SUBCOMMANDS = new Set(["keychain"]);
+const RUNTIME_FLAGS_WITH_VALUES = new Set([
+  "-w",
+  "--workspace",
+  "-p",
+  "--port",
+  "--host",
+  "--idle-timeout",
+  "--tls-cert",
+  "--tls-key",
+]);
 
 function isCliSubcommand(value: string | undefined): boolean {
   return typeof value === "string" && CLI_SUBCOMMANDS.has(value);
+}
+
+function runtimeArgError(args: string[]): string | null {
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (!arg || arg === "--") return null;
+
+    if (RUNTIME_FLAGS_WITH_VALUES.has(arg)) {
+      const value = args[i + 1];
+      if (!value || value.startsWith("-")) return `Missing value for option: ${arg}`;
+      i += 1;
+      continue;
+    }
+
+    const equalsIndex = arg.indexOf("=");
+    if (equalsIndex > 0 && RUNTIME_FLAGS_WITH_VALUES.has(arg.slice(0, equalsIndex))) {
+      if (!arg.slice(equalsIndex + 1)) return `Missing value for option: ${arg.slice(0, equalsIndex)}`;
+      continue;
+    }
+
+    if (arg.startsWith("-")) return `Unknown option: ${arg}`;
+    return `Unknown command: ${arg}`;
+  }
+  return null;
 }
 
 function consumeLeadingGlobalOptions(args: string[]): string[] {
@@ -226,5 +260,13 @@ export async function handleCliOptions(args = process.argv.slice(2)): Promise<bo
     }
     return true;
   }
+
+  const validationError = runtimeArgError(args);
+  if (validationError) {
+    console.error(`${validationError}\nRun \`piclaw --help\` for usage.`);
+    process.exitCode = 1;
+    return true;
+  }
+
   return false;
 }

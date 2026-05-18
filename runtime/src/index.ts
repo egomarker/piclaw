@@ -8,16 +8,16 @@
  */
 
 import { handleCliOptions } from "./cli.js";
-import { main } from "./runtime.js";
 import { createLogger } from "./utils/logger.js";
 
 const log = createLogger("piclaw");
 
 const handled = await handleCliOptions();
 if (handled) {
-  process.exit(0);
+  process.exit(process.exitCode ?? 0);
 }
 
+const { main } = await import("./runtime.js");
 main().catch((error) => {
   log.error("Fatal runtime error", {
     operation: "piclaw.main",

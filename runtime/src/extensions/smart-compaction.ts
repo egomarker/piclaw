@@ -13,7 +13,7 @@ import { completeSimple } from "@earendil-works/pi-ai";
 import type { Message } from "@earendil-works/pi-ai";
 import { resolveModelRequestAuth } from "../utils/model-auth.js";
 import { createLogger } from "../utils/logger.js";
-import { applyTokenEstimateSafetyMultiplier } from "../utils/context-window-budget.js";
+import { applyTokenEstimateSafetyMultiplier, getEffectiveContextWindow } from "../utils/context-window-budget.js";
 
 import { MIN_COMPACTION_OUTPUT_TOKENS, MIN_SUMMARY_CHARS, PROGRESSIVE_FALLBACK_CONTEXT_WINDOW, SELECTIVE_THRESHOLD, SYSTEM_PROMPT_OVERHEAD_TOKENS } from "./smart-compaction/config.js";
 import { estimateCompactionPromptTokens, estimateTokensFromChars, getContextWindowEstimate, publishContextEstimate } from "./smart-compaction/context.js";
@@ -144,6 +144,20 @@ function parseTargetContextInstructions(customInstructions: string | undefined):
   };
 }
 
+function buildTargetContextGuidance(targetContextWindow: number | null, targetModelLabel: string | null, configuredKeepRecent: number): string {
+  if (!targetContextWindow) return "";
+  const effectiveWindow = getEffectiveContextWindow(targetContextWindow, SYSTEM_PROMPT_OVERHEAD_TOKENS);
+  const safeKeepRecent = clampKeepRecentTokens(configuredKeepRecent, targetContextWindow);
+  const maxSummaryTokens = Math.max(0, effectiveWindow - applyTokenEstimateSafetyMultiplier(safeKeepRecent) - MIN_COMPACTION_OUTPUT_TOKENS);
+  const target = targetModelLabel ? ` for ${targetModelLabel}` : "";
+  return [
+    `Target-aware compaction${target}: the compacted session must fit a ${targetContextWindow} token raw context window (${effectiveWindow} effective after app overhead).`,
+    `Keep the generated summary concise enough that summary + kept recent context + app overhead fits this target.`,
+    `Approximate kept-context budget: ${safeKeepRecent} tokens; approximate summary budget before estimator safety: ${maxSummaryTokens} tokens.`,
+    `If details compete, preserve current task continuity, user constraints, file paths, commands, and unresolved errors over historical narrative.`,
+  ].join("\n");
+}
+
 function maybeAdjustFirstKeptForFit(input: {
   summary: string;
   currentFirstKeptEntryId: string;
@@ -196,7 +210,6 @@ export const smartCompaction: ExtensionFactory = (pi: ExtensionAPI) => {
     const ctx = makeResilientCtx(rawCtx as any) as typeof rawCtx;
     const { preparation, signal, customInstructions, branchEntries } = event;
     const targetContext = parseTargetContextInstructions(customInstructions);
-    const effectiveCustomInstructions = targetContext.instructions;
     const {
       messagesToSummarize,
       tokensBefore,
@@ -263,6 +276,8 @@ export const smartCompaction: ExtensionFactory = (pi: ExtensionAPI) => {
       const contextWindow = targetContext.targetContextWindow ?? getContextWindowEstimate(ctx) ?? PROGRESSIVE_FALLBACK_CONTEXT_WINDOW;
       const configuredKeepRecent = Math.max(0, Number(settings.keepRecentTokens) || 0);
       const safeKeepRecent = clampKeepRecentTokens(configuredKeepRecent, contextWindow);
+      const targetGuidance = buildTargetContextGuidance(targetContext.targetContextWindow, targetContext.targetModelLabel, configuredKeepRecent);
+      const effectiveCustomInstructions = [targetGuidance, targetContext.instructions].filter((part) => part?.trim()).join("\n\n") || undefined;
 
       // ── No-op detection ──────────────────────────────────────────────
       // Skip the LLM call entirely when we can produce a good summary
@@ -325,7 +340,8 @@ export const smartCompaction: ExtensionFactory = (pi: ExtensionAPI) => {
       // prompt has room for system overhead plus a minimal summary response;
       // otherwise keep going into selective/progressive chunking.
       const fullPassPromptEstimate = applyTokenEstimateSafetyMultiplier(tokensBefore) + SYSTEM_PROMPT_OVERHEAD_TOKENS;
-      if (messagesToSummarize.length < SELECTIVE_THRESHOLD && fullPassPromptEstimate + MIN_COMPACTION_OUTPUT_TOKENS <= contextWindow) {
+      const fullPassFallbackAllowed = fullPassPromptEstimate + MIN_COMPACTION_OUTPUT_TOKENS <= contextWindow && !targetContext.targetContextWindow;
+      if (messagesToSummarize.length < SELECTIVE_THRESHOLD && fullPassFallbackAllowed) {
         publishContextEstimate(ctx, tokensBefore, "builtin_fallback");
         return;
       }
@@ -458,7 +474,7 @@ export const smartCompaction: ExtensionFactory = (pi: ExtensionAPI) => {
           log.debug(
             `Smart compaction LLM error: ${(response as any).errorMessage || "unknown"}`,
           );
-          return; // fall through to built-in
+          return fullPassFallbackAllowed ? undefined : { cancel: true };
         }
 
         const summary = response.content
@@ -469,9 +485,11 @@ export const smartCompaction: ExtensionFactory = (pi: ExtensionAPI) => {
 
         if (summary.length < MIN_SUMMARY_CHARS) {
           log.debug(
-            "Smart compaction summary too short, falling back to built-in",
+            fullPassFallbackAllowed
+              ? "Smart compaction summary too short, falling back to built-in"
+              : "Smart compaction summary too short; cancelling instead of falling back to unsafe full-pass compaction",
           );
-          return;
+          return fullPassFallbackAllowed ? undefined : { cancel: true };
         }
 
         if (abortSignal.aborted) return { cancel: true };
@@ -535,8 +553,8 @@ export const smartCompaction: ExtensionFactory = (pi: ExtensionAPI) => {
         // cannot fit this model, cancel instead of falling through to the
         // built-in full-pass compactor (which would use an even larger prompt
         // and can re-enter the same overflow path on lower-context models).
-        if (abortSignal.aborted || /Compaction result still exceeds|exceeds safe model budget/i.test(msg)) return { cancel: true };
-        return; // fall through to built-in
+        if (abortSignal.aborted || /Compaction result still exceeds|exceeds safe model budget/i.test(msg) || !fullPassFallbackAllowed) return { cancel: true };
+        return; // fall through to built-in only when the full-pass prompt is estimated safe
       }
     } finally {
       // Always broadcast a final context estimate so the meter is never stale

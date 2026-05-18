@@ -85,8 +85,13 @@ export const SYSTEM_PROMPT_OVERHEAD_TOKENS = getSystemPromptOverheadTokens();
  */
 export const BUDGET_SAFETY_MARGIN = 0.85;
 
-/** Maximum progressive compaction chunks to prevent cost explosion. */
-export const MAX_PROGRESSIVE_CHUNKS = 10;
+/**
+ * Optional maximum progressive compaction chunk count.
+ * 0 means unbounded by count; elapsed-time and per-call prompt budgets remain
+ * the safety limits. Do not increase chunk size to satisfy this cap, because
+ * oversized chunks are exactly what progressive mode is meant to avoid.
+ */
+export const MAX_PROGRESSIVE_CHUNKS = parsePositiveEnvInt("PICLAW_PROGRESSIVE_COMPACTION_MAX_CHUNKS") ?? 0;
 
 /** Maximum fraction of context window that keepRecentTokens may consume. */
 export const MAX_KEEP_RECENT_FRACTION = 0.50;

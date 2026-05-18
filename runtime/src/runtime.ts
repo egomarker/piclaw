@@ -15,9 +15,15 @@
 import { DATA_DIR } from "./core/config.js";
 import { bootstrapRuntime, createDefaultRuntimeBootstrapDeps } from "./runtime/bootstrap.js";
 import { createRuntimeCoreServices } from "./runtime/composition.js";
+import { acquireRuntimeLock } from "./runtime/single-instance.js";
 
 /** Boot all subsystems (DB, channels, agent pool, scheduler) and enter the main loop. */
 export async function main(): Promise<void> {
-  const core = createRuntimeCoreServices({ dataDir: DATA_DIR });
-  await bootstrapRuntime(createDefaultRuntimeBootstrapDeps(core));
+  const runtimeLock = acquireRuntimeLock();
+  try {
+    const core = createRuntimeCoreServices({ dataDir: DATA_DIR });
+    await bootstrapRuntime(createDefaultRuntimeBootstrapDeps(core));
+  } finally {
+    runtimeLock.release();
+  }
 }
