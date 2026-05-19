@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { openSync, closeSync, readlinkSync, readdirSync, readFileSync, accessSync, existsSync, statSync, constants, read as fsRead, write as fsWrite } from "node:fs";
 import { dirname, join } from "node:path";
 import { FFIType, dlopen, ptr } from "bun:ffi";
@@ -196,7 +196,6 @@ function getMacOSPtyLib(): MacOSPtyLib | null {
       statSync(srcPath).mtimeMs > statSync(dylibPath).mtimeMs
     );
     if (needsCompile) {
-      const { execFileSync } = require("node:child_process");
       execFileSync("cc", ["-shared", "-o", dylibPath, srcPath], { timeout: 10000, stdio: "ignore" });
     }
     if (!existsSync(dylibPath)) return null;

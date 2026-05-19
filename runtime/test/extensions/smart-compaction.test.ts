@@ -772,6 +772,49 @@ describe("smart-compaction", () => {
       expect(prompts.at(-1)).toContain("Ordered Intermediate Summaries");
     });
 
+    it("does not trust underreported tokensBefore for oversized short conversations", async () => {
+      const hugeShortConversation = Array.from({ length: 6 }, (_, i) =>
+        userMsg(`Undercounted short-session fact ${i}: ${"y".repeat(130_000)}`),
+      );
+
+      (completeSimple as any).mockImplementation(async (_model: any, context: any) => {
+        const prompt = context.messages[0].content[0].text as string;
+        if (prompt.includes("deterministic chunk")) {
+          const range = prompt.match(/Message index range: ([0-9-]+)/)?.[1] ?? "unknown";
+          return {
+            content: [{ type: "text", text: `## Chunk Range\n- ${range}\n\n## Goals / User Intent\n- Preserve undercounted short-session chunk ${range}\n\n## Constraints & Preferences\n- none\n\n## Decisions\n- none\n\n## Files / Commands / Tool Outcomes\n- none\n\n## Progress\n- Done: chunk summarized\n- In progress: final merge\n- Blocked: none\n\n## Open Questions / Next Steps\n- merge\n\n## Key Continuity Facts\n- Undercounted short-session fact in ${range}` }],
+            stopReason: "end",
+          };
+        }
+        return {
+          content: [{ type: "text", text: "## Goal\nProgressive undercounted short-session final goal\n\n## Current Active Topic\n- oversized short-session compaction\n\n## Historical / Background Context\n- tokensBefore can undercount provider prompt tokens\n\n## Constraints & Preferences\n- preserve facts\n\n## Progress\n### Done\n- [x] chunks summarized\n\n### In Progress\n- [ ] final validation\n\n### Blocked\n- none\n\n## Key Decisions\n- **Progressive mode**: used because serialized messages exceed full-pass safety\n\n## Next Steps\n1. validate\n\n## Critical Context\n- Undercounted short-session fact 0\n- Undercounted short-session fact 5" }],
+          stopReason: "end",
+        };
+      });
+
+      const result = await handler!(
+        {
+          preparation: makePreparation(hugeShortConversation.length, {
+            messagesToSummarize: hugeShortConversation,
+            // This low estimate would previously permit built-in full-pass
+            // fallback, but providers can count the serialized prompt much
+            // higher (e.g. 319008 > 272000 in sandbox).
+            tokensBefore: 120_000,
+            settings: { enabled: true, reserveTokens: 8192, keepRecentTokens: 1000 },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx({ model: { provider: "test", id: "provider-limit", contextWindow: 272_000, reasoning: false } }),
+      );
+
+      expect(result.compaction.summary).toContain("Progressive undercounted short-session final goal");
+      expect((completeSimple as any).mock.calls.length).toBeGreaterThan(1);
+      const prompts = (completeSimple as any).mock.calls.map((call: any[]) => call[1].messages[0].content[0].text as string);
+      expect(prompts.some((prompt: string) => prompt.includes("deterministic chunk"))).toBe(true);
+      expect(prompts.at(-1)).toContain("Ordered Intermediate Summaries");
+    });
+
     it("aborts progressive mode when merge passes make no reduction (loop guard)", async () => {
       const longMessages: any[] = [];
       for (let i = 0; i < 80; i++) {

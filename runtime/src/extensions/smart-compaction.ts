@@ -158,6 +158,18 @@ function buildTargetContextGuidance(targetContextWindow: number | null, targetMo
   ].join("\n");
 }
 
+const FULL_PASS_FALLBACK_CONTEXT_FRACTION = 0.6;
+
+function estimateFullPassFallbackPromptTokens(llmMessages: Message[], tokensBefore: number): number {
+  const serializedChars = llmMessages.reduce((total, message) => {
+    const content = Array.isArray(message.content) ? message.content : [message.content];
+    return total + JSON.stringify({ role: message.role, content }).length + 64;
+  }, 0);
+  const serializedTokens = applyTokenEstimateSafetyMultiplier(Math.max(1, Math.ceil(serializedChars / 4)));
+  const sessionTokens = applyTokenEstimateSafetyMultiplier(tokensBefore);
+  return Math.max(serializedTokens, sessionTokens) + SYSTEM_PROMPT_OVERHEAD_TOKENS;
+}
+
 function maybeAdjustFirstKeptForFit(input: {
   summary: string;
   currentFirstKeptEntryId: string;
@@ -339,8 +351,9 @@ export const smartCompaction: ExtensionFactory = (pi: ExtensionAPI) => {
       // through to the built-in full-pass compactor when the estimated full
       // prompt has room for system overhead plus a minimal summary response;
       // otherwise keep going into selective/progressive chunking.
-      const fullPassPromptEstimate = applyTokenEstimateSafetyMultiplier(tokensBefore) + SYSTEM_PROMPT_OVERHEAD_TOKENS;
-      const fullPassFallbackAllowed = fullPassPromptEstimate + MIN_COMPACTION_OUTPUT_TOKENS <= contextWindow && !targetContext.targetContextWindow;
+      const fullPassPromptEstimate = estimateFullPassFallbackPromptTokens(llmMessages, tokensBefore);
+      const conservativeFullPassLimit = Math.floor(contextWindow * FULL_PASS_FALLBACK_CONTEXT_FRACTION);
+      const fullPassFallbackAllowed = fullPassPromptEstimate + MIN_COMPACTION_OUTPUT_TOKENS <= conservativeFullPassLimit && !targetContext.targetContextWindow;
       if (messagesToSummarize.length < SELECTIVE_THRESHOLD && fullPassFallbackAllowed) {
         publishContextEstimate(ctx, tokensBefore, "builtin_fallback");
         return;
