@@ -129,7 +129,7 @@ export function isContextPressureFailure(errorText: string | null | undefined): 
 
 export function isTransientFailure(errorText: string | null | undefined): boolean {
   if (!errorText) return false;
-  return /timed out|timeout|before finalization|connection error|fetch failed|socket hang up|econnreset|econnrefused|etimedout|enotfound|502|503|504|temporary|temporarily unavailable|try again|rate limit|too many requests|\b429\b|overloaded|server error/i.test(errorText);
+  return /timed out|timeout|before finalization|connection (?:error|ended|closed|lost)|websocket.*(?:closed|ended|1006)|fetch failed|socket hang up|econnreset|econnrefused|etimedout|enotfound|502|503|504|temporary|temporarily unavailable|try again|rate limit|too many requests|\b429\b|overloaded|server error/i.test(errorText);
 }
 
 export function isProviderAuthConfigFailure(errorText: string | null | undefined): boolean {

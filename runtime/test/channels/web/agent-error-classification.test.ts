@@ -96,4 +96,12 @@ describe("provider error classification", () => {
     expect(formatted?.detail).toContain("request id: 7b101289-798a-4b84-bec4-fef42cc49469");
     expect(formatted?.detail).toContain("sequence: 4");
   });
+
+  test("classifies WebSocket 1006 provider disconnects as network errors for display", () => {
+    const formatted = formatProviderError("Codex error: WebSocket closed 1006 Connection ended");
+
+    expect(formatted?.category).toBe("network");
+    expect(formatted?.title).toBe("Codex network error");
+    expect(formatted?.label).toBe("network");
+  });
 });

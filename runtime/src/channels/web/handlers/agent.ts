@@ -148,7 +148,7 @@ function isQuotaError(errorText: string | null | undefined): boolean {
 
 function isNetworkError(errorText: string | null | undefined): boolean {
   if (!errorText) return false;
-  return /\bENOTFOUND\b|\bECONNREFUSED\b|\bETIMEDOUT\b|\bECONNRESET\b|getaddrinfo|dns.*failed|network.*error|connection.*error|fetch failed|socket hang up|connection.*refused|connection.*lost/i.test(errorText);
+  return /\bENOTFOUND\b|\bECONNREFUSED\b|\bETIMEDOUT\b|\bECONNRESET\b|getaddrinfo|dns.*failed|network.*error|connection.*(?:error|refused|lost|ended|closed)|websocket.*(?:closed|ended|1006)|fetch failed|socket hang up/i.test(errorText);
 }
 
 function describeNetworkError(errorText: string): string {
@@ -163,8 +163,8 @@ function describeNetworkError(errorText: string): string {
   if (/ETIMEDOUT|timed? out|timeout/i.test(errorText)) {
     return 'Connection timed out — provider API did not respond';
   }
-  if (/ECONNRESET|connection.*reset|socket hang up/i.test(errorText)) {
-    return 'Connection reset — provider closed the connection unexpectedly';
+  if (/ECONNRESET|connection.*(?:reset|ended|closed)|websocket.*(?:closed|ended|1006)|socket hang up/i.test(errorText)) {
+    return 'Connection closed — provider closed the connection unexpectedly';
   }
   if (/fetch failed/i.test(errorText)) {
     return 'Network request failed — check provider URL and connectivity';

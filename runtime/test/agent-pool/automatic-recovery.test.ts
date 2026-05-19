@@ -226,6 +226,24 @@ test("treats partial-output interruptions as transient retry candidates", () => 
   expect(decision.strategy).toBe("retry");
 });
 
+test("treats WebSocket 1006 provider disconnects as transient retry candidates", () => {
+  const decision = decideAutomaticRecovery({
+    config: DEFAULT_AUTOMATIC_RECOVERY_CONFIG,
+    errorText: "WebSocket closed 1006 Connection ended",
+    recoveryAttemptsUsed: 0,
+    elapsedMs: 1000,
+    snapshot: {
+      hadToolActivity: false,
+      hadPartialOutput: false,
+    },
+  });
+
+  expect(isTransientFailure("WebSocket closed 1006 Connection ended")).toBe(true);
+  expect(decision.recover).toBe(true);
+  expect(decision.classifier).toBe("transient");
+  expect(decision.strategy).toBe("retry");
+});
+
 test("retries a thinking-only stop once before escalating", () => {
   const first = decideAutomaticRecovery({
     config: DEFAULT_AUTOMATIC_RECOVERY_CONFIG,

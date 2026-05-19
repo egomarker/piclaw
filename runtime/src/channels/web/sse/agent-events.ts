@@ -218,7 +218,7 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
 
   const isNetworkError = (message?: string): boolean => {
     if (!message) return false;
-    return /\bENOTFOUND\b|\bECONNREFUSED\b|\bETIMEDOUT\b|\bECONNRESET\b|getaddrinfo|dns.*failed|fetch failed|socket hang up|connection.*refused|connection.*lost/i.test(message);
+    return /\bENOTFOUND\b|\bECONNREFUSED\b|\bETIMEDOUT\b|\bECONNRESET\b|getaddrinfo|dns.*failed|fetch failed|socket hang up|connection.*(?:refused|lost|ended|closed)|websocket.*(?:closed|ended|1006)/i.test(message);
   };
 
   const describeNetworkError = (message?: string): string => {
@@ -226,7 +226,7 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
     if (/ENOTFOUND|getaddrinfo|dns/i.test(message)) return "DNS lookup failed";
     if (/ECONNREFUSED|connection.*refused/i.test(message)) return "Connection refused";
     if (/ETIMEDOUT|timed? out/i.test(message)) return "Connection timed out";
-    if (/ECONNRESET|socket hang up/i.test(message)) return "Connection reset";
+    if (/ECONNRESET|connection.*(?:ended|closed)|websocket.*(?:closed|ended|1006)|socket hang up/i.test(message)) return "Connection closed";
     if (/fetch failed/i.test(message)) return "Network request failed";
     return "Network error";
   };
