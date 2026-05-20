@@ -366,14 +366,14 @@ export function ChatPanel({ onOpenPalette }: ChatPanelProps = {}) {
     return () => window.removeEventListener("piclaw:new-message", handler);
   }, [notificationsEnabled]);
 
-  const sendMessage = async () => {
+  const sendMessage = async (forceSteer = false) => {
     const el = textareaRef.current;
     if (!el || isSending.value) return;
     const content = el.value.trim();
     if (!content && attachmentsRef.current.length === 0) return;
 
-    // Auto-queue when agent is busy (backend handles steer/queue logic)
-    const mode = isAgentRunning.value ? "queue" : undefined;
+    // Shift+Send = steer (inject mid-stream); default when busy = queue
+    const mode = isAgentRunning.value ? (forceSteer ? "steer" : "queue") : undefined;
 
     isSending.value = true;
     sendError.value = null;
@@ -556,7 +556,7 @@ export function ChatPanel({ onOpenPalette }: ChatPanelProps = {}) {
               <textarea
                 ref={textareaRef}
                 className="chat__input"
-                placeholder={isAgentRunning.value ? "Type to queue (sent after current turn)" : "Type a message..."}
+                placeholder={isAgentRunning.value ? "Type to queue (Shift+Enter to steer mid-turn)" : "Type a message..."}
                 rows={3}
                 autoFocus
                 onInput={handleInput}
@@ -565,6 +565,10 @@ export function ChatPanel({ onOpenPalette }: ChatPanelProps = {}) {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     sendMessage();
+                  }
+                  if (e.key === "Enter" && e.shiftKey && isAgentRunning.value) {
+                    e.preventDefault();
+                    sendMessage(true);
                   }
                   if (e.key === "Escape" && isAgentRunning.value) {
                     abortAgent();
@@ -611,11 +615,23 @@ export function ChatPanel({ onOpenPalette }: ChatPanelProps = {}) {
               <div className="chat__action-group">
                 <button
                   type="button"
+                  className="chat__send-btn chat__send-btn--steer"
+                  onClick={() => sendMessage(true)}
+                  disabled={isSending.value || (!hasText.value && attachments.length === 0)}
+                  aria-label="Steer (inject mid-turn)"
+                  title="Steer — inject into the current turn (Shift+Enter)"
+                >
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 19V5M5 12l7-7 7 7"/>
+                  </svg>
+                </button>
+                <button
+                  type="button"
                   className="chat__send-btn chat__send-btn--queue"
                   onClick={() => sendMessage()}
                   disabled={isSending.value || (!hasText.value && attachments.length === 0)}
                   aria-label="Queue message"
-                  title="Queue (sent after current turn)"
+                  title="Queue — sent after current turn (Enter)"
                 >
                   <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
                     <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>

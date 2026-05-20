@@ -5156,8 +5156,6 @@ pre.frontmatter-block {
   overflow-wrap: anywhere;
   color: var(--text-primary, #e7e9ea);
 }
-  border-top: none;
-}
 
 /* Status bar stale indicators */
 .model-badge-wrapper--stale {
