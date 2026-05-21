@@ -7175,14 +7175,15 @@ mark[data-highlight] { border-radius: 2px; padding: 0 1px; }
 }
 
 /* ── Editor Frame ─────────────────────────────────────────── */
-.editor-frame { display: flex; flex-direction: column; height: 100%; width: 100%; overflow: hidden; }
+.editor-frame { display: flex; flex-direction: column; height: 100%; width: 100%; overflow: hidden; min-height: 0; }
 .editor-frame--loading, .editor-frame--error { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-secondary); }
 .editor-frame__header { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--bg-elevated); flex-shrink: 0; }
 .editor-frame__back { background: none; border: none; color: var(--text-primary, #e7e9ea); cursor: pointer; font-size: 16px; padding: 2px 6px; border-radius: 4px; }
 .editor-frame__back:hover { background: var(--bg-hover); }
 .editor-frame__path { font-family: var(--font-family-mono); font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.editor-frame__container { flex: 1; overflow: hidden; }
-.editor-frame__container .cm-editor { height: 100%; }
+.editor-frame__container { flex: 1; min-height: 0; min-width: 0; overflow: hidden; position: relative; }
+.editor-frame__container .cm-editor { height: 100%; overflow: hidden; }
+.editor-frame__container .cm-editor .cm-scroller { overflow: auto !important; }
 .editor-frame__error { text-align: center; }
 .editor-frame__error button { margin-top: 12px; padding: 6px 16px; }
 .editor-frame__spinner { animation: pulse 1.5s infinite; }
