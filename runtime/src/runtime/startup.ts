@@ -403,26 +403,5 @@ export async function startOptionalPushoverChannel(): Promise<PushoverChannel | 
   return pushover;
 }
 
-/** Runtime-facing WhatsApp channel boundary. The concrete Baileys channel is optional and lazy-loaded. */
-export interface RuntimeWhatsAppChannel {
-  connect(): Promise<unknown>;
-  disconnect(): Promise<unknown>;
-  sendMessage(jid: string, text: string): Promise<void>;
-  setTyping(jid: string, isTyping: boolean): Promise<void>;
-  isConnected(): boolean;
-}
 
-function createNoopWhatsAppChannel(): RuntimeWhatsAppChannel {
-  return {
-    connect: async () => {},
-    disconnect: async () => {},
-    sendMessage: async () => {},
-    setTyping: async () => {},
-    isConnected: () => false,
-  };
-}
 
-/** Build optional WhatsApp channel. Removed from core — use @rcarmo/piclaw-addon-whatsapp instead. */
-export function createWhatsAppChannel(_state: RuntimeState): RuntimeWhatsAppChannel {
-  return createNoopWhatsAppChannel();
-}

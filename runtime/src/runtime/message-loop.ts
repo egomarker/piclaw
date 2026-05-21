@@ -6,7 +6,7 @@
  *   2. Detects whether each message is a control command (agent-control) or
  *      a regular user message.
  *   3. Formats messages into XML and enqueues agent runs on the AgentQueue.
- *   4. Delivers agent responses via the WhatsApp channel.
+ *   4. Delivers agent responses via the WhatsApp (removed — now addon) channel.
  *
  * Also provides the processChat() helper used by the web channel to inject
  * messages directly into the queue without going through the poll cycle.
@@ -33,14 +33,9 @@ const log = createLogger("runtime.message-loop");
  * Dependencies injected into the message-processing functions.
  * Provided by runtime.ts to avoid circular imports.
  */
-export interface MessageProcessingWhatsAppChannel {
-  sendMessage(jid: string, text: string): Promise<void>;
-  setTyping(jid: string, isTyping: boolean): Promise<void>;
-}
 
 export interface MessageProcessingDeps {
   agentPool: AgentPool;
-  whatsapp: MessageProcessingWhatsAppChannel;
   state: RuntimeState;
   assistantName: string;
   triggerPattern: RegExp;
@@ -70,7 +65,6 @@ export async function processMessages(chatJid: string, deps: MessageProcessingDe
 
   for (const { message, command } of commandQueue) {
     const result = await deps.agentPool.applyControlCommand(chatJid, command);
-    await deps.whatsapp.sendMessage(chatJid, result.message);
     deps.state.markCommandProcessed(chatJid, message.id);
   }
 
@@ -92,13 +86,10 @@ export async function processMessages(chatJid: string, deps: MessageProcessingDe
       operation: "process_messages.slash_command",
       chatJid,
     });
-    await deps.whatsapp.setTyping(chatJid, true);
     const result = await deps.agentPool.applySlashCommand(chatJid, cleaned);
-    await deps.whatsapp.setTyping(chatJid, false);
 
     if (result.message) {
       const text = formatOutbound(result.message, channel);
-      if (text) await deps.whatsapp.sendMessage(chatJid, text);
     }
 
     if (result.status === "error") {
@@ -122,13 +113,11 @@ export async function processMessages(chatJid: string, deps: MessageProcessingDe
     promptMessageCount: promptMessages.length,
   });
 
-  await deps.whatsapp.setTyping(chatJid, true);
 
   const output = await deps.agentPool.runAgent(prompt, chatJid, {
     onTurnComplete: async (turn) => {
       if (turn.text) {
         const text = formatOutbound(turn.text, channel);
-        if (text) await deps.whatsapp.sendMessage(chatJid, text);
       }
     },
   });
@@ -144,7 +133,6 @@ export async function processMessages(chatJid: string, deps: MessageProcessingDe
     });
   }
 
-  await deps.whatsapp.setTyping(chatJid, false);
 
   if (output.status === "error") {
     log.error("Agent run failed", {
@@ -159,7 +147,6 @@ export async function processMessages(chatJid: string, deps: MessageProcessingDe
 
   if (output.result) {
     const text = formatOutbound(output.result, channel);
-    if (text) await deps.whatsapp.sendMessage(chatJid, text);
   }
 
   commitLastAgentTimestamp();

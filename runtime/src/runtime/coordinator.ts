@@ -17,7 +17,6 @@ export type StartRuntimeLoopDeps = {
   queue: MessageLoopDeps["queue"];
   state: MessageLoopDeps["state"];
   agentPool: MessageProcessingDeps["agentPool"];
-  whatsapp: MessageProcessingDeps["whatsapp"];
   assistantName: MessageLoopDeps["assistantName"];
   triggerPattern: MessageProcessingDeps["triggerPattern"];
   pollIntervalMs: MessageLoopDeps["pollIntervalMs"];
@@ -45,7 +44,6 @@ export async function startRuntimeLoop(deps: StartRuntimeLoopDeps): Promise<void
     processMessages: (chatJid) =>
       processMessagesImpl(chatJid, {
         agentPool: deps.agentPool,
-        whatsapp: deps.whatsapp,
         state: deps.state,
         assistantName: deps.assistantName,
         triggerPattern: deps.triggerPattern,

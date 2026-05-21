@@ -18,7 +18,6 @@ import { registerOptionalProviders } from "./provider-bootstrap.js";
 import { createShutdownHandler, type ShutdownDeps } from "./shutdown.js";
 import { registerShutdownHandler } from "./shutdown-registry.js";
 import {
-  createWhatsAppChannel,
   initializeRuntimeEnvironment,
   queueStartupResumePendingIpc,
   startOptionalPushoverChannel,
@@ -31,7 +30,6 @@ import {
   type RuntimePushoverWorkerChannel,
   type RuntimeSenders,
   type RuntimeWebWorkerChannel,
-  type RuntimeWhatsAppWorkerChannel,
 } from "./wiring.js";
 
 const log = createLogger("runtime.bootstrap");
@@ -55,12 +53,7 @@ export type RuntimeBootstrapState = StartRuntimeLoopDeps["state"];
 /** Web channel contract required by runtime bootstrap orchestration. */
 export type RuntimeBootstrapWeb = RuntimeWebWorkerChannel & ShutdownDeps["web"];
 
-/** WhatsApp channel contract required by runtime bootstrap orchestration. */
-export type RuntimeBootstrapWhatsApp =
-  & StartRuntimeLoopDeps["whatsapp"]
-  & RuntimeWhatsAppWorkerChannel
-  & ShutdownDeps["whatsapp"]
-  & { connect: () => Promise<unknown> };
+/** WhatsApp (removed — now addon) channel contract required by runtime bootstrap orchestration. */
 
 /** Optional pushover channel contract required by runtime bootstrap orchestration. */
 export type RuntimeBootstrapPushover = RuntimePushoverWorkerChannel & NonNullable<ShutdownDeps["pushover"]>;
@@ -76,7 +69,6 @@ export interface RuntimeBootstrapCoreServices {
 export interface RuntimeBootstrapDefaultCoreServices extends RuntimeBootstrapCoreServices {
   queue: Parameters<typeof startWebChannel>[0];
   agentPool: Parameters<typeof startWebChannel>[1];
-  state: Parameters<typeof createWhatsAppChannel>[0];
 }
 
 /** Dependency injection contract for the runtime bootstrap sequence. */
@@ -90,7 +82,6 @@ export interface RuntimeBootstrapDeps {
   registerOptionalProviders(agentPool: RuntimeBootstrapAgentPool): void | Promise<void>;
   startWebChannel(queue: RuntimeBootstrapQueue, agentPool: RuntimeBootstrapAgentPool): Promise<RuntimeBootstrapWeb>;
   startOptionalPushoverChannel(): Promise<RuntimeBootstrapPushover | null>;
-  createWhatsAppChannel(state: RuntimeBootstrapState): RuntimeBootstrapWhatsApp;
   createShutdownHandler(deps: ShutdownDeps): (signal: string) => Promise<void>;
   registerRuntimeShutdownSignals(
     registrar: RuntimeSignalRegistrar,
@@ -98,7 +89,6 @@ export interface RuntimeBootstrapDeps {
   ): void;
   createRuntimeSenders(
     web: RuntimeBootstrapWeb,
-    whatsapp: RuntimeBootstrapWhatsApp,
     pushover: RuntimeBootstrapPushover | null
   ): RuntimeSenders;
   startRuntimeWorkers(
@@ -128,7 +118,6 @@ export function createDefaultRuntimeBootstrapDeps(core: RuntimeBootstrapDefaultC
     registerOptionalProviders: () => registerOptionalProviders(core.agentPool),
     startWebChannel: () => startWebChannel(core.queue, core.agentPool),
     startOptionalPushoverChannel: () => startOptionalPushoverChannel(),
-    createWhatsAppChannel: () => createWhatsAppChannel(core.state),
     createShutdownHandler,
     registerRuntimeShutdownSignals,
     createRuntimeSenders,
@@ -153,12 +142,10 @@ export async function bootstrapRuntime(deps: RuntimeBootstrapDeps): Promise<void
 
   const web = await deps.startWebChannel(queue, agentPool);
   const pushover = await deps.startOptionalPushoverChannel();
-  const whatsapp = deps.createWhatsAppChannel(state);
 
   const shutdown = deps.createShutdownHandler({
     queue,
     agentPool,
-    whatsapp,
     web,
     pushover,
     stopIpcWatcher: deps.stopIpcWatcher,
@@ -167,16 +154,14 @@ export async function bootstrapRuntime(deps: RuntimeBootstrapDeps): Promise<void
   registerShutdownHandler(shutdown);
   deps.registerRuntimeShutdownSignals(deps.signalRegistrar, shutdown);
 
-  const senders = deps.createRuntimeSenders(web, whatsapp, pushover);
+  const senders = deps.createRuntimeSenders(web, pushover);
   deps.startRuntimeWorkers(queue, agentPool, web, senders);
 
-  await whatsapp.connect();
 
   await deps.startRuntimeLoop({
     queue,
     state,
     agentPool,
-    whatsapp,
     assistantName: deps.assistantName,
     triggerPattern: deps.triggerPattern,
     pollIntervalMs: deps.pollIntervalMs,

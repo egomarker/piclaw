@@ -49,10 +49,7 @@ export interface RuntimeWebWorkerChannel {
   resumePendingChats: (chatJid?: string) => void;
 }
 
-/** WhatsApp-channel capability required by runtime worker startup. */
-export interface RuntimeWhatsAppWorkerChannel {
-  sendMessage: (jid: string, text: string) => Promise<void>;
-}
+/** WhatsApp (removed — now addon)-channel capability required by runtime worker startup. */
 
 /** Optional Pushover-channel capability required by runtime worker startup. */
 export interface RuntimePushoverWorkerChannel {
@@ -67,7 +64,6 @@ export interface RuntimeModelResolver {
 /** Build sendMessage/sendNudge closures for runtime workers. */
 export function createRuntimeSenders(
   web: RuntimeWebWorkerChannel,
-  whatsapp: RuntimeWhatsAppWorkerChannel,
   pushover: RuntimePushoverWorkerChannel | null
 ): RuntimeSenders {
   const sendMessage = async (jid: string, text: string, options?: RuntimeSendMessageOptions) => {
@@ -75,7 +71,6 @@ export function createRuntimeSenders(
       await web.sendMessage(jid, text, options);
       return;
     }
-    await whatsapp.sendMessage(jid, text);
   };
 
   const sendNudge = pushover

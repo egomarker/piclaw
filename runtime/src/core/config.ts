@@ -10,7 +10,6 @@
  *   - WORKSPACE_DIR / STORE_DIR / DATA_DIR → db/, ipc.ts, task-scheduler.ts
  *   - WEB_* → channels/web.ts (HTTP/TLS server setup, auth)
  *   - ASSISTANT_NAME / ASSISTANT_AVATAR → agent-pool.ts, channels/formatting.ts
- *   - WHATSAPP_PHONE → channels/whatsapp.ts
  *   - PUSHOVER_* → channels/pushover.ts
  *   - AGENT_TIMEOUT / BACKGROUND_AGENT_TIMEOUT → agent-pool.ts, runtime.ts
  *   - TRIGGER_PATTERN → router.ts (decides whether to process a message)
@@ -68,8 +67,6 @@ const envConfig = readEnvFile([
   "AGENT_TIMEOUT",
   "PICLAW_BACKGROUND_AGENT_TIMEOUT",
   "AGENT_TIMEOUT_BACKGROUND",
-  "PICLAW_WHATSAPP_PHONE",
-  "WHATSAPP_PHONE",
   "PUSHOVER_APP_TOKEN",
   "PUSHOVER_USER_KEY",
   "PUSHOVER_DEVICE",
@@ -210,10 +207,6 @@ const modelsConfig =
   piclawConfig.models && typeof piclawConfig.models === "object"
     ? (piclawConfig.models as Record<string, unknown>)
     : piclawConfig;
-const whatsappConfig =
-  piclawConfig.whatsapp && typeof piclawConfig.whatsapp === "object"
-    ? (piclawConfig.whatsapp as Record<string, unknown>)
-    : piclawConfig;
 const compactionConfig =
   piclawConfig.compaction && typeof piclawConfig.compaction === "object"
     ? (piclawConfig.compaction as Record<string, unknown>)
@@ -235,12 +228,6 @@ const configUserKey = pickString(pushoverConfig, ["userKey", "user_key", "PUSHOV
 const configDevice = pickString(pushoverConfig, ["device", "PUSHOVER_DEVICE"]);
 const configSound = pickString(pushoverConfig, ["sound", "PUSHOVER_SOUND"]);
 const configPriority = pickNumber(pushoverConfig, ["priority", "PUSHOVER_PRIORITY"]);
-const configWhatsappPhone =
-  pickString(whatsappConfig, ["phoneNumber", "phone_number", "whatsappPhone", "whatsapp_phone", "WHATSAPP_PHONE", "PICLAW_WHATSAPP_PHONE"]) ||
-  pickString(piclawConfig, ["whatsappPhone", "whatsapp_phone", "WHATSAPP_PHONE", "PICLAW_WHATSAPP_PHONE"]);
-const configWhatsappEnabled =
-  pickBoolean(whatsappConfig, ["enabled", "whatsappEnabled", "whatsapp_enabled", "WHATSAPP_ENABLED", "PICLAW_WHATSAPP_ENABLED"]) ??
-  pickBoolean(piclawConfig, ["whatsappEnabled", "whatsapp_enabled", "WHATSAPP_ENABLED", "PICLAW_WHATSAPP_ENABLED"]);
 const configAssistantName = pickString(assistantConfig, [
   "assistantName",
   "assistant_name",
@@ -1964,37 +1951,15 @@ export function getToolOutputConfig(): Readonly<ToolOutputConfig> {
 }
 
 // ---------------------------------------------------------------------------
-// WhatsApp channel settings.
+// WhatsApp (removed — now addon) channel settings.
 // ---------------------------------------------------------------------------
 
-/** Typed WhatsApp channel settings grouped for startup/channel wiring. */
-export interface WhatsAppConfig {
-  /** Explicit opt-in. Defaults to false even when a legacy phone number is present. */
-  enabled: boolean;
-  phoneNumber: string;
-}
+/** Typed WhatsApp (removed — now addon) channel settings grouped for startup/channel wiring. */
 
-const envWhatsappEnabled = pickBoolean({
-  PICLAW_WHATSAPP_ENABLED: process.env.PICLAW_WHATSAPP_ENABLED ?? envConfig.PICLAW_WHATSAPP_ENABLED,
-  WHATSAPP_ENABLED: process.env.WHATSAPP_ENABLED ?? envConfig.WHATSAPP_ENABLED,
-}, ["PICLAW_WHATSAPP_ENABLED", "WHATSAPP_ENABLED"]);
 
-/** Grouped WhatsApp channel settings. */
-export const WHATSAPP_CONFIG = Object.freeze<WhatsAppConfig>({
-  enabled: envWhatsappEnabled ?? configWhatsappEnabled ?? false,
-  phoneNumber:
-    process.env.WHATSAPP_PHONE ||
-    envConfig.WHATSAPP_PHONE ||
-    process.env.PICLAW_WHATSAPP_PHONE ||
-    envConfig.PICLAW_WHATSAPP_PHONE ||
-    configWhatsappPhone ||
-    "",
-});
+/** Grouped WhatsApp (removed — now addon) channel settings. */
 
-/** Return the grouped WhatsApp settings for startup and channel wiring. */
-export function getWhatsAppConfig(): Readonly<WhatsAppConfig> {
-  return WHATSAPP_CONFIG;
-}
+/** Return the grouped WhatsApp (removed — now addon) settings for startup and channel wiring. */
 
 // ---------------------------------------------------------------------------
 // Pushover notification channel settings.
