@@ -15,9 +15,8 @@ import {
   WORKSPACE_DIR,
   getPushoverConfig,
   getToolOutputConfig,
-  getWhatsAppConfig,
 } from "../core/config.js";
-import { getDb, initDatabase, storeChatMetadata, storeMessage } from "../db.js";
+import { getDb, initDatabase, storeMessage } from "../db.js";
 import type { AgentQueue } from "../queue.js";
 import { startToolOutputCleanup } from "../tool-output.js";
 import { createUuid } from "../utils/ids.js";
@@ -423,68 +422,7 @@ function createNoopWhatsAppChannel(): RuntimeWhatsAppChannel {
   };
 }
 
-/** Build optional WhatsApp channel with runtime callbacks and pairing IPC integration. */
-export function createWhatsAppChannel(state: RuntimeState): RuntimeWhatsAppChannel {
-  const whatsAppConfig = getWhatsAppConfig();
-  if (!whatsAppConfig.enabled) {
-    if (whatsAppConfig.phoneNumber) {
-      log.info("WhatsApp phone is configured but channel is disabled; set PICLAW_WHATSAPP_ENABLED=1 to opt in.", {
-        operation: "whatsapp.disabled_with_phone",
-      });
-    }
-    return createNoopWhatsAppChannel();
-  }
-  if (!whatsAppConfig.phoneNumber) {
-    log.warn("WhatsApp is enabled but no phone number is configured; using no-op channel.", {
-      operation: "whatsapp.enabled_missing_phone",
-    });
-    return createNoopWhatsAppChannel();
-  }
-
-  let channel: RuntimeWhatsAppChannel | null = null;
-  const load = async (): Promise<RuntimeWhatsAppChannel> => {
-    if (channel) return channel;
-    const mod = await import("../channels/whatsapp.js");
-    channel = new mod.WhatsAppChannel({
-      chatJids: () => state.chatJids,
-      phoneNumber: whatsAppConfig.phoneNumber || undefined,
-      onPairingCode: (code) => {
-        try {
-          const ipcDir = join(DATA_DIR, "ipc", "messages");
-          mkdirSync(ipcDir, { recursive: true });
-          const payload = {
-            type: "message",
-            chatJid: "web:default",
-            text: code,
-          };
-          const filePath = join(ipcDir, `${createUuid("pairing")}.json`);
-          writeFileSync(filePath, JSON.stringify(payload));
-        } catch (error) {
-          log.error("Failed to write pairing code IPC message", {
-            operation: "pairing_code_ipc",
-            err: error,
-          });
-        }
-      },
-      onMessage: (chatJid, msg) => {
-        if (!state.chatJids.has(chatJid) && msg.is_from_me) {
-          state.chatJids.add(chatJid);
-          state.saveChats();
-        }
-        storeMessage(msg);
-      },
-      onChatMetadata: (chatJid, timestamp) => storeChatMetadata(chatJid, timestamp),
-    });
-    return channel;
-  };
-
-  return {
-    connect: async () => await (await load()).connect(),
-    disconnect: async () => {
-      if (channel) await channel.disconnect();
-    },
-    sendMessage: async (jid, text) => await (await load()).sendMessage(jid, text),
-    setTyping: async (jid, isTyping) => await (await load()).setTyping(jid, isTyping),
-    isConnected: () => channel?.isConnected() ?? false,
-  };
+/** Build optional WhatsApp channel. Removed from core — use @rcarmo/piclaw-addon-whatsapp instead. */
+export function createWhatsAppChannel(_state: RuntimeState): RuntimeWhatsAppChannel {
+  return createNoopWhatsAppChannel();
 }
