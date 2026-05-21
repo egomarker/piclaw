@@ -15,6 +15,7 @@ import { resolveModelRequestAuth } from "../utils/model-auth.js";
 import { createLogger } from "../utils/logger.js";
 import { applyTokenEstimateSafetyMultiplier, getEffectiveContextWindow } from "../utils/context-window-budget.js";
 
+import { getCompactionRuntimeConfig } from "../core/config.js";
 import { FULL_PASS_FALLBACK_MAX_PROMPT_TOKENS, MIN_COMPACTION_OUTPUT_TOKENS, MIN_SUMMARY_CHARS, PROGRESSIVE_FALLBACK_CONTEXT_WINDOW, SELECTIVE_THRESHOLD, SYSTEM_PROMPT_OVERHEAD_TOKENS } from "./smart-compaction/config.js";
 import { estimateCompactionPromptTokens, estimateTokensFromChars, getContextWindowEstimate, publishContextEstimate } from "./smart-compaction/context.js";
 import { compressFilePaths, fileListsFromOps } from "./smart-compaction/files.js";
@@ -423,7 +424,7 @@ export const smartCompaction: ExtensionFactory = (pi: ExtensionAPI) => {
             budget,
             abortSignal,
             ctx,
-            timeoutMs: 180_000,
+            timeoutMs: getCompactionRuntimeConfig().timeoutMs,
             startedAt: compactionStartedAt,
             publishEstimate: (tokens, phase) => publishContextEstimate(ctx, tokens, phase),
           });
