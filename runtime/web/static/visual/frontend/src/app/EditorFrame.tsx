@@ -60,12 +60,7 @@ export function EditorFrame({ filePath, onBack }: EditorFrameProps) {
 
           const instance = new EditorClass(containerRef.current, {
             path: filePath,
-            content: null,
-            mtime: null,
-            workspaceBaseUrl: "/workspace",
-            onDirtyChange: () => {},
-            onSaveRequest: () => {},
-            onClose: () => { onBack?.(); },
+            mode: "edit",
           });
 
           instanceRef.current = instance;

@@ -100,8 +100,9 @@ update-mermaid-vendor: ## Rebuild or upgrade vendored mermaid (use MERMAID_VERSI
 	cd runtime && bun run update:vendor:mermaid $(if $(MERMAID_VERSION),--version $(MERMAID_VERSION),)
 	@ls -lh runtime/web/static/common/js/vendor/beautiful-mermaid.js runtime/web/static/common/js/vendor/beautiful-mermaid.meta.json
 
-build-web: ## Build web JS/CSS bundles (+ sourcemaps) into static/classic/dist and static/common/dist
+build-web: ## Build web JS/CSS bundles (+ sourcemaps) into static/classic/dist, static/common/dist, and static/visual/dist
 	cd runtime && bun run build:web
+	bun run build:web:visual
 	@cd runtime && bun test --timeout $(WEB_BUILD_TEST_TIMEOUT_MS) test/channels/web/web-build.test.ts test/channels/web/post-link-preview-content.test.ts
 	@# Pre-compress static assets for faster first-request serving
 	@find runtime/web/static -type f \( -name '*.js' -o -name '*.css' -o -name '*.json' -o -name '*.svg' \) \
