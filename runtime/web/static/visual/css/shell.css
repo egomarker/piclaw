@@ -7204,3 +7204,22 @@ mark[data-highlight] { border-radius: 2px; padding: 0 1px; }
   background: var(--bg-hover, #1d1f23);
   border-color: var(--accent-color, #1d9bf0);
 }
+
+/* ── PanelHeader chevron ─────────────────────────────────── */
+.agent-status-card__chevron {
+  display: inline-block;
+  font-size: 10px;
+  transition: transform 0.15s ease;
+  margin-right: 4px;
+  color: var(--text-secondary, #71767b);
+}
+.agent-status-card__chevron--expanded {
+  transform: rotate(90deg);
+}
+
+/* ── Tools panel max-height (#622) ──────────────────────── */
+.agent-status-card__content {
+  max-height: 200px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}

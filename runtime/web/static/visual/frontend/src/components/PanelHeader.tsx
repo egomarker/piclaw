@@ -14,6 +14,7 @@ interface PanelHeaderProps {
   title: string;
   dotColor?: string; // CSS class suffix: "thought" | "draft" | "output" | "tools"
   elapsed?: number; // seconds
+  expanded?: boolean;
   gitBranch?: string;
   onToggle?: () => void;
   onDismiss?: (e: MouseEvent) => void;
@@ -24,9 +25,12 @@ interface PanelHeaderProps {
  * Shared header for agent status card panels.
  * Renders: dot indicator, title, optional git branch, elapsed timer, optional extras, close button.
  */
-export function PanelHeader({ title, dotColor, elapsed, gitBranch, onToggle, onDismiss, children }: PanelHeaderProps) {
+export function PanelHeader({ title, dotColor, elapsed, expanded, gitBranch, onToggle, onDismiss, children }: PanelHeaderProps) {
   return (
-    <div className="agent-status-card__header" onClick={onToggle}>
+    <div className="agent-status-card__header" onClick={onToggle} style={{ cursor: onToggle ? 'pointer' : undefined }}>
+      {onToggle && (
+        <span className={`agent-status-card__chevron${expanded ? ' agent-status-card__chevron--expanded' : ''}`} aria-hidden="true">▸</span>
+      )}
       {dotColor && (
         <span className={`agent-status-card__dot agent-status-card__dot--${dotColor}`} aria-hidden="true" />
       )}

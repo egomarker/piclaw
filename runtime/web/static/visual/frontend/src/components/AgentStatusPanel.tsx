@@ -582,6 +582,7 @@ export function AgentStatusPanel() {
             title={`Tools (${tools.length})`}
             dotColor="tools"
             elapsed={elapsed.tools}
+            expanded={toolsExpanded}
             onToggle={() => setToolsExpanded(prev => !prev)}
             onDismiss={(e) => { e.stopPropagation(); setToolsDismissed(true); }}
           />
@@ -760,6 +761,7 @@ function AgentPanel({ title, type, text, expanded, elapsed = 0, onToggle, onDism
         title={title}
         dotColor={type}
         elapsed={elapsed}
+        expanded={expanded}
         onToggle={onToggle}
         onDismiss={onDismiss}
       />
@@ -800,6 +802,7 @@ function OutputPanel({ text, expanded, toolName, startedAt, gitBranch, onToggle,
         title={toolName || "Output"}
         dotColor="output"
         elapsed={elapsed}
+        expanded={expanded}
         gitBranch={gitBranch}
         onToggle={onToggle}
         onDismiss={onDismiss}
