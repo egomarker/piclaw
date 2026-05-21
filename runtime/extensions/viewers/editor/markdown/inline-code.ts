@@ -10,7 +10,7 @@
 import { cursorInRange, registerDecorator, Decoration } from './live-preview.js';
 import type { DecorationEntry, SyntaxNode, EditorView } from './live-preview.js';
 
-function inlineCodeDecorator(node: SyntaxNode, _view: EditorView): DecorationEntry[] {
+function inlineCodeDecorator(node: SyntaxNode, view: EditorView): DecorationEntry[] {
     const entries: DecorationEntry[] = [];
 
     // Find CodeMark children (the backticks)
