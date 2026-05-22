@@ -5148,6 +5148,8 @@ pre.frontmatter-block {
   border-radius: 0 0 6px 6px;
   min-height: 1.5em;
   overflow-x: auto;
+  background: var(--bg-terminal, #11111b);
+  padding: 12px;
 }
 .code-block pre code {
   display: block;
@@ -5155,6 +5157,9 @@ pre.frontmatter-block {
   word-break: break-word;
   overflow-wrap: anywhere;
   color: var(--text-primary, #e7e9ea);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 /* Status bar stale indicators */
