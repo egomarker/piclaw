@@ -1097,9 +1097,6 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
         };
         setAsideInput(null);
         setAsideText('');
-        if (contentRef.current) {
-            applyAsidesToElement(contentRef.current, [aside]);
-        }
         try {
             const updated = await persistAside(post.id, post.chat_jid, data.annotations, aside);
             data.annotations = updated;
@@ -1281,6 +1278,8 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
     // Re-apply saved text highlights and asides after content renders
     useEffect(() => {
         if (!contentRef.current) return;
+        // Remove any previously inserted pills/asides before re-applying
+        contentRef.current.querySelectorAll('.post-aside-pill, .post-aside-content').forEach((el) => el.remove());
         const highlights = extractHighlightsFromAnnotations(data.annotations);
         if (highlights.length > 0) applyHighlightsToElement(contentRef.current, highlights);
         const asides = extractAsidesFromAnnotations(data.annotations);
