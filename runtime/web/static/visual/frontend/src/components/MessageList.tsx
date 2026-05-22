@@ -85,18 +85,13 @@ export function MessageList() {
     return () => window.removeEventListener("piclaw:new-message", handler);
   }, [scrollToBottom, setMessages, userScrolledRef]);
 
-  if (connected === false) {
-    return (
-      <div className="message-list message-list--disconnected">
-        <div className="message-list__status-banner">
-          ⚠️ Not connected — unable to load messages
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="message-list" ref={listRef}>
+      {connected === false && (
+        <div className="message-list__status-banner message-list__status-banner--disconnected">
+          ⚠️ Connection lost — showing last known messages
+        </div>
+      )}
       {timelineError.value && (
         <div
           className="message-list__error-banner"
