@@ -77,7 +77,7 @@ const LARGE_DOCUMENT_CHARS = 48 * 1024;
 const LARGE_DOCUMENT_LINES = 1_000;
 const LARGE_DOCUMENT_LINE_CHARS = 2_000;
 const DIRTY_RECHECK_DELAY_MS = 500;
-const CONTENT_CHANGE_DEBOUNCE_MS = 180;
+const CONTENT_CHANGE_DEBOUNCE_MS = 1000;
 
 const shellLanguage = StreamLanguage.define(shell);
 
@@ -862,12 +862,11 @@ export class StandaloneEditorInstance implements PaneInstance {
             return;
         }
 
-        // Avoid serializing large documents synchronously on every keystroke.
-        // Same-length edits are dirty immediately. In normal mode an idle
-        // recheck clears the marker after undo-to-saved; in large-file mode we
-        // keep the dirty marker until save/reload rather than janking typing.
+        // Same-length edits: mark dirty immediately. Skip the expensive
+        // full-document string comparison that scheduleDirtyRecheck() does —
+        // it serializes the entire rope on every keystroke debounce.
+        // Dirty state clears on save/reload instead.
         this.setDirty(true);
-        if (!this.largeDocumentMode) this.scheduleDirtyRecheck();
     }
 
     private clearDirtyRecheckTimer(): void {
@@ -895,10 +894,14 @@ export class StandaloneEditorInstance implements PaneInstance {
 
     private scheduleContentChangeCallback(): void {
         if (!this.contentChangeCb || this.largeDocumentMode) return;
+        // Skip expensive serialization for documents > 32KB — the preview
+        // already disables itself at 96KB but the toString() call alone is costly.
+        if (this.view && this.view.state.doc.length > 32_000) return;
         this.clearContentChangeTimer();
         this.contentChangeTimer = this.ownerWindow.setTimeout(() => {
             this.contentChangeTimer = null;
             if (!this.view || this.disposed || !this.contentChangeCb || this.largeDocumentMode) return;
+            if (this.view.state.doc.length > 32_000) return;
             this.contentChangeCb(this.view.state.doc.toString());
         }, CONTENT_CHANGE_DEBOUNCE_MS);
     }
