@@ -139,6 +139,22 @@ class LivePreviewPlugin {
 
                     const decos = decorator(node.node, view);
                     entries.push(...decos);
+
+                    // Code-font: add line decorations for code block lines
+                    // (merged from code-font.ts to avoid a second tree walk)
+                    if (nodeTypeName === 'FencedCode' || nodeTypeName === 'CodeBlock') {
+                        const startLine = doc.lineAt(node.from).number;
+                        const endPos = Math.max(node.from, Math.min(node.to, doc.length) - 1);
+                        const endLine = doc.lineAt(endPos).number;
+                        for (let ln = startLine; ln <= endLine; ln++) {
+                            const line = doc.line(ln);
+                            entries.push({
+                                from: line.from,
+                                to: line.from,
+                                decoration: Decoration.line({ class: 'cm-md-code-raw-line' }),
+                            });
+                        }
+                    }
                 },
             });
         }

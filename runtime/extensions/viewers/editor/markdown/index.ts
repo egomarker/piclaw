@@ -26,7 +26,6 @@ import './tag.js';
 
 // Core engine + theme
 import { livePreviewPlugin } from './live-preview.js';
-import { codeBlockMonospacePlugin } from './code-font.js';
 import { markdownPreviewTheme } from './theme.js';
 import { livePreviewCursorNav } from './cursor-nav.js';
 
@@ -59,7 +58,7 @@ export const markdownParserExtensions = [
  */
 export const markdownLivePreview: Extension = [
     livePreviewPlugin,
-    codeBlockMonospacePlugin,
+
     livePreviewCursorNav,
     markdownPreviewTheme,
 ];
