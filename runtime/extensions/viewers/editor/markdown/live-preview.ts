@@ -77,27 +77,52 @@ export function getSelectionLineSignature(view: Pick<EditorView, 'state'>): stri
         .join('|');
 }
 
+const LIVE_PREVIEW_DEBOUNCE_MS = 300;
+
 class LivePreviewPlugin {
     decorations: DecorationSet;
     private selectionLineSignature: string;
+    private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
+    private view: EditorView;
 
     constructor(view: EditorView) {
+        this.view = view;
         this.selectionLineSignature = getSelectionLineSignature(view);
         this.decorations = this.buildDecorations(view);
     }
 
     update(update: ViewUpdate) {
+        this.view = update.view;
         const nextSelectionLineSignature = getSelectionLineSignature(update.view);
         const selectionLineChanged = nextSelectionLineSignature !== this.selectionLineSignature;
         this.selectionLineSignature = nextSelectionLineSignature;
 
-        if (
+        const needsRebuild =
             update.docChanged ||
             update.viewportChanged ||
-            (update.selectionSet && selectionLineChanged)
-        ) {
+            (update.selectionSet && selectionLineChanged);
+
+        if (!needsRebuild) return;
+
+        if (update.docChanged) {
+            // During typing: debounce the expensive rebuild.
+            // Return stale decorations for this frame — rebuild after idle.
+            if (this.rebuildTimer !== null) clearTimeout(this.rebuildTimer);
+            this.rebuildTimer = setTimeout(() => {
+                this.rebuildTimer = null;
+                this.decorations = this.buildDecorations(this.view);
+                // Force CM to pick up the new decorations
+                this.view.dispatch({ effects: [] });
+            }, LIVE_PREVIEW_DEBOUNCE_MS);
+        } else {
+            // Viewport/selection changes: rebuild immediately (no typing lag)
+            if (this.rebuildTimer !== null) { clearTimeout(this.rebuildTimer); this.rebuildTimer = null; }
             this.decorations = this.buildDecorations(update.view);
         }
+    }
+
+    destroy() {
+        if (this.rebuildTimer !== null) { clearTimeout(this.rebuildTimer); this.rebuildTimer = null; }
     }
 
     private buildDecorations(view: EditorView): DecorationSet {
