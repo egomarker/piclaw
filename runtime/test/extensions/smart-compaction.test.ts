@@ -283,6 +283,59 @@ describe("smart-compaction", () => {
     });
   });
 
+  it("sanitizes context-pruned tool history before building the compaction prompt", async () => {
+    const summaryText = "## Goal\nPruned tool history\n\n## Constraints & Preferences\n- none\n\n## Progress\n### Done\n- [x] Sanitized raw outputs\n\n### In Progress\n\n### Blocked\n\n## Key Decisions\n\n## Next Steps\n\n## Critical Context\n- context";
+
+    (completeSimple as any).mockResolvedValueOnce({
+      content: [{ type: "text", text: summaryText }],
+      stopReason: "end",
+    });
+
+    const prep = makePreparation(60);
+    const rawPrunedOutput = "UNIQUE_RAW_CONTEXT_PRUNE_OUTPUT";
+    const prunedResult = prep.messagesToSummarize.find((msg: any) => msg.role === "toolResult" && msg.toolCallId === "tc-1");
+    prunedResult.content = [{ type: "text", text: rawPrunedOutput }];
+    const ctx = makeCtx();
+    const result = await handler!(
+      {
+        preparation: prep,
+        branchEntries: [
+          {
+            type: "custom",
+            customType: "context-prune-index",
+            data: {
+              toolCalls: [
+                {
+                  toolCallId: "tc-1",
+                  toolName: "read",
+                  args: { path: "/workspace/file-1.ts" },
+                  resultText: rawPrunedOutput,
+                  isError: false,
+                  turnIndex: 0,
+                  timestamp: Date.now(),
+                },
+              ],
+            },
+          },
+          {
+            type: "custom_message",
+            customType: "context-prune-summary",
+            details: { toolCallRefs: [{ shortId: "t1", toolCallId: "tc-1" }] },
+            content: "Summary for t1",
+          },
+        ],
+        signal: new AbortController().signal,
+      },
+      ctx,
+    );
+
+    expect(result.compaction.summary).toContain("Pruned tool history");
+    const prompt = (completeSimple as any).mock.calls[0][1].messages[0].content[0].text;
+    expect(prompt).not.toContain(rawPrunedOutput);
+    expect(prompt).toContain("context-pruned tool call ref t1");
+    expect(prompt).toContain("context_tree_query");
+  });
+
   it("forwards apiKey-only auth to completeSimple", async () => {
     const summaryText = "## Goal\nApiKey auth\n\n## Current Active Topic\n- test\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- none\n\n## Progress\n### Done\n- [x] auth\n\n### In Progress\n\n### Blocked\n\n## Key Decisions\n\n## Next Steps\n\n## Critical Context\n- context";
 

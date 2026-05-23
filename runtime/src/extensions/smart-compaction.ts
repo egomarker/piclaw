@@ -24,6 +24,7 @@ import { appendFileLists, buildTurnPrefixSummary, extractKeptMessagesSummary, tr
 import { buildProgressiveCompactionChunks, getProgressiveCompactionBudget, runProgressiveCompaction } from "./smart-compaction/progressive.js";
 import { clampKeepRecentTokens, estimatePostCompactionFit, getCompactionReasoningEffort, getSafeCompactionMaxTokens } from "./smart-compaction/safety.js";
 import { buildSelectivePrompt, detectRecentTopicShift, SYSTEM_PROMPT } from "./smart-compaction/selective-prompt.js";
+import { sanitizeContextPruneCompactionMessages } from "./context-prune/pruner.js";
 
 export {
   buildProgressiveCompactionChunks,
@@ -254,8 +255,22 @@ export const smartCompaction: ExtensionFactory = (pi: ExtensionAPI) => {
       // We preserve source-message provenance so synthetic upstream user-role
       // wrappers (branch/compaction summaries, custom messages, bashExecution)
       // don't get mistaken for real human user turns.
-      const { llmMessages, humanUserIndexes } = convertMessagesWithMetadata(
+      const sanitizedContextPrune = sanitizeContextPruneCompactionMessages(
         messagesToSummarize as SourceMessage[],
+        branchEntries,
+      );
+      const messagesForCompaction = sanitizedContextPrune.messages as SourceMessage[];
+      if (sanitizedContextPrune.prunedToolResults > 0 || sanitizedContextPrune.replacedToolCalls > 0) {
+        log.debug("Sanitized context-pruned tool history before smart compaction", {
+          operation: "smart_compaction.context_prune_sanitize",
+          prunedToolResults: sanitizedContextPrune.prunedToolResults,
+          replacedToolCalls: sanitizedContextPrune.replacedToolCalls,
+          summarizedToolCallCount: sanitizedContextPrune.summarizedToolCallIds.size,
+        });
+      }
+
+      const { llmMessages, humanUserIndexes } = convertMessagesWithMetadata(
+        messagesForCompaction,
       );
 
       // Check abort early — a concurrent compact() may have already cancelled us.
@@ -276,8 +291,11 @@ export const smartCompaction: ExtensionFactory = (pi: ExtensionAPI) => {
         ? extractKeptMessagesSummary(branchEntries, firstKeptEntryId)
         : { summary: "", hasHumanUser: false };
       const keptMessagesSummary = keptContext.summary;
-      const turnPrefixContext = preparation.isSplitTurn && preparation.turnPrefixMessages.length > 0
-        ? convertMessagesWithMetadata(preparation.turnPrefixMessages as SourceMessage[])
+      const sanitizedTurnPrefix = preparation.isSplitTurn && preparation.turnPrefixMessages.length > 0
+        ? sanitizeContextPruneCompactionMessages(preparation.turnPrefixMessages as SourceMessage[], branchEntries)
+        : null;
+      const turnPrefixContext = sanitizedTurnPrefix
+        ? convertMessagesWithMetadata(sanitizedTurnPrefix.messages as SourceMessage[])
         : null;
       const turnPrefixSummary = turnPrefixContext
         ? buildTurnPrefixSummary(
@@ -358,7 +376,7 @@ export const smartCompaction: ExtensionFactory = (pi: ExtensionAPI) => {
         FULL_PASS_FALLBACK_MAX_PROMPT_TOKENS,
       );
       const fullPassFallbackAllowed = fullPassPromptEstimate + MIN_COMPACTION_OUTPUT_TOKENS <= conservativeFullPassLimit && !targetContext.targetContextWindow;
-      if (messagesToSummarize.length < SELECTIVE_THRESHOLD && fullPassFallbackAllowed) {
+      if (messagesForCompaction.length < SELECTIVE_THRESHOLD && fullPassFallbackAllowed) {
         publishContextEstimate(ctx, tokensBefore, "builtin_fallback");
         return;
       }
@@ -370,10 +388,10 @@ export const smartCompaction: ExtensionFactory = (pi: ExtensionAPI) => {
           );
       }
 
-      ctx.ui.setWorkingMessage(`Smart compaction: extracting signal from ${messagesToSummarize.length} messages…`);
+      ctx.ui.setWorkingMessage(`Smart compaction: extracting signal from ${messagesForCompaction.length} messages…`);
       publishContextEstimate(ctx, tokensBefore, "extracting");
       log.debug(
-        `Smart compaction: ${messagesToSummarize.length} msgs → selective extraction`,
+        `Smart compaction: ${messagesForCompaction.length} msgs → selective extraction`,
           );
 
       const promptText = buildSelectivePrompt(
