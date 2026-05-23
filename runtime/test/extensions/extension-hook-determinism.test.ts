@@ -29,7 +29,7 @@ describe("built-in extension hook determinism", () => {
       "exitProcess",
       "imageProcessing",
     ]);
-    expect(audit.context_hook_order).toEqual(["fileAttachments"]);
+    expect(audit.context_hook_order).toEqual(["fileAttachments", "contextPrune"]);
     expect(audit.final_system_prompt).toContain("## File Attachments");
     expect(audit.final_system_prompt).toContain("## Script discovery");
     expect(audit.final_system_prompt).toContain("## Database Introspection");

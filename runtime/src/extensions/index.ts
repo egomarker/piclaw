@@ -21,6 +21,7 @@
  *   - chatTool: chat for cross-session agent-to-agent messaging.
  *   - openWorkspaceFile: open_workspace_file for browser-side editor tab/popout launches.
  *   - envTools: env for persistent workspace-scoped environment variables.
+ *   - contextPrune: context_prune/context_tree_query for recoverable tool-result pruning.
  *
  * Note: bun_run, keychain, ssh, proxmox, and portainer now live as packaged
  * runtime extensions under runtime/extensions/integrations/* and are loaded via
@@ -54,6 +55,7 @@ import { imageProcessing } from "./image-processing.js";
 import { sessionStatus } from "./session-status.js";
 import { providerResponseDiagnostics } from "./provider-response-diagnostics.js";
 import { postCompactionPrune } from "./post-compaction-prune.js";
+import { contextPrune } from "./context-prune.js";
 
 /** Build the built-in extension factory list used for session creation. */
 export function createBuiltinExtensionFactories(options?: {
@@ -84,6 +86,7 @@ export function createBuiltinExtensionFactories(options?: {
     sessionStatus,
     providerResponseDiagnostics,
     postCompactionPrune,
+    contextPrune,
   ];
 }
 
