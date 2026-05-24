@@ -721,6 +721,8 @@
     max-width: 100%;
     max-height: 60vh;
     overflow: hidden;
+    will-change: transform;
+    transition: transform 0.05s ease-out;
 }
 
 .image-annotator-source {

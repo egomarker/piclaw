@@ -206,6 +206,9 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
   const [color, setColor] = useState(DEFAULT_COLOR);
   const [saving, setSaving] = useState(false);
   const [canvasReady, setCanvasReady] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [panOffset, setPanOffset] = useState<Point>({ x: 0, y: 0 });
+  const pinchRef = useRef<{ startDist: number; startZoom: number; startMid: Point; startPan: Point } | null>(null);
   const [textInput, setTextInput] = useState<{ position: Point; visible: boolean }>({ position: { x: 0, y: 0 }, visible: false });
   const [textValue, setTextValue] = useState('');
   const textInputRef = useRef<HTMLInputElement>(null);
@@ -283,6 +286,16 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
     const onTouchStart = (e: TouchEvent) => {
       e.preventDefault();
       e.stopPropagation();
+      if (e.touches.length === 2) {
+        // Start pinch-to-zoom
+        const t0 = e.touches[0]!;
+        const t1 = e.touches[1]!;
+        const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+        const mid = { x: (t0.clientX + t1.clientX) / 2, y: (t0.clientY + t1.clientY) / 2 };
+        pinchRef.current = { startDist: dist, startZoom: zoom, startMid: mid, startPan: { ...panOffset } };
+        drawingRef.current = false;
+        return;
+      }
       if (e.touches.length !== 1) return;
       const touch = e.touches[0]!;
       const pt = canvasPointFromTouch(canvas, touch);
@@ -306,6 +319,20 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
     const onTouchMove = (e: TouchEvent) => {
       e.preventDefault();
       e.stopPropagation();
+      if (e.touches.length === 2 && pinchRef.current) {
+        const t0 = e.touches[0]!;
+        const t1 = e.touches[1]!;
+        const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+        const mid = { x: (t0.clientX + t1.clientX) / 2, y: (t0.clientY + t1.clientY) / 2 };
+        const scaleFactor = dist / pinchRef.current.startDist;
+        const nextZoom = Math.min(5, Math.max(1, pinchRef.current.startZoom * scaleFactor));
+        setZoom(nextZoom);
+        // Pan follows the midpoint movement
+        const dx = mid.x - pinchRef.current.startMid.x;
+        const dy = mid.y - pinchRef.current.startMid.y;
+        setPanOffset({ x: pinchRef.current.startPan.x + dx, y: pinchRef.current.startPan.y + dy });
+        return;
+      }
       if (!drawingRef.current || e.touches.length !== 1) return;
       const touch = e.touches[0]!;
       const pt = canvasPointFromTouch(canvas, touch);
@@ -362,6 +389,10 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
 
     const onTouchEnd = (e: TouchEvent) => {
       e.preventDefault();
+      if (pinchRef.current) {
+        pinchRef.current = null;
+        return;
+      }
       if (!drawingRef.current) return;
       drawingRef.current = false;
       const currentTool = toolRef.current;
@@ -464,7 +495,7 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
 
   return html`
     <div class="image-annotator">
-      <div class="image-annotator-canvas-wrap">
+      <div class="image-annotator-canvas-wrap" style="transform: scale(${zoom}) translate(${panOffset.x / zoom}px, ${panOffset.y / zoom}px); transform-origin: center center;">
         <img
           ref=${imgRef}
           src=${src}
@@ -521,6 +552,14 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
             disabled=${saving}
             dangerouslySetInnerHTML=${{ __html: UNDO_ICON }}
           />
+          ${zoom > 1 && html`
+            <button
+              class="image-annotator-tool-btn"
+              onClick=${() => { setZoom(1); setPanOffset({ x: 0, y: 0 }); }}
+              title=${`Reset zoom (${Math.round(zoom * 100)}%)`}
+              aria-label="Reset zoom"
+            >${Math.round(zoom * 100)}%</button>
+          `}
         </div>
         <div class="image-annotator-colors">
           ${COLORS.map((c) => html`
