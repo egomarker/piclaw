@@ -632,6 +632,37 @@ export function prepareMarkdownSource(text) {
     return { safeHtml, mermaidBlocks };
 }
 
+/**
+ * Transform GitHub-style admonition blockquotes into styled admonition blocks.
+ * Matches: <blockquote><p>[!NOTE]\n...   or   <blockquote>\n<p>[!NOTE]\n...
+ * Types: NOTE, TIP, IMPORTANT, WARNING, CAUTION
+ */
+const ADMONITION_TYPES = new Set(['NOTE', 'TIP', 'IMPORTANT', 'WARNING', 'CAUTION']);
+const ADMONITION_LABELS: Record<string, string> = {
+    NOTE: 'Note',
+    TIP: 'Tip',
+    IMPORTANT: 'Important',
+    WARNING: 'Warning',
+    CAUTION: 'Caution',
+};
+
+function transformAdmonitions(html: string): string {
+    // Match blockquotes whose first <p> starts with [!TYPE]
+    return html.replace(
+        /<blockquote>\s*<p>\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(?:<br>\s*)?(\n)?/gi,
+        (_match, type: string, _nl) => {
+            const normalized = type.toUpperCase();
+            if (!ADMONITION_TYPES.has(normalized)) return _match;
+            const label = ADMONITION_LABELS[normalized] || normalized;
+            return `<div class="admonition admonition-${normalized.toLowerCase()}"><p class="admonition-title">${label}</p><p>`;
+        }
+    ).replace(
+        // Close the div instead of blockquote for transformed admonitions
+        /(<div class="admonition admonition-[a-z]+">(?:(?!<\/div>)[\s\S])*?)<\/blockquote>/g,
+        (_match, inner) => `${inner}</div>`
+    );
+}
+
 /** Render markdown text to sanitised HTML with syntax highlighting. */
 export function renderMarkdown(text, onHashtagClick, options: MarkdownOptions = {}) {
     if (!text) return '';
@@ -652,6 +683,9 @@ export function renderMarkdown(text, onHashtagClick, options: MarkdownOptions = 
 
     // Process hashtags without breaking links
     html_content = linkifyHashtagsInHtml(html_content);
+
+    // Transform GitHub-style admonitions (> [!NOTE], > [!TIP], etc.)
+    html_content = transformAdmonitions(html_content);
 
     // Inject Mermaid blocks after markdown processing to avoid double-encoding
     html_content = injectMermaidBlocks(html_content, mermaidBlocks);

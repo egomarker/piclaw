@@ -528,6 +528,19 @@ const CLIPBOARD_STYLE = `
   pre code { background: none; padding: 0; border: none; }
   :not(pre) > code { background: #f0f2f5; padding: 2px 5px; border-radius: 3px; }
   blockquote { border-left: 3px solid #d0d7de; margin: 0.5em 0; padding-left: 12px; color: #57606a; }
+  .admonition { border-left: 4px solid; border-radius: 4px; margin: 0.5em 0; padding: 8px 12px; }
+  .admonition p { margin: 0.25em 0; }
+  .admonition-title { font-weight: 600; margin-bottom: 0.25em !important; }
+  .admonition-note { border-color: #4493f8; background: rgba(68,147,248,0.08); }
+  .admonition-note .admonition-title { color: #4493f8; }
+  .admonition-tip { border-color: #3fb950; background: rgba(63,185,80,0.08); }
+  .admonition-tip .admonition-title { color: #3fb950; }
+  .admonition-important { border-color: #a371f7; background: rgba(163,113,247,0.08); }
+  .admonition-important .admonition-title { color: #a371f7; }
+  .admonition-warning { border-color: #d29922; background: rgba(210,153,34,0.08); }
+  .admonition-warning .admonition-title { color: #d29922; }
+  .admonition-caution { border-color: #f85149; background: rgba(248,81,73,0.08); }
+  .admonition-caution .admonition-title { color: #f85149; }
   table { border-collapse: collapse; margin: 0.5em 0; }
   th, td { border: 1px solid #d0d7de; padding: 6px 12px; text-align: left; }
   th { background: #f6f8fa; font-weight: 600; }
