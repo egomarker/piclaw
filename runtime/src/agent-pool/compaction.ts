@@ -157,6 +157,40 @@ export function estimateContextTokensFromSession(session: AgentSession): number 
 // ── Per-session compaction counter for auto-rotation ──
 const compactionSuccessCounters = new Map<string, number>();
 
+function buildFallbackAutoCompactionWindow(
+  chatJid: string,
+  baselineTokens: number | null = null,
+  options: { ordinal?: number; successCount?: number; warnedCount?: number } = {},
+): ChatAutoCompactionWindowState {
+  const baseline = baselineTokens == null ? null : Math.max(0, Math.trunc(Number(baselineTokens) || 0));
+  return {
+    chatJid,
+    ordinal: Math.max(1, Math.trunc(Number(options.ordinal ?? 1) || 1)),
+    baselineTokens: baseline,
+    prefillTokens: baseline,
+    successCount: Math.max(0, Math.trunc(Number(options.successCount ?? 0) || 0)),
+    warnedCount: Math.max(0, Math.trunc(Number(options.warnedCount ?? 0) || 0)),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function getPersistedAutoCompactionWindowOrFallback(chatJid: string): ChatAutoCompactionWindowState {
+  try {
+    return getChatAutoCompactionWindow(chatJid);
+  } catch (error) {
+    // Tests, early startup paths, and shutdown-adjacent rotation can finalize
+    // compaction when the DB is unavailable. Keep the runtime path best-effort
+    // instead of turning a successful compaction/rotation into an agent error.
+    debugSuppressedError(log, "Failed to read persisted auto-compaction window; using volatile fallback", error, {
+      operation: "compaction.auto_window.read_fallback",
+      chatJid,
+    });
+    return buildFallbackAutoCompactionWindow(chatJid, null, {
+      successCount: compactionSuccessCounters.get(chatJid) ?? 0,
+    });
+  }
+}
+
 export function getCompactionSuccessCount(chatJid: string): number {
   return compactionSuccessCounters.get(chatJid) ?? 0;
 }
@@ -191,7 +225,7 @@ export function noteCompactionSuccess(
 ): ChatAutoCompactionWindowState {
   if (options.clearBackoff !== false) clearCompactionFailureBackoff(chatJid);
 
-  const previousWindow = getChatAutoCompactionWindow(chatJid);
+  const previousWindow = getPersistedAutoCompactionWindowOrFallback(chatJid);
   const countSuccess = options.countSuccess === true;
   const prevVolatileCount = compactionSuccessCounters.get(chatJid) ?? 0;
   const nextSuccessCount = countSuccess ? previousWindow.successCount + 1 : previousWindow.successCount;
@@ -200,10 +234,24 @@ export function noteCompactionSuccess(
   clearContextEstimateCache(session);
   const postRawContextTokens = estimateContextTokensFromSession(session);
   const postContextTokens = applyTokenEstimateSafetyMultiplier(postRawContextTokens);
-  const nextWindow = resetChatAutoCompactionWindow(chatJid, postContextTokens, {
-    successCount: nextSuccessCount,
-    warnedCount: previousWindow.warnedCount,
-  });
+  let nextWindow: ChatAutoCompactionWindowState;
+  try {
+    nextWindow = resetChatAutoCompactionWindow(chatJid, postContextTokens, {
+      successCount: nextSuccessCount,
+      warnedCount: previousWindow.warnedCount,
+    });
+  } catch (error) {
+    debugSuppressedError(log, "Failed to persist auto-compaction window; using volatile fallback", error, {
+      operation: "compaction.auto_window.write_fallback",
+      chatJid,
+      reason,
+    });
+    nextWindow = buildFallbackAutoCompactionWindow(chatJid, postContextTokens, {
+      ordinal: previousWindow.ordinal + 1,
+      successCount: nextSuccessCount,
+      warnedCount: previousWindow.warnedCount,
+    });
+  }
 
   options.onInfo?.("Compaction success finalized", {
     operation: "compaction.success_finalizer",
@@ -222,10 +270,23 @@ export function noteCompactionSuccess(
   if (countSuccess) {
     const warningThreshold = getCompactionRuntimeConfig().warningThreshold;
     if (shouldEmitRepeatedCompactionWarning(previousWindow.warnedCount, nextSuccessCount, warningThreshold)) {
-      const warnedWindow = setChatAutoCompactionWindow(chatJid, {
-        ...nextWindow,
-        warnedCount: nextSuccessCount,
-      });
+      let warnedWindow = nextWindow;
+      try {
+        warnedWindow = setChatAutoCompactionWindow(chatJid, {
+          ...nextWindow,
+          warnedCount: nextSuccessCount,
+        });
+      } catch (error) {
+        debugSuppressedError(log, "Failed to persist repeated auto-compaction warning", error, {
+          operation: "compaction.auto_window.warning_fallback",
+          chatJid,
+          reason,
+        });
+        warnedWindow = {
+          ...nextWindow,
+          warnedCount: nextSuccessCount,
+        };
+      }
       const detail = `This chat has auto-compacted ${nextSuccessCount} times. If this keeps happening, consider rotating the session or switching to a larger context model.`;
       options.onWarn?.("Repeated auto-compaction warning", {
         operation: "compaction.success_finalizer.repeated_warning",
