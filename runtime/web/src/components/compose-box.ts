@@ -87,6 +87,39 @@ export const SLASH_COMMANDS = [
 ];
 
 const COMPOSE_HISTORY_STORAGE_KEY = 'piclaw_compose_history';
+const COMPOSE_HEIGHT_STORAGE_KEY = 'piclaw_compose_height';
+const COMPOSE_MIN_HEIGHT_MOBILE = 50;
+const COMPOSE_MIN_HEIGHT_DESKTOP = 70;
+const COMPOSE_AUTO_MAX_HEIGHT_CAP = 300;
+const COMPOSE_MANUAL_MAX_HEIGHT_CAP = 520;
+
+function getComposeMinHeight() {
+    if (typeof window === 'undefined') return COMPOSE_MIN_HEIGHT_DESKTOP;
+    return window.innerWidth >= 1024 ? COMPOSE_MIN_HEIGHT_DESKTOP : COMPOSE_MIN_HEIGHT_MOBILE;
+}
+
+function getComposeAutoMaxHeight() {
+    if (typeof window === 'undefined') return COMPOSE_AUTO_MAX_HEIGHT_CAP;
+    return Math.min(Math.floor(window.innerHeight * 0.40), COMPOSE_AUTO_MAX_HEIGHT_CAP);
+}
+
+function getComposeManualMaxHeight() {
+    if (typeof window === 'undefined') return COMPOSE_MANUAL_MAX_HEIGHT_CAP;
+    return Math.min(Math.floor(window.innerHeight * 0.50), COMPOSE_MANUAL_MAX_HEIGHT_CAP);
+}
+
+function clampComposeManualHeight(height) {
+    const min = getComposeMinHeight();
+    const max = Math.max(min, getComposeManualMaxHeight());
+    return Math.min(Math.max(Math.round(Number(height) || min), min), max);
+}
+
+function readStoredComposeHeight() {
+    const raw = getLocalStorageItem(COMPOSE_HEIGHT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = parseInt(raw, 10);
+    return Number.isFinite(parsed) ? clampComposeManualHeight(parsed) : null;
+}
 
 export function resolveComposePrefillRequest(prefillRequest, lastHandledToken, searchMode = false) {
     if (searchMode) return { shouldApply: false, nextToken: lastHandledToken, text: '' };
@@ -1067,6 +1100,7 @@ export function ComposeBox({
     const [statusNoticeNowMs, setStatusNoticeNowMs] = useState(() => Date.now());
     const [extensionWorkingFrameIndex, setExtensionWorkingFrameIndex] = useState(0);
     const textareaRef = useRef(null);
+    const manualTextareaHeightRef = useRef(readStoredComposeHeight());
     const slashRef = useRef(null);
     const mentionRef = useRef(null);
     const modelPopupRef = useRef(null);
@@ -1302,12 +1336,32 @@ export function ComposeBox({
         }
     };
 
+    const applyTextareaHeight = (textarea, height) => {
+        const nextHeight = clampComposeManualHeight(height);
+        textarea.style.minHeight = `${nextHeight}px`;
+        textarea.style.height = `${nextHeight}px`;
+        textarea.style.overflowY = textarea.scrollHeight > nextHeight ? 'auto' : 'hidden';
+        return nextHeight;
+    };
+
     const resizeTextarea = (target) => {
         const textarea = target || textareaRef.current;
         if (!textarea) return;
+
+        const manualHeight = manualTextareaHeightRef.current;
+        if (manualHeight != null) {
+            applyTextareaHeight(textarea, manualHeight);
+            return;
+        }
+
+        textarea.style.minHeight = '';
         textarea.style.height = 'auto';
-        textarea.style.height = `${textarea.scrollHeight}px`;
-        textarea.style.overflowY = 'hidden';
+        const nextHeight = Math.max(
+            getComposeMinHeight(),
+            Math.min(textarea.scrollHeight, getComposeAutoMaxHeight()),
+        );
+        textarea.style.height = `${nextHeight}px`;
+        textarea.style.overflowY = textarea.scrollHeight > nextHeight ? 'auto' : 'hidden';
     };
 
     /** Update slash autocomplete matches based on current input. */
@@ -1583,6 +1637,65 @@ export function ComposeBox({
             console.warn('Failed to delete session:', error);
         }
         requestAnimationFrame(() => textareaRef.current?.focus());
+    };
+
+    const startComposeResize = (startHeight, startY, handle) => {
+        const textarea = textareaRef.current;
+        if (!textarea || !handle) return;
+
+        let nextHeight = startHeight;
+        handle.classList.add('dragging');
+        document.body.style.cursor = 'row-resize';
+        document.body.style.userSelect = 'none';
+
+        const applyNextHeight = (clientY) => {
+            nextHeight = applyTextareaHeight(textarea, startHeight + (startY - clientY));
+            manualTextareaHeightRef.current = nextHeight;
+        };
+
+        const onMouseMove = (moveEvent) => {
+            applyNextHeight(moveEvent.clientY);
+        };
+
+        const onTouchMove = (moveEvent) => {
+            const touch = moveEvent.touches[0];
+            if (!touch) return;
+            moveEvent.preventDefault();
+            applyNextHeight(touch.clientY);
+        };
+
+        const stop = () => {
+            handle.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            setLocalStorageItem(COMPOSE_HEIGHT_STORAGE_KEY, String(Math.round(nextHeight)));
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', stop);
+            document.removeEventListener('touchmove', onTouchMove);
+            document.removeEventListener('touchend', stop);
+            document.removeEventListener('touchcancel', stop);
+        };
+
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', stop);
+        document.addEventListener('touchmove', onTouchMove, { passive: false });
+        document.addEventListener('touchend', stop);
+        document.addEventListener('touchcancel', stop);
+    };
+
+    const handleComposeResizeMouseDown = (event) => {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+        event.preventDefault();
+        startComposeResize(textarea.getBoundingClientRect().height, event.clientY, event.currentTarget);
+    };
+
+    const handleComposeResizeTouchStart = (event) => {
+        const textarea = textareaRef.current;
+        const touch = event.touches?.[0];
+        if (!textarea || !touch) return;
+        event.preventDefault();
+        startComposeResize(textarea.getBoundingClientRect().height, touch.clientY, event.currentTarget);
     };
 
     const updateValue = (value) => {
@@ -2724,6 +2837,22 @@ export function ComposeBox({
     }, [content, searchText, searchMode]);
 
     useEffect(() => {
+        if (typeof window === 'undefined') return undefined;
+
+        const onWindowResize = () => {
+            if (manualTextareaHeightRef.current != null) {
+                const clamped = clampComposeManualHeight(manualTextareaHeightRef.current);
+                manualTextareaHeightRef.current = clamped;
+                setLocalStorageItem(COMPOSE_HEIGHT_STORAGE_KEY, String(clamped));
+            }
+            requestAnimationFrame(() => resizeTextarea());
+        };
+
+        window.addEventListener('resize', onWindowResize);
+        return () => window.removeEventListener('resize', onWindowResize);
+    }, []);
+
+    useEffect(() => {
         if (!searchMode) return undefined;
         if (speechRecognitionRef.current) {
             stopSpeechRecognition();
@@ -2778,6 +2907,15 @@ export function ComposeBox({
 
     return html`
         <div class="compose-box" data-testid="compose-box">
+            <div
+                class="compose-resize-handle"
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="Resize message input"
+                title="Drag to resize message input"
+                onMouseDown=${handleComposeResizeMouseDown}
+                onTouchStart=${handleComposeResizeTouchStart}
+            ></div>
             ${speechUiVisible && html`
                 <div class=${`compose-inline-status compose-speech-status compose-speech-status-${speechUiState.kind}`} role="status" aria-live="polite">
                     <div class="compose-inline-status-row">

@@ -242,8 +242,8 @@ function listAddonPackageDirs(addonsNodeModulesDir: string): string[] {
           const scopedPath = join(entryPath, scoped.name);
           if (existsSync(scopedPath)) results.push(scopedPath);
         }
-      } catch {
-        // Skip unreadable scoped directories (broken symlinks, permission errors)
+      } catch (error) {
+        debugSuppressedError(log, "Skipping unreadable scoped directory during extension scan.", error, { scopedDir: entryPath });
       }
       continue;
     }
