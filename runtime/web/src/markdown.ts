@@ -124,6 +124,40 @@ const SAFE_TAGS = new Set([
     'mtr',
     'mtd',
     'annotation',
+    // SVG tags for inline diagrams/charts
+    'svg',
+    'g',
+    'defs',
+    'symbol',
+    'use',
+    'path',
+    'rect',
+    'circle',
+    'ellipse',
+    'line',
+    'polyline',
+    'polygon',
+    'text',
+    'tspan',
+    'image',
+    'clippath',
+    'mask',
+    'pattern',
+    'lineargradient',
+    'radialgradient',
+    'stop',
+    'filter',
+    'fegaussianblur',
+    'feoffset',
+    'feblend',
+    'fecolormatrix',
+    'fecomposite',
+    'feflood',
+    'fedropshadow',
+    'title',
+    'desc',
+    'marker',
+    'foreignobject',
 ]);
 
 const GLOBAL_ALLOWED_ATTRS = new Set([
@@ -146,6 +180,14 @@ const TAG_ALLOWED_ATTRS = {
 
 const SAFE_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', '']);
 
+const SVG_TAGS = new Set([
+    'svg', 'g', 'defs', 'symbol', 'use', 'path', 'rect', 'circle', 'ellipse',
+    'line', 'polyline', 'polygon', 'text', 'tspan', 'image', 'clippath', 'mask',
+    'pattern', 'lineargradient', 'radialgradient', 'stop', 'filter',
+    'fegaussianblur', 'feoffset', 'feblend', 'fecolormatrix', 'fecomposite',
+    'feflood', 'fedropshadow', 'title', 'desc', 'marker', 'foreignobject',
+]);
+
 export function isSanitizedHtmlAttributeAllowed(tagName, attrName) {
     const normalizedTag = String(tagName || '').toLowerCase();
     const normalizedAttr = String(attrName || '').toLowerCase();
@@ -153,6 +195,9 @@ export function isSanitizedHtmlAttributeAllowed(tagName, attrName) {
     if (normalizedAttr.startsWith('data-') || normalizedAttr.startsWith('aria-')) {
         return true;
     }
+    // SVG elements use many presentation attributes (viewBox, fill, stroke, d, cx, etc.)
+    // Allow all non-event attributes on SVG tags — they cannot execute scripts.
+    if (SVG_TAGS.has(normalizedTag)) return true;
     const allowedAttrs = TAG_ALLOWED_ATTRS[normalizedTag] || new Set();
     return allowedAttrs.has(normalizedAttr) || GLOBAL_ALLOWED_ATTRS.has(normalizedAttr);
 }
