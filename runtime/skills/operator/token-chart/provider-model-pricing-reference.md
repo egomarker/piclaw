@@ -1,6 +1,6 @@
 # Provider/model pricing reference
 
-_Reference tag (snapshot date): 2026-05-09_
+_Reference tag (snapshot date): 2026-05-25_
 
 This note documents the pricing snapshot used by the estimated provider/model cost chart.
 
@@ -9,7 +9,8 @@ This note documents the pricing snapshot used by the estimated provider/model co
 - Codex GPT-5.5 source: OpenAI Codex pricing page, using its 2× GPT-5.4 credit ratio as the token-rate estimate
 - GPT-4o fallback source: `projects/openviktor/apps/bot/src/agent/pricing.ts`
 - GPT-OSS 120B fallback source: OpenRouter model pricing reference, used only as a Cerebras proxy until direct account pricing is confirmed
-- Fireworks Fire Pass / Kimi source: Fireworks Fire Pass docs and Fireworks model pages accessed 2026-05-09
+- Kimi sources: Fireworks Fire Pass docs, Fireworks/Moonshot model rows, and OpenRouter provider row accessed 2026-05-25
+- MiniMax sources: MiniMax official PAYG pricing docs and OpenRouter/provider registry rows accessed 2026-05-25
 
 ## Assumptions
 
@@ -21,8 +22,8 @@ This note documents the pricing snapshot used by the estimated provider/model co
 - Claude Opus 4.6 (1M) keeps standard Opus pricing; long-context premiums are not modeled.
 - GPT-OSS 120B uses an OpenRouter proxy rate until direct Cerebras account pricing is confirmed; current local rows have zero tokens.
 - Fire Pass is modeled as a $49/month subscription outside token charts; the covered `kimi-k2p6-turbo` router is represented as $0/token only when that pass is active.
-- Kimi cache writes are treated as normal input because Fireworks publishes input/cached-input/output rates, not a separate cache-write meter.
-- Kimi K2.5 is retained only for historical rows; prefer Kimi K2.6 or Kimi K2.6 Turbo under Fire Pass for new routing.
+- Kimi and MiniMax provider pages publish input/cached-input/output rates; cache writes are modeled as the provider-published cache-write rate when available, otherwise at normal input.
+- Kimi K2.5 is retained only for historical rows; prefer Kimi K2.6, Kimi K2.6 Turbo under Fire Pass, or MiniMax M2.7 for new routing.
 
 ## Reference rows
 
@@ -45,6 +46,14 @@ This note documents the pricing snapshot used by the estimated provider/model co
 | `gpt-4o` | GPT-4o | $2.50 | $10.00 | $0.00 | $0.00 | Fallback helper entry |
 | `mistral-large-3` | Mistral Large 3 | $2.00 | $6.00 | $0.00 | $0.00 | Azure Foundry usage proxied to Mistral Large |
 | `gpt-oss-120b` | GPT-OSS 120B | $0.039 | $0.10 | $0.00 | $0.00 | OpenRouter proxy for Cerebras rows until direct pricing is confirmed |
+| `minimax-m2.7` / `minimax/minimax-m2.7` | MiniMax M2.7 | $0.30 | $1.20 | $0.06 | $0.375 | Native/current MiniMax coding baseline |
+| `minimax-m2.7-highspeed` | MiniMax M2.7 Highspeed | $0.60 | $2.40 | $0.06 | $0.375 | 2× input/output high-speed row |
+| `minimax-m2.5` | MiniMax M2.5 | $0.30 | $1.20 | $0.03 | $0.375 | Official row; OpenRouter-routed row is cheaper |
+| `minimax/minimax-m2.5` | MiniMax M2.5 (OpenRouter) | $0.15 | $1.15 | $0.03 | $0.15 | Router-specific price |
+| `minimax/minimax-m2` | MiniMax M2 (OpenRouter) | $0.255 | $1.00 | $0.03 | $0.255 | Router-specific historical/current row |
+| `minimax/minimax-m2.1` | MiniMax M2.1 (OpenRouter) | $0.29 | $0.95 | $0.03 | $0.29 | Router-specific row |
+| `minimax/minimax-m1` | MiniMax M1 (OpenRouter) | $0.40 | $2.20 | $0.00 | $0.40 | Older 1M-context row retained for historical/router usage |
 | `kimi-k2p6-turbo` | Kimi K2.6 Turbo (Fire Pass router) | $0.00 | $0.00 | $0.00 | $0.00 | Covered by Fireworks Fire Pass while active; $49/month subscription tracked separately |
-| `kimi-k2.6` / `kimi-k2p6` | Kimi K2.6 | $0.95 | $4.00 | $0.16 | $0.95 | Fireworks serverless PAYG; cache write modeled as normal input |
+| `moonshotai/kimi-k2.6` | Kimi K2.6 (OpenRouter) | $0.75 | $3.50 | $0.15 | $0.75 | Router-specific price |
+| `kimi-k2.6` / `kimi-k2p6` | Kimi K2.6 | $0.95 | $4.00 | $0.16 | $0.95 | Native/Fireworks PAYG; cache write modeled as normal input |
 | `kimi-k2.5` / `kimi-k2p5` | Kimi K2.5 (legacy/deprecated) | $0.60 | $3.00 | $0.10 | $0.60 | Legacy/historical row; avoid for new routing |
