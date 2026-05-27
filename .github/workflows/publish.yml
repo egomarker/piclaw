@@ -1,4 +1,4 @@
-name: Publish Docker images
+name: Publish macOS Intel release assets
 
 on:
   push:
@@ -108,25 +108,29 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: linux
-            arch: x64
-            runner: ubuntu-24.04
-            build_args: ""
-          - platform: linux
-            arch: x64-baseline
-            runner: ubuntu-24.04
-            build_args: "--bun-target linux-x64-baseline"
-          - platform: linux
-            arch: arm64
-            runner: ubuntu-24.04-arm
-            build_args: ""
+          # - platform: linux
+          #   arch: x64
+          #   runner: ubuntu-24.04
+          #   build_args: ""
+          # - platform: linux
+          #   arch: x64-baseline
+          #   runner: ubuntu-24.04
+          #   build_args: "--bun-target linux-x64-baseline"
+          # - platform: linux
+          #   arch: arm64
+          #   runner: ubuntu-24.04-arm
+          #   build_args: ""
+          # - platform: macos
+          #   arch: arm64
+          #   runner: macos-14
+          #   build_args: ""
+          # - platform: windows
+          #   arch: x64
+          #   runner: windows-latest
+          #   build_args: ""
           - platform: macos
-            arch: arm64
-            runner: macos-14
-            build_args: ""
-          - platform: windows
             arch: x64
-            runner: windows-latest
+            runner: macos-15-intel
             build_args: ""
     steps:
       - name: Checkout repository
@@ -159,18 +163,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: linux
-            arch: x64
-            runner: ubuntu-24.04
-          - platform: linux
-            arch: arm64
-            runner: ubuntu-24.04-arm
+          # - platform: linux
+          #   arch: x64
+          #   runner: ubuntu-24.04
+          # - platform: linux
+          #   arch: arm64
+          #   runner: ubuntu-24.04-arm
+          # - platform: macos
+          #   arch: arm64
+          #   runner: macos-14
+          # - platform: windows
+          #   arch: x64
+          #   runner: windows-latest
           - platform: macos
-            arch: arm64
-            runner: macos-14
-          - platform: windows
             arch: x64
-            runner: windows-latest
+            runner: macos-15-intel
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -195,162 +202,162 @@ jobs:
 
   # Build/push remains workflow-native because it is GitHub-runner-specific Docker orchestration.
   # Build AMD64 image on native Intel runner
-  build-amd64:
-    name: Build AMD64 image
-    needs: [wait-for-integration, resolve-runtime-versions]
-    runs-on: ubuntu-24.04
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
+  # build-amd64:
+  #   name: Build AMD64 image
+  #   needs: [wait-for-integration, resolve-runtime-versions]
+  #   runs-on: ubuntu-24.04
+  #   outputs:
+  #     digest: ${{ steps.build.outputs.digest }}
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v6
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+  #     - name: Set up Docker Buildx
+  #       uses: docker/setup-buildx-action@v4
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+  #     - name: Login to GitHub Container Registry
+  #       uses: docker/login-action@v4
+  #       with:
+  #         registry: ${{ env.REGISTRY }}
+  #         username: ${{ github.actor }}
+  #         password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+  #     - name: Extract metadata
+  #       id: meta
+  #       uses: docker/metadata-action@v6
+  #       with:
+  #         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
-      - name: Build and push AMD64 image
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64
-          push: true
-          provenance: false
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=amd64
-          cache-to: type=gha,mode=max,scope=amd64
-          build-args: |
-            BUN_VERSION=${{ needs.resolve-runtime-versions.outputs.bun_version }}
-            BUN_PREFER_BASELINE=${{ env.BUN_PREFER_BASELINE }}
+  #     - name: Build and push AMD64 image
+  #       id: build
+  #       uses: docker/build-push-action@v7
+  #       with:
+  #         context: .
+  #         file: ./Dockerfile
+  #         platforms: linux/amd64
+  #         push: true
+  #         provenance: false
+  #         outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+  #         cache-from: type=gha,scope=amd64
+  #         cache-to: type=gha,mode=max,scope=amd64
+  #         build-args: |
+  #           BUN_VERSION=${{ needs.resolve-runtime-versions.outputs.bun_version }}
+  #           BUN_PREFER_BASELINE=${{ env.BUN_PREFER_BASELINE }}
 
-      - name: Smoke test AMD64 image
-        continue-on-error: true
-        timeout-minutes: 5
-        env:
-          STATIC_TIMEOUT_SEC: "120"
-          HTTP_TIMEOUT_SEC: "180"
-        run: |
-          make publish-smoke \
-            IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" \
-            PLATFORM="linux/amd64" \
-            EXPECTED_BUN_VERSION="${{ needs.resolve-runtime-versions.outputs.bun_version }}" \
-            EXPECTED_RESTIC_VERSION="${{ needs.resolve-runtime-versions.outputs.restic_version }}"
+  #     - name: Smoke test AMD64 image
+  #       continue-on-error: true
+  #       timeout-minutes: 5
+  #       env:
+  #         STATIC_TIMEOUT_SEC: "120"
+  #         HTTP_TIMEOUT_SEC: "180"
+  #       run: |
+  #         make publish-smoke \
+  #           IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" \
+  #           PLATFORM="linux/amd64" \
+  #           EXPECTED_BUN_VERSION="${{ needs.resolve-runtime-versions.outputs.bun_version }}" \
+  #           EXPECTED_RESTIC_VERSION="${{ needs.resolve-runtime-versions.outputs.restic_version }}"
 
   # Build ARM64 image on native ARM runner
-  build-arm64:
-    name: Build ARM64 image
-    needs: [wait-for-integration, resolve-runtime-versions]
-    runs-on: ubuntu-24.04-arm
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
+  # build-arm64:
+  #   name: Build ARM64 image
+  #   needs: [wait-for-integration, resolve-runtime-versions]
+  #   runs-on: ubuntu-24.04-arm
+  #   outputs:
+  #     digest: ${{ steps.build.outputs.digest }}
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v6
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+  #     - name: Set up Docker Buildx
+  #       uses: docker/setup-buildx-action@v4
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+  #     - name: Login to GitHub Container Registry
+  #       uses: docker/login-action@v4
+  #       with:
+  #         registry: ${{ env.REGISTRY }}
+  #         username: ${{ github.actor }}
+  #         password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+  #     - name: Extract metadata
+  #       id: meta
+  #       uses: docker/metadata-action@v6
+  #       with:
+  #         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
-      - name: Build and push ARM64 image
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/arm64
-          push: true
-          provenance: false
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=arm64
-          cache-to: type=gha,mode=max,scope=arm64
-          build-args: |
-            BUN_VERSION=${{ needs.resolve-runtime-versions.outputs.bun_version }}
-            BUN_PREFER_BASELINE=${{ env.BUN_PREFER_BASELINE }}
+  #     - name: Build and push ARM64 image
+  #       id: build
+  #       uses: docker/build-push-action@v7
+  #       with:
+  #         context: .
+  #         file: ./Dockerfile
+  #         platforms: linux/arm64
+  #         push: true
+  #         provenance: false
+  #         outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+  #         cache-from: type=gha,scope=arm64
+  #         cache-to: type=gha,mode=max,scope=arm64
+  #         build-args: |
+  #           BUN_VERSION=${{ needs.resolve-runtime-versions.outputs.bun_version }}
+  #           BUN_PREFER_BASELINE=${{ env.BUN_PREFER_BASELINE }}
 
-      - name: Smoke test ARM64 image
-        continue-on-error: true
-        timeout-minutes: 5
-        env:
-          STATIC_TIMEOUT_SEC: "120"
-          HTTP_TIMEOUT_SEC: "180"
-        run: |
-          make publish-smoke \
-            IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" \
-            PLATFORM="linux/arm64" \
-            EXPECTED_BUN_VERSION="${{ needs.resolve-runtime-versions.outputs.bun_version }}" \
-            EXPECTED_RESTIC_VERSION="${{ needs.resolve-runtime-versions.outputs.restic_version }}"
+  #     - name: Smoke test ARM64 image
+  #       continue-on-error: true
+  #       timeout-minutes: 5
+  #       env:
+  #         STATIC_TIMEOUT_SEC: "120"
+  #         HTTP_TIMEOUT_SEC: "180"
+  #       run: |
+  #         make publish-smoke \
+  #           IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" \
+  #           PLATFORM="linux/arm64" \
+  #           EXPECTED_BUN_VERSION="${{ needs.resolve-runtime-versions.outputs.bun_version }}" \
+  #           EXPECTED_RESTIC_VERSION="${{ needs.resolve-runtime-versions.outputs.restic_version }}"
 
   # Merge digests into a single multi-arch manifest
-  merge:
-    name: Create multi-arch manifest
-    runs-on: ubuntu-latest
-    needs: [build-amd64, build-arm64]
+  # merge:
+    # name: Create multi-arch manifest
+    # runs-on: ubuntu-latest
+    # needs: [build-amd64, build-arm64]
 
-    steps:
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+    # steps:
+    #   - name: Set up Docker Buildx
+    #     uses: docker/setup-buildx-action@v4
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+    #   - name: Login to GitHub Container Registry
+    #     uses: docker/login-action@v4
+    #     with:
+    #       registry: ${{ env.REGISTRY }}
+    #       username: ${{ github.actor }}
+    #       password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
+    #   - name: Extract metadata
+    #     id: meta
+    #     uses: docker/metadata-action@v6
+    #     with:
+    #       images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+    #       tags: |
+    #         type=ref,event=tag
+    #         type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Create and push multi-arch manifest
-        working-directory: /tmp
-        run: |
-          docker buildx imagetools create \
-            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }} \
-            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-amd64.outputs.digest }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-arm64.outputs.digest }}
+    #   - name: Create and push multi-arch manifest
+    #     working-directory: /tmp
+    #     run: |
+    #       docker buildx imagetools create \
+    #         -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }} \
+    #         -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+    #         ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-amd64.outputs.digest }} \
+    #         ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-arm64.outputs.digest }}
 
-      - name: Inspect merged image
-        run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+    #   - name: Inspect merged image
+    #     run: |
+    #       docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
 
   publish-portable-assets:
     name: Publish portable release assets
     runs-on: ubuntu-latest
-    needs: [merge, build-portable-artifacts, build-experimental-shell-artifacts]
+    needs: [build-portable-artifacts, build-experimental-shell-artifacts]
     permissions:
       contents: write
     steps:
@@ -546,109 +553,109 @@ jobs:
   # GitHub-native cleanup boundary: GHCR package pruning remains in `github-script`
   # because it uses GitHub package APIs directly and is not meaningfully reusable
   # as a local repo command.
-  prune-docker-images:
-    name: Prune old Docker images
-    runs-on: ubuntu-latest
-    needs: merge
-    permissions:
-      packages: write
-    steps:
-      - name: Delete untagged images
-        uses: actions/github-script@v9
-        with:
-          github-token: ${{ secrets.RELEASES_TOKEN || secrets.GITHUB_TOKEN }}
-          script: |
-            const keepCount = 5;
-            const { owner, repo } = context.repo;
-            const packageName = repo.toLowerCase();
+  # prune-docker-images:
+  #   name: Prune old Docker images
+  #   runs-on: ubuntu-latest
+  #   needs: merge
+  #   permissions:
+  #     packages: write
+  #   steps:
+  #     - name: Delete untagged images
+  #       uses: actions/github-script@v9
+  #       with:
+  #         github-token: ${{ secrets.RELEASES_TOKEN || secrets.GITHUB_TOKEN }}
+  #         script: |
+  #           const keepCount = 5;
+  #           const { owner, repo } = context.repo;
+  #           const packageName = repo.toLowerCase();
 
-            core.info(`Cleaning Docker images for repository: ${owner}/${repo}`);
-            core.info(`Package name in registry: ${packageName}`);
+  #           core.info(`Cleaning Docker images for repository: ${owner}/${repo}`);
+  #           core.info(`Package name in registry: ${packageName}`);
 
-            try {
-              const versions = await github.paginate(
-                github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg,
-                {
-                  package_type: 'container',
-                  package_name: packageName,
-                  org: owner,
-                  per_page: 100,
-                  state: 'active',
-                }
-              );
+  #           try {
+  #             const versions = await github.paginate(
+  #               github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg,
+  #               {
+  #                 package_type: 'container',
+  #                 package_name: packageName,
+  #                 org: owner,
+  #                 per_page: 100,
+  #                 state: 'active',
+  #               }
+  #             );
 
-              core.info(`Found ${versions.length} package versions`);
+  #             core.info(`Found ${versions.length} package versions`);
 
-              const taggedVersions = versions.filter(
-                v => v.metadata?.container?.tags?.length > 0
-              );
-              const untaggedVersions = versions.filter(
-                v => !v.metadata?.container?.tags || v.metadata.container.tags.length === 0
-              );
+  #             const taggedVersions = versions.filter(
+  #               v => v.metadata?.container?.tags?.length > 0
+  #             );
+  #             const untaggedVersions = versions.filter(
+  #               v => !v.metadata?.container?.tags || v.metadata.container.tags.length === 0
+  #             );
 
-              core.info(
-                `Tagged versions: ${taggedVersions.length}, Untagged versions: ${untaggedVersions.length}`
-              );
+  #             core.info(
+  #               `Tagged versions: ${taggedVersions.length}, Untagged versions: ${untaggedVersions.length}`
+  #             );
 
-              const sortedTagged = taggedVersions.sort(
-                (a, b) => new Date(b.created_at) - new Date(a.created_at)
-              );
+  #             const sortedTagged = taggedVersions.sort(
+  #               (a, b) => new Date(b.created_at) - new Date(a.created_at)
+  #             );
 
-              const oldestKept = sortedTagged.length > 0
-                ? new Date(sortedTagged[Math.min(keepCount, sortedTagged.length) - 1].created_at)
-                : new Date();
-              core.info(`Oldest kept tag created at: ${oldestKept.toISOString()}`);
+  #             const oldestKept = sortedTagged.length > 0
+  #               ? new Date(sortedTagged[Math.min(keepCount, sortedTagged.length) - 1].created_at)
+  #               : new Date();
+  #             core.info(`Oldest kept tag created at: ${oldestKept.toISOString()}`);
 
-              const untaggedToDelete = untaggedVersions.filter(v =>
-                new Date(v.created_at) < oldestKept
-              );
-              core.info(`Untagged versions to delete: ${untaggedToDelete.length} (keeping ${untaggedVersions.length - untaggedToDelete.length} that may be referenced by kept tags)`);
+  #             const untaggedToDelete = untaggedVersions.filter(v =>
+  #               new Date(v.created_at) < oldestKept
+  #             );
+  #             core.info(`Untagged versions to delete: ${untaggedToDelete.length} (keeping ${untaggedVersions.length - untaggedToDelete.length} that may be referenced by kept tags)`);
 
-              for (const version of untaggedToDelete) {
-                core.info(
-                  `Deleting untagged version ${version.id} (created: ${version.created_at})`
-                );
-                try {
-                  await github.rest.packages.deletePackageVersionForOrg({
-                    package_type: 'container',
-                    package_name: packageName,
-                    org: owner,
-                    package_version_id: version.id,
-                  });
-                } catch (error) {
-                  core.warning(
-                    `Failed to delete untagged version ${version.id}: ${error.message}`
-                  );
-                }
-              }
+  #             for (const version of untaggedToDelete) {
+  #               core.info(
+  #                 `Deleting untagged version ${version.id} (created: ${version.created_at})`
+  #               );
+  #               try {
+  #                 await github.rest.packages.deletePackageVersionForOrg({
+  #                   package_type: 'container',
+  #                   package_name: packageName,
+  #                   org: owner,
+  #                   package_version_id: version.id,
+  #                 });
+  #               } catch (error) {
+  #                 core.warning(
+  #                   `Failed to delete untagged version ${version.id}: ${error.message}`
+  #                 );
+  #               }
+  #             }
 
-              const versionsToDelete = sortedTagged.slice(keepCount);
+  #             const versionsToDelete = sortedTagged.slice(keepCount);
 
-              core.info(
-                `Keeping ${keepCount} newest tagged versions, deleting ${versionsToDelete.length} older ones...`
-              );
-              for (const version of versionsToDelete) {
-                const tags = version.metadata?.container?.tags?.join(', ') || 'unknown';
-                core.info(
-                  `Deleting version ${version.id} with tags: ${tags} (created: ${version.created_at})`
-                );
-                try {
-                  await github.rest.packages.deletePackageVersionForOrg({
-                    package_type: 'container',
-                    package_name: packageName,
-                    org: owner,
-                    package_version_id: version.id,
-                  });
-                } catch (error) {
-                  core.warning(
-                    `Failed to delete version ${version.id}: ${error.message}`
-                  );
-                }
-              }
-            } catch (error) {
-              if (error.status === 404) {
-                core.info('No package found - this might be the first build');
-              } else {
-                core.setFailed(`Error managing package versions: ${error.message}`);
-              }
-            }
+  #             core.info(
+  #               `Keeping ${keepCount} newest tagged versions, deleting ${versionsToDelete.length} older ones...`
+  #             );
+  #             for (const version of versionsToDelete) {
+  #               const tags = version.metadata?.container?.tags?.join(', ') || 'unknown';
+  #               core.info(
+  #                 `Deleting version ${version.id} with tags: ${tags} (created: ${version.created_at})`
+  #               );
+  #               try {
+  #                 await github.rest.packages.deletePackageVersionForOrg({
+  #                   package_type: 'container',
+  #                   package_name: packageName,
+  #                   org: owner,
+  #                   package_version_id: version.id,
+  #                 });
+  #               } catch (error) {
+  #                 core.warning(
+  #                   `Failed to delete version ${version.id}: ${error.message}`
+  #                 );
+  #               }
+  #             }
+  #           } catch (error) {
+  #             if (error.status === 404) {
+  #               core.info('No package found - this might be the first build');
+  #             } else {
+  #               core.setFailed(`Error managing package versions: ${error.message}`);
+  #             }
+  #           }
