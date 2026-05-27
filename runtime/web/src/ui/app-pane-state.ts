@@ -87,8 +87,8 @@ export function shouldShowEditorPaneContainer(
   panePopoutMode: boolean,
   chatOnlyMode: boolean,
   editorOpen: boolean,
-  hasDockPanes: boolean,
-  dockVisible: boolean,
+  _hasDockPanes: boolean,
+  _dockVisible: boolean,
 ): boolean {
-  return panePopoutMode || (!chatOnlyMode && (editorOpen || (hasDockPanes && dockVisible)));
+  return panePopoutMode || (!chatOnlyMode && editorOpen);
 }

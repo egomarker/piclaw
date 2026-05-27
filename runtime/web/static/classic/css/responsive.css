@@ -280,7 +280,7 @@
         max-width: 800px;
     }
 
-    .app-shell > .container {
+    .app-shell > .app-main-row > .container {
         max-width: none;
         margin: 0;
         flex: 1;
@@ -316,4 +316,3 @@
     overflow-y: hidden;
     padding: var(--spacing-xs) 0;
 }
-

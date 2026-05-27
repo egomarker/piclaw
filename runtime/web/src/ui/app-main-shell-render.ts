@@ -325,6 +325,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
           </form>
         </div>
       `}
+      <div class="app-main-row">
       ${!chatOnlyMode && html`
         <${WorkspaceExplorer}
           onFileSelect=${addFileRef}
@@ -396,51 +397,6 @@ export function renderMainShell(options: MainShellRenderOptions): any {
               onClose=${() => handleTabTogglePreview(tabStripActiveId)}
             />
           `}
-          ${hasDockPanes && dockVisible && html`<div class="dock-splitter" onMouseDown=${handleDockSplitterMouseDown} onTouchStart=${handleDockSplitterTouchStart}></div>`}
-          ${hasDockPanes && html`<div class=${`dock-panel${dockVisible ? '' : ' hidden'}${editorOpen ? '' : ' standalone'}`}>
-            <div class="dock-panel-header">
-              <span class="dock-panel-title">Terminal</span>
-              <div class="dock-panel-actions">
-                ${!isWebAppMode && !detachedDockPane && html`
-                  <button class="dock-panel-action" onClick=${() => handlePopOutPane(TERMINAL_TAB_PATH, 'Terminal')} title="Open terminal in window" aria-label="Open terminal in window">
-                    <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                      <rect x="2.25" y="2.25" width="8.5" height="8.5" rx="1.5"/>
-                      <path d="M8.5 2.25h5.25v5.25"/>
-                      <path d="M13.75 2.25 7.75 8.25"/>
-                    </svg>
-                  </button>
-                `}
-                ${detachedDockPane && html`
-                  <button class="dock-panel-action" onClick=${() => handleReattachPane(TERMINAL_TAB_PATH)} title="Reattach terminal" aria-label="Reattach terminal">
-                    <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                      <rect x="2.25" y="2.25" width="11.5" height="11.5" rx="1.5"/>
-                      <path d="M5.25 8h5.5"/>
-                      <path d="M8 5.25v5.5"/>
-                    </svg>
-                  </button>
-                `}
-                <button class="dock-panel-close" onClick=${toggleDock} title="Hide terminal (Ctrl+\`)" aria-label="Hide terminal">
-                  <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                    <line x1="4" y1="4" x2="12" y2="12"/>
-                    <line x1="12" y1="4" x2="4" y2="12"/>
-                  </svg>
-                </button>
-              </div>
-            </div>
-            ${detachedDockPane
-              ? html`
-                <div class="dock-panel-body dock-panel-body-detached">
-                  <div class="editor-empty-state">
-                    <div class="editor-empty-state-title">Terminal detached</div>
-                    <div class="editor-empty-state-body">The terminal is open in another window.</div>
-                    <div class="editor-empty-state-actions">
-                      <button class="editor-empty-state-button" onClick=${() => handleReattachPane(TERMINAL_TAB_PATH)}>Reattach here</button>
-                    </div>
-                  </div>
-                </div>
-              `
-              : html`<div class="dock-panel-body" ref=${dockContainerRef}></div>`}
-          </div>`}
         </div>
         <div class="editor-splitter" onMouseDown=${handleEditorSplitterMouseDown} onTouchStart=${handleEditorSplitterTouchStart}></div>
       `}
@@ -619,6 +575,52 @@ export function renderMainShell(options: MainShellRenderOptions): any {
           }}
         />
       </div>
+      </div>
+      ${hasDockPanes && dockVisible && html`<div class="dock-splitter" onMouseDown=${handleDockSplitterMouseDown} onTouchStart=${handleDockSplitterTouchStart}></div>`}
+      ${hasDockPanes && html`<div class=${`dock-panel${dockVisible ? '' : ' hidden'}`}>
+        <div class="dock-panel-header">
+          <span class="dock-panel-title">Terminal</span>
+          <div class="dock-panel-actions">
+            ${!isWebAppMode && !detachedDockPane && html`
+              <button class="dock-panel-action" onClick=${() => handlePopOutPane(TERMINAL_TAB_PATH, 'Terminal')} title="Open terminal in window" aria-label="Open terminal in window">
+                <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="2.25" y="2.25" width="8.5" height="8.5" rx="1.5"/>
+                  <path d="M8.5 2.25h5.25v5.25"/>
+                  <path d="M13.75 2.25 7.75 8.25"/>
+                </svg>
+              </button>
+            `}
+            ${detachedDockPane && html`
+              <button class="dock-panel-action" onClick=${() => handleReattachPane(TERMINAL_TAB_PATH)} title="Reattach terminal" aria-label="Reattach terminal">
+                <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="2.25" y="2.25" width="11.5" height="11.5" rx="1.5"/>
+                  <path d="M5.25 8h5.5"/>
+                  <path d="M8 5.25v5.5"/>
+                </svg>
+              </button>
+            `}
+            <button class="dock-panel-close" onClick=${toggleDock} title="Hide terminal (Ctrl+\`)" aria-label="Hide terminal">
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                <line x1="4" y1="4" x2="12" y2="12"/>
+                <line x1="12" y1="4" x2="4" y2="12"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        ${detachedDockPane
+          ? html`
+            <div class="dock-panel-body dock-panel-body-detached">
+              <div class="editor-empty-state">
+                <div class="editor-empty-state-title">Terminal detached</div>
+                <div class="editor-empty-state-body">The terminal is open in another window.</div>
+                <div class="editor-empty-state-actions">
+                  <button class="editor-empty-state-button" onClick=${() => handleReattachPane(TERMINAL_TAB_PATH)}>Reattach here</button>
+                </div>
+              </div>
+            </div>
+          `
+          : html`<div class="dock-panel-body" ref=${dockContainerRef}></div>`}
+      </div>`}
     </div>
   `;
 }

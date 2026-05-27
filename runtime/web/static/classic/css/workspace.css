@@ -4,7 +4,7 @@
  * Keep selector names/order stable in this first move-only tranche.
  */
 
-.workspace-sidebar {
+ .workspace-sidebar {
     --workspace-header-font-size: 13px;
     --workspace-header-button-size: 28px;
     --workspace-header-icon-size: 16px;
@@ -1084,25 +1084,25 @@
     border-color: color-mix(in srgb, var(--accent-color) 28%, transparent);
 }
 
-.app-shell.editor-open > .container {
+.app-shell.editor-open > .app-main-row > .container {
     font-size: 0.9em;
 }
 
-.app-shell.editor-open > .container .post-content {
+.app-shell.editor-open > .app-main-row > .container .post-content {
     font-size: inherit;
 }
 
-.app-shell.editor-open > .container .compose-input {
+.app-shell.editor-open > .app-main-row > .container .compose-input {
     font-size: inherit;
     min-height: 2em;
     padding: 6px 8px;
 }
 
-.app-shell.editor-open > .container .agent-status {
+.app-shell.editor-open > .app-main-row > .container .agent-status {
     font-size: inherit;
 }
 
-.app-shell.editor-open > .container .post-avatar {
+.app-shell.editor-open > .app-main-row > .container .post-avatar {
     width: 28px;
     height: 28px;
     min-width: 28px;
@@ -1110,7 +1110,7 @@
     font-size: 11px;
 }
 
-.app-shell.editor-open > .container .post-avatar.has-image img {
+.app-shell.editor-open > .app-main-row > .container .post-avatar.has-image img {
     width: 28px;
     height: 28px;
 }
