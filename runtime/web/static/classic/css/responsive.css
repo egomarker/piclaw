@@ -280,7 +280,7 @@
         max-width: 800px;
     }
 
-    .app-shell > .app-main-row > .container {
+    .app-shell .shell-chat-pane {
         max-width: none;
         margin: 0;
         flex: 1;

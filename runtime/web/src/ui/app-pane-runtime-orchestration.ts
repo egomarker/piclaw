@@ -759,8 +759,6 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
     panePopoutMode,
     chatOnlyMode,
     editorOpen,
-    hasDockPanes,
-    dockVisible,
   );
 
   const [zenMode, setZenMode] = useState(false);

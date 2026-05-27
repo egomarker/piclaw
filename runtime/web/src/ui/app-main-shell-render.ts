@@ -23,9 +23,10 @@ export function buildMainShellClassName(options: {
   editorOpen: boolean;
   chatOnlyMode: boolean;
   zenMode: boolean;
+  dockBottomActive: boolean;
 }): string {
-  const { workspaceOpen, editorOpen, chatOnlyMode, zenMode } = options;
-  return `app-shell${workspaceOpen ? '' : ' workspace-collapsed'}${editorOpen ? ' editor-open' : ''}${chatOnlyMode ? ' chat-only' : ''}${zenMode ? ' zen-mode' : ''}`;
+  const { workspaceOpen, editorOpen, chatOnlyMode, zenMode, dockBottomActive } = options;
+  return `app-shell${workspaceOpen ? '' : ' workspace-collapsed'}${editorOpen ? ' editor-open' : ''}${chatOnlyMode ? ' chat-only' : ''}${zenMode ? ' zen-mode' : ''}${dockBottomActive ? ' dock-bottom-active' : ''}`;
 }
 
 export function extractPostedUserMessageId(response: unknown): number | null {
@@ -273,8 +274,10 @@ export function renderMainShell(options: MainShellRenderOptions): any {
     scrollToBottom();
   };
 
+  const dockBottomActive = Boolean(hasDockPanes && dockVisible);
+
   return html`
-    <div class=${buildMainShellClassName({ workspaceOpen, editorOpen, chatOnlyMode, zenMode })} ref=${appShellRef}>
+    <div class=${buildMainShellClassName({ workspaceOpen, editorOpen, chatOnlyMode, zenMode, dockBottomActive })} ref=${appShellRef}>
       <${SystemMetersHud} mode="overlay" />
       ${isRenameBranchFormOpen && html`
         <div class="rename-branch-overlay" onPointerDown=${(event: any) => {
@@ -351,7 +354,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
         <div class="workspace-splitter" onMouseDown=${handleSplitterMouseDown} onTouchStart=${handleSplitterTouchStart}></div>
       `}
       ${showEditorPaneContainer && html`
-        <div class="editor-pane-container">
+        <div class="editor-pane-container shell-editor-pane">
           ${zenMode && html`<div class="zen-hover-zone"></div>`}
           ${editorOpen && html`
             <${TabStrip}
@@ -422,7 +425,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
         onToggleTerminalDock=${hasDockPanes ? toggleDock : undefined}
         onPrefillCompose=${requestComposePrefill}
       />
-      <div class="container">
+      <div class="container shell-chat-pane">
         ${searchQuery && isIOSDevice() && html`<div class="search-results-spacer"></div>`}
         ${(currentHashtag || searchQuery) && html`
           <div class="hashtag-header">

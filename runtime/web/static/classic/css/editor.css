@@ -1004,15 +1004,15 @@
 }
 
 /* ── Zen mode layout ── */
-.app-shell.zen-mode .app-main-row > .workspace-sidebar,
-.app-shell.zen-mode .app-main-row > .workspace-toggle-tab,
-.app-shell.zen-mode .app-main-row > .workspace-splitter,
-.app-shell.zen-mode .app-main-row > .editor-splitter,
-.app-shell.zen-mode .app-main-row > .container {
+.app-shell.zen-mode .workspace-sidebar,
+.app-shell.zen-mode .workspace-toggle-tab,
+.app-shell.zen-mode .workspace-splitter,
+.app-shell.zen-mode .editor-splitter,
+.app-shell.zen-mode .shell-chat-pane {
     display: none !important;
 }
 
-.app-shell.zen-mode .app-main-row > .editor-pane-container {
+.app-shell.zen-mode .shell-editor-pane {
     width: 100% !important;
     max-width: 100% !important;
     min-width: 0 !important;
@@ -1086,7 +1086,7 @@
 
 /* Zen mode transitions: respect prefers-reduced-motion */
 @media (prefers-reduced-motion: no-preference) {
-    .app-shell.zen-mode .app-main-row > .editor-pane-container {
+    .app-shell.zen-mode .shell-editor-pane {
         transition: width 250ms ease, max-width 250ms ease;
     }
 }
@@ -1328,21 +1328,25 @@
 
     .app-shell.sidebar-resizing .workspace-sidebar,
     .app-shell.sidebar-resizing .workspace-splitter,
-    .app-shell.sidebar-resizing .container {
+    .app-shell.sidebar-resizing .shell-chat-pane {
         transition: none;
     }
 
-    .app-shell.workspace-collapsed .app-main-row > .container {
+    .app-shell.workspace-collapsed .shell-chat-pane {
         max-width: var(--chat-max-width, 900px);
         min-width: var(--chat-min-width, 640px);
         margin: 0 auto;
     }
 
-    .app-shell.workspace-collapsed:not(.editor-open):not(.chat-only):not(.pane-popout) > .app-main-row {
+    .app-shell.workspace-collapsed:not(.editor-open):not(.chat-only):not(.pane-popout):not(.dock-bottom-active) {
         justify-content: center;
     }
 
-    .app-shell.workspace-collapsed:not(.editor-open):not(.chat-only):not(.pane-popout) > .app-main-row > .container {
+    .app-shell.dock-bottom-active.workspace-collapsed:not(.editor-open):not(.chat-only):not(.pane-popout) .app-main-row {
+        justify-content: center;
+    }
+
+    .app-shell.workspace-collapsed:not(.editor-open):not(.chat-only):not(.pane-popout) .shell-chat-pane {
         flex: 0 1 auto;
         width: min(100%, var(--chat-max-width, 900px));
         margin: 0;
