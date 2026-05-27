@@ -44,9 +44,9 @@ test('pane popout helpers compute title, menu actions, and VNC control visibilit
   expect(shouldHidePanePopoutControls('/tabs/preview', '/tabs/terminal', true, false)).toBe(false);
 });
 
-test('shouldShowEditorPaneContainer respects pane popout and dock visibility modes', () => {
-  expect(shouldShowEditorPaneContainer(true, true, false, false, false)).toBe(true);
-  expect(shouldShowEditorPaneContainer(false, false, true, false, false)).toBe(true);
-  expect(shouldShowEditorPaneContainer(false, false, false, true, true)).toBe(true);
-  expect(shouldShowEditorPaneContainer(false, true, true, true, true)).toBe(false);
+test('shouldShowEditorPaneContainer respects pane popout, editor visibility, and chat-only mode', () => {
+  expect(shouldShowEditorPaneContainer(true, true, false)).toBe(true);
+  expect(shouldShowEditorPaneContainer(false, false, true)).toBe(true);
+  expect(shouldShowEditorPaneContainer(false, false, false)).toBe(false);
+  expect(shouldShowEditorPaneContainer(false, true, true)).toBe(false);
 });
