@@ -21,6 +21,8 @@ export interface QueuedFollowupStateItem {
   content: string;
   timestamp: string;
   thread_id: number | null;
+  source?: string;
+  queued_by?: Record<string, string>;
 }
 
 export interface RemoveQueuedFollowupForActionOptions {
@@ -42,6 +44,8 @@ function cloneQueuedFollowupItem(item: QueuedFollowupItem): QueuedFollowupItem {
     contentBlocks: Array.isArray(item.contentBlocks) ? [...item.contentBlocks] : undefined,
     linkPreviews: Array.isArray(item.linkPreviews) ? [...item.linkPreviews] : undefined,
     screenHint: typeof item.screenHint === "string" && item.screenHint.trim() ? item.screenHint.trim() : undefined,
+    source: typeof item.source === "string" && item.source.trim() ? item.source.trim() : undefined,
+    queuedBy: item.queuedBy ? { ...item.queuedBy } : undefined,
     materializeRetries: item.materializeRetries,
   };
 }
@@ -56,6 +60,8 @@ function toDeferredQueuedFollowupRecord(item: QueuedFollowupItem): DeferredQueue
     contentBlocks: Array.isArray(item.contentBlocks) ? [...item.contentBlocks] : undefined,
     linkPreviews: Array.isArray(item.linkPreviews) ? [...item.linkPreviews] : undefined,
     screenHint: typeof item.screenHint === "string" && item.screenHint.trim() ? item.screenHint.trim() : undefined,
+    source: typeof item.source === "string" && item.source.trim() ? item.source.trim() : undefined,
+    queuedBy: item.queuedBy ? { ...item.queuedBy } : undefined,
     materializeRetries: item.materializeRetries ?? 0,
   };
 }
@@ -74,7 +80,7 @@ export class QueuedFollowupLifecycleService {
     queuedContent: string,
     threadId?: number | null,
     queuedAt?: string,
-    extras?: Pick<QueuedFollowupItem, "mediaIds" | "contentBlocks" | "linkPreviews" | "screenHint">
+    extras?: Pick<QueuedFollowupItem, "mediaIds" | "contentBlocks" | "linkPreviews" | "screenHint" | "source" | "queuedBy">
   ): void {
     this.placeholderStore.enqueue(chatJid, rowId, queuedContent, threadId, queuedAt, extras);
   }
@@ -89,7 +95,7 @@ export class QueuedFollowupLifecycleService {
     queuedContent: string,
     threadId?: number | null,
     queuedAt?: string,
-    extras?: { mediaIds?: number[]; contentBlocks?: unknown[]; linkPreviews?: unknown[]; screenHint?: string }
+    extras?: { mediaIds?: number[]; contentBlocks?: unknown[]; linkPreviews?: unknown[]; screenHint?: string; source?: string; queuedBy?: QueuedFollowupItem["queuedBy"] }
   ): number {
     const resolvedRowId = Number.isFinite(rowId) && rowId !== 0 ? rowId : this.allocateDeferredQueuedRowId(chatJid);
     const queued = this.getDeferredQueuedFollowupItems(chatJid);
@@ -102,6 +108,8 @@ export class QueuedFollowupLifecycleService {
       contentBlocks: Array.isArray(extras?.contentBlocks) ? [...extras.contentBlocks] : undefined,
       linkPreviews: Array.isArray(extras?.linkPreviews) ? [...extras.linkPreviews] : undefined,
       screenHint: typeof extras?.screenHint === "string" && extras.screenHint.trim() ? extras.screenHint.trim() : undefined,
+      source: typeof extras?.source === "string" && extras.source.trim() ? extras.source.trim() : undefined,
+      queuedBy: extras?.queuedBy ? { ...extras.queuedBy } : undefined,
     });
     this.setDeferredQueuedFollowupItems(chatJid, queued);
     return resolvedRowId;
@@ -154,11 +162,16 @@ export class QueuedFollowupLifecycleService {
     return this.getQueuedFollowupItems(chatJid)
       .map((queued) => {
         const interaction = getMessageByRowId(chatJid, queued.rowId);
+        const queuedBy = queued.queuedBy
+          ? Object.fromEntries(Object.entries(queued.queuedBy).filter(([, value]) => typeof value === "string" && value.trim())) as Record<string, string>
+          : undefined;
         return {
           row_id: queued.rowId,
           content: queued.queuedContent,
           timestamp: interaction?.timestamp ?? queued.queuedAt,
           thread_id: interaction?.data?.thread_id ?? queued.threadId ?? null,
+          ...(queued.source ? { source: queued.source } : {}),
+          ...(queuedBy && Object.keys(queuedBy).length > 0 ? { queued_by: queuedBy } : {}),
         };
       })
       .filter((item) => typeof item.content === "string" && item.content.trim().length > 0);
@@ -202,6 +215,8 @@ export class QueuedFollowupLifecycleService {
       contentBlocks: Array.isArray(item.contentBlocks) ? [...item.contentBlocks] : undefined,
       linkPreviews: Array.isArray(item.linkPreviews) ? [...item.linkPreviews] : undefined,
       screenHint: typeof item.screenHint === "string" && item.screenHint.trim() ? item.screenHint.trim() : undefined,
+      source: typeof item.source === "string" && item.source.trim() ? item.source.trim() : undefined,
+      queuedBy: item.queuedBy ? { ...item.queuedBy } : undefined,
       materializeRetries: item.materializeRetries ?? 0,
     }));
   }

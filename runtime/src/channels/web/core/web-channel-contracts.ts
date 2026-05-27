@@ -99,7 +99,7 @@ export interface WebChannelLike
     queuedContent: string,
     threadId?: number | null,
     queuedAt?: string,
-    extras?: { mediaIds?: number[]; contentBlocks?: unknown[]; linkPreviews?: unknown[] }
+    extras?: { mediaIds?: number[]; contentBlocks?: unknown[]; linkPreviews?: unknown[]; screenHint?: string; source?: string; queuedBy?: QueuedFollowupItem["queuedBy"] }
   ): number;
   getQueuedFollowupCount(chatJid: string): number;
   getQueuedFollowupItems(chatJid: string): QueuedFollowupItem[];

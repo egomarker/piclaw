@@ -168,7 +168,7 @@ export function installWebChannelPrototype(
         queuedContent: string,
         threadId?: number | null,
         queuedAt?: string,
-        extras?: { mediaIds?: number[]; contentBlocks?: unknown[]; linkPreviews?: unknown[] },
+        extras?: { mediaIds?: number[]; contentBlocks?: unknown[]; linkPreviews?: unknown[]; screenHint?: string; source?: string; queuedBy?: QueuedFollowupItem["queuedBy"] },
       ): number => service.enqueueQueuedFollowupItem(chatJid, rowId, queuedContent, threadId, queuedAt, extras)),
     },
     consumeQueuedFollowupItem: {

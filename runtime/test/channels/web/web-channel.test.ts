@@ -2999,6 +2999,60 @@ test("processChat can materialize a deferred queued follow-up when resumed idle"
   expect(contents).toContain("reply after materialize");
 });
 
+test("processChat executes deferred model commands server-side after materialization", async () => {
+  const ws = createTempWorkspace("piclaw-web-channel-");
+  cleanupWorkspace = ws.cleanup;
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+
+  const db = await import("../../../src/db.js");
+  db.initDatabase();
+  db.getDb().exec("DELETE FROM message_media; DELETE FROM messages; DELETE FROM chats; DELETE FROM chat_cursors; DELETE FROM chat_cursors;");
+  db.storeChatMetadata("web:default", new Date().toISOString(), "Web");
+
+  const applyCalls: Array<{ chatJid: string; type: string; provider?: string; modelId?: string }> = [];
+  let runCount = 0;
+  const webMod = await import("../../../src/channels/web.js");
+  const web = new (webMod.WebChannel as any)({
+    queue: { enqueue: async (fn: () => Promise<void>) => fn() },
+    agentPool: {
+      setSessionBinder: () => {},
+      applyControlCommand: async (chatJid: string, command: any) => {
+        applyCalls.push({ chatJid, type: command.type, provider: command.provider, modelId: command.modelId });
+        return {
+          status: "success",
+          message: `Model set to ${command.provider}/${command.modelId}. Thinking level: high.`,
+          model_label: `${command.provider}/${command.modelId}`,
+          thinking_level: "high",
+          thinking_level_label: "high",
+        };
+      },
+      getAvailableModels: async () => ({
+        current: "openai-codex/gpt-5.5",
+        thinking_level: "high",
+        thinking_level_label: "high",
+        supports_thinking: true,
+      }),
+      runAgent: async () => {
+        runCount += 1;
+        return { status: "success", result: "should not run", attachments: [] };
+      },
+      getContextUsageForChat: async () => null,
+    },
+  });
+
+  web.enqueueQueuedFollowupItem("web:default", 0, "/model openai-codex/gpt-5.5");
+  await web.processChat("web:default", "default");
+
+  expect(runCount).toBe(0);
+  expect(applyCalls).toEqual([{ chatJid: "web:default", type: "model", provider: "openai-codex", modelId: "gpt-5.5" }]);
+  expect(web.getQueuedFollowupCount("web:default")).toBe(0);
+
+  const timeline = db.getTimeline("web:default", 10);
+  const contents = timeline.map((item: any) => item.data.content);
+  expect(contents).toContain("/model openai-codex/gpt-5.5");
+  expect(contents.some((content: string) => content.includes("Model set to openai-codex/gpt-5.5"))).toBe(true);
+});
+
 test("processChat drains multiple deferred queued follow-ups across resume tasks", async () => {
   const ws = createTempWorkspace("piclaw-web-channel-");
   cleanupWorkspace = ws.cleanup;
