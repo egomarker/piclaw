@@ -22,6 +22,8 @@ export function TimelineMenu({
     onOpenTerminalTab,
     onOpenVncTab,
     onToggleTerminal,
+    showTerminalDockMenuItem = false,
+    terminalDockToggleDisabled = false,
     terminalVisible,
 }) {
     const [open, setOpen] = useState(false);
@@ -161,6 +163,8 @@ export function TimelineMenu({
         window.location.href = url.toString();
     }, [chatOnlyMode]);
 
+    const terminalDockMenuDisabled = terminalDockToggleDisabled || typeof onToggleTerminal !== 'function';
+
     const content = html`
         <button ref=${btnRef} class=${`timeline-menu-btn${open ? ' active' : ''}`} data-testid="hamburger"
             onClick=${() => setOpen(v => !v)} title="Menu" aria-label="Menu"
@@ -186,10 +190,19 @@ export function TimelineMenu({
                     ${chatOnlyMode ? 'Exit chat-only mode' : 'Chat-only mode'}
                 </button>
 
-                ${(onOpenTerminalTab || onOpenVncTab || onToggleTerminal) && html`<div class="workspace-menu-separator"></div>`}
+                ${(onOpenTerminalTab || onOpenVncTab || showTerminalDockMenuItem) && html`<div class="workspace-menu-separator"></div>`}
                 ${onOpenTerminalTab && html`<button class="workspace-menu-item" role="menuitem" onClick=${() => run(onOpenTerminalTab)}>Open terminal in tab</button>`}
                 ${onOpenVncTab && html`<button class="workspace-menu-item" role="menuitem" onClick=${() => run(onOpenVncTab)}>Open VNC in tab</button>`}
-                ${onToggleTerminal && html`<button class="workspace-menu-item" role="menuitem" onClick=${() => run(onToggleTerminal)}>${terminalVisible ? 'Hide terminal dock' : 'Show terminal dock'}</button>`}
+                ${showTerminalDockMenuItem && html`
+                    <button
+                        class="workspace-menu-item"
+                        role="menuitem"
+                        disabled=${terminalDockMenuDisabled}
+                        onClick=${terminalDockMenuDisabled ? undefined : () => run(onToggleTerminal)}
+                    >
+                        ${terminalVisible ? 'Hide terminal dock' : 'Show terminal dock'}
+                    </button>
+                `}
 
                 <div class="workspace-menu-separator"></div>
                 <button class="workspace-menu-item" role="menuitem" disabled=${!workspaceOpen} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'new-file' } })))}>New file</button>

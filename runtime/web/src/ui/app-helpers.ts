@@ -18,6 +18,17 @@ export const SILENCE_FINALIZE_MS = readSilenceOverride("finalize", 120_000);
 export const SILENCE_REFRESH_MS = readSilenceOverride("refresh", 30_000);
 export const LAST_ACTIVITY_TTL_MS = 30_000;
 
+type NavigatorLike = {
+  userAgent?: unknown;
+  platform?: unknown;
+  maxTouchPoints?: unknown;
+};
+
+function resolveNavigator(runtime: { navigator?: NavigatorLike | null } = {}): NavigatorLike | null {
+  const candidate = runtime.navigator ?? (typeof navigator !== "undefined" ? navigator : null);
+  return candidate && typeof candidate === "object" ? candidate : null;
+}
+
 export function buildAgentsMap(data: { agents?: Array<{ id: string }> } | null | undefined): Record<string, unknown> {
   const map: Record<string, unknown> = {};
   (data?.agents || []).forEach((agent) => {
@@ -26,12 +37,22 @@ export function buildAgentsMap(data: { agents?: Array<{ id: string }> } | null |
   return map;
 }
 
-/** Detect iOS devices for layout adjustments. */
-export function isIOSDevice(): boolean {
-  if (/iPad|iPhone/.test(navigator.userAgent)) {
+/** Detect iOS/iPadOS devices for layout adjustments. */
+export function isIOSDevice(runtime: { navigator?: NavigatorLike | null } = {}): boolean {
+  const nav = resolveNavigator(runtime);
+  if (!nav) return false;
+  const userAgent = String(nav.userAgent || "");
+  const platform = String(nav.platform || "");
+  const maxTouchPoints = Number(nav.maxTouchPoints || 0);
+  if (/iPad|iPhone/.test(userAgent)) {
     return true;
   }
-  return navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+  return platform === "MacIntel" && maxTouchPoints > 1;
+}
+
+/** Bottom terminal dock is supported on desktop and Android, but not on iOS/iPadOS. */
+export function supportsBottomTerminalDock(runtime: { navigator?: NavigatorLike | null } = {}): boolean {
+  return !isIOSDevice(runtime);
 }
 
 /** Hook to force re-render for updating timestamps. */

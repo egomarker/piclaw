@@ -67,6 +67,8 @@ export function composeMainAppShellOptions(input: ComposeMainAppShellOptionsInpu
     renameBranchDraftState: shellState.renameBranchDraftState,
     isRenamingBranch: shellState.isRenamingBranch,
     hasDockPanes: paneRuntime.hasDockPanes,
+    showTerminalDockMenuItem: paneRuntime.showTerminalDockMenuItem,
+    terminalDockToggleDisabled: paneRuntime.terminalDockToggleDisabled,
     toggleDock: paneRuntime.toggleDock,
     dockVisible: paneRuntime.dockVisible,
     showEditorPaneContainer: paneRuntime.showEditorPaneContainer,
