@@ -48,6 +48,9 @@ jobs:
     needs: [resolve-runtime-versions]
     runs-on: macos-15-intel
 
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -83,6 +86,9 @@ jobs:
     needs: [resolve-runtime-versions]
     runs-on: macos-15-intel
     timeout-minutes: 45
+
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
 
     steps:
       - name: Checkout repository
@@ -123,6 +129,9 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
       - name: Download portable artifact
         uses: actions/download-artifact@v8
         with:
@@ -139,7 +148,7 @@ jobs:
 
       - name: List release assets
         run: |
-          find artifacts/release -type f -maxdepth 2 -print
+          find artifacts/release -maxdepth 2 -type f -print
 
       - name: Create release if needed and upload assets
         env:

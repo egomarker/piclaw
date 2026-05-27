@@ -37,6 +37,4 @@ jobs:
         run: make ci-integration
         env:
           PICLAW_DB_IN_MEMORY: "1"
-          # Playwright/Docker stages auto-detect availability;
-          # skip Docker-based tests in CI for now (no Docker-in-Docker).
           PICLAW_INTEGRATION_SKIP_DOCKER: "1"
