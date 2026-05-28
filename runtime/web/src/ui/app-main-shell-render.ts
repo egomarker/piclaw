@@ -123,8 +123,6 @@ export function renderMainShell(options: MainShellRenderOptions): any {
     openTerminalTab,
     openVncTab,
     hasDockPanes,
-    showTerminalDockMenuItem,
-    terminalDockToggleDisabled,
     toggleDock,
     dockVisible,
     handleSplitterMouseDown,
@@ -341,8 +339,6 @@ export function renderMainShell(options: MainShellRenderOptions): any {
           onOpenTerminalTab=${openTerminalTab}
           onOpenVncTab=${openVncTab}
           onToggleTerminal=${hasDockPanes ? toggleDock : undefined}
-          showTerminalDockMenuItem=${Boolean(showTerminalDockMenuItem)}
-          terminalDockToggleDisabled=${Boolean(terminalDockToggleDisabled)}
           terminalVisible=${Boolean(hasDockPanes && dockVisible)}
         />
         <button
@@ -414,8 +410,6 @@ export function renderMainShell(options: MainShellRenderOptions): any {
         onOpenTerminalTab=${openTerminalTab}
         onOpenVncTab=${openVncTab}
         onToggleTerminal=${hasDockPanes ? toggleDock : undefined}
-        showTerminalDockMenuItem=${Boolean(showTerminalDockMenuItem)}
-        terminalDockToggleDisabled=${Boolean(terminalDockToggleDisabled)}
         terminalVisible=${Boolean(hasDockPanes && dockVisible)}
       />
       <${TimelineQuickActions}

@@ -35,7 +35,6 @@ import {
   shouldHidePanePopoutControls,
   shouldShowEditorPaneContainer,
 } from './app-pane-state.js';
-import { supportsBottomTerminalDock } from './app-helpers.js';
 import { closeWindowBestEffort, postMessageToWindowBestEffort } from './window-bridge-safety.js';
 
 interface UsePaneRuntimeOrchestrationOptions {
@@ -380,19 +379,9 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
   const detachedDockPaneRef = useRef<DetachedPaneState | null>(detachedDockPane);
   detachedDockPaneRef.current = detachedDockPane;
 
-  const showTerminalDockMenuItem = paneRegistry.getDockPanes().length > 0;
-  const terminalDockToggleDisabled = showTerminalDockMenuItem && !supportsBottomTerminalDock();
-  const hasDockPanes = showTerminalDockMenuItem && !terminalDockToggleDisabled;
+  const hasDockPanes = paneRegistry.getDockPanes().length > 0;
   const [dockVisible, setDockVisible] = useState(false);
-  const toggleDock = useCallback(() => {
-    if (!hasDockPanes) return;
-    setDockVisible((visible) => !visible);
-  }, [hasDockPanes]);
-
-  useEffect(() => {
-    if (hasDockPanes || !dockVisible) return;
-    setDockVisible(false);
-  }, [dockVisible, hasDockPanes]);
+  const toggleDock = useCallback(() => setDockVisible((visible) => !visible), []);
 
   const openTerminalTab = useCallback(() => {
     openEditor(terminalTabPath, { label: 'Terminal' });
@@ -465,11 +454,7 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
     clearDetachedPane(normalizedPath);
 
     if (normalizedPath === terminalTabPath && wasDetachedDockPane && !wasDetachedTab) {
-      if (hasDockPanes) {
-        setDockVisible(true);
-      } else {
-        openEditor(normalizedPath, { label: 'Terminal' });
-      }
+      setDockVisible(true);
     } else if (normalizedPath === terminalTabPath && wasDetachedTab) {
       openEditor(normalizedPath, { label: 'Terminal' });
     } else {
@@ -486,7 +471,7 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
     }
 
     return true;
-  }, [clearDetachedPane, hasDockPanes, openEditor, setDockVisible, terminalTabPath]);
+  }, [clearDetachedPane, openEditor, setDockVisible, terminalTabPath]);
 
   const flushDeferredPaneCloseRecoveries = useCallback(() => {
     if (panePopoutMode) return;
@@ -1270,8 +1255,6 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
     dockContainerRef,
     dockInstanceRef,
     hasDockPanes,
-    showTerminalDockMenuItem,
-    terminalDockToggleDisabled,
     dockVisible,
     setDockVisible,
     toggleDock,

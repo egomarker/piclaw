@@ -619,8 +619,6 @@ export function WorkspaceExplorer({
     onOpenTerminalTab,
     onOpenVncTab,
     onToggleTerminal,
-    showTerminalDockMenuItem = false,
-    terminalDockToggleDisabled = false,
     terminalVisible = false,
 }) {
     const [tree,          setTree]          = useState(null);
@@ -639,7 +637,6 @@ export function WorkspaceExplorer({
     const [dragGhost,    setDragGhost]     = useState(null);
     const [dropTarget,   setDropTarget]    = useState(null);
     const [uploading,    setUploading]     = useState(false);
-    const terminalDockMenuDisabled = terminalDockToggleDisabled || typeof onToggleTerminal !== 'function';
     const [uploadProgress, setUploadProgress] = useState(null);
     const [folderChart,  setFolderChart]   = useState(null);
     const [workspaceIndexStatus, setWorkspaceIndexStatus] = useState(null);
@@ -2226,9 +2223,8 @@ export function WorkspaceExplorer({
 
     const handleMenuToggleTerminal = useCallback(() => {
         closeHeaderMenu();
-        if (terminalDockMenuDisabled) return;
         onToggleTerminal?.();
-    }, [closeHeaderMenu, onToggleTerminal, terminalDockMenuDisabled]);
+    }, [closeHeaderMenu, onToggleTerminal]);
 
     const handleRowMouseDown = useCallback((event) => {
         if (!event || event.button !== 0) return;
@@ -2396,7 +2392,7 @@ export function WorkspaceExplorer({
                                     </div>
                                 </div>
 
-                                ${(onOpenTerminalTab || onOpenVncTab || showTerminalDockMenuItem) && html`<div class="workspace-menu-separator"></div>`}
+                                ${(onOpenTerminalTab || onOpenVncTab || onToggleTerminal) && html`<div class="workspace-menu-separator"></div>`}
                                 ${onOpenTerminalTab && html`
                                     <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuOpenTerminalTab}>
                                         Open terminal in tab
@@ -2407,8 +2403,8 @@ export function WorkspaceExplorer({
                                         Open VNC in tab
                                     </button>
                                 `}
-                                ${showTerminalDockMenuItem && html`
-                                    <button class="workspace-menu-item" role="menuitem" disabled=${terminalDockMenuDisabled} onClick=${terminalDockMenuDisabled ? undefined : handleMenuToggleTerminal}>
+                                ${onToggleTerminal && html`
+                                    <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuToggleTerminal}>
                                         ${terminalVisible ? 'Hide terminal dock' : 'Show terminal dock'}
                                     </button>
                                 `}
