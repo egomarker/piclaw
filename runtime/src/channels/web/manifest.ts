@@ -23,15 +23,13 @@ function buildDefaultManifestIcons(): Array<{ src: string; sizes: string; type: 
   return [
     { src: "/static/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
     { src: "/static/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
-    { src: "/static/icon-192.png", sizes: "192x192", type: "image/png", purpose: "maskable" },
-    { src: "/static/icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
   ];
 }
 
 function buildAvatarManifestIcons(version: string): Array<{ src: string; sizes: string; type: string; purpose?: string }> {
   return [
-    { src: `/avatar/agent?format=png&size=192&v=${version}`, sizes: "192x192", type: "image/png", purpose: "any maskable" },
-    { src: `/avatar/agent?format=png&size=512&v=${version}`, sizes: "512x512", type: "image/png", purpose: "any maskable" },
+    { src: `/avatar/agent?format=png&size=192&v=${version}`, sizes: "192x192", type: "image/png", purpose: "any" },
+    { src: `/avatar/agent?format=png&size=512&v=${version}`, sizes: "512x512", type: "image/png", purpose: "any" },
   ];
 }
 
