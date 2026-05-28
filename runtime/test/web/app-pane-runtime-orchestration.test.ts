@@ -237,7 +237,7 @@ test('shouldDisableTerminalReattach keeps terminal reattach enabled', () => {
   })).toBe(false);
 });
 
-test('shouldRequireManualTerminalCloseRecovery only applies to Safari terminal close recovery', () => {
+test('shouldRequireManualTerminalCloseRecovery keeps terminal auto-reattach enabled', () => {
   expect(shouldRequireManualTerminalCloseRecovery({
     panePath: 'piclaw://terminal',
     terminalTabPath: 'piclaw://terminal',
@@ -247,7 +247,7 @@ test('shouldRequireManualTerminalCloseRecovery only applies to Safari terminal c
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',
       vendor: 'Apple Computer, Inc.',
     } as any,
-  })).toBe(true);
+  })).toBe(false);
   expect(shouldRequireManualTerminalCloseRecovery({
     panePath: 'piclaw://terminal',
     terminalTabPath: 'piclaw://terminal',

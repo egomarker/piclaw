@@ -170,15 +170,14 @@ export function shouldDelayPaneReattachAfterWindowClose(options: {
   return options?.allowLiveTransfer === false;
 }
 
-export function shouldRequireManualTerminalCloseRecovery(options: {
+export function shouldRequireManualTerminalCloseRecovery(_options: {
   panePath: string;
   terminalTabPath: string;
   allowLiveTransfer?: boolean | null;
   reason?: 'message' | 'closed-window' | null;
   runtimeNavigator?: Navigator | null;
 }): boolean {
-  if (!shouldDelayPaneReattachAfterWindowClose(options)) return false;
-  return isLikelySafariBrowser(options?.runtimeNavigator);
+  return false;
 }
 
 export function shouldDisableTerminalReattach(_options: {
