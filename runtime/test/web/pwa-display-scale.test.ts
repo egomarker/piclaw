@@ -10,6 +10,7 @@ import {
   normalizePwaDisplayScalePercent,
   persistPwaDisplayScalePercent,
   readStoredPwaDisplayScalePercent,
+  supportsPwaDisplayScaleControl,
 } from '../../web/src/ui/pwa-display-scale.js';
 
 function createRuntime(options: {
@@ -74,6 +75,12 @@ describe('PWA display scale helpers', () => {
     expect(isMobileStandalonePwa(createRuntime({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15)', displayMode: 'standalone' }))).toBe(false);
   });
 
+  test('disables the scale control on iPhone and iPad-class Apple touch devices', () => {
+    expect(supportsPwaDisplayScaleControl(createRuntime({ userAgent: 'Mozilla/5.0 (Linux; Android 15)', maxTouchPoints: 5 }))).toBe(true);
+    expect(supportsPwaDisplayScaleControl(createRuntime({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)', maxTouchPoints: 5 }))).toBe(false);
+    expect(supportsPwaDisplayScaleControl(createRuntime({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15)', maxTouchPoints: 5 }))).toBe(false);
+  });
+
   test('builds default viewport content unless a non-default scale applies', () => {
     expect(buildPwaDisplayScaleViewportContent(75)).toContain('initial-scale=1.0');
     expect(buildPwaDisplayScaleViewportContent(100, { applies: true })).toContain('initial-scale=1.0');
@@ -81,8 +88,8 @@ describe('PWA display scale helpers', () => {
     expect(buildPwaDisplayScaleViewportContent(75, { applies: true })).toContain('viewport-fit=cover');
   });
 
-  test('persists and applies the saved scale for standalone mobile PWA runtime', () => {
-    const runtime = createRuntime({ userAgent: 'iPhone', displayMode: 'standalone' });
+  test('persists and applies the saved scale for supported standalone mobile PWA runtime', () => {
+    const runtime = createRuntime({ userAgent: 'Android', displayMode: 'standalone', maxTouchPoints: 5 });
 
     expect(persistPwaDisplayScalePercent(75, runtime)).toBe(75);
     expect(readStoredPwaDisplayScalePercent(runtime)).toBe(75);
@@ -93,6 +100,21 @@ describe('PWA display scale helpers', () => {
 
   test('restores default viewport content outside standalone mobile mode', () => {
     const runtime = createRuntime({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15)', displayMode: 'standalone', stored: '75' });
+    const result = applyPwaDisplayScale(runtime);
+
+    expect(result.applied).toBe(false);
+    expect(result.percent).toBe(75);
+    expect(runtime.__viewport.content).toContain('initial-scale=1.0');
+  });
+
+  test('restores default viewport content on iOS even when a non-default scale is stored', () => {
+    const runtime = createRuntime({
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
+      displayMode: 'standalone',
+      maxTouchPoints: 5,
+      standalone: true,
+      stored: '75',
+    });
     const result = applyPwaDisplayScale(runtime);
 
     expect(result.applied).toBe(false);

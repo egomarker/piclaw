@@ -17,6 +17,19 @@ function getRuntimeNavigator(runtime: any) {
   return runtime?.navigator || (typeof navigator !== 'undefined' ? navigator : null);
 }
 
+export function isAppleTouchMobileDevice(runtime: any = typeof window !== 'undefined' ? window : null): boolean {
+  const runtimeWindow = getRuntimeWindow(runtime);
+  const runtimeNavigator = getRuntimeNavigator(runtimeWindow);
+  const userAgent = String(runtimeNavigator?.userAgent || '');
+  if (/iPad|iPhone|iPod/i.test(userAgent)) return true;
+  return String(runtimeNavigator?.platform || '') === 'MacIntel'
+    && Number(runtimeNavigator?.maxTouchPoints || 0) > 1;
+}
+
+export function supportsPwaDisplayScaleControl(runtime: any = typeof window !== 'undefined' ? window : null): boolean {
+  return !isAppleTouchMobileDevice(runtime);
+}
+
 function parseScalePercent(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value !== 'string') return null;
@@ -79,7 +92,9 @@ export function applyPwaDisplayScale(runtime: any = typeof window !== 'undefined
 } {
   const runtimeWindow = getRuntimeWindow(runtime);
   const percent = readStoredPwaDisplayScalePercent(runtimeWindow);
-  const applied = isMobileStandalonePwa(runtimeWindow) && percent !== DEFAULT_PWA_DISPLAY_SCALE_PERCENT;
+  const applied = supportsPwaDisplayScaleControl(runtimeWindow)
+    && isMobileStandalonePwa(runtimeWindow)
+    && percent !== DEFAULT_PWA_DISPLAY_SCALE_PERCENT;
   const content = buildPwaDisplayScaleViewportContent(percent, { applies: applied });
   const viewport = runtimeWindow?.document?.querySelector?.('meta[name="viewport"]');
   viewport?.setAttribute?.('content', content);
