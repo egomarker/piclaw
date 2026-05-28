@@ -10,6 +10,7 @@ import {
     PWA_DISPLAY_SCALE_EVENT,
     PWA_DISPLAY_SCALE_STEP_PERCENT,
     PWA_DISPLAY_SCALE_STORAGE_KEY,
+    isAppleTouchStandalonePwa,
     persistPwaDisplayScalePercent,
     readStoredPwaDisplayScalePercent,
 } from '../ui/pwa-display-scale.js';
@@ -31,6 +32,7 @@ export function TimelineMenu({
         try { return localStorage.getItem('workspaceShowHidden') === 'true'; } catch { return false; }
     });
     const [pos, setPos] = useState({ top: 8, left: 8 });
+    const showPwaDisplayScaleControl = !isAppleTouchStandalonePwa();
 
     const getSafeAreaTop = () => {
         if (typeof document === 'undefined') return 0;
@@ -218,28 +220,30 @@ export function TimelineMenu({
                 })}>
                     ${showHidden ? 'Hide hidden files' : 'Show hidden files'}
                 </button>
-                <div class="workspace-menu-scale-control" role="none">
-                    <label for="timeline-pwa-display-scale">Scale</label>
-                    <div class="workspace-menu-scale-input-wrap">
-                        <input
-                            id="timeline-pwa-display-scale"
-                            class="workspace-menu-scale-input"
-                            type="number"
-                            inputmode="numeric"
-                            min=${MIN_PWA_DISPLAY_SCALE_PERCENT}
-                            max=${MAX_PWA_DISPLAY_SCALE_PERCENT}
-                            step=${PWA_DISPLAY_SCALE_STEP_PERCENT}
-                            value=${pwaDisplayScaleDraft}
-                            aria-label=${`PWA display scale percentage, currently ${pwaDisplayScalePercent}%`}
-                            onClick=${(event) => event.stopPropagation()}
-                            onInput=${handlePwaDisplayScaleInput}
-                            onChange=${handlePwaDisplayScaleCommit}
-                            onBlur=${handlePwaDisplayScaleCommit}
-                            onKeyDown=${handlePwaDisplayScaleKeyDown}
-                        />
-                        <span aria-hidden="true">%</span>
+                ${showPwaDisplayScaleControl && html`
+                    <div class="workspace-menu-scale-control" role="none">
+                        <label for="timeline-pwa-display-scale">Scale</label>
+                        <div class="workspace-menu-scale-input-wrap">
+                            <input
+                                id="timeline-pwa-display-scale"
+                                class="workspace-menu-scale-input"
+                                type="number"
+                                inputmode="numeric"
+                                min=${MIN_PWA_DISPLAY_SCALE_PERCENT}
+                                max=${MAX_PWA_DISPLAY_SCALE_PERCENT}
+                                step=${PWA_DISPLAY_SCALE_STEP_PERCENT}
+                                value=${pwaDisplayScaleDraft}
+                                aria-label=${`PWA display scale percentage, currently ${pwaDisplayScalePercent}%`}
+                                onClick=${(event) => event.stopPropagation()}
+                                onInput=${handlePwaDisplayScaleInput}
+                                onChange=${handlePwaDisplayScaleCommit}
+                                onBlur=${handlePwaDisplayScaleCommit}
+                                onKeyDown=${handlePwaDisplayScaleKeyDown}
+                            />
+                            <span aria-hidden="true">%</span>
+                        </div>
                     </div>
-                </div>
+                `}
                 <button class="workspace-menu-item" role="menuitem" onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:open-settings')))}>Settings</button>
             </div>
         `}

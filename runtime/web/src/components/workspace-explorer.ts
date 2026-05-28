@@ -37,6 +37,7 @@ import {
     PWA_DISPLAY_SCALE_EVENT,
     PWA_DISPLAY_SCALE_STEP_PERCENT,
     PWA_DISPLAY_SCALE_STORAGE_KEY,
+    isAppleTouchStandalonePwa,
     persistPwaDisplayScalePercent,
     readStoredPwaDisplayScalePercent,
 } from '../ui/pwa-display-scale.js';
@@ -649,6 +650,7 @@ export function WorkspaceExplorer({
     }));
     const [pwaDisplayScalePercent, setPwaDisplayScalePercent] = useState(() => readStoredPwaDisplayScalePercent());
     const [pwaDisplayScaleDraft, setPwaDisplayScaleDraft] = useState(() => String(readStoredPwaDisplayScalePercent()));
+    const showPwaDisplayScaleControl = !isAppleTouchStandalonePwa();
     const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
     const refreshIntervalMs = Math.max(15000, (Number(workspaceClientSettings?.refreshIntervalSec) || 60) * 1000);
     const folderPreviewDepth = Math.max(0, Number(workspaceClientSettings?.folderPreviewDepth) || 0);
@@ -2369,28 +2371,30 @@ export function WorkspaceExplorer({
                                 <button class=${`workspace-menu-item${showHidden ? ' active' : ''}`} role="menuitem" onClick=${handleMenuToggleHidden}>
                                     ${showHidden ? 'Hide hidden files' : 'Show hidden files'}
                                 </button>
-                                <div class="workspace-menu-scale-control" role="none">
-                                    <label for="workspace-pwa-display-scale">Scale</label>
-                                    <div class="workspace-menu-scale-input-wrap">
-                                        <input
-                                            id="workspace-pwa-display-scale"
-                                            class="workspace-menu-scale-input"
-                                            type="number"
-                                            inputmode="numeric"
-                                            min=${MIN_PWA_DISPLAY_SCALE_PERCENT}
-                                            max=${MAX_PWA_DISPLAY_SCALE_PERCENT}
-                                            step=${PWA_DISPLAY_SCALE_STEP_PERCENT}
-                                            value=${pwaDisplayScaleDraft}
-                                            aria-label=${`PWA display scale percentage, currently ${pwaDisplayScalePercent}%`}
-                                            onClick=${(event) => event.stopPropagation()}
-                                            onInput=${handlePwaDisplayScaleInput}
-                                            onChange=${handlePwaDisplayScaleCommit}
-                                            onBlur=${handlePwaDisplayScaleCommit}
-                                            onKeyDown=${handlePwaDisplayScaleKeyDown}
-                                        />
-                                        <span aria-hidden="true">%</span>
+                                ${showPwaDisplayScaleControl && html`
+                                    <div class="workspace-menu-scale-control" role="none">
+                                        <label for="workspace-pwa-display-scale">Scale</label>
+                                        <div class="workspace-menu-scale-input-wrap">
+                                            <input
+                                                id="workspace-pwa-display-scale"
+                                                class="workspace-menu-scale-input"
+                                                type="number"
+                                                inputmode="numeric"
+                                                min=${MIN_PWA_DISPLAY_SCALE_PERCENT}
+                                                max=${MAX_PWA_DISPLAY_SCALE_PERCENT}
+                                                step=${PWA_DISPLAY_SCALE_STEP_PERCENT}
+                                                value=${pwaDisplayScaleDraft}
+                                                aria-label=${`PWA display scale percentage, currently ${pwaDisplayScalePercent}%`}
+                                                onClick=${(event) => event.stopPropagation()}
+                                                onInput=${handlePwaDisplayScaleInput}
+                                                onChange=${handlePwaDisplayScaleCommit}
+                                                onBlur=${handlePwaDisplayScaleCommit}
+                                                onKeyDown=${handlePwaDisplayScaleKeyDown}
+                                            />
+                                            <span aria-hidden="true">%</span>
+                                        </div>
                                     </div>
-                                </div>
+                                `}
 
                                 ${(onOpenTerminalTab || onOpenVncTab || onToggleTerminal) && html`<div class="workspace-menu-separator"></div>`}
                                 ${onOpenTerminalTab && html`

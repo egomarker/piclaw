@@ -55,11 +55,36 @@ export function readStoredPwaDisplayScalePercent(runtime: any = typeof window !=
   }
 }
 
+export function isAppleTouchMobileDevice(runtime: any = typeof window !== 'undefined' ? window : null): boolean {
+  const runtimeWindow = getRuntimeWindow(runtime);
+  const runtimeNavigator = getRuntimeNavigator(runtimeWindow);
+  const userAgent = String(runtimeNavigator?.userAgent || '');
+  if (/iPhone|iPad|iPod/i.test(userAgent)) return true;
+  return String(runtimeNavigator?.platform || '') === 'MacIntel' && Number(runtimeNavigator?.maxTouchPoints || 0) > 1;
+}
+
 export function isMobileStandalonePwa(runtime: any = typeof window !== 'undefined' ? window : null): boolean {
   const runtimeWindow = getRuntimeWindow(runtime);
   const runtimeNavigator = getRuntimeNavigator(runtimeWindow);
   return isStandaloneWebAppMode({ window: runtimeWindow, navigator: runtimeNavigator })
     && isMobileBrowserMode({ window: runtimeWindow, navigator: runtimeNavigator });
+}
+
+export function isAppleTouchStandalonePwa(runtime: any = typeof window !== 'undefined' ? window : null): boolean {
+  const runtimeWindow = getRuntimeWindow(runtime);
+  const runtimeNavigator = getRuntimeNavigator(runtimeWindow);
+  // For iPhone/iPad specifically, use navigator.standalone to distinguish
+  // Safari browser from an installed home-screen app. The display-mode media
+  // queries can be unreliable on iOS and may match browser-mode unexpectedly.
+  return isAppleTouchMobileDevice(runtimeWindow) && runtimeNavigator?.standalone === true;
+}
+
+export function isAppleTouchMobileBrowser(runtime: any = typeof window !== 'undefined' ? window : null): boolean {
+  const runtimeWindow = getRuntimeWindow(runtime);
+  const runtimeNavigator = getRuntimeNavigator(runtimeWindow);
+  return isAppleTouchMobileDevice(runtimeWindow)
+    && isMobileBrowserMode({ window: runtimeWindow, navigator: runtimeNavigator })
+    && !isStandaloneWebAppMode({ window: runtimeWindow, navigator: runtimeNavigator });
 }
 
 export function buildPwaDisplayScaleViewportContent(percent: number, options: { applies?: boolean } = {}): string {
@@ -79,7 +104,8 @@ export function applyPwaDisplayScale(runtime: any = typeof window !== 'undefined
 } {
   const runtimeWindow = getRuntimeWindow(runtime);
   const percent = readStoredPwaDisplayScalePercent(runtimeWindow);
-  const applied = isMobileStandalonePwa(runtimeWindow) && percent !== DEFAULT_PWA_DISPLAY_SCALE_PERCENT;
+  const applied = (isMobileStandalonePwa(runtimeWindow) || isAppleTouchMobileBrowser(runtimeWindow))
+    && percent !== DEFAULT_PWA_DISPLAY_SCALE_PERCENT;
   const content = buildPwaDisplayScaleViewportContent(percent, { applies: applied });
   const viewport = runtimeWindow?.document?.querySelector?.('meta[name="viewport"]');
   viewport?.setAttribute?.('content', content);
