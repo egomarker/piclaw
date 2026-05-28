@@ -181,14 +181,12 @@ export function shouldRequireManualTerminalCloseRecovery(options: {
   return isLikelySafariBrowser(options?.runtimeNavigator);
 }
 
-export function shouldDisableTerminalReattach(options: {
+export function shouldDisableTerminalReattach(_options: {
   panePath: string;
   terminalTabPath: string;
   runtimeNavigator?: Navigator | null;
 }): boolean {
-  const panePath = typeof options?.panePath === 'string' ? options.panePath.trim() : '';
-  if (!panePath || panePath !== options?.terminalTabPath) return false;
-  return isLikelySafariBrowser(options?.runtimeNavigator);
+  return false;
 }
 
 function shouldUseLivePaneTransfer(options: {

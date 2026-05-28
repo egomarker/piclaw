@@ -218,7 +218,7 @@ test('shouldDelayPaneReattachAfterWindowClose only defers terminal close recover
   })).toBe(false);
 });
 
-test('shouldDisableTerminalReattach only applies to Safari terminal panes', () => {
+test('shouldDisableTerminalReattach keeps terminal reattach enabled', () => {
   expect(shouldDisableTerminalReattach({
     panePath: 'piclaw://terminal',
     terminalTabPath: 'piclaw://terminal',
@@ -226,7 +226,7 @@ test('shouldDisableTerminalReattach only applies to Safari terminal panes', () =
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',
       vendor: 'Apple Computer, Inc.',
     } as any,
-  })).toBe(true);
+  })).toBe(false);
   expect(shouldDisableTerminalReattach({
     panePath: '/workspace/notes.md',
     terminalTabPath: 'piclaw://terminal',
