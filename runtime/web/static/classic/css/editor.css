@@ -808,9 +808,11 @@
     width: 100%;
     border-top: 1px solid var(--border-color);
     background: var(--bg-primary);
-    height: var(--dock-height, 200px);
-    min-height: 100px;
-    max-height: 50vh;
+    box-sizing: border-box;
+    height: calc(var(--dock-height, 200px) + env(safe-area-inset-bottom, 0px));
+    min-height: calc(100px + env(safe-area-inset-bottom, 0px));
+    max-height: calc(50vh + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -1282,6 +1284,15 @@
     flex-direction: column;
     position: relative;
     overflow: hidden;
+}
+
+/* In bottom-dock mode the main row is shorter than the viewport; size its children to
+   that flex row instead of full app height so the dock stays inside the visible screen. */
+.app-shell.dock-bottom-active .workspace-sidebar,
+.app-shell.dock-bottom-active .editor-pane-container,
+.app-shell.dock-bottom-active .container {
+    height: 100%;
+    min-height: 0;
 }
 
 @media (min-width: 1024px) and (orientation: landscape) {

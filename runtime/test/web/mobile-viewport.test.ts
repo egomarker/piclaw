@@ -58,6 +58,16 @@ test('container CSS has a single --app-height height declaration', () => {
   expect(rule).not.toContain('height: 100%;');
 });
 
+test('dock-bottom mode sizes panes to the main row instead of full app height', () => {
+  const css = readFileSync(new URL('../../web/static/classic/css/editor.css', import.meta.url), 'utf8');
+  expect(css).toMatch(/\.app-shell\.dock-bottom-active \.workspace-sidebar,\s*\.app-shell\.dock-bottom-active \.editor-pane-container,\s*\.app-shell\.dock-bottom-active \.container\s*\{[^}]*height:\s*100%;[^}]*min-height:\s*0;/s);
+});
+
+test('dock panel reserves bottom safe-area space inside its own height', () => {
+  const css = readFileSync(new URL('../../web/static/classic/css/editor.css', import.meta.url), 'utf8');
+  expect(css).toMatch(/\.dock-panel\s*\{[^}]*box-sizing:\s*border-box;[^}]*height:\s*calc\(var\(--dock-height,\s*200px\) \+ env\(safe-area-inset-bottom,\s*0px\)\);[^}]*min-height:\s*calc\(100px \+ env\(safe-area-inset-bottom,\s*0px\)\);[^}]*max-height:\s*calc\(50vh \+ env\(safe-area-inset-bottom,\s*0px\)\);[^}]*padding-bottom:\s*env\(safe-area-inset-bottom,\s*0px\);/s);
+});
+
 test('body stays in normal flow and uses --app-height (not fixed/inset)', () => {
   const css = readFileSync(new URL('../../web/static/classic/css/base.css', import.meta.url), 'utf8');
   const rule = readCssRule(css, 'body');
