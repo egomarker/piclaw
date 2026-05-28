@@ -5,6 +5,13 @@ export function shouldUseStandaloneMobileViewportFix(runtime = {}) {
   return isStandaloneWebAppMode(runtime) && isMobileBrowserMode(runtime);
 }
 
+function shouldUseIphoneStandaloneComposeInset(runtime = {}): boolean {
+  if (!shouldUseStandaloneMobileViewportFix(runtime)) return false;
+  const nav = runtime.navigator ?? (typeof navigator !== 'undefined' ? navigator : null);
+  const userAgent = String(nav?.userAgent || '');
+  return /iPhone/i.test(userAgent);
+}
+
 function isTextEntryFocused(doc: any): boolean {
   const active = doc?.activeElement;
   if (!active) return false;
@@ -99,6 +106,12 @@ export function syncStandaloneMobileViewport(runtime = {}, options = {}) {
     return null;
   }
 
+  if (shouldUseIphoneStandaloneComposeInset({ window: win, navigator: runtime.navigator ?? win.navigator })) {
+    doc.documentElement.style.setProperty('--iphone-standalone-compose-safe-area-bottom', 'env(safe-area-inset-bottom, 0px)');
+  } else {
+    doc.documentElement.style.removeProperty('--iphone-standalone-compose-safe-area-bottom');
+  }
+
   const textEntryFocused = isTextEntryFocused(doc);
   const keyboardActive = textEntryFocused && isVirtualKeyboardLikelyVisible(win);
   const height = readViewportHeight({ window: win }, { ignoreStandaloneChromeGap: true, keyboardActive });
@@ -166,6 +179,9 @@ export function installStandaloneMobileViewportFix(runtime = {}) {
   // Standalone mode has no URL bar, so 100vh is the stable full-screen unit.
   // See docs/PWA.md before changing this path.
   doc.documentElement?.style?.setProperty?.('--app-height', '100vh');
+  if (shouldUseIphoneStandaloneComposeInset({ window: win, navigator: win.navigator })) {
+    doc.documentElement?.style?.setProperty?.('--iphone-standalone-compose-safe-area-bottom', 'env(safe-area-inset-bottom, 0px)');
+  }
 
   let rafId = 0;
   const timers = new Set();
@@ -268,5 +284,6 @@ export function installStandaloneMobileViewportFix(runtime = {}) {
     doc.removeEventListener('focusout', handleFocusOut, true);
     viewport?.removeEventListener?.('resize', scheduleSettledSync);
     viewport?.removeEventListener?.('scroll', resetScroll);
+    doc.documentElement?.style?.removeProperty?.('--iphone-standalone-compose-safe-area-bottom');
   };
 }

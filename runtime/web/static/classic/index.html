@@ -73,7 +73,12 @@
                         window.matchMedia('(display-mode: fullscreen)').matches ||
                         window.matchMedia('(display-mode: minimal-ui)').matches;
                 }
-                if (standalone) document.documentElement.style.setProperty('--app-height', '100vh');
+                if (standalone) {
+                    document.documentElement.style.setProperty('--app-height', '100vh');
+                    if (/iPhone/i.test(navigator.userAgent || '')) {
+                        document.documentElement.style.setProperty('--iphone-standalone-compose-safe-area-bottom', 'env(safe-area-inset-bottom, 0px)');
+                    }
+                }
             } catch(e) {}
         })();
     </script>

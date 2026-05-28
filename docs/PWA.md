@@ -248,7 +248,11 @@ This keeps interactive content below the Dynamic Island / status bar while allow
 
 ### Bottom (home indicator)
 
-**No special handling needed.** With `100vh` in standalone mode, the layout reaches the bottom of the screen. The home indicator overlay is transparent and the system handles tap-through. Adding `padding-bottom: env(safe-area-inset-bottom)` would push the compose box up unnecessarily.
+For the main shell overall, **do not add a blanket bottom safe-area inset**. With `100vh` in standalone mode, the app shell itself should still reach the bottom of the screen.
+
+However, on **iPhone standalone PWAs specifically**, the compose surface can sit a little too low and its lower edge can be clipped by the home-indicator area. The narrow fix is to reserve `env(safe-area-inset-bottom)` **inside the compose box only**, and only when runtime detection confirms **iPhone + standalone PWA**.
+
+That keeps the input chrome above the lower screen boundary without changing iPhone Safari, iPad Safari/PWA, or Android layouts.
 
 ### Left / Right (landscape rotation)
 

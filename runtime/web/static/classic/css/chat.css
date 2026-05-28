@@ -143,7 +143,7 @@
 .compose-box {
     flex-shrink: 0;
     border-top: none;
-    padding: var(--spacing-sm) 0 2px;
+    padding: var(--spacing-sm) 0 calc(2px + var(--iphone-standalone-compose-safe-area-bottom, 0px));
     background-color: var(--bg-primary);
     display: flex;
     flex-direction: column;

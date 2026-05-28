@@ -34,7 +34,7 @@
     }
 
     .compose-box {
-        padding: var(--spacing-sm) 0 2px;
+        padding: var(--spacing-sm) 0 calc(2px + var(--iphone-standalone-compose-safe-area-bottom, 0px));
     }
 
     .compose-box textarea {
