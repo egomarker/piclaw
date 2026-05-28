@@ -32,10 +32,57 @@ function readIphoneStandaloneViewportCompensation(win: any, options: { keyboardA
   return gap;
 }
 
-function buildIphoneStandaloneComposeInsetValue(win: any, options: { keyboardActive?: boolean } = {}): string {
+const IPHONE_PORTRAIT_SAFE_AREA_BOTTOM_FALLBACK_PX = 34;
+
+function isPortraitOrientation(win: any): boolean {
+  const innerWidth = Number(win?.innerWidth || 0);
+  const innerHeight = Number(win?.innerHeight || 0);
+  if (!Number.isFinite(innerWidth) || !Number.isFinite(innerHeight) || innerWidth <= 0 || innerHeight <= 0) {
+    return true;
+  }
+  return innerHeight >= innerWidth;
+}
+
+function measureSafeAreaInset(doc: any, edge: 'top' | 'bottom'): number {
+  if (!doc?.body || typeof doc.createElement !== 'function') return 0;
+  const view = doc.defaultView ?? (typeof window !== 'undefined' ? window : null);
+  const probe = doc.createElement('div');
+  probe.style.cssText = [
+    'position:fixed',
+    'visibility:hidden',
+    'pointer-events:none',
+    'width:0',
+    'height:0',
+    'overflow:hidden',
+    'padding:0',
+    'border:0',
+    edge === 'top' ? 'top:0;left:0;padding-top:env(safe-area-inset-top,0px)' : 'left:0;bottom:0;padding-bottom:env(safe-area-inset-bottom,0px)',
+  ].join(';');
+  doc.body.appendChild(probe);
+  const computedStyle = view && typeof view.getComputedStyle === 'function' ? view.getComputedStyle(probe) : null;
+  const computed = edge === 'top'
+    ? Number.parseFloat(String(computedStyle?.paddingTop ?? '0'))
+    : Number.parseFloat(String(computedStyle?.paddingBottom ?? '0'));
+  const fallback = probe.offsetHeight;
+  probe.remove();
+  const value = Number.isFinite(computed) ? computed : fallback;
+  return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
+}
+
+function readIphoneStandaloneBottomSafeArea(win: any, doc: any, options: { keyboardActive?: boolean } = {}): number {
+  if (options.keyboardActive) return 0;
+  const measuredBottom = measureSafeAreaInset(doc, 'bottom');
+  if (measuredBottom > 0) return measuredBottom;
+  return isPortraitOrientation(win) ? IPHONE_PORTRAIT_SAFE_AREA_BOTTOM_FALLBACK_PX : 0;
+}
+
+function buildIphoneStandaloneComposeInsetValue(win: any, doc: any, options: { keyboardActive?: boolean } = {}): string {
+  if (options.keyboardActive) return '0px';
   const compensation = readIphoneStandaloneViewportCompensation(win, options);
-  if (compensation > 0) {
-    return `max(${compensation}px, env(safe-area-inset-bottom, 0px))`;
+  const safeBottom = readIphoneStandaloneBottomSafeArea(win, doc, options);
+  const totalInset = Math.max(0, compensation) + Math.max(0, safeBottom);
+  if (totalInset > 0) {
+    return `${totalInset}px`;
   }
   return 'env(safe-area-inset-bottom, 0px)';
 }
