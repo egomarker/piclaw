@@ -36,12 +36,14 @@
     <title>PiClaw</title>
     <meta name="apple-mobile-web-app-title" content="PiClaw">
     <script>
-        // Android standalone PWA scale guard: apply the saved display scale before CSS loads.
+        // Mobile standalone PWA scale guard: apply the saved display scale before CSS loads.
         (function() {
             try {
-                var isAndroid = /Android/i.test(navigator.userAgent || '');
-                var standalone = false;
-                if (window.matchMedia) {
+                var userAgent = navigator.userAgent || '';
+                var maxTouchPoints = Number(navigator.maxTouchPoints || 0);
+                var isMobile = /Android|webOS|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(userAgent) || maxTouchPoints > 1;
+                var standalone = Boolean(navigator.standalone);
+                if (!standalone && window.matchMedia) {
                     standalone = window.matchMedia('(display-mode: standalone)').matches ||
                         window.matchMedia('(display-mode: fullscreen)').matches ||
                         window.matchMedia('(display-mode: minimal-ui)').matches;
@@ -51,7 +53,7 @@
                 if (parsed > 0 && parsed <= 2) parsed *= 100;
                 if (!Number.isFinite(parsed)) parsed = 100;
                 var percent = Math.min(115, Math.max(20, Math.round(parsed)));
-                if (isAndroid && standalone && percent !== 100) {
+                if (isMobile && standalone && percent !== 100) {
                     var scale = (percent / 100).toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
                     var viewport = document.getElementById('piclaw-viewport') || document.querySelector('meta[name="viewport"]');
                     if (viewport) {

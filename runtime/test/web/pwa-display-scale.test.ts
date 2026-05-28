@@ -6,7 +6,7 @@ import {
   applyPwaDisplayScale,
   buildPwaDisplayScaleViewportContent,
   formatPwaDisplayScaleRatio,
-  isAndroidStandalonePwa,
+  isMobileStandalonePwa,
   normalizePwaDisplayScalePercent,
   persistPwaDisplayScalePercent,
   readStoredPwaDisplayScalePercent,
@@ -15,6 +15,8 @@ import {
 function createRuntime(options: {
   userAgent?: string;
   displayMode?: string;
+  maxTouchPoints?: number;
+  standalone?: boolean;
   stored?: string | null;
 } = {}) {
   const storage = new Map<string, string>();
@@ -29,7 +31,11 @@ function createRuntime(options: {
   };
   const listeners: Array<{ type: string; event: any }> = [];
   return {
-    navigator: { userAgent: options.userAgent || 'Mozilla/5.0' },
+    navigator: {
+      userAgent: options.userAgent || 'Mozilla/5.0',
+      maxTouchPoints: options.maxTouchPoints ?? 0,
+      standalone: options.standalone ?? false,
+    },
     localStorage: {
       getItem: (key: string) => storage.has(key) ? storage.get(key)! : null,
       setItem: (key: string, value: string) => storage.set(key, String(value)),
@@ -58,12 +64,14 @@ describe('PWA display scale helpers', () => {
     expect(formatPwaDisplayScaleRatio(75)).toBe('0.75');
   });
 
-  test('detects Android standalone, fullscreen, and minimal-ui display modes only', () => {
-    expect(isAndroidStandalonePwa(createRuntime({ userAgent: 'Android', displayMode: 'standalone' }))).toBe(true);
-    expect(isAndroidStandalonePwa(createRuntime({ userAgent: 'Android', displayMode: 'fullscreen' }))).toBe(true);
-    expect(isAndroidStandalonePwa(createRuntime({ userAgent: 'Android', displayMode: 'minimal-ui' }))).toBe(true);
-    expect(isAndroidStandalonePwa(createRuntime({ userAgent: 'Android' }))).toBe(false);
-    expect(isAndroidStandalonePwa(createRuntime({ userAgent: 'iPhone', displayMode: 'standalone' }))).toBe(false);
+  test('detects standalone mobile PWAs across Android and iOS/iPadOS', () => {
+    expect(isMobileStandalonePwa(createRuntime({ userAgent: 'Android', displayMode: 'standalone' }))).toBe(true);
+    expect(isMobileStandalonePwa(createRuntime({ userAgent: 'Android', displayMode: 'fullscreen' }))).toBe(true);
+    expect(isMobileStandalonePwa(createRuntime({ userAgent: 'Android', displayMode: 'minimal-ui' }))).toBe(true);
+    expect(isMobileStandalonePwa(createRuntime({ userAgent: 'iPhone', displayMode: 'standalone' }))).toBe(true);
+    expect(isMobileStandalonePwa(createRuntime({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15)', maxTouchPoints: 5, standalone: true }))).toBe(true);
+    expect(isMobileStandalonePwa(createRuntime({ userAgent: 'Android' }))).toBe(false);
+    expect(isMobileStandalonePwa(createRuntime({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15)', displayMode: 'standalone' }))).toBe(false);
   });
 
   test('builds default viewport content unless a non-default scale applies', () => {
@@ -73,8 +81,8 @@ describe('PWA display scale helpers', () => {
     expect(buildPwaDisplayScaleViewportContent(75, { applies: true })).toContain('viewport-fit=cover');
   });
 
-  test('persists and applies the saved scale only for Android standalone PWA runtime', () => {
-    const runtime = createRuntime({ userAgent: 'Android', displayMode: 'standalone' });
+  test('persists and applies the saved scale for standalone mobile PWA runtime', () => {
+    const runtime = createRuntime({ userAgent: 'iPhone', displayMode: 'standalone' });
 
     expect(persistPwaDisplayScalePercent(75, runtime)).toBe(75);
     expect(readStoredPwaDisplayScalePercent(runtime)).toBe(75);
@@ -83,8 +91,8 @@ describe('PWA display scale helpers', () => {
     expect(runtime.__listeners.some((entry: any) => entry.type === 'piclaw:pwa-display-scale-changed')).toBe(true);
   });
 
-  test('restores default viewport content outside Android standalone mode', () => {
-    const runtime = createRuntime({ userAgent: 'Android', stored: '75' });
+  test('restores default viewport content outside standalone mobile mode', () => {
+    const runtime = createRuntime({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15)', displayMode: 'standalone', stored: '75' });
     const result = applyPwaDisplayScale(runtime);
 
     expect(result.applied).toBe(false);
