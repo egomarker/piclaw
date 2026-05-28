@@ -1284,6 +1284,10 @@
     overflow: hidden;
 }
 
+html[data-iphone-standalone-compose-inset="1"] .container {
+    padding-bottom: var(--iphone-standalone-compose-safe-area-bottom, 0px);
+}
+
 @media (min-width: 1024px) and (orientation: landscape) {
     .workspace-sidebar {
         display: flex;

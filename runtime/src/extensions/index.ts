@@ -22,6 +22,7 @@
  *   - openWorkspaceFile: open_workspace_file for browser-side editor tab/popout launches.
  *   - envTools: env for persistent workspace-scoped environment variables.
  *   - contextPrune: context_prune/context_tree_query for recoverable tool-result pruning.
+ *   - providerRequestSanitizer: defensive provider payload cleanup before HTTP requests.
  *
  * Note: bun_run, keychain, ssh, proxmox, and portainer now live as packaged
  * runtime extensions under runtime/extensions/integrations/* and are loaded via
@@ -54,6 +55,7 @@ import { exitProcess } from "./exit-process.js";
 import { imageProcessing } from "./image-processing.js";
 import { sessionStatus } from "./session-status.js";
 import { providerResponseDiagnostics } from "./provider-response-diagnostics.js";
+import { providerRequestSanitizer } from "./provider-request-sanitizer.js";
 import { postCompactionPrune } from "./post-compaction-prune.js";
 import { contextPrune } from "./context-prune.js";
 import { mcpTimeoutPatch } from "./mcp-timeout-patch.js";
@@ -85,6 +87,7 @@ export function createBuiltinExtensionFactories(options?: {
     imageProcessing,
     // remotePair moved to extensions/integrations/remote-pair/ (lazy, env-gated)
     sessionStatus,
+    providerRequestSanitizer,
     providerResponseDiagnostics,
     postCompactionPrune,
     contextPrune,

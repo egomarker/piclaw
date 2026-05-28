@@ -186,7 +186,7 @@ export class WebChannelRuntimePublicSurfaceService {
     queuedContent: string,
     threadId?: number | null,
     queuedAt?: string,
-    extras?: { mediaIds?: number[]; contentBlocks?: unknown[]; linkPreviews?: unknown[] },
+    extras?: { mediaIds?: number[]; contentBlocks?: unknown[]; linkPreviews?: unknown[]; screenHint?: string; source?: string; queuedBy?: QueuedFollowupItem["queuedBy"] },
   ): number {
     return this.channel.runtimeFollowupFacade.enqueueQueuedFollowupItem(
       chatJid,

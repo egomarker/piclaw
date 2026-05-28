@@ -246,6 +246,7 @@ describe("WebAgentControlPlaneService", () => {
       cleared: true,
       had_inflight: true,
       had_preflight: false,
+      had_status: true,
     });
     expect(getInflightRuns().some((run) => run.chatJid === "web:hung")).toBe(false);
     expect(events).toEqual(expect.arrayContaining([

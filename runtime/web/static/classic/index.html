@@ -36,12 +36,14 @@
     <title>PiClaw</title>
     <meta name="apple-mobile-web-app-title" content="PiClaw">
     <script>
-        // Android standalone PWA scale guard: apply the saved display scale before CSS loads.
+        // Mobile standalone PWA scale guard: apply the saved display scale before CSS loads.
         (function() {
             try {
-                var isAndroid = /Android/i.test(navigator.userAgent || '');
-                var standalone = false;
-                if (window.matchMedia) {
+                var userAgent = navigator.userAgent || '';
+                var maxTouchPoints = Number(navigator.maxTouchPoints || 0);
+                var isMobile = /Android|webOS|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(userAgent) || maxTouchPoints > 1;
+                var standalone = Boolean(navigator.standalone);
+                if (!standalone && window.matchMedia) {
                     standalone = window.matchMedia('(display-mode: standalone)').matches ||
                         window.matchMedia('(display-mode: fullscreen)').matches ||
                         window.matchMedia('(display-mode: minimal-ui)').matches;
@@ -51,7 +53,7 @@
                 if (parsed > 0 && parsed <= 2) parsed *= 100;
                 if (!Number.isFinite(parsed)) parsed = 100;
                 var percent = Math.min(115, Math.max(20, Math.round(parsed)));
-                if (isAndroid && standalone && percent !== 100) {
+                if (isMobile && standalone && percent !== 100) {
                     var scale = (percent / 100).toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
                     var viewport = document.getElementById('piclaw-viewport') || document.querySelector('meta[name="viewport"]');
                     if (viewport) {
@@ -73,12 +75,20 @@
                         window.matchMedia('(display-mode: fullscreen)').matches ||
                         window.matchMedia('(display-mode: minimal-ui)').matches;
                 }
-                if (standalone) document.documentElement.style.setProperty('--app-height', '100vh');
+                if (standalone) {
+                    document.documentElement.style.setProperty('--app-height', '100vh');
+                    var userAgent = navigator.userAgent || '';
+                    var isAppleTouchStandalone = /iPhone|iPad|iPod/i.test(userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+                    if (isAppleTouchStandalone) {
+                        document.documentElement.style.setProperty('--iphone-standalone-compose-safe-area-bottom', 'env(safe-area-inset-bottom, 0px)');
+                        document.documentElement.setAttribute('data-iphone-standalone-compose-inset', '1');
+                    }
+                }
             } catch(e) {}
         })();
     </script>
-    <link rel="stylesheet" href="/static/classic/dist/app.bundle.css?v=2f2152febcf7">
-    <link id="dynamic-manifest" rel="manifest" href="/manifest.json?v=2f2152febcf7">
+    <link rel="stylesheet" href="/static/classic/dist/app.bundle.css?v=c4111ff35432">
+    <link id="dynamic-manifest" rel="manifest" href="/manifest.json?v=c4111ff35432">
     <link id="dynamic-favicon" rel="icon" href="/favicon.ico">
     <link id="dynamic-apple-touch-icon" rel="apple-touch-icon" href="/apple-touch-icon.png">
     <link id="dynamic-apple-touch-icon-180" rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-180x180.png">
@@ -195,6 +205,6 @@
       }
     }
     </script>
-    <script type="module" src="/static/classic/dist/app.bundle.js?v=2f2152febcf7"></script>
+    <script type="module" src="/static/classic/dist/app.bundle.js?v=c4111ff35432"></script>
 </body>
 </html>

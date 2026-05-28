@@ -109,6 +109,12 @@ export interface DeferredQueuedFollowupRecord {
   contentBlocks?: unknown[];
   linkPreviews?: unknown[];
   screenHint?: string;
+  source?: string;
+  queuedBy?: {
+    userId?: string;
+    sessionId?: string;
+    clientId?: string;
+  };
   /** Number of times materializeNextDeferredFollowup has failed for this item. */
   materializeRetries?: number;
 }
@@ -149,6 +155,17 @@ export function getInflightMessageId(chatJid: string): string | null {
   return row?.inflight_message_id ?? null;
 }
 
+function sanitizeQueuedBy(value: unknown): DeferredQueuedFollowupRecord["queuedBy"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  const queuedBy = {
+    ...(typeof record.userId === "string" && record.userId.trim() ? { userId: record.userId.trim() } : {}),
+    ...(typeof record.sessionId === "string" && record.sessionId.trim() ? { sessionId: record.sessionId.trim() } : {}),
+    ...(typeof record.clientId === "string" && record.clientId.trim() ? { clientId: record.clientId.trim() } : {}),
+  };
+  return Object.keys(queuedBy).length > 0 ? queuedBy : undefined;
+}
+
 function sanitizeDeferredQueuedFollowupRecord(value: unknown): DeferredQueuedFollowupRecord | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
@@ -164,6 +181,8 @@ function sanitizeDeferredQueuedFollowupRecord(value: unknown): DeferredQueuedFol
     contentBlocks: Array.isArray(record.contentBlocks) ? [...record.contentBlocks] : undefined,
     linkPreviews: Array.isArray(record.linkPreviews) ? [...record.linkPreviews] : undefined,
     screenHint: typeof record.screenHint === "string" && record.screenHint.trim() ? record.screenHint.trim() : undefined,
+    source: typeof record.source === "string" && record.source.trim() ? record.source.trim() : undefined,
+    queuedBy: sanitizeQueuedBy(record.queuedBy),
     materializeRetries: Number.isFinite(record.materializeRetries) ? Number(record.materializeRetries) : 0,
   };
 }
@@ -198,6 +217,8 @@ export function setDeferredQueuedFollowups(chatJid: string, items: DeferredQueue
     contentBlocks: Array.isArray(item.contentBlocks) ? [...item.contentBlocks] : undefined,
     linkPreviews: Array.isArray(item.linkPreviews) ? [...item.linkPreviews] : undefined,
     screenHint: typeof item.screenHint === "string" && item.screenHint.trim() ? item.screenHint.trim() : undefined,
+    source: typeof item.source === "string" && item.source.trim() ? item.source.trim() : undefined,
+    queuedBy: item.queuedBy ? { ...item.queuedBy } : undefined,
     materializeRetries: item.materializeRetries || 0,
   })));
   db.prepare(`

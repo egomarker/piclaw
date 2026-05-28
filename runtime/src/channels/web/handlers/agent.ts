@@ -15,6 +15,7 @@ import {
   getRoutingConfig,
 } from "../../../core/config.js";
 import { parseControlCommand } from "../../../agent-control/index.js";
+import type { AgentControlCommand, AgentControlResult } from "../../../agent-control/index.js";
 import { isSlashCommandInvocation } from "../../../agent-pool/slash-command.js";
 import {
   normalizeAgentMessagePayload,
@@ -71,6 +72,16 @@ type BrowserObservabilityContext = {
   userId?: string;
   sessionId?: string;
   clientId?: string;
+};
+
+type QueueDeferredFollowupExtras = {
+  mediaIds?: number[];
+  contentBlocks?: unknown[];
+  linkPreviews?: unknown[];
+  screenHint?: string;
+  source?: string;
+  browserContext?: BrowserObservabilityContext;
+  wakeIfIdle?: boolean;
 };
 
 function readTrimmedHeader(req: Request, name: string): string | null {
@@ -518,6 +529,54 @@ export function summarizeCommandStatusTitle(message: unknown, fallback = "Comman
   return collapsed || fallback;
 }
 
+const MODEL_COMMAND_TYPES = new Set(["model", "thinking", "cycle_model", "cycle_thinking"]);
+const DEFERRED_CONTROL_COMMAND_TYPES = new Set(["compact", ...MODEL_COMMAND_TYPES]);
+
+type ModelControlCommand = Extract<AgentControlCommand, { type: "model" | "thinking" | "cycle_model" | "cycle_thinking" }>;
+type DeferredControlCommand = Extract<AgentControlCommand, { type: "compact" | "model" | "thinking" | "cycle_model" | "cycle_thinking" }>;
+
+function isModelControlCommand(command: unknown): command is ModelControlCommand {
+  return Boolean(command && typeof command === "object" && MODEL_COMMAND_TYPES.has(String((command as { type?: unknown }).type || "")));
+}
+
+function isDeferredControlCommand(command: unknown): command is DeferredControlCommand {
+  return Boolean(command && typeof command === "object" && DEFERRED_CONTROL_COMMAND_TYPES.has(String((command as { type?: unknown }).type || "")));
+}
+
+async function resolveAndBroadcastModelStateForCommand(channel: WebChannelLike, chatJid: string, result: AgentControlResult): Promise<{ model: string | null; thinkingLevel: string | null; thinkingLevelLabel: string | null; supportsThinking: boolean | undefined }> {
+  let nextModel = typeof result.model_label === "string" ? result.model_label : null;
+  let thinkingLevel = typeof result.thinking_level === "string" ? result.thinking_level : null;
+  let thinkingLevelLabel = typeof result.thinking_level_label === "string" ? result.thinking_level_label : null;
+  let supportsThinking: boolean | undefined = undefined;
+
+  try {
+    const modelState = await channel.agentPool.getAvailableModels(chatJid);
+    if (!nextModel) nextModel = modelState.current ?? null;
+    if (thinkingLevel == null) thinkingLevel = modelState.thinking_level ?? null;
+    if (!thinkingLevelLabel) thinkingLevelLabel = modelState.thinking_level_label ?? thinkingLevel;
+    supportsThinking = modelState.supports_thinking;
+  } catch {
+    if (typeof channel.agentPool.getCurrentModelLabel === "function") {
+      nextModel = await channel.agentPool.getCurrentModelLabel(chatJid).catch(() => null);
+    }
+  }
+
+  const state = {
+    model: nextModel ?? null,
+    thinkingLevel: thinkingLevel ?? null,
+    thinkingLevelLabel: thinkingLevelLabel ?? thinkingLevel ?? null,
+    supportsThinking,
+  };
+  channel.broadcastEvent("model_changed", {
+    chat_jid: chatJid,
+    model: state.model,
+    thinking_level: state.thinkingLevel,
+    thinking_level_label: state.thinkingLevelLabel,
+    supports_thinking: state.supportsThinking,
+  });
+  return state;
+}
+
 function parseLeadingAgentMention(content: string): { agentName: string; remainder: string } | null {
   const match = content.match(/^\s*@([a-zA-Z0-9][a-zA-Z0-9_-]{0,31})(?:\s+([\s\S]*))?$/);
   if (!match) return null;
@@ -663,7 +722,7 @@ export async function handleAgentMessage(
 
   const queueDeferredFollowup = (
     queuedContent: string,
-    extras?: { mediaIds?: number[]; contentBlocks?: unknown[]; linkPreviews?: unknown[]; screenHint?: string }
+    extras: QueueDeferredFollowupExtras = {}
   ): Response => {
     const queuedAt = new Date().toISOString();
     // Don't inherit the active turn's thread root. Deferred followups are
@@ -671,14 +730,33 @@ export async function handleAgentMessage(
     // start their own thread when materialized (self-rooted via
     // storeWebMessage's default behaviour).
     const queuedThreadId: number | null = null;
-    const queuedRowId = channel.enqueueQueuedFollowupItem(chatJid, 0, queuedContent, queuedThreadId, queuedAt, extras);
+    const queuedBy = extras.browserContext
+      ? {
+          ...(extras.browserContext.userId ? { userId: extras.browserContext.userId } : {}),
+          ...(extras.browserContext.sessionId ? { sessionId: extras.browserContext.sessionId } : {}),
+          ...(extras.browserContext.clientId ? { clientId: extras.browserContext.clientId } : {}),
+        }
+      : undefined;
+    const queuedRowId = channel.enqueueQueuedFollowupItem(chatJid, 0, queuedContent, queuedThreadId, queuedAt, {
+      mediaIds: extras.mediaIds,
+      contentBlocks: extras.contentBlocks,
+      linkPreviews: extras.linkPreviews,
+      screenHint: extras.screenHint,
+      source: extras.source,
+      queuedBy: queuedBy && Object.keys(queuedBy).length > 0 ? queuedBy : undefined,
+    });
     channel.broadcastEvent("agent_followup_queued", {
       chat_jid: chatJid,
       thread_id: queuedThreadId,
       row_id: queuedRowId,
       content: queuedContent,
       timestamp: queuedAt,
+      ...(extras.source ? { source: extras.source } : {}),
+      ...(queuedBy && Object.keys(queuedBy).length > 0 ? { queued_by: queuedBy } : {}),
     });
+    if (extras.wakeIfIdle) {
+      channel.resumeChat(chatJid);
+    }
     return channel.json({ queued: "followup", thread_id: queuedThreadId }, 201);
   };
 
@@ -717,8 +795,20 @@ export async function handleAgentMessage(
   if ((command?.type === "queue" || command?.type === "queue_all") && isStreaming) {
     const queuedText = (command.message || "").trim();
     if (queuedText) {
-      return queueDeferredFollowup(queuedText);
+      return queueDeferredFollowup(queuedText, { source: "web.queue_command", browserContext: browserObservability });
     }
+  }
+
+  if (isModelControlCommand(command) && (isActive || hasQueuedBacklog) && (requestMode === "queue" || requestMode === "auto")) {
+    // Model/thinking changes are session mutations. Queue them behind active
+    // turns and existing backlog so a stale browser/model-picker request cannot
+    // silently reroute the currently running or already queued work. The queued
+    // item is server-owned and will drain even if the browser disconnects.
+    return queueDeferredFollowup(content, {
+      source: "web.model_command",
+      browserContext: browserObservability,
+      wakeIfIdle: hasQueuedBacklog && !isActive,
+    });
   }
 
   const isCompactionControlCommand = command?.type === "compact" || (command?.type === "model" && Boolean(command.compact));
@@ -726,7 +816,11 @@ export async function handleAgentMessage(
     // session.compact() aborts the current agent operation before rewriting the
     // branch. Queue explicit compaction requests behind the active turn/backlog
     // so they operate on the complete current session instead of racing it.
-    return queueDeferredFollowup(content);
+    return queueDeferredFollowup(content, {
+      source: command?.type === "compact" ? "web.compact_command" : "web.model_compact_command",
+      browserContext: browserObservability,
+      wakeIfIdle: hasQueuedBacklog && !isActive,
+    });
   }
 
   if (command?.type === "steer" && isStreaming) {
@@ -818,35 +912,13 @@ export async function handleAgentMessage(
   // Model/thinking commands: execute without writing to the timeline,
   // EXCEPT for bare /model (list) and bare /thinking (query) which should
   // surface their table/output as a timeline message like /theme does.
-  const MODEL_COMMAND_TYPES = new Set(["model", "thinking", "cycle_model", "cycle_thinking"]);
   if (command && MODEL_COMMAND_TYPES.has(command.type)) {
     const result = await channel.agentPool.applyControlCommand(chatJid, command);
 
     // Broadcast model state so the UI hint updates immediately
-    let nextModel = result.model_label ?? null;
-    let thinkingLevel = result.thinking_level ?? null;
-    let thinkingLevelLabel = result.thinking_level_label ?? null;
-    let supportsThinking: boolean | undefined = undefined;
-    try {
-      const modelState = await channel.agentPool.getAvailableModels(chatJid);
-      if (!nextModel) nextModel = modelState.current ?? null;
-      if (thinkingLevel == null) thinkingLevel = modelState.thinking_level ?? null;
-      if (!thinkingLevelLabel) thinkingLevelLabel = modelState.thinking_level_label ?? thinkingLevel;
-      supportsThinking = modelState.supports_thinking;
-    } catch {
-      if (typeof channel.agentPool.getCurrentModelLabel === "function") {
-        nextModel = await channel.agentPool.getCurrentModelLabel(chatJid).catch(() => null);
-      }
-    }
-
+    let modelState: { model: string | null; thinkingLevel: string | null; thinkingLevelLabel: string | null; supportsThinking: boolean | undefined } | null = null;
     if (result.status === "success") {
-      channel.broadcastEvent("model_changed", {
-        chat_jid: chatJid,
-        model: nextModel ?? null,
-        thinking_level: thinkingLevel ?? null,
-        thinking_level_label: thinkingLevelLabel ?? thinkingLevel ?? null,
-        supports_thinking: supportsThinking,
-      });
+      modelState = await resolveAndBroadcastModelStateForCommand(channel, chatJid, result);
       if (command.type === "model" || command.type === "cycle_model") {
         if (channel.retryFailedOnModelSwitch(chatJid)) {
           channel.resumeChat(chatJid);
@@ -875,7 +947,13 @@ export async function handleAgentMessage(
     return channel.json(
       {
         thread_id: null,
-        command: { ...result, model_label: nextModel, thinking_level: thinkingLevel, thinking_level_label: thinkingLevelLabel ?? thinkingLevel, supports_thinking: supportsThinking },
+        command: {
+          ...result,
+          model_label: modelState?.model ?? (result as { model_label?: string | null }).model_label ?? null,
+          thinking_level: modelState?.thinkingLevel ?? (result as { thinking_level?: string | null }).thinking_level ?? null,
+          thinking_level_label: modelState?.thinkingLevelLabel ?? (result as { thinking_level_label?: string | null }).thinking_level_label ?? (result as { thinking_level?: string | null }).thinking_level ?? null,
+          supports_thinking: modelState?.supportsThinking,
+        },
         ui_only: true,
       },
       200,
@@ -912,14 +990,10 @@ export async function handleAgentMessage(
       contentBlocks: normalized.contentBlocks,
       linkPreviews: normalized.linkPreviews,
       screenHint: normalized.screenHint,
+      source: "web.compose",
+      browserContext: browserObservability,
+      wakeIfIdle: hasQueuedBacklog && !isActive,
     });
-
-    // If we are deferring only because persisted/deferred backlog exists but
-    // no run is currently active, proactively wake processChat so the backlog
-    // drains instead of passively accumulating more deferred messages.
-    if (hasQueuedBacklog && !isActive) {
-      channel.resumeChat(chatJid);
-    }
 
     return response;
   }
@@ -982,7 +1056,15 @@ export async function handleAgentMessage(
       interaction.id,
       content,
       interaction.id,
-      interaction.timestamp
+      interaction.timestamp,
+      {
+        source: "web.compose_persisted",
+        queuedBy: {
+          ...(browserObservability.userId ? { userId: browserObservability.userId } : {}),
+          ...(browserObservability.sessionId ? { sessionId: browserObservability.sessionId } : {}),
+          ...(browserObservability.clientId ? { clientId: browserObservability.clientId } : {}),
+        },
+      }
     );
     channel.broadcastEvent("agent_followup_queued", {
       chat_jid: chatJid,
@@ -990,6 +1072,7 @@ export async function handleAgentMessage(
       row_id: interaction.id,
       content,
       timestamp: interaction.timestamp,
+      source: "web.compose_persisted",
     });
 
     return channel.json(
@@ -1083,14 +1166,14 @@ export async function handleAgentMessage(
 
     if (formatted || result.contentBlocks?.length) {
       if (isQueueCommand && result.queued_followup) {
-        return queueDeferredFollowup(((command as { message?: string }).message || content).trim());
+        return queueDeferredFollowup(((command as { message?: string }).message || content).trim(), { source: "web.queue_command", browserContext: browserObservability });
       } else if (isSteerCommand && (result as { queued_steer?: boolean }).queued_steer) {
         const steerResponse = await queueSteerMessage("command");
         if (steerResponse) {
           return steerResponse;
         }
       } else if (isSteerCommand && (result as { queued_followup?: boolean }).queued_followup) {
-        return queueDeferredFollowup(((command as { message?: string }).message || content).trim());
+        return queueDeferredFollowup(((command as { message?: string }).message || content).trim(), { source: "web.steer_command", browserContext: browserObservability });
       } else if (isSteerCommand && result.status === "error" && result.message === "No active response to steer. Please send a message first.") {
         const queueResponse = await queueFollowupMessage();
         if (queueResponse) {
@@ -1276,8 +1359,71 @@ export async function processChat(
   browserObservability?: BrowserObservabilityContext,
 ): Promise<void> {
   const MAX_MATERIALIZE_RETRIES = 5;
+  const prevCursor = getChatCursor(chatJid);
 
-  const materializeNextDeferredFollowup = (): boolean => {
+  type DeferredControlExecutionMessage = {
+    rowId: number;
+    messageId?: string | null;
+    content: string;
+    timestamp: string;
+    threadId?: number | null;
+    queuedSource?: string;
+    queuedBy?: import("../runtime/followup-placeholders.js").QueuedFollowupItem["queuedBy"];
+  };
+
+  const executeDeferredControlCommand = async (
+    persistedCommand: DeferredControlCommand,
+    message: DeferredControlExecutionMessage,
+    effectiveThreadRootId?: number | null,
+  ): Promise<"continue" | "resumed"> => {
+    log.info("processChat executing deferred control command", {
+      operation: "process_chat.deferred_control_command",
+      chatJid,
+      cursor: getChatCursor(chatJid),
+      messageId: message.messageId ?? null,
+      rowId: message.rowId,
+      commandType: persistedCommand.type,
+      queuedSource: message.queuedSource ?? null,
+      queuedBy: message.queuedBy ?? null,
+      contentPreview: message.content.slice(0, 80),
+    });
+
+    const result = await channel.agentPool.applyControlCommand(chatJid, persistedCommand);
+    const formatted = formatOutbound(result.message, "web");
+    const commandThreadId = message.threadId ?? effectiveThreadRootId ?? message.rowId ?? null;
+
+    if (formatted || result.contentBlocks?.length) {
+      const sendOptions: Record<string, unknown> = { threadId: commandThreadId };
+      if (result.mediaIds?.length) sendOptions.mediaIds = result.mediaIds;
+      if (result.contentBlocks?.length) sendOptions.contentBlocks = result.contentBlocks;
+      await channel.sendMessage(chatJid, formatted || "", sendOptions);
+    }
+
+    if (result.status === "success" && isModelControlCommand(persistedCommand)) {
+      await resolveAndBroadcastModelStateForCommand(channel, chatJid, result);
+    }
+
+    setChatCursor(chatJid, message.timestamp);
+    channel.saveState?.();
+
+    if (result.status === "success" && (persistedCommand.type === "model" || persistedCommand.type === "cycle_model")) {
+      if (channel.retryFailedOnModelSwitch(chatJid)) {
+        channel.resumeChat(chatJid);
+        return "resumed";
+      }
+    }
+
+    const cursorNow = getChatCursor(chatJid);
+    const remainingPersisted = getMessagesSince(chatJid, cursorNow, getIdentityConfig().assistantName);
+    if (remainingPersisted.length > 0) {
+      channel.resumeChat(chatJid);
+      return "resumed";
+    }
+
+    return "continue";
+  };
+
+  const materializeNextDeferredFollowup = async (): Promise<boolean> => {
     const nextQueued = channel.consumeQueuedFollowupItem(chatJid);
     if (!nextQueued) return false;
 
@@ -1304,6 +1450,7 @@ export async function processChat(
           chatJid,
           retries,
           rowId: nextQueued.rowId,
+          queuedSource: nextQueued.source ?? null,
           contentPreview: nextQueued.queuedContent?.slice(0, 80) ?? "",
         });
         channel.broadcastEvent("agent_followup_consumed", {
@@ -1312,6 +1459,7 @@ export async function processChat(
           row_id: nextQueued.rowId,
           content: nextQueued.queuedContent,
           timestamp: nextQueued.queuedAt,
+          ...(nextQueued.source ? { source: nextQueued.source } : {}),
         });
         return false;
       }
@@ -1324,6 +1472,7 @@ export async function processChat(
         attempt: retries + 1,
         maxAttempts: MAX_MATERIALIZE_RETRIES,
         rowId: nextQueued.rowId,
+        queuedSource: nextQueued.source ?? null,
       });
       return false;
     }
@@ -1334,8 +1483,30 @@ export async function processChat(
       row_id: nextQueued.rowId,
       content: nextQueued.queuedContent,
       timestamp: nextQueued.queuedAt,
+      ...(nextQueued.source ? { source: nextQueued.source } : {}),
     });
     channel.broadcastEvent("new_post", queuedInteraction);
+
+    const queuedCommand = parseControlCommand(String(nextQueued.queuedContent || ""), getRoutingConfig().triggerPattern);
+    if (isDeferredControlCommand(queuedCommand)) {
+      const action = await executeDeferredControlCommand(
+        queuedCommand,
+        {
+          rowId: queuedInteraction.id,
+          content: nextQueued.queuedContent,
+          timestamp: queuedInteraction.timestamp,
+          threadId: queuedInteraction.data?.thread_id ?? queuedInteraction.id ?? null,
+          queuedSource: nextQueued.source,
+          queuedBy: nextQueued.queuedBy,
+        },
+        queuedInteraction.data?.thread_id ?? queuedInteraction.id ?? null,
+      );
+      if (action === "continue") {
+        await materializeNextDeferredFollowup();
+      }
+      return true;
+    }
+
     // Resume using the newly materialized message row id as the frontier.
     // If multiple queued follow-ups belong to the same thread root, reusing the
     // stable thread id here would cause resume-task deduplication to collapse
@@ -1344,7 +1515,6 @@ export async function processChat(
     return true;
   };
 
-  const prevCursor = getChatCursor(chatJid);
   const messages = getMessagesSince(chatJid, prevCursor, getIdentityConfig().assistantName);
 
   if (messages.length === 0) {
@@ -1354,7 +1524,7 @@ export async function processChat(
       cursor: prevCursor,
       threadRootId: threadRootId ?? null,
     });
-    materializeNextDeferredFollowup();
+    await materializeNextDeferredFollowup();
     return;
   }
 
@@ -1380,7 +1550,7 @@ export async function processChat(
     if (messages.length > 1) {
       channel.resumeChat(chatJid);
     } else {
-      materializeNextDeferredFollowup();
+      await materializeNextDeferredFollowup();
     }
     return;
   }
@@ -1404,6 +1574,25 @@ export async function processChat(
     effectiveThreadRootId: effectiveThreadRootId ?? null,
     processingMessageId: currentMessage.id,
   });
+
+  const persistedCommand = parseControlCommand(String(currentMessage.content || ""), getRoutingConfig().triggerPattern);
+  if (isDeferredControlCommand(persistedCommand)) {
+    const action = await executeDeferredControlCommand(
+      persistedCommand,
+      {
+        rowId: getMessageRowIdById(chatJid, currentMessage.id ?? "") ?? 0,
+        messageId: currentMessage.id,
+        content: String(currentMessage.content || ""),
+        timestamp: currentMessage.timestamp,
+        threadId: currentMessage.thread_id ?? effectiveThreadRootId ?? null,
+      },
+      effectiveThreadRootId,
+    );
+    if (action === "continue") {
+      await materializeNextDeferredFollowup();
+    }
+    return;
+  }
 
   const channelName = detectChannel(chatJid);
   const prompt = formatMessages([currentMessage], channelName, chatJid);
@@ -1790,7 +1979,7 @@ export async function processChat(
     }
 
     // Start the next queued follow-up only after this turn has fully finalized.
-    materializeNextDeferredFollowup();
+    await materializeNextDeferredFollowup();
 
     // If the exit_process tool was called during this turn, trigger graceful
     // shutdown now that the response has been persisted and broadcast.
