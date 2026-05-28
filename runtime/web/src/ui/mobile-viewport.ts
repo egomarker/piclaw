@@ -5,6 +5,83 @@ export function shouldUseStandaloneMobileViewportFix(runtime = {}) {
   return isStandaloneWebAppMode(runtime) && isMobileBrowserMode(runtime);
 }
 
+function shouldUseIphoneStandaloneComposeInset(runtime = {}): boolean {
+  if (!shouldUseStandaloneMobileViewportFix(runtime)) return false;
+  const nav = runtime.navigator ?? (typeof navigator !== 'undefined' ? navigator : null);
+  const userAgent = String(nav?.userAgent || '');
+  if (/iPhone|iPad|iPod/i.test(userAgent)) return true;
+  return String(nav?.platform || '') === 'MacIntel' && Number(nav?.maxTouchPoints || 0) > 1;
+}
+
+function readIphoneStandaloneViewportCompensation(win: any, options: { keyboardActive?: boolean } = {}): number {
+  if (options.keyboardActive) return 0;
+
+  const screenHeight = readCurrentScreenHeight(win);
+  if (!screenHeight || screenHeight <= 0) return 0;
+
+  const viewportHeight = Number(win?.visualViewport?.height || 0);
+  const innerHeight = Number(win?.innerHeight || 0);
+  const candidateHeight = Number.isFinite(viewportHeight) && viewportHeight > 0
+    ? viewportHeight
+    : (Number.isFinite(innerHeight) && innerHeight > 0 ? innerHeight : 0);
+
+  if (!candidateHeight || candidateHeight <= 0) return 0;
+
+  const gap = Math.round(screenHeight - candidateHeight);
+  const maxExpectedGap = Math.max(120, Math.round(screenHeight * 0.2));
+  if (!Number.isFinite(gap) || gap <= 0 || gap > maxExpectedGap) return 0;
+  return gap;
+}
+
+
+function measureSafeAreaInset(doc: any, edge: 'top' | 'bottom'): number {
+  if (!doc?.body || typeof doc.createElement !== 'function') return 0;
+  const view = doc.defaultView ?? (typeof window !== 'undefined' ? window : null);
+  const probe = doc.createElement('div');
+  probe.style.cssText = [
+    'position:fixed',
+    'visibility:hidden',
+    'pointer-events:none',
+    'width:0',
+    'height:0',
+    'overflow:hidden',
+    'padding:0',
+    'border:0',
+    edge === 'top' ? 'top:0;left:0;padding-top:env(safe-area-inset-top,0px)' : 'left:0;bottom:0;padding-bottom:env(safe-area-inset-bottom,0px)',
+  ].join(';');
+  doc.body.appendChild(probe);
+  const computedStyle = view && typeof view.getComputedStyle === 'function' ? view.getComputedStyle(probe) : null;
+  const computed = edge === 'top'
+    ? Number.parseFloat(String(computedStyle?.paddingTop ?? '0'))
+    : Number.parseFloat(String(computedStyle?.paddingBottom ?? '0'));
+  const fallback = probe.offsetHeight;
+  probe.remove();
+  const value = Number.isFinite(computed) ? computed : fallback;
+  return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
+}
+
+function readIphoneStandaloneBottomSafeArea(win: any, doc: any, options: { keyboardActive?: boolean } = {}): number {
+  if (options.keyboardActive) return 0;
+  const measuredBottom = measureSafeAreaInset(doc, 'bottom');
+  if (measuredBottom > 0) return measuredBottom;
+  return 0;
+}
+
+function buildIphoneStandaloneComposeInsetValue(win: any, doc: any, options: { keyboardActive?: boolean } = {}): string {
+  if (options.keyboardActive) return '0px';
+  const compensation = readIphoneStandaloneViewportCompensation(win, options);
+  const safeBottom = readIphoneStandaloneBottomSafeArea(win, doc, options);
+  const totalInset = Math.max(0, compensation) + Math.max(0, safeBottom);
+  if (totalInset > 0) {
+    return `${totalInset}px`;
+  }
+  return 'env(safe-area-inset-bottom, 0px)';
+}
+
+function buildStandaloneComposeInsetBootstrapValue(_win: any): string {
+  return 'env(safe-area-inset-bottom, 0px)';
+}
+
 function isTextEntryFocused(doc: any): boolean {
   const active = doc?.activeElement;
   if (!active) return false;
@@ -101,6 +178,17 @@ export function syncStandaloneMobileViewport(runtime = {}, options = {}) {
 
   const textEntryFocused = isTextEntryFocused(doc);
   const keyboardActive = textEntryFocused && isVirtualKeyboardLikelyVisible(win);
+
+  if (shouldUseIphoneStandaloneComposeInset({ window: win, navigator: runtime.navigator ?? win.navigator })) {
+    doc.documentElement.style.setProperty(
+      '--iphone-standalone-compose-safe-area-bottom',
+      buildIphoneStandaloneComposeInsetValue(win, doc, { keyboardActive }),
+    );
+    doc.documentElement?.setAttribute?.('data-iphone-standalone-compose-inset', '1');
+  } else {
+    doc.documentElement?.style?.removeProperty?.('--iphone-standalone-compose-safe-area-bottom');
+    doc.documentElement?.removeAttribute?.('data-iphone-standalone-compose-inset');
+  }
   const height = readViewportHeight({ window: win }, { ignoreStandaloneChromeGap: true, keyboardActive });
   if (keyboardActive) {
     if (height && height > 0) {
@@ -156,6 +244,7 @@ export function installStandaloneMobileViewportFix(runtime = {}) {
 
   const win = runtime.window ?? (typeof window !== 'undefined' ? window : null);
   const doc = runtime.document ?? (typeof document !== 'undefined' ? document : null);
+  const nav = runtime.navigator ?? win?.navigator ?? (typeof navigator !== 'undefined' ? navigator : null);
   if (!win || !doc) {
     return () => {};
   }
@@ -166,6 +255,13 @@ export function installStandaloneMobileViewportFix(runtime = {}) {
   // Standalone mode has no URL bar, so 100vh is the stable full-screen unit.
   // See docs/PWA.md before changing this path.
   doc.documentElement?.style?.setProperty?.('--app-height', '100vh');
+  if (shouldUseIphoneStandaloneComposeInset({ window: win, navigator: nav })) {
+    doc.documentElement?.style?.setProperty?.(
+      '--iphone-standalone-compose-safe-area-bottom',
+      buildStandaloneComposeInsetBootstrapValue({ ...win, navigator: nav }),
+    );
+    doc.documentElement?.setAttribute?.('data-iphone-standalone-compose-inset', '1');
+  }
 
   let rafId = 0;
   const timers = new Set();
@@ -183,7 +279,7 @@ export function installStandaloneMobileViewportFix(runtime = {}) {
 
   const runSync = () => {
     rafId = 0;
-    syncStandaloneMobileViewport({ window: win, document: doc });
+    syncStandaloneMobileViewport({ window: win, document: doc, navigator: nav });
   };
 
   const scheduleSync = () => {
@@ -195,7 +291,7 @@ export function installStandaloneMobileViewportFix(runtime = {}) {
 
   const scheduleSettledSync = () => {
     scheduleSync();
-    for (const delay of [80, 220, 420]) {
+    for (const delay of [80, 220, 420, 800, 1200]) {
       const timer = win.setTimeout?.(() => {
         timers.delete(timer);
         scheduleSync();
@@ -268,5 +364,7 @@ export function installStandaloneMobileViewportFix(runtime = {}) {
     doc.removeEventListener('focusout', handleFocusOut, true);
     viewport?.removeEventListener?.('resize', scheduleSettledSync);
     viewport?.removeEventListener?.('scroll', resetScroll);
+    doc.documentElement?.style?.removeProperty?.('--iphone-standalone-compose-safe-area-bottom');
+    doc.documentElement?.removeAttribute?.('data-iphone-standalone-compose-inset');
   };
 }

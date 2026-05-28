@@ -2,6 +2,13 @@
  * channels/web/followup-placeholders.ts – queued follow-up placeholder row ids.
  */
 
+export interface QueuedFollowupSourceMetadata {
+  source?: string;
+  userId?: string;
+  sessionId?: string;
+  clientId?: string;
+}
+
 export interface QueuedFollowupItem {
   rowId: number;
   queuedContent: string;
@@ -11,6 +18,8 @@ export interface QueuedFollowupItem {
   contentBlocks?: unknown[];
   linkPreviews?: unknown[];
   screenHint?: string;
+  source?: string;
+  queuedBy?: QueuedFollowupSourceMetadata;
   /** Number of times materializeNextDeferredFollowup has failed for this item. */
   materializeRetries?: number;
 }
@@ -25,7 +34,7 @@ export class FollowupPlaceholderStore {
     queuedContent: string,
     threadId?: number | null,
     queuedAt?: string,
-    extras?: Pick<QueuedFollowupItem, "mediaIds" | "contentBlocks" | "linkPreviews" | "screenHint">
+    extras?: Pick<QueuedFollowupItem, "mediaIds" | "contentBlocks" | "linkPreviews" | "screenHint" | "source" | "queuedBy">
   ): void {
     const existing = this.queuedFollowupPlaceholders.get(chatJid) ?? [];
     existing.push({
@@ -37,6 +46,8 @@ export class FollowupPlaceholderStore {
       contentBlocks: Array.isArray(extras?.contentBlocks) ? [...extras.contentBlocks] : undefined,
       linkPreviews: Array.isArray(extras?.linkPreviews) ? [...extras.linkPreviews] : undefined,
       screenHint: typeof extras?.screenHint === "string" && extras.screenHint.trim() ? extras.screenHint.trim() : undefined,
+      source: typeof extras?.source === "string" && extras.source.trim() ? extras.source.trim() : undefined,
+      queuedBy: extras?.queuedBy ? { ...extras.queuedBy } : undefined,
     });
     this.queuedFollowupPlaceholders.set(chatJid, existing);
   }
@@ -52,6 +63,8 @@ export class FollowupPlaceholderStore {
       contentBlocks: Array.isArray(item.contentBlocks) ? [...item.contentBlocks] : undefined,
       linkPreviews: Array.isArray(item.linkPreviews) ? [...item.linkPreviews] : undefined,
       screenHint: typeof item.screenHint === "string" && item.screenHint.trim() ? item.screenHint.trim() : undefined,
+      source: typeof item.source === "string" && item.source.trim() ? item.source.trim() : undefined,
+      queuedBy: item.queuedBy ? { ...item.queuedBy } : undefined,
     });
     this.queuedFollowupPlaceholders.set(chatJid, existing);
   }

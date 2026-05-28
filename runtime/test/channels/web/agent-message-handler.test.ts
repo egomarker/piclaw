@@ -238,6 +238,53 @@ describe("web agent message handler", () => {
     expect(storeMessageCalls).toBe(0);
   });
 
+  test("defers /model while the current session is still active", async () => {
+    const queuedFollowups: Array<{ chatJid: string; content: string }> = [];
+    let applyCalls = 0;
+    let storeMessageCalls = 0;
+
+    const channel = {
+      agentPool: {
+        isStreaming: () => false,
+        isActive: () => true,
+        applyControlCommand: async () => {
+          applyCalls += 1;
+          return { status: "error", message: "should not run immediately" };
+        },
+      },
+      json: (payload: unknown, status = 200) =>
+        new Response(JSON.stringify(payload), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        }),
+      enqueueQueuedFollowupItem: (chatJid: string, _rowId: number, content: string) => {
+        queuedFollowups.push({ chatJid, content });
+        return 458;
+      },
+      getQueuedFollowupCount: () => 0,
+      broadcastEvent: () => {},
+      storeMessage: () => {
+        storeMessageCalls += 1;
+        return null;
+      },
+      sendMessage: async () => {},
+    } as any;
+
+    const req = new Request("https://example.com/agent/default/message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "/model openai/gpt-4.1" }),
+    });
+
+    const response = await handleAgentMessage(channel, req, "/agent/default/message", "web:default", "default");
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body.queued).toBe("followup");
+    expect(queuedFollowups).toEqual([{ chatJid: "web:default", content: "/model openai/gpt-4.1" }]);
+    expect(applyCalls).toBe(0);
+    expect(storeMessageCalls).toBe(0);
+  });
+
   test("defers /model --compact while the current session is still active", async () => {
     const queuedFollowups: Array<{ chatJid: string; content: string }> = [];
     let applyCalls = 0;

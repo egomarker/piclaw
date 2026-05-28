@@ -248,7 +248,11 @@ This keeps interactive content below the Dynamic Island / status bar while allow
 
 ### Bottom (home indicator)
 
-**No special handling needed.** With `100vh` in standalone mode, the layout reaches the bottom of the screen. The home indicator overlay is transparent and the system handles tap-through. Adding `padding-bottom: env(safe-area-inset-bottom)` would push the compose box up unnecessarily.
+For the main shell overall, **do not add a blanket bottom safe-area inset**. With `100vh` in standalone mode, the app shell itself should still reach the bottom of the screen.
+
+However, on **iPhone standalone PWAs specifically**, the chat surface can sit too low when the standalone viewport is still in its undocked / under-reported state, and the compose area's lower edge can be clipped by the lower screen boundary. The narrow fix is to reserve a runtime-controlled bottom inset at the **chat container level**, only when detection confirms **iPhone + standalone PWA**.
+
+That bottom inset should be at least `env(safe-area-inset-bottom)`, and while the viewport is under-reporting it may need to grow to match the current `screen.height - visualViewport.height` gap. That moves the whole compose region above the lower screen boundary without changing iPhone Safari, iPad Safari/PWA, or Android layouts.
 
 ### Left / Right (landscape rotation)
 

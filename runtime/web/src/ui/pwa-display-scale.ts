@@ -1,3 +1,5 @@
+import { isMobileBrowserMode, isStandaloneWebAppMode } from './chat-window.js';
+
 export const PWA_DISPLAY_SCALE_STORAGE_KEY = 'piclawPwaDisplayScalePercent';
 export const PWA_DISPLAY_SCALE_EVENT = 'piclaw:pwa-display-scale-changed';
 export const DEFAULT_PWA_DISPLAY_SCALE_PERCENT = 100;
@@ -53,19 +55,11 @@ export function readStoredPwaDisplayScalePercent(runtime: any = typeof window !=
   }
 }
 
-export function isAndroidStandalonePwa(runtime: any = typeof window !== 'undefined' ? window : null): boolean {
+export function isMobileStandalonePwa(runtime: any = typeof window !== 'undefined' ? window : null): boolean {
   const runtimeWindow = getRuntimeWindow(runtime);
   const runtimeNavigator = getRuntimeNavigator(runtimeWindow);
-  const userAgent = String(runtimeNavigator?.userAgent || '');
-  if (!/Android/i.test(userAgent)) return false;
-
-  try {
-    return ['standalone', 'fullscreen', 'minimal-ui'].some((mode) =>
-      Boolean(runtimeWindow?.matchMedia?.(`(display-mode: ${mode})`)?.matches),
-    );
-  } catch {
-    return false;
-  }
+  return isStandaloneWebAppMode({ window: runtimeWindow, navigator: runtimeNavigator })
+    && isMobileBrowserMode({ window: runtimeWindow, navigator: runtimeNavigator });
 }
 
 export function buildPwaDisplayScaleViewportContent(percent: number, options: { applies?: boolean } = {}): string {
@@ -85,7 +79,7 @@ export function applyPwaDisplayScale(runtime: any = typeof window !== 'undefined
 } {
   const runtimeWindow = getRuntimeWindow(runtime);
   const percent = readStoredPwaDisplayScalePercent(runtimeWindow);
-  const applied = isAndroidStandalonePwa(runtimeWindow) && percent !== DEFAULT_PWA_DISPLAY_SCALE_PERCENT;
+  const applied = isMobileStandalonePwa(runtimeWindow) && percent !== DEFAULT_PWA_DISPLAY_SCALE_PERCENT;
   const content = buildPwaDisplayScaleViewportContent(percent, { applies: applied });
   const viewport = runtimeWindow?.document?.querySelector?.('meta[name="viewport"]');
   viewport?.setAttribute?.('content', content);

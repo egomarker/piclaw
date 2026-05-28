@@ -80,6 +80,7 @@ export interface WebAgentControlPlaneServiceOptions {
   ): InteractionRow | null;
   processChat(chatJid: string, agentId: string, threadRootId?: number | null): Promise<void> | void;
   getAgentStatus?: (chatJid: string) => Record<string, unknown> | null;
+  updateAgentStatus?: (chatJid: string, status: Record<string, unknown>) => void;
   getInflightMessageId?: typeof getInflightMessageId;
   getMessageThreadRootIdById?: typeof getMessageThreadRootIdById;
   getAutoresearchWidgetPayload?: (chatJid: string) => unknown;
@@ -103,6 +104,7 @@ export interface WebAgentControlPlaneChannelLike {
   ): InteractionRow | null;
   processChat(chatJid: string, agentId: string, threadRootId?: number | null): Promise<void> | void;
   getAgentStatus?(chatJid: string): Record<string, unknown> | null;
+  updateAgentStatus?(chatJid: string, status: Record<string, unknown>): void;
 }
 
 export function createWebAgentControlPlaneService(
@@ -122,6 +124,7 @@ export function createWebAgentControlPlaneService(
       channel.storeMessage(chatJid, content, isBot, mediaIds, options),
     processChat: (chatJid, agentId, threadRootId) => channel.processChat(chatJid, agentId, threadRootId),
     getAgentStatus: (chatJid) => channel.getAgentStatus?.(chatJid) ?? null,
+    updateAgentStatus: (chatJid, status) => channel.updateAgentStatus?.(chatJid, status),
   });
 }
 
@@ -465,14 +468,26 @@ export class WebAgentControlPlaneService {
     if (!chatJid) return this.options.json({ error: "Missing chat_jid" }, 400);
     const hadInflight = getInflightRuns().some((run) => run.chatJid === chatJid);
     const hadPreflight = getPreflightRuns().some((run) => run.chatJid === chatJid);
+    const hadStatus = Boolean(this.options.getAgentStatus?.(chatJid));
     clearInflightMarker(chatJid);
+    if (hadStatus) {
+      this.options.updateAgentStatus?.(chatJid, { type: "done", title: "Idle", source: "operator_clear_stale" });
+    }
     log.warn("Operator cleared stale run markers", {
       operation: "operator_run.clear_stale",
       chatJid,
       hadInflight,
       hadPreflight,
+      hadStatus,
     });
-    return this.options.json({ status: "ok", chat_jid: chatJid, cleared: hadInflight || hadPreflight, had_inflight: hadInflight, had_preflight: hadPreflight }, 200);
+    return this.options.json({
+      status: "ok",
+      chat_jid: chatJid,
+      cleared: hadInflight || hadPreflight || hadStatus,
+      had_inflight: hadInflight,
+      had_preflight: hadPreflight,
+      had_status: hadStatus,
+    }, 200);
   }
 
   async handleAgentRunDrainQueue(req: Request): Promise<Response> {
