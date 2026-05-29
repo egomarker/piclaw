@@ -579,6 +579,76 @@ describe("web recovery helpers", () => {
     expect(enqueued.map((item) => item.key)).toEqual(["resume:web:new"]);
   });
 
+  test("resumePendingChats skips chats excluded by addon recovery prefixes", async () => {
+    const enqueued: Array<{ key: string; task: () => Promise<void> }> = [];
+    const calls: Array<{ chatJid: string; since: string }> = [];
+
+    const ctx: WebRecoveryContext = {
+      assistantName: "Pi",
+      defaultAgentId: "default",
+      enqueue: (task, key) => {
+        enqueued.push({ key, task });
+      },
+      processChat: async () => {},
+      getExcludedChatJidPrefixes: () => ["telegram:"],
+    };
+
+    const store: WebRecoveryStore = {
+      getInflightRuns: () => [],
+      transaction: (run) => run(),
+      getAgentReplyStateAfter: () => "none",
+      clearInflightMarker: () => {},
+      rollbackInflightRun: () => {},
+      getAllChatCursors: () => ({ "web:known": "t1", "telegram:123": "t2" }),
+      getKnownChatJids: () => ["web:known", "telegram:123"],
+      getDeferredQueuedFollowups: () => [],
+      getMessagesSince: (chatJid, since) => {
+        calls.push({ chatJid, since });
+        return [{ id: `${chatJid}-msg` }];
+      },
+    };
+
+    resumePendingChats(ctx, undefined, store);
+
+    expect(calls).toEqual([{ chatJid: "web:known", since: "t1" }]);
+    expect(enqueued.map((item) => item.key)).toEqual(["resume:web:known"]);
+  });
+
+  test("resumePendingChats ignores an explicitly requested excluded chat", async () => {
+    const enqueued: Array<{ key: string; task: () => Promise<void> }> = [];
+    const calls: Array<{ chatJid: string; since: string }> = [];
+
+    const ctx: WebRecoveryContext = {
+      assistantName: "Pi",
+      defaultAgentId: "default",
+      enqueue: (task, key) => {
+        enqueued.push({ key, task });
+      },
+      processChat: async () => {},
+      getExcludedChatJidPrefixes: () => ["telegram:"],
+    };
+
+    const store: WebRecoveryStore = {
+      getInflightRuns: () => [],
+      transaction: (run) => run(),
+      getAgentReplyStateAfter: () => "none",
+      clearInflightMarker: () => {},
+      rollbackInflightRun: () => {},
+      getAllChatCursors: () => ({ "telegram:123": "t2" }),
+      getKnownChatJids: () => ["telegram:123"],
+      getDeferredQueuedFollowups: () => [],
+      getMessagesSince: (chatJid, since) => {
+        calls.push({ chatJid, since });
+        return [{ id: `${chatJid}-msg` }];
+      },
+    };
+
+    resumePendingChats(ctx, "telegram:123", store);
+
+    expect(calls).toEqual([]);
+    expect(enqueued).toEqual([]);
+  });
+
   test("resumePendingChats isolates an explicit chat branch from sibling pending chats", async () => {
     const enqueued: Array<{ key: string; task: () => Promise<void> }> = [];
     const calls: Array<{ chatJid: string; since: string }> = [];

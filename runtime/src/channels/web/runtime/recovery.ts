@@ -2,6 +2,7 @@
  * channels/web/recovery.ts – crash recovery and pending-resume orchestration.
  */
 
+import { getAddonRecoveryExcludedChatJidPrefixes } from "../../../addons/manifest-discovery.js";
 import {
   clearChatCompactionActive,
   clearChatPreflight,
@@ -134,6 +135,7 @@ export interface WebRecoveryContext {
   processChat(chatJid: string, agentId: string, threadRootId?: number): Promise<void>;
   getDraftRecovery?: (chatJid: string) => PersistedDraftRecoveryEntry | null;
   clearDraftRecovery?: (chatJid: string) => void;
+  getExcludedChatJidPrefixes?: () => string[];
   now?: () => number;
   recoveryDelayMs?: number;
   sleep?: (ms: number) => Promise<unknown>;
@@ -171,6 +173,20 @@ function getKnownChatJids(): string[] {
   return rows
     .map((row) => (typeof row.chat_jid === "string" ? row.chat_jid.trim() : ""))
     .filter((jid) => jid.length > 0);
+}
+
+function normalizeExcludedChatJidPrefixes(prefixes: string[] | undefined): string[] {
+  if (!Array.isArray(prefixes)) return [];
+  return Array.from(new Set(
+    prefixes
+      .filter((prefix): prefix is string => typeof prefix === "string")
+      .map((prefix) => prefix.trim())
+      .filter(Boolean)
+  ));
+}
+
+function shouldSkipPendingRecovery(chatJid: string, excludedChatJidPrefixes: readonly string[]): boolean {
+  return excludedChatJidPrefixes.some((prefix) => chatJid.startsWith(prefix));
 }
 
 const defaultStore: WebRecoveryStore = {
@@ -552,8 +568,12 @@ export function resumePendingChats(
   const resolvedJids = chatJid && chatJid !== "all"
     ? [chatJid]
     : Array.from(new Set([...Object.keys(cursors), ...store.getKnownChatJids()]));
+  const excludedChatJidPrefixes = normalizeExcludedChatJidPrefixes(
+    ctx.getExcludedChatJidPrefixes?.() ?? getAddonRecoveryExcludedChatJidPrefixes()
+  );
 
   for (const jid of resolvedJids) {
+    if (shouldSkipPendingRecovery(jid, excludedChatJidPrefixes)) continue;
     const since = Object.prototype.hasOwnProperty.call(cursors, jid) ? cursors[jid] : "";
     const messages = store.getMessagesSince(jid, since, ctx.assistantName);
     const deferred = store.getDeferredQueuedFollowups(jid);

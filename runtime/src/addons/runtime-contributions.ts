@@ -1,9 +1,8 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { WORKSPACE_DIR } from "../core/config.js";
+
 import { createMedia, getMediaById } from "../db/media.js";
 import { postMessagesToolMessage } from "../extensions/messages-crud.js";
+import { getInstalledAddonRuntimeEntryPaths } from "./manifest-discovery.js";
 import { resetRuntimeStreamSessionsForTests, runtimeStreamSessions } from "./runtime-stream-sessions.js";
 
 export interface AddonStatusPanelProvider {
@@ -31,15 +30,6 @@ export interface PiclawRuntimeAddonApi {
   streamSessions: typeof runtimeStreamSessions;
 }
 
-type AddonPackageManifest = {
-  name?: string;
-  pi?: {
-    runtime?: {
-      entries?: string[];
-    };
-  };
-};
-
 type RuntimeGlobal = typeof globalThis & {
   __piclaw_runtime?: PiclawRuntimeAddonApi;
   __piclaw_autoresearch_runtime_registered__?: boolean;
@@ -50,51 +40,10 @@ const adaptiveCardIntentHandlers = new Map<string, AddonAdaptiveCardIntentHandle
 let runtimeApiInstalled = false;
 let runtimeEntriesLoadPromise: Promise<void> | null = null;
 
-function getWorkspaceDir(): string {
-  return process.env.PICLAW_WORKSPACE || WORKSPACE_DIR;
-}
-
-function listAddonPackageDirs(addonsNodeModulesDir: string): string[] {
-  if (!existsSync(addonsNodeModulesDir)) return [];
-  const results: string[] = [];
-  for (const entry of readdirSync(addonsNodeModulesDir, { withFileTypes: true })) {
-    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
-    const entryPath = join(addonsNodeModulesDir, entry.name);
-    if (entry.name.startsWith("@")) {
-      for (const scoped of readdirSync(entryPath, { withFileTypes: true })) {
-        if (scoped.isDirectory() || scoped.isSymbolicLink()) results.push(join(entryPath, scoped.name));
-      }
-      continue;
-    }
-    results.push(entryPath);
-  }
-  return results;
-}
-
-export function getInstalledAddonRuntimeEntryPaths(workspaceDir = getWorkspaceDir()): string[] {
-  const addonsNodeModulesDir = join(workspaceDir, ".pi", "extensions", "node_modules");
-  const runtimeEntries: string[] = [];
-
-  for (const packageDir of listAddonPackageDirs(addonsNodeModulesDir)) {
-    const packageJsonPath = join(packageDir, "package.json");
-    if (!existsSync(packageJsonPath)) continue;
-
-    try {
-      const manifest = JSON.parse(readFileSync(packageJsonPath, "utf8")) as AddonPackageManifest;
-      const declared = Array.isArray(manifest?.pi?.runtime?.entries)
-        ? manifest.pi.runtime.entries.filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
-        : [];
-      for (const relativePath of declared) {
-        const fullPath = join(packageDir, relativePath);
-        if (existsSync(fullPath) && statSync(fullPath).isFile()) runtimeEntries.push(fullPath);
-      }
-    } catch {
-      continue;
-    }
-  }
-
-  return runtimeEntries;
-}
+export {
+  getAddonRecoveryExcludedChatJidPrefixes,
+  getInstalledAddonRuntimeEntryPaths,
+} from "./manifest-discovery.js";
 
 export function registerAddonStatusPanelProvider(provider: AddonStatusPanelProvider): () => void {
   if (!provider || typeof provider.key !== "string" || !provider.key.trim() || typeof provider.getPayload !== "function") {

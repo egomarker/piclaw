@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  getAddonRecoveryExcludedChatJidPrefixes,
   getAddonStatusPanelPayload,
   getInstalledAddonRuntimeEntryPaths,
   resetAddonRuntimeContributionsForTests,
@@ -21,7 +22,10 @@ test("installed addon runtime entries register status panel, card-intent, and st
       type: "module",
       pi: {
         extensions: ["index.ts"],
-        runtime: { entries: ["runtime.ts"] },
+        runtime: {
+          entries: ["runtime.ts"],
+          recovery: { excludeChatJidPrefixes: ["telegram:", "telegram:", "  ", 123] },
+        },
       },
     }, null, 2));
     writeFileSync(join(addonDir, "index.ts"), "export default function noop() {}\n");
@@ -56,6 +60,7 @@ export {};
     expect(getInstalledAddonRuntimeEntryPaths(workspace.workspace)).toEqual([
       join(addonDir, "runtime.ts"),
     ]);
+    expect(getAddonRecoveryExcludedChatJidPrefixes(workspace.workspace)).toEqual(["telegram:"]);
 
     expect(await getAddonStatusPanelPayload("example", "web:test")).toEqual({
       key: "example",

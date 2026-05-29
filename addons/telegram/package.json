@@ -20,7 +20,12 @@
     "runtime": {
       "entries": [
         "runtime/index.ts"
-      ]
+      ],
+      "recovery": {
+        "excludeChatJidPrefixes": [
+          "telegram:"
+        ]
+      }
     },
     "web": {
       "entries": [
