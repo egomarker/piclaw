@@ -139,11 +139,7 @@ export async function processMessages(
   });
 
 
-  const output = await deps.agentPool.runAgent(prompt, chatJid, {
-    onTurnComplete: async () => {
-      // Non-web channels currently deliver only the terminal turn output.
-    },
-  });
+  const output = await deps.agentPool.runAgent(prompt, chatJid);
 
   const recoverySummary = formatRecoverySummary(output.recovery);
 

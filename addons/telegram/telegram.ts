@@ -174,6 +174,11 @@ export class TelegramBotApi {
   }
 }
 
+function shouldSendAsTelegramPhoto(attachment: TelegramBinaryAttachment): boolean {
+  const mimeType = String(attachment.contentType || "").toLowerCase();
+  return ["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(mimeType);
+}
+
 export class TelegramChannel {
   private api: TelegramBotApi | null = null;
   private connected = false;
@@ -231,7 +236,7 @@ export class TelegramChannel {
     }
 
     for (const attachment of attachments) {
-      if (attachment.kind === "image") {
+      if (attachment.kind === "image" && shouldSendAsTelegramPhoto(attachment)) {
         await this.api.sendPhoto(chatId, attachment);
       } else {
         await this.api.sendDocument(chatId, attachment);

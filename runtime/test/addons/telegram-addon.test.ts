@@ -7,6 +7,7 @@ import {
   isTelegramDirectChatId,
   parseTelegramChatJid,
 } from "../../../addons/telegram/telegram-targets.ts";
+import { TelegramChannel } from "../../../addons/telegram/telegram.ts";
 import { importFresh, setEnv } from "../helpers.js";
 
 let restoreEnv: (() => void) | null = null;
@@ -46,6 +47,50 @@ test("telegram config reads env overrides", () => {
     unauthorizedMode: "ignore",
   });
   expect(maskTelegramBotToken("1234567890")).toBe("1234…7890");
+});
+
+test("telegram channel sends SVGs as documents and PNGs as photos", async () => {
+  const channel = new TelegramChannel({
+    botToken: "test",
+    onUpdate: async () => {},
+  }) as any;
+
+  const calls: string[] = [];
+  channel.api = {
+    sendMessage: async () => {
+      calls.push("text");
+    },
+    sendPhoto: async (_chatId: string, attachment: { filename: string }) => {
+      calls.push(`photo:${attachment.filename}`);
+    },
+    sendDocument: async (_chatId: string, attachment: { filename: string }) => {
+      calls.push(`document:${attachment.filename}`);
+    },
+  };
+  channel.connected = true;
+
+  await channel.sendMessage("telegram:123456", "Here you go", {
+    attachments: [
+      {
+        filename: "chart.svg",
+        contentType: "image/svg+xml",
+        data: new Uint8Array([1, 2, 3]),
+        kind: "image",
+      },
+      {
+        filename: "chart.png",
+        contentType: "image/png",
+        data: new Uint8Array([4, 5, 6]),
+        kind: "image",
+      },
+    ],
+  });
+
+  expect(calls).toEqual([
+    "text",
+    "document:chart.svg",
+    "photo:chart.png",
+  ]);
 });
 
 test("telegram runtime entry is safe to import while disabled", async () => {

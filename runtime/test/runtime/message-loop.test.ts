@@ -2,6 +2,8 @@ import { expect, test } from "bun:test";
 
 import { importFresh, withTempWorkspaceEnv } from "../helpers.js";
 
+const noopSendMessage = async () => {};
+
 function makeMessage(chatJid: string, content: string, timestamp: string) {
   return {
     id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -44,6 +46,7 @@ test("processMessages leaves lastAgentTimestamp unchanged when runAgent throws",
           throw new Error("agent crashed");
         },
       } as any,
+      sendMessage: noopSendMessage,
     })).rejects.toThrow("agent crashed");
 
     expect(state.lastAgentTimestamp[chatJid]).toBeUndefined();
@@ -89,6 +92,7 @@ test("processMessages persists lastAgentTimestamp after a recovered successful a
           },
         }),
       } as any,
+      sendMessage: noopSendMessage,
     });
 
     expect(ok).toBe(true);
@@ -128,11 +132,66 @@ test("processMessages treats leading path-like slash text after trigger as a nor
           return { status: "success", result: "done" };
         },
       } as any,
+      sendMessage: noopSendMessage,
     });
 
     expect(ok).toBe(true);
     expect(prompt).toContain("/workspace/piclaw");
     expect(prompt).toContain("/agent/keychain");
+  });
+});
+
+test("processMessages does not consume non-web attachments via intermediate turn callbacks", async () => {
+  await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
+    const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
+    const loop = await importFresh<typeof import("../../src/runtime/message-loop.js")>("../src/runtime/message-loop.js");
+    db.initDatabase();
+
+    const chatJid = `telegram:${Date.now()}`;
+    const timestamp = "2026-04-17T01:04:00.000Z";
+    db.storeMessage(makeMessage(chatJid, "@Pi send image", timestamp));
+
+    const state = {
+      lastAgentTimestamp: {} as Record<string, string>,
+      wasCommandProcessed: () => false,
+      markCommandProcessed: () => {},
+      saveTimestamps: () => {},
+    };
+
+    const sent: Array<{ text: string; options?: Record<string, unknown> }> = [];
+    const attachment = {
+      id: 7,
+      name: "chart.png",
+      contentType: "image/png",
+      size: 1234,
+      kind: "image",
+      sourcePath: "/workspace/chart.png",
+    };
+
+    const ok = await loop.processMessages(chatJid, {
+      state: state as any,
+      assistantName: "Pi",
+      triggerPattern: /@Pi/i,
+      agentPool: {
+        runAgent: async (_prompt: string, _nextChatJid: string, options?: { onTurnComplete?: (turn: { text: string; attachments: unknown[] }) => Promise<void> | void }) => {
+          expect(options?.onTurnComplete).toBeUndefined();
+          return {
+            status: "success",
+            result: "Done — attached.",
+            attachments: [attachment],
+          };
+        },
+      } as any,
+      sendMessage: async (_jid: string, text: string, options?: Record<string, unknown>) => {
+        sent.push({ text, options });
+      },
+    });
+
+    expect(ok).toBe(true);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.text).toContain("Done");
+    expect(Array.isArray(sent[0]?.options?.attachments)).toBe(true);
+    expect((sent[0]?.options?.attachments as Array<{ id: number }>)[0]?.id).toBe(7);
   });
 });
 
@@ -166,6 +225,7 @@ test("processMessages persists lastAgentTimestamp after a successful agent run",
           result: "done",
         }),
       } as any,
+      sendMessage: noopSendMessage,
     });
 
     expect(ok).toBe(true);
