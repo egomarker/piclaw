@@ -25,15 +25,48 @@ import { getMessagesSince, getNewMessages } from "../db.js";
 import type { AgentQueue } from "../queue.js";
 import { detectChannel, formatMessages, formatOutbound } from "../router.js";
 import { createLogger } from "../utils/logger.js";
-import type { RuntimeSendMessageOptions } from "./channel-transport-registry.js";
+import { getChannelTransport, type RuntimeSendMessageOptions } from "./channel-transport-registry.js";
 import type { RuntimeState } from "./state.js";
 
 const log = createLogger("runtime.message-loop");
+const TYPING_REFRESH_MS = 4_000;
 
 function normalizeContentBlocks(value: unknown): Array<Record<string, unknown>> | undefined {
   return Array.isArray(value)
     ? value.filter((block): block is Record<string, unknown> => Boolean(block) && typeof block === "object")
     : undefined;
+}
+
+function startChannelTyping(chatJid: string, channel: string): () => void {
+  const transport = getChannelTransport(channel);
+  if (!transport?.setTyping) return () => {};
+
+  let stopped = false;
+  const sendTyping = async (isTyping: boolean) => {
+    try {
+      await transport.setTyping?.(chatJid, isTyping);
+    } catch (error) {
+      log.warn("Failed to update typing state", {
+        operation: "process_messages.typing",
+        chatJid,
+        channel,
+        isTyping,
+        err: error,
+      });
+    }
+  };
+
+  void sendTyping(true);
+  const timer = setInterval(() => {
+    void sendTyping(true);
+  }, TYPING_REFRESH_MS);
+
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(timer);
+    void sendTyping(false);
+  };
 }
 
 /**
@@ -106,7 +139,13 @@ export async function processMessages(
       operation: "process_messages.slash_command",
       chatJid,
     });
-    const result = await deps.agentPool.applySlashCommand(chatJid, cleaned);
+    const stopTyping = startChannelTyping(chatJid, channel);
+    let result;
+    try {
+      result = await deps.agentPool.applySlashCommand(chatJid, cleaned);
+    } finally {
+      stopTyping();
+    }
 
     if (result.message || result.mediaIds?.length || result.contentBlocks?.length) {
       const text = formatOutbound(result.message || "", channel);
@@ -139,7 +178,13 @@ export async function processMessages(
   });
 
 
-  const output = await deps.agentPool.runAgent(prompt, chatJid);
+  const stopTyping = startChannelTyping(chatJid, channel);
+  let output;
+  try {
+    output = await deps.agentPool.runAgent(prompt, chatJid);
+  } finally {
+    stopTyping();
+  }
 
   const recoverySummary = formatRecoverySummary(output.recovery);
 

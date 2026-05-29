@@ -1,8 +1,18 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
+
+import {
+  registerChannelTransport,
+  resetChannelTransportRegistryForTests,
+} from "../../src/runtime/channel-transport-registry.js";
+import { registerChannelDetector } from "../../src/router.js";
 
 import { importFresh, withTempWorkspaceEnv } from "../helpers.js";
 
 const noopSendMessage = async () => {};
+
+afterEach(() => {
+  resetChannelTransportRegistryForTests();
+});
 
 function makeMessage(chatJid: string, content: string, timestamp: string) {
   return {
@@ -192,6 +202,56 @@ test("processMessages does not consume non-web attachments via intermediate turn
     expect(sent[0]?.text).toContain("Done");
     expect(Array.isArray(sent[0]?.options?.attachments)).toBe(true);
     expect((sent[0]?.options?.attachments as Array<{ id: number }>)[0]?.id).toBe(7);
+  });
+});
+
+test("processMessages emits typing updates for transport-backed chats", async () => {
+  await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
+    const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
+    const loop = await importFresh<typeof import("../../src/runtime/message-loop.js")>("../src/runtime/message-loop.js");
+    db.initDatabase();
+
+    const chatJid = `telegram:${Date.now()}`;
+    const timestamp = "2026-04-17T01:04:30.000Z";
+    db.storeMessage(makeMessage(chatJid, "@Pi hello", timestamp));
+
+    const state = {
+      lastAgentTimestamp: {} as Record<string, string>,
+      wasCommandProcessed: () => false,
+      markCommandProcessed: () => {},
+      saveTimestamps: () => {},
+    };
+    const typingStates: boolean[] = [];
+    const unregisterDetector = registerChannelDetector((jid) => jid.startsWith("telegram:") ? "telegram" : null);
+
+    try {
+      registerChannelTransport("telegram", {
+        sendMessage: async () => {},
+        setTyping: async (_jid, isTyping) => {
+          typingStates.push(isTyping);
+        },
+      });
+
+      const ok = await loop.processMessages(chatJid, {
+        state: state as any,
+        assistantName: "Pi",
+        triggerPattern: /@Pi/i,
+        agentPool: {
+          runAgent: async () => ({
+            status: "success",
+            result: "done",
+          }),
+        } as any,
+        sendMessage: noopSendMessage,
+      });
+
+      await Bun.sleep(0);
+      expect(ok).toBe(true);
+      expect(typingStates).toContain(true);
+      expect(typingStates.at(-1)).toBe(false);
+    } finally {
+      unregisterDetector();
+    }
   });
 });
 
