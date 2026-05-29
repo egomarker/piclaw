@@ -89,17 +89,12 @@ export async function processMessages(
   options: { forcePrompt?: boolean } = {},
 ): Promise<boolean> {
   const since = deps.state.lastAgentTimestamp[chatJid] || "";
-  const messages = getMessagesSince(chatJid, since, deps.assistantName, { includeSlashCommands: true });
+  const messages = getMessagesSince(chatJid, since, deps.assistantName);
   if (messages.length === 0) return true;
 
   const commandQueue: Array<{ message: (typeof messages)[number]; command: AgentControlCommand }> = [];
   const promptMessages: typeof messages = [];
   const channel = detectChannel(chatJid);
-  const nextTimestamp = messages[messages.length - 1].timestamp;
-  const commitLastAgentTimestamp = () => {
-    deps.state.lastAgentTimestamp[chatJid] = nextTimestamp;
-    deps.state.saveTimestamps();
-  };
 
   for (const message of messages) {
     const command = !message.is_bot_message
@@ -127,10 +122,15 @@ export async function processMessages(
     deps.state.markCommandProcessed(chatJid, message.id);
   }
 
-  if (promptMessages.length === 0) {
-    commitLastAgentTimestamp();
-    return true;
-  }
+  // Check trigger on non-command messages only
+  const hasTrigger = options.forcePrompt === true || promptMessages.some((m) => deps.triggerPattern.test(m.content.trim()));
+  if (!hasTrigger) return true;
+
+  const nextTimestamp = messages[messages.length - 1].timestamp;
+  const commitLastAgentTimestamp = () => {
+    deps.state.lastAgentTimestamp[chatJid] = nextTimestamp;
+    deps.state.saveTimestamps();
+  };
 
   const lastPrompt = promptMessages[promptMessages.length - 1];
   const cleaned = lastPrompt ? stripTrigger(lastPrompt.content, deps.triggerPattern) : "";
@@ -156,22 +156,18 @@ export async function processMessages(
       });
     }
 
-    commitLastAgentTimestamp();
-
     if (result.status === "error") {
       log.error("Slash command failed", {
         operation: "process_messages.slash_command",
         chatJid,
         errorMessage: result.message,
       });
+      return true;
     }
 
+    commitLastAgentTimestamp();
     return true;
   }
-
-  // Check trigger on non-command, non-slash messages only.
-  const hasTrigger = options.forcePrompt === true || promptMessages.some((m) => deps.triggerPattern.test(m.content.trim()));
-  if (!hasTrigger) return true;
 
   const prompt = formatMessages(promptMessages, channel, chatJid);
 
@@ -243,9 +239,7 @@ export async function runMessageLoop(deps: MessageLoopDeps): Promise<void> {
   while (true) {
     try {
       const jids = [...deps.state.chatJids];
-      const { messages, newTimestamp } = getNewMessages(jids, deps.state.lastTimestamp, deps.assistantName, {
-        includeSlashCommands: true,
-      });
+      const { messages, newTimestamp } = getNewMessages(jids, deps.state.lastTimestamp, deps.assistantName);
       if (messages.length > 0) {
         deps.state.lastTimestamp = newTimestamp;
         deps.state.saveTimestamps();

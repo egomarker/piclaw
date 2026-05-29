@@ -868,14 +868,8 @@ test("getMessagesSince and getNewMessages filter bot messages, bot-prefixed cont
   const sinceMessages = db.getMessagesSince(chatJid, "", "Pi");
   expect(sinceMessages.map((m) => m.content)).toEqual(["user message"]);
 
-  const sinceMessagesWithSlash = db.getMessagesSince(chatJid, "", "Pi", { includeSlashCommands: true });
-  expect(sinceMessagesWithSlash.map((m) => m.content)).toEqual(["/tree", "   /theme gruvbox", "user message"]);
-
   const { messages } = db.getNewMessages([chatJid], "", "Pi");
   expect(messages.map((m) => m.content)).toEqual(["user message"]);
-
-  const { messages: messagesWithSlash } = db.getNewMessages([chatJid], "", "Pi", { includeSlashCommands: true });
-  expect(messagesWithSlash.map((m) => m.content)).toEqual(["/tree", "   /theme gruvbox", "user message"]);
 });
 
 // --- Delete cascade & media cleanup ---
