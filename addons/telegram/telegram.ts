@@ -126,10 +126,21 @@ export class TelegramBotApi {
   }
 
   async sendMessage(chatId: string | number, text: string): Promise<void> {
-    await this.requestJson("sendMessage", {
-      chat_id: chatId,
-      text,
-    });
+    try {
+      await this.requestJson("sendMessage", {
+        chat_id: chatId,
+        text,
+        parse_mode: "Markdown",
+      });
+    } catch (error) {
+      if (!/can't parse entities/i.test(String(error))) {
+        throw error;
+      }
+      await this.requestJson("sendMessage", {
+        chat_id: chatId,
+        text,
+      });
+    }
   }
 
   async sendChatAction(chatId: string | number, action: "typing"): Promise<void> {

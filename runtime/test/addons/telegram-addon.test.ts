@@ -7,14 +7,16 @@ import {
   isTelegramDirectChatId,
   parseTelegramChatJid,
 } from "../../../addons/telegram/telegram-targets.ts";
-import { TelegramChannel } from "../../../addons/telegram/telegram.ts";
+import { TelegramBotApi, TelegramChannel } from "../../../addons/telegram/telegram.ts";
 import { importFresh, setEnv } from "../helpers.js";
 
 let restoreEnv: (() => void) | null = null;
+const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   restoreEnv?.();
   restoreEnv = null;
+  globalThis.fetch = originalFetch;
   resetTelegramRuntimeState();
   delete (globalThis as Record<string, unknown>).__piclaw_telegram_runtime_controller;
   delete (globalThis as Record<string, unknown>).__piclawRuntimeInterop;
@@ -47,6 +49,62 @@ test("telegram config reads env overrides", () => {
     unauthorizedMode: "ignore",
   });
   expect(maskTelegramBotToken("1234567890")).toBe("1234…7890");
+});
+
+test("telegram api sendMessage uses Markdown parse mode", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push(JSON.parse(String(init?.body || "{}")) as Record<string, unknown>);
+    return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  const api = new TelegramBotApi("test-token");
+  await api.sendMessage("123456", "I will *not* use `curl`.");
+
+  expect(requests).toEqual([
+    expect.objectContaining({
+      chat_id: "123456",
+      text: "I will *not* use `curl`.",
+      parse_mode: "Markdown",
+    }),
+  ]);
+});
+
+test("telegram api sendMessage falls back to plain text when Markdown parsing fails", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body || "{}")) as Record<string, unknown>;
+    requests.push(body);
+    if (requests.length === 1) {
+      return new Response(JSON.stringify({ ok: false, description: "Bad Request: can't parse entities" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ ok: true, result: { message_id: 2 } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  const api = new TelegramBotApi("test-token");
+  await api.sendMessage("123456", "I will *not* use `curl`.");
+
+  expect(requests).toEqual([
+    expect.objectContaining({
+      chat_id: "123456",
+      text: "I will *not* use `curl`.",
+      parse_mode: "Markdown",
+    }),
+    expect.objectContaining({
+      chat_id: "123456",
+      text: "I will *not* use `curl`.",
+    }),
+  ]);
+  expect(requests[1]).not.toHaveProperty("parse_mode");
 });
 
 test("telegram channel sends SVGs as documents and PNGs as photos", async () => {
