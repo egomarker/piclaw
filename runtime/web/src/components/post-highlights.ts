@@ -145,6 +145,19 @@ function collectTextNodes(root: Node): { node: Text; offset: number }[] {
   return result;
 }
 
+function resolveAbsoluteOffset(
+  textNodes: { node: Text; offset: number }[],
+  container: Node | null,
+  localOffset: number,
+): number {
+  if (!container || container.nodeType !== Node.TEXT_NODE) return -1;
+  const entry = textNodes.find(({ node }) => node === container);
+  if (!entry) return -1;
+  const nodeLength = entry.node.textContent?.length ?? 0;
+  const bounded = Math.max(0, Math.min(localOffset, nodeLength));
+  return entry.offset + bounded;
+}
+
 /**
  * Apply saved highlights to a DOM element by wrapping matched text
  * ranges in <mark> elements. Call after innerHTML is set.
@@ -242,26 +255,24 @@ export function getSelectionInElement(element: HTMLElement): {
   const range = sel.getRangeAt(0)!;
   if (!element.contains(range.commonAncestorContainer)) return null;
 
-  const text = sel.toString().trim();
+  const fullText = sel.toString();
+  if (!fullText) return null;
+
+  const textNodes = collectTextNodes(element);
+  if (!textNodes.length) return null;
+
+  const rawStartOffset = resolveAbsoluteOffset(textNodes, range.startContainer, range.startOffset);
+  const rawEndOffset = resolveAbsoluteOffset(textNodes, range.endContainer, range.endOffset);
+  if (rawStartOffset < 0 || rawEndOffset < 0 || rawEndOffset <= rawStartOffset) return null;
+
+  // Keep user intent for multi-line ranges (including list bullets/newlines),
+  // but trim only edge whitespace so persistence and matching stay stable.
+  const leadingTrim = fullText.match(/^\s*/)?.[0].length ?? 0;
+  const trailingTrim = fullText.match(/\s*$/)?.[0].length ?? 0;
+  const text = fullText.slice(leadingTrim, Math.max(leadingTrim, fullText.length - trailingTrim));
   if (!text) return null;
 
-  // Compute clean text content excluding injected annotation elements
-  const textNodes = collectTextNodes(element);
-  const cleanText = textNodes.map(({ node }) => node.textContent ?? '').join('');
-  let textOffset = -1;
-
-  for (const { node, offset } of textNodes) {
-    if (node === range.startContainer || node.contains?.(range.startContainer)) {
-      textOffset = offset + range.startOffset;
-      break;
-    }
-  }
-
-  if (textOffset < 0) {
-    textOffset = cleanText.indexOf(text);
-  }
-
-  if (textOffset < 0) return null;
+  const textOffset = rawStartOffset + leadingTrim;
 
   const rect = range.getBoundingClientRect();
   return { text, textOffset, rect };

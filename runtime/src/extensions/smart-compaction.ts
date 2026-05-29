@@ -9,7 +9,6 @@
  */
 
 import type { ExtensionAPI, ExtensionFactory, CompactionResult } from "@earendil-works/pi-coding-agent";
-import { completeSimple } from "@earendil-works/pi-ai";
 import type { Message } from "@earendil-works/pi-ai";
 import { resolveModelRequestAuth } from "../utils/model-auth.js";
 import { createLogger } from "../utils/logger.js";
@@ -25,7 +24,10 @@ import { appendFileLists, buildTurnPrefixSummary, extractKeptMessagesSummary, tr
 import { buildProgressiveCompactionChunks, buildTrimmedProgressiveMergeRetryPrompt, getProgressiveCompactionBudget, runProgressiveCompaction } from "./smart-compaction/progressive.js";
 import { clampKeepRecentTokens, estimatePostCompactionFit, getCompactionReasoningEffort, getSafeCompactionMaxTokens } from "./smart-compaction/safety.js";
 import { buildSelectivePrompt, detectRecentTopicShift, SYSTEM_PROMPT } from "./smart-compaction/selective-prompt.js";
+import { streamComplete, type CompactionStreamFn } from "./smart-compaction/stream-complete.js";
 import { sanitizeContextPruneCompactionMessages } from "./context-prune/pruner.js";
+
+export type { CompactionStreamFn } from "./smart-compaction/stream-complete.js";
 
 export {
   buildProgressiveCompactionChunks,
@@ -248,7 +250,8 @@ function maybeAdjustFirstKeptForFit(input: {
 // Extension factory
 // ---------------------------------------------------------------------------
 
-export const smartCompaction: ExtensionFactory = (pi: ExtensionAPI) => {
+export function createSmartCompactionExtension(options: { streamFn?: CompactionStreamFn } = {}): ExtensionFactory {
+  return (pi: ExtensionAPI) => {
 
   pi.on("session_before_compact", async (event, rawCtx) => {
     const ctx = makeResilientCtx(rawCtx as any) as typeof rawCtx;
@@ -475,6 +478,10 @@ export const smartCompaction: ExtensionFactory = (pi: ExtensionAPI) => {
             timeoutMs: getCompactionRuntimeConfig().timeoutMs,
             startedAt: compactionStartedAt,
             publishEstimate: (tokens, phase) => publishContextEstimate(ctx, tokens, phase),
+            streamFn: options.streamFn,
+            onProgress: (chars) => {
+              ctx.ui.setWorkingMessage(`Smart compaction: progressive summary… (${Math.round(chars / 4)}t)`);
+            },
           });
           const fullSummary = progressiveSummary.includes("<read-files>") || progressiveSummary.includes("<modified-files>")
             ? progressiveSummary
@@ -522,23 +529,23 @@ export const smartCompaction: ExtensionFactory = (pi: ExtensionAPI) => {
       const authForCompletion = auth as { apiKey?: string; headers?: Record<string, string> };
 
       try {
-        const makeCompletionOptions = (prompt: string) => {
+        const runCompletion = async (prompt: string) => {
           const safeOutput = getSafeCompactionMaxTokens(model, prompt, requestedMaxTokens);
-          return (model as any).reasoning
-            ? { maxTokens: safeOutput.maxTokens, signal: abortSignal, apiKey: authForCompletion.apiKey, headers: authForCompletion.headers, reasoning: getCompactionReasoningEffort(model) }
-            : { maxTokens: safeOutput.maxTokens, signal: abortSignal, apiKey: authForCompletion.apiKey, headers: authForCompletion.headers };
-        };
-        const runCompletion = async (prompt: string) => await completeSimple(
-          model,
-          { systemPrompt: SYSTEM_PROMPT, messages: [
-            {
-              role: "user",
-              content: [{ type: "text", text: prompt }],
-              timestamp: Date.now(),
+          return await streamComplete({
+            model,
+            systemPrompt: SYSTEM_PROMPT,
+            userPrompt: prompt,
+            maxTokens: safeOutput.maxTokens,
+            signal: abortSignal,
+            apiKey: authForCompletion.apiKey,
+            headers: authForCompletion.headers,
+            reasoning: (model as any).reasoning ? getCompactionReasoningEffort(model) : undefined,
+            streamFn: options.streamFn,
+            onProgress: (chars) => {
+              ctx.ui.setWorkingMessage(`Smart compaction: generating summary… (${Math.round(chars / 4)}t)`);
             },
-          ] },
-          makeCompletionOptions(prompt),
-        );
+          });
+        };
 
         ctx.ui.setWorkingMessage("Smart compaction: generating selective summary…");
         publishContextEstimate(ctx, estimateCompactionPromptTokens(activePromptText), "generating_summary");
@@ -670,4 +677,7 @@ export const smartCompaction: ExtensionFactory = (pi: ExtensionAPI) => {
       ctx.ui.setWorkingIndicator({ frames: [] });
     }
   });
-};
+  };
+}
+
+export const smartCompaction: ExtensionFactory = createSmartCompactionExtension();

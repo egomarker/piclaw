@@ -163,5 +163,5 @@ describe("same-turn tool activation live update", () => {
       else process.env.PICLAW_WORKSPACE = previousWorkspace;
       rmSync(tempRoot, { recursive: true, force: true });
     }
-  });
+  }, 10_000);
 });

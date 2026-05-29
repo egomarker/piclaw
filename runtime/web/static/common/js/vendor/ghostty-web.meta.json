@@ -1,11 +1,11 @@
 {
   "manifest_id": "ghostty-web",
   "package_name": "ghostty-web",
-  "package_version": "0.8.2",
+  "package_version": "0.9.3",
   "package_license": "MIT",
   "package_repository": "https://github.com/rcarmo/ghostty-web.git",
   "package_versions": {
-    "ghostty-web": "0.8.2"
+    "ghostty-web": "0.9.3"
   },
   "package_licenses": {
     "ghostty-web": "MIT"
@@ -19,8 +19,8 @@
     {
       "package_path": "dist/ghostty-web.js",
       "output_file": "web/static/common/js/vendor/ghostty-web.js",
-      "sha256": "79779a00b9b20d84944f0701207e4c692f006c92404ed71ee6d174147c3552fe",
-      "size_bytes": 1266676
+      "sha256": "058bd86255a14b3e2f38479fc4665bdef78dd8665194e11df3d96b0036bf0af3",
+      "size_bytes": 1343286
     },
     {
       "package_path": "dist/ghostty-vt.wasm",
@@ -30,8 +30,8 @@
     }
   ],
   "metadata_file": "web/static/common/js/vendor/ghostty-web.meta.json",
-  "sha256": "79779a00b9b20d84944f0701207e4c692f006c92404ed71ee6d174147c3552fe",
-  "size_bytes": 1266676,
+  "sha256": "058bd86255a14b3e2f38479fc4665bdef78dd8665194e11df3d96b0036bf0af3",
+  "size_bytes": 1343286,
   "export_files": [
     {
       "package_path": "dist/ghostty-web.js",

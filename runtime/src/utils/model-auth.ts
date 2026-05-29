@@ -3,7 +3,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 
 /** Resolved auth payload for provider requests in Piclaw runtime helpers. */
 export type ModelRequestAuth =
-  | { ok: true; apiKey?: string }
+  | { ok: true; apiKey?: string; headers?: Record<string, string> }
   | { ok: false; error: string };
 
 /**
@@ -22,14 +22,14 @@ export async function resolveModelRequestAuth(
   model: Model<Api>,
 ): Promise<ModelRequestAuth> {
   const reg = registry as ModelRegistry & {
-    getApiKeyAndHeaders?: (model: Model<Api>) => Promise<{ ok: boolean; apiKey?: string; error?: string }>;
+    getApiKeyAndHeaders?: (model: Model<Api>) => Promise<{ ok: boolean; apiKey?: string; headers?: Record<string, string>; error?: string }>;
     getApiKey?: (model: Model<Api>) => Promise<string | undefined>;
   };
 
   // Pre-0.67.6 compat path (test doubles may still use this)
   if (typeof reg.getApiKeyAndHeaders === "function") {
     const auth = await reg.getApiKeyAndHeaders(model);
-    if (auth.ok) return { ok: true, apiKey: auth.apiKey };
+    if (auth.ok) return { ok: true, apiKey: auth.apiKey, headers: auth.headers };
     return { ok: false, error: auth.error || `No credentials available for ${model.provider}/${model.id}.` };
   }
 

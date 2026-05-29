@@ -5,9 +5,9 @@
  * ../smart-compaction.ts.
  */
 
-import { completeSimple } from "@earendil-works/pi-ai";
 import type { Message } from "@earendil-works/pi-ai";
 import type { FileOperations } from "@earendil-works/pi-coding-agent";
+import { streamComplete, type CompactionStreamFn } from "./stream-complete.js";
 import {
   BUDGET_SAFETY_MARGIN,
   MAX_PROGRESSIVE_CHUNKS,
@@ -285,20 +285,24 @@ async function completeCompactionPrompt(
   promptText: string,
   maxTokens: number,
   abortSignal: AbortSignal,
+  streamFn?: CompactionStreamFn,
+  onProgress?: (generatedChars: number) => void,
 ): Promise<string> {
   const runOnce = async (activePromptText: string): Promise<string> => {
     if (abortSignal.aborted) throw new Error("Compaction cancelled");
     const safeOutput = getSafeCompactionMaxTokens(model, activePromptText, maxTokens);
-    const response = await completeSimple(
+    const response = await streamComplete({
       model,
-      {
-        systemPrompt: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: [{ type: "text", text: activePromptText }], timestamp: Date.now() }],
-      },
-      (model as any).reasoning
-        ? { maxTokens: safeOutput.maxTokens, signal: abortSignal, apiKey: auth.apiKey, headers: auth.headers, reasoning: getCompactionReasoningEffort(model) }
-        : { maxTokens: safeOutput.maxTokens, signal: abortSignal, apiKey: auth.apiKey, headers: auth.headers },
-    );
+      systemPrompt: SYSTEM_PROMPT,
+      userPrompt: activePromptText,
+      maxTokens: safeOutput.maxTokens,
+      signal: abortSignal,
+      apiKey: auth.apiKey,
+      headers: auth.headers,
+      reasoning: (model as any).reasoning ? getCompactionReasoningEffort(model) : undefined,
+      streamFn,
+      onProgress,
+    });
     if ((response as any).stopReason === "error") {
       throw new Error((response as any).errorMessage || "Progressive compaction LLM error");
     }
@@ -339,6 +343,8 @@ async function mergeProgressiveSummaries(input: {
   publishEstimate?: (tokens: number, phase: string) => void;
   timeoutMs?: number;
   startedAt?: number;
+  streamFn?: CompactionStreamFn;
+  onProgress?: (generatedChars: number) => void;
 }): Promise<string> {
   const MAX_PROGRESSIVE_MERGE_PASSES = 12;
   let summaries = input.summaries;
@@ -386,6 +392,8 @@ async function mergeProgressiveSummaries(input: {
           mergePrompt,
           input.maxTokens,
           input.abortSignal,
+          input.streamFn,
+          input.onProgress,
         ));
         batch = [];
         chars = 0;
@@ -403,6 +411,8 @@ async function mergeProgressiveSummaries(input: {
         mergePrompt,
         input.maxTokens,
         input.abortSignal,
+        input.streamFn,
+        input.onProgress,
       ));
     }
     const nextChars = next.join("\n\n").length;
@@ -439,6 +449,8 @@ async function mergeProgressiveSummaries(input: {
       compressPrompt,
       input.maxTokens,
       input.abortSignal,
+      input.streamFn,
+      input.onProgress,
     )];
     finalPrompt = buildFinalPrompt();
   }
@@ -449,6 +461,8 @@ async function mergeProgressiveSummaries(input: {
     finalPrompt,
     input.maxTokens,
     input.abortSignal,
+    input.streamFn,
+    input.onProgress,
   );
 }
 
@@ -472,6 +486,10 @@ export async function runProgressiveCompaction(input: {
   startedAt?: number;
   /** Callback to publish context estimate to the UI meter. */
   publishEstimate?: (tokens: number, phase: string) => void;
+  /** Custom stream function for proxy-routed providers. */
+  streamFn?: CompactionStreamFn;
+  /** Progress callback (chars generated so far). */
+  onProgress?: (generatedChars: number) => void;
 }): Promise<string> {
   const chunks = buildProgressiveCompactionChunks(
     input.llmMessages,
@@ -511,6 +529,8 @@ export async function runProgressiveCompaction(input: {
       chunkPrompt,
       maxTokens,
       input.abortSignal,
+      input.streamFn,
+      input.onProgress,
     ));
     input.ctx.ui.setWorkingMessage?.(`Smart compaction: summarized chunk ${chunk.index}/${chunks.length}…`);
   }
@@ -530,6 +550,8 @@ export async function runProgressiveCompaction(input: {
     publishEstimate: input.publishEstimate,
     timeoutMs: input.timeoutMs,
     startedAt: input.startedAt,
+    streamFn: input.streamFn,
+    onProgress: input.onProgress,
     finalPromptExtras: {
       previousSummary: input.previousSummary,
       keptMessagesSummary: input.keptMessagesSummary,

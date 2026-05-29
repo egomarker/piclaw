@@ -45,7 +45,7 @@ import { workspaceSearch } from "./workspace-search.js";
 import { workspaceMemoryBootstrap } from "./workspace-memory-bootstrap.js";
 import { dreamMaintenance } from "./dream-maintenance.js";
 import { uiThemeExtension } from "./ui-theme.js";
-import { smartCompaction } from "./smart-compaction.js";
+import { createSmartCompactionExtension, type CompactionStreamFn } from "./smart-compaction.js";
 import { sendAdaptiveCard } from "./send-adaptive-card.js";
 import { sendDashboardWidget } from "./send-dashboard-widget.js";
 import { chatTool } from "./chat-tool.js";
@@ -63,6 +63,7 @@ import { mcpTimeoutPatch } from "./mcp-timeout-patch.js";
 /** Build the built-in extension factory list used for session creation. */
 export function createBuiltinExtensionFactories(options?: {
   attachmentRegistry?: AttachmentRegistry;
+  compactionStreamFn?: CompactionStreamFn;
 }): ExtensionFactory[] {
   return [
     createFileAttachmentsExtension(options?.attachmentRegistry),
@@ -77,7 +78,7 @@ export function createBuiltinExtensionFactories(options?: {
     workspaceMemoryBootstrap,
     dreamMaintenance,
     uiThemeExtension,
-    smartCompaction,
+    createSmartCompactionExtension({ streamFn: options?.compactionStreamFn }),
     sendAdaptiveCard,
     sendDashboardWidget,
     chatTool,

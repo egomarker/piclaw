@@ -22,7 +22,7 @@ import {
   type RecoveryClassifier,
   type RecoveryStrategy,
 } from "./automatic-recovery.js";
-import { getAgentRuntimeConfig, getCompactionRuntimeConfig, getSessionStorageConfig, getToolUseMessageBudget } from "../core/config.js";
+import { getAgentRuntimeConfig, getSessionStorageConfig, getToolUseMessageBudget } from "../core/config.js";
 import { detectChannel } from "../router.js";
 import { pruneOrphanToolResults } from "./orphan-tool-results.js";
 import { writeAgentLog } from "./logging.js";
@@ -38,7 +38,6 @@ import {
 import {
   cancelScheduledIdleAutoCompaction,
   clearCompactionFailureBackoff,
-  estimateContextTokensFromSession,
   getAutoCompactionTokenStatusForSession,
   isCompactionCancellationError,
   maybeAutoCompactSessionBeforePrompt,

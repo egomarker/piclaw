@@ -36,12 +36,14 @@ import {
 import { SESSIONS_DIR, WORKSPACE_DIR } from "../core/config.js";
 import { buildChannelSystemPromptAppendix } from "../channels/formatting.js";
 import { detectChannel } from "../router.js";
-import { builtinExtensionFactories } from "../extensions/index.js";
+import { createBuiltinExtensionFactories } from "../extensions/index.js";
 import { freezeExtensionRoutes } from "../channels/web/http/extension-routes.js";
 import { bindImmediateToolActivation } from "./tool-activation-live-update.js";
 import { ensureExtensionNodeModulesLink } from "./session-node-modules-link.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
 import { installAddonRuntimeApi } from "../addons/runtime-contributions.js";
+import { streamSimple } from "@earendil-works/pi-ai";
+import type { CompactionStreamFn } from "../extensions/smart-compaction/stream-complete.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const AGENT_DIR = getAgentDir();
@@ -633,6 +635,26 @@ export function ensureNamedSessionDir(chatJid: string, name: string): string {
  * Loads workspace resources (AGENTS.md, skills, extensions, prompt templates)
  * and resumes the most recent session tree.
  */
+function createCompactionStreamFn(modelRegistry: ModelRegistry, settingsManager: SettingsManager): CompactionStreamFn {
+  return async (model, context, options) => {
+    const auth = await modelRegistry.getApiKeyAndHeaders(model);
+    if (!auth.ok) {
+      throw new Error(auth.error);
+    }
+    const providerRetrySettings = settingsManager.getProviderRetrySettings();
+    return streamSimple(model, context, {
+      ...options,
+      apiKey: auth.apiKey,
+      timeoutMs: options?.timeoutMs ?? providerRetrySettings.timeoutMs,
+      maxRetries: options?.maxRetries ?? providerRetrySettings.maxRetries,
+      maxRetryDelayMs: options?.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
+      headers: auth.headers || options?.headers
+        ? { ...auth.headers, ...options?.headers }
+        : undefined,
+    });
+  };
+}
+
 export async function createSessionInDir(
   sessionDir: string,
   options: {
@@ -665,6 +687,9 @@ export async function createSessionInDir(
     sessionManager: SessionManager;
     sessionStartEvent?: SessionStartEvent;
   }) => {
+    const builtinExtensionFactories = createBuiltinExtensionFactories({
+      compactionStreamFn: createCompactionStreamFn(options.modelRegistry, options.settingsManager),
+    });
     const resourceLoader = new DefaultResourceLoader({
       cwd,
       agentDir,

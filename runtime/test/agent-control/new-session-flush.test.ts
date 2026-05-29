@@ -85,13 +85,14 @@ describe("/new-session JSONL flush", () => {
     const filePath = sm.getSessionFile()!;
     expect(existsSync(filePath)).toBe(false);
 
-    // Write just the header (what our fix does)
-    const { appendFileSync, mkdirSync } = await import("node:fs");
+    // Write just the header and mark the SDK manager flushed (what our fix does)
+    const { writeFileSync, mkdirSync } = await import("node:fs");
     const { dirname } = await import("node:path");
     const header = sm.getHeader();
     expect(header).toBeTruthy();
     mkdirSync(dirname(filePath), { recursive: true });
-    appendFileSync(filePath, JSON.stringify(header) + "\n");
+    writeFileSync(filePath, JSON.stringify(header) + "\n");
+    (sm as any).flushed = true;
 
     // Now the SDK appends messages as it normally would (user + assistant)
     sm.appendMessage({ role: "user", content: "hello" });
@@ -102,14 +103,12 @@ describe("/new-session JSONL flush", () => {
     const content = readFileSync(filePath, "utf8").trim();
     const allLines = content.split("\n").filter(Boolean);
 
-    // Will have duplicate header (our write + SDK flush), plus entries
-    // Both are valid JSON and the file is loadable by the SDK
+    // Has the eager header plus entries, and is loadable by the SDK
     const parsed = allLines.map((l) => JSON.parse(l));
     const headers = parsed.filter((e) => e.type === "session");
     const messages = parsed.filter((e) => e.type === "message");
 
-    // At least one header (may be two due to SDK re-flush)
-    expect(headers.length).toBeGreaterThanOrEqual(1);
+    expect(headers.length).toBe(1);
     // Should have both user and assistant messages
     expect(messages.length).toBe(2);
     expect(messages[0].message.role).toBe("user");

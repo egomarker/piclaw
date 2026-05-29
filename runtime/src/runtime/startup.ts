@@ -16,7 +16,7 @@ import {
   getPushoverConfig,
   getToolOutputConfig,
 } from "../core/config.js";
-import { getDb, initDatabase, storeMessage } from "../db.js";
+import { getDb, initDatabase } from "../db.js";
 import type { AgentQueue } from "../queue.js";
 import { startToolOutputCleanup } from "../tool-output.js";
 import { createUuid } from "../utils/ids.js";

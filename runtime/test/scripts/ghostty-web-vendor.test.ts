@@ -41,7 +41,7 @@ test("ghostty-web export manifest vendors js + wasm with metadata", () => {
 
   expect(meta.manifest_id).toBe("ghostty-web");
   expect(meta.package_name).toBe("ghostty-web");
-  expect(meta.package_version).toBe("0.8.2");
+  expect(meta.package_version).toBe("0.9.3");
   expect(meta.output_files.length).toBe(2);
   expect(meta.output_files.some((file) => file.package_path === "dist/ghostty-web.js")).toBe(true);
   expect(meta.output_files.some((file) => file.package_path === "dist/ghostty-vt.wasm")).toBe(true);

@@ -64,7 +64,7 @@ export async function processMessages(chatJid: string, deps: MessageProcessingDe
   }
 
   for (const { message, command } of commandQueue) {
-    const result = await deps.agentPool.applyControlCommand(chatJid, command);
+    await deps.agentPool.applyControlCommand(chatJid, command);
     deps.state.markCommandProcessed(chatJid, message.id);
   }
 
@@ -89,7 +89,7 @@ export async function processMessages(chatJid: string, deps: MessageProcessingDe
     const result = await deps.agentPool.applySlashCommand(chatJid, cleaned);
 
     if (result.message) {
-      const text = formatOutbound(result.message, channel);
+      formatOutbound(result.message, channel);
     }
 
     if (result.status === "error") {
@@ -117,7 +117,7 @@ export async function processMessages(chatJid: string, deps: MessageProcessingDe
   const output = await deps.agentPool.runAgent(prompt, chatJid, {
     onTurnComplete: async (turn) => {
       if (turn.text) {
-        const text = formatOutbound(turn.text, channel);
+        formatOutbound(turn.text, channel);
       }
     },
   });
@@ -146,7 +146,7 @@ export async function processMessages(chatJid: string, deps: MessageProcessingDe
   }
 
   if (output.result) {
-    const text = formatOutbound(output.result, channel);
+    formatOutbound(output.result, channel);
   }
 
   commitLastAgentTimestamp();
