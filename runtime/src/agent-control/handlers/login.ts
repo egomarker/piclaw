@@ -427,7 +427,7 @@ async function startOAuthBackground(
     onAuth: (info) => { authUrl = info.url; instructions = info.instructions || ""; authReceived?.(); },
     onProgress: () => {},
     onPrompt: async () => "",
-    onSelect: async (prompt) => prompt.options[0]?.id || "",
+    onSelect: async (prompt) => prompt.options.find((option) => option.id === "device_code")?.id || prompt.options[0]?.id || "",
     onDeviceCode: (device) => {
       instructions = `Open ${device.verificationUri} and enter code ${device.userCode}.`;
       authUrl = device.verificationUri;
