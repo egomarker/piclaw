@@ -524,6 +524,10 @@ export function searchMessagesAcrossChats(chatJids: string[] | null, query: stri
   return searchMessagesInternal(chatJids, query, limit, offset);
 }
 
+interface PendingMessageQueryOptions {
+  includeSlashCommands?: boolean;
+}
+
 /**
  * Polling query used by the router – fetch all non-bot messages newer than
  * `lastTimestamp` across the given chat JIDs. Returns the messages and the
@@ -532,18 +536,19 @@ export function searchMessagesAcrossChats(chatJids: string[] | null, query: stri
 export function getNewMessages(
   jids: string[],
   lastTimestamp: string,
-  botPrefix: string
+  botPrefix: string,
+  options: PendingMessageQueryOptions = {},
 ): { messages: NewMessage[]; newTimestamp: string } {
   if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
   const db = getDb();
 
   const placeholders = jids.map(() => "?").join(",");
+  const slashFilter = options.includeSlashCommands === true ? "" : "\n      AND LTRIM(content) NOT LIKE '/%'";
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, screen_hint, timestamp
     FROM messages
     WHERE timestamp > ? AND chat_jid IN (${placeholders})
-      AND is_bot_message = 0 AND content NOT LIKE ?
-      AND LTRIM(content) NOT LIKE '/%'
+      AND is_bot_message = 0 AND content NOT LIKE ?${slashFilter}
       AND COALESCE(is_steering_message, 0) = 0
     ORDER BY timestamp
   `;
@@ -565,15 +570,16 @@ export function getNewMessages(
 export function getMessagesSince(
   chatJid: string,
   sinceTimestamp: string,
-  botPrefix: string
+  botPrefix: string,
+  options: PendingMessageQueryOptions = {},
 ): NewMessage[] {
   const db = getDb();
+  const slashFilter = options.includeSlashCommands === true ? "" : "\n      AND LTRIM(content) NOT LIKE '/%'";
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, screen_hint, timestamp, thread_id
     FROM messages
     WHERE chat_jid = ? AND timestamp > ?
-      AND is_bot_message = 0 AND content NOT LIKE ?
-      AND LTRIM(content) NOT LIKE '/%'
+      AND is_bot_message = 0 AND content NOT LIKE ?${slashFilter}
       AND COALESCE(is_steering_message, 0) = 0
     ORDER BY timestamp
   `;

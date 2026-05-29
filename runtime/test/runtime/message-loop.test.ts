@@ -151,6 +151,112 @@ test("processMessages treats leading path-like slash text after trigger as a nor
   });
 });
 
+test("processMessages applies control slash commands for transport chats without prompting the agent", async () => {
+  await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
+    const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
+    const loop = await importFresh<typeof import("../../src/runtime/message-loop.js")>("../src/runtime/message-loop.js");
+    db.initDatabase();
+
+    const chatJid = `telegram:${Date.now()}`;
+    const timestamp = "2026-04-17T01:03:30.000Z";
+    db.storeMessage(makeMessage(chatJid, "/commands", timestamp));
+
+    let saveCalls = 0;
+    const state = {
+      lastAgentTimestamp: {} as Record<string, string>,
+      wasCommandProcessed: () => false,
+      markCommandProcessed: () => {},
+      saveTimestamps: () => {
+        saveCalls += 1;
+      },
+    };
+
+    const sent: Array<{ text: string; options?: Record<string, unknown> }> = [];
+    let runAgentCalled = false;
+    let seenCommandType = "";
+
+    const ok = await loop.processMessages(chatJid, {
+      state: state as any,
+      assistantName: "Pi",
+      triggerPattern: /@Pi/i,
+      agentPool: {
+        applyControlCommand: async (_chatJid: string, command: { type: string }) => {
+          seenCommandType = command.type;
+          return { status: "success", message: "Available commands" };
+        },
+        runAgent: async () => {
+          runAgentCalled = true;
+          return { status: "success", result: "should not run" };
+        },
+      } as any,
+      sendMessage: async (_jid: string, text: string, options?: Record<string, unknown>) => {
+        sent.push({ text, options });
+      },
+    }, { forcePrompt: true });
+
+    expect(ok).toBe(true);
+    expect(seenCommandType).toBe("commands");
+    expect(runAgentCalled).toBe(false);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.text).toContain("Available commands");
+    expect(state.lastAgentTimestamp[chatJid]).toBe(timestamp);
+    expect(saveCalls).toBe(1);
+  });
+});
+
+test("processMessages executes transport slash invocations and advances the cursor after error replies", async () => {
+  await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
+    const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
+    const loop = await importFresh<typeof import("../../src/runtime/message-loop.js")>("../src/runtime/message-loop.js");
+    db.initDatabase();
+
+    const chatJid = `telegram:${Date.now()}`;
+    const timestamp = "2026-04-17T01:03:45.000Z";
+    db.storeMessage(makeMessage(chatJid, "/check", timestamp));
+
+    let saveCalls = 0;
+    const state = {
+      lastAgentTimestamp: {} as Record<string, string>,
+      wasCommandProcessed: () => false,
+      markCommandProcessed: () => {},
+      saveTimestamps: () => {
+        saveCalls += 1;
+      },
+    };
+
+    const sent: Array<{ text: string; options?: Record<string, unknown> }> = [];
+    let runAgentCalled = false;
+    let slashCommand = "";
+
+    const ok = await loop.processMessages(chatJid, {
+      state: state as any,
+      assistantName: "Pi",
+      triggerPattern: /@Pi/i,
+      agentPool: {
+        applySlashCommand: async (_chatJid: string, rawText: string) => {
+          slashCommand = rawText;
+          return { status: "error", message: `Unknown command: ${rawText}` };
+        },
+        runAgent: async () => {
+          runAgentCalled = true;
+          return { status: "success", result: "should not run" };
+        },
+      } as any,
+      sendMessage: async (_jid: string, text: string, options?: Record<string, unknown>) => {
+        sent.push({ text, options });
+      },
+    }, { forcePrompt: true });
+
+    expect(ok).toBe(true);
+    expect(slashCommand).toBe("/check");
+    expect(runAgentCalled).toBe(false);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.text).toContain("Unknown command: /check");
+    expect(state.lastAgentTimestamp[chatJid]).toBe(timestamp);
+    expect(saveCalls).toBe(1);
+  });
+});
+
 test("processMessages does not consume non-web attachments via intermediate turn callbacks", async () => {
   await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
     const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
