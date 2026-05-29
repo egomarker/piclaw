@@ -3,6 +3,8 @@ import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 
 import { createTempWorkspace, importFresh, setEnv } from "../helpers.js";
+import { registerChannelDetector } from "../../src/router.js";
+import { registerChannelTransport } from "../../src/runtime/channel-transport-registry.js";
 import { createRuntimeSenders, getDreamQueueLane } from "../../src/runtime/wiring.js";
 
 let restoreEnv: (() => void) | null = null;
@@ -37,7 +39,7 @@ describe("runtime wiring", () => {
     expect(webCalls[0]).toEqual({ jid: "web:default", text: "hello", source: "scheduled" });
   });
 
-  test("createRuntimeSenders ignores non-web chat messages without a core channel", async () => {
+  test("createRuntimeSenders rejects non-web chat messages without a registered transport", async () => {
     const webCalls: Array<{ jid: string; text: string }> = [];
 
     const senders = createRuntimeSenders(
@@ -51,9 +53,73 @@ describe("runtime wiring", () => {
       null
     );
 
-    await senders.sendMessage("12345@s.whatsapp.net", "hi");
+    await expect(senders.sendMessage("12345@s.whatsapp.net", "hi")).rejects.toThrow(
+      "No registered transport for chat 12345@s.whatsapp.net (unknown)."
+    );
 
     expect(webCalls).toHaveLength(0);
+  });
+
+  test("createRuntimeSenders mirrors transport attachments into the web timeline", async () => {
+    const webCalls: Array<{ jid: string; text: string; options?: Record<string, unknown> }> = [];
+    const transportCalls: Array<{ jid: string; text: string; options?: Record<string, unknown> }> = [];
+    const unregisterDetector = registerChannelDetector((jid) => jid.startsWith("telegram:") ? "telegram" : null);
+    const unregisterTransport = registerChannelTransport("telegram", {
+      sendMessage: async (jid, text, options) => {
+        transportCalls.push({ jid, text, options: options as Record<string, unknown> | undefined });
+      },
+    });
+
+    try {
+      const senders = createRuntimeSenders(
+        {
+          sendMessage: async (jid, text, options) => {
+            webCalls.push({ jid, text, options: options as Record<string, unknown> | undefined });
+          },
+          resumeChat: () => {},
+          resumePendingChats: () => {},
+        },
+        null
+      );
+
+      await senders.sendMessage("telegram:123", "sent above", {
+        source: "agent",
+        attachments: [{
+          id: 7,
+          name: "chart.png",
+          contentType: "image/png",
+          size: 1234,
+          kind: "image",
+          sourcePath: "/workspace/chart.png",
+        }],
+      });
+
+      expect(transportCalls).toHaveLength(1);
+      expect(transportCalls[0]).toMatchObject({ jid: "telegram:123", text: "sent above" });
+      expect(Array.isArray(transportCalls[0]?.options?.attachments)).toBe(true);
+
+      expect(webCalls).toHaveLength(1);
+      expect(webCalls[0]).toMatchObject({
+        jid: "telegram:123",
+        text: "sent above",
+        options: {
+          source: "agent",
+          mediaIds: [7],
+        },
+      });
+      expect(webCalls[0]?.options?.contentBlocks).toEqual([
+        {
+          type: "image",
+          name: "chart.png",
+          filename: "chart.png",
+          mime_type: "image/png",
+          size: 1234,
+        },
+      ]);
+    } finally {
+      unregisterTransport();
+      unregisterDetector();
+    }
   });
 
   test("workspaceNeedsDreamBootstrap only requires the core Dream memory files", async () => {

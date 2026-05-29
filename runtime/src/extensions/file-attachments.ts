@@ -186,7 +186,7 @@ async function execute(
 
     const remoteNote = pulledRemotely ? " (pulled from remote host via SSH)" : "";
     return {
-      content: [{ type: "text", text: `Attached "${filename}" (${Math.round(size / 1024)} KB)${remoteNote}. A download card will appear in the chat automatically.` }],
+      content: [{ type: "text", text: `Attached "${filename}" (${Math.round(size / 1024)} KB)${remoteNote}. Piclaw can now deliver it through the active chat channel and mirror it in the web timeline when applicable.` }],
       details: { filename, content_type: contentType, size, kind, pulled_remotely: pulledRemotely },
     };
   } finally {
@@ -326,11 +326,14 @@ const ATTACHMENT_HINT = [
   "## File Attachments",
   "You have an attach_file tool. When you create or generate a file the user",
   "will want (images, charts, CSVs, PDFs, archives, code exports, etc.),",
-  "always call attach_file with the workspace path so they get a download",
-  "card in the chat. Do not just tell the user the file path — attach it.",
+  "always call attach_file with the workspace path so Piclaw can deliver it",
+  "through the active chat channel and mirror it in the web timeline when",
+  "applicable. Do not just tell the user the file path — attach it.",
   "You do NOT need to paste the file contents into your reply.",
-  "After attaching, briefly mention what you attached so the user knows",
-  "to look for the download card below your message.",
+  "In web chats, the UI shows a download card automatically. In transport-backed",
+  "chats, Piclaw can send a native file/photo message and still mirror it on web.",
+  "Do not fall back to raw transport API calls unless you are explicitly debugging",
+  "that transport.",
   "Use attachment:<id> when you want to reference an uploaded attachment by id.",
   "Use read_attachment to load an attachment by id (auto/text/image/base64 modes).",
   `Use export_attachment to save an attachment into ${WORKSPACE_DIR}/tmp for shell tools.`,
@@ -454,8 +457,8 @@ export function createFileAttachmentsExtension(registry: AttachmentRegistry = ge
     pi.registerTool({
       name: "attach_file",
       label: "attach_file",
-      description: "Attach a file from the workspace so the user can download it in the web UI. Returns an attachment handle.",
-      promptSnippet: "attach_file: upload a workspace file so the user gets a download card.",
+      description: "Attach a workspace file so Piclaw can deliver it through the active chat channel and mirror it in web when applicable. Returns an attachment handle.",
+      promptSnippet: "attach_file: attach a workspace file for active-chat delivery; web chats show a download card and transport-backed chats can mirror the attachment on web.",
       parameters: AttachmentSchema,
       execute: (toolCallId, params, signal, onUpdate, ctx) => execute(registry, toolCallId, params, signal, onUpdate, ctx),
     });

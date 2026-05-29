@@ -14,6 +14,7 @@
 /** Formatting hints keyed by channel name. */
 export const CHANNEL_FORMATTING_HINTS: Record<string, string> = {
   web: "Use Markdown formatting in responses. Tables, headings, and links are allowed. To deliver files, use the attach_file tool on a workspace path; the UI will show a download card automatically. Use attachment:<filename> only if you want an inline embed.",
+  telegram: "Use Telegram-friendly plain text formatting. When delivering files or images, prefer the attach_file tool on a workspace path so Piclaw can send the attachment through Telegram and mirror it in the web timeline. Do not use raw Telegram Bot API calls via bash/curl unless you are explicitly debugging Telegram transport behavior.",
 };
 
 /**
