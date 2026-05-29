@@ -19,9 +19,10 @@ export type StartRuntimeLoopDeps = {
   agentPool: MessageProcessingDeps["agentPool"];
   assistantName: MessageLoopDeps["assistantName"];
   triggerPattern: MessageProcessingDeps["triggerPattern"];
+  sendMessage: MessageProcessingDeps["sendMessage"];
   pollIntervalMs: MessageLoopDeps["pollIntervalMs"];
   runMessageLoopFn?: (deps: MessageLoopDeps) => Promise<void>;
-  processMessagesFn?: (chatJid: string, deps: MessageProcessingDeps) => Promise<boolean>;
+  processMessagesFn?: (chatJid: string, deps: MessageProcessingDeps, options?: { forcePrompt?: boolean }) => Promise<boolean>;
 };
 
 /**
@@ -47,6 +48,7 @@ export async function startRuntimeLoop(deps: StartRuntimeLoopDeps): Promise<void
         state: deps.state,
         assistantName: deps.assistantName,
         triggerPattern: deps.triggerPattern,
+        sendMessage: deps.sendMessage,
       }),
   });
 }

@@ -25,9 +25,16 @@ import { getMessagesSince, getNewMessages } from "../db.js";
 import type { AgentQueue } from "../queue.js";
 import { detectChannel, formatMessages, formatOutbound } from "../router.js";
 import { createLogger } from "../utils/logger.js";
+import type { RuntimeSendMessageOptions } from "./channel-transport-registry.js";
 import type { RuntimeState } from "./state.js";
 
 const log = createLogger("runtime.message-loop");
+
+function normalizeContentBlocks(value: unknown): Array<Record<string, unknown>> | undefined {
+  return Array.isArray(value)
+    ? value.filter((block): block is Record<string, unknown> => Boolean(block) && typeof block === "object")
+    : undefined;
+}
 
 /**
  * Dependencies injected into the message-processing functions.
@@ -39,16 +46,22 @@ export interface MessageProcessingDeps {
   state: RuntimeState;
   assistantName: string;
   triggerPattern: RegExp;
+  sendMessage: (jid: string, text: string, options?: RuntimeSendMessageOptions) => Promise<void>;
 }
 
 /** Process pending messages for a single chat: send to agent, deliver response. */
-export async function processMessages(chatJid: string, deps: MessageProcessingDeps): Promise<boolean> {
+export async function processMessages(
+  chatJid: string,
+  deps: MessageProcessingDeps,
+  options: { forcePrompt?: boolean } = {},
+): Promise<boolean> {
   const since = deps.state.lastAgentTimestamp[chatJid] || "";
   const messages = getMessagesSince(chatJid, since, deps.assistantName);
   if (messages.length === 0) return true;
 
   const commandQueue: Array<{ message: (typeof messages)[number]; command: AgentControlCommand }> = [];
   const promptMessages: typeof messages = [];
+  const channel = detectChannel(chatJid);
 
   for (const message of messages) {
     const command = !message.is_bot_message
@@ -65,14 +78,21 @@ export async function processMessages(chatJid: string, deps: MessageProcessingDe
 
   for (const { message, command } of commandQueue) {
     const result = await deps.agentPool.applyControlCommand(chatJid, command);
+    const formatted = formatOutbound(result.message || "", channel);
+    if (formatted || result.mediaIds?.length || result.contentBlocks?.length) {
+      await deps.sendMessage(chatJid, formatted || "", {
+        source: "control",
+        mediaIds: result.mediaIds,
+        contentBlocks: normalizeContentBlocks(result.contentBlocks),
+      });
+    }
     deps.state.markCommandProcessed(chatJid, message.id);
   }
 
   // Check trigger on non-command messages only
-  const hasTrigger = promptMessages.some((m) => deps.triggerPattern.test(m.content.trim()));
+  const hasTrigger = options.forcePrompt === true || promptMessages.some((m) => deps.triggerPattern.test(m.content.trim()));
   if (!hasTrigger) return true;
 
-  const channel = detectChannel(chatJid);
   const nextTimestamp = messages[messages.length - 1].timestamp;
   const commitLastAgentTimestamp = () => {
     deps.state.lastAgentTimestamp[chatJid] = nextTimestamp;
@@ -88,8 +108,13 @@ export async function processMessages(chatJid: string, deps: MessageProcessingDe
     });
     const result = await deps.agentPool.applySlashCommand(chatJid, cleaned);
 
-    if (result.message) {
-      const text = formatOutbound(result.message, channel);
+    if (result.message || result.mediaIds?.length || result.contentBlocks?.length) {
+      const text = formatOutbound(result.message || "", channel);
+      await deps.sendMessage(chatJid, text || "", {
+        source: "slash-command",
+        mediaIds: result.mediaIds,
+        contentBlocks: normalizeContentBlocks(result.contentBlocks),
+      });
     }
 
     if (result.status === "error") {
@@ -115,10 +140,8 @@ export async function processMessages(chatJid: string, deps: MessageProcessingDe
 
 
   const output = await deps.agentPool.runAgent(prompt, chatJid, {
-    onTurnComplete: async (turn) => {
-      if (turn.text) {
-        const text = formatOutbound(turn.text, channel);
-      }
+    onTurnComplete: async () => {
+      // Non-web channels currently deliver only the terminal turn output.
     },
   });
 
@@ -145,8 +168,12 @@ export async function processMessages(chatJid: string, deps: MessageProcessingDe
     return true;
   }
 
-  if (output.result) {
-    const text = formatOutbound(output.result, channel);
+  if (output.result || output.attachments?.length) {
+    const text = formatOutbound(output.result || "", channel);
+    await deps.sendMessage(chatJid, text || "", {
+      source: "agent",
+      attachments: output.attachments,
+    });
   }
 
   commitLastAgentTimestamp();

@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { WORKSPACE_DIR } from "../core/config.js";
-import { createMedia } from "../db/media.js";
+import { createMedia, getMediaById } from "../db/media.js";
 import { postMessagesToolMessage } from "../extensions/messages-crud.js";
 import { resetRuntimeStreamSessionsForTests, runtimeStreamSessions } from "./runtime-stream-sessions.js";
 
@@ -26,6 +26,7 @@ export interface PiclawRuntimeAddonApi {
   registerStatusPanelProvider: (provider: AddonStatusPanelProvider) => () => void;
   registerAdaptiveCardIntentHandler: (intent: string, handler: AddonAdaptiveCardIntentHandler) => () => void;
   createMedia: typeof createMedia;
+  getMediaById: typeof getMediaById;
   postMessage: typeof postMessagesToolMessage;
   streamSessions: typeof runtimeStreamSessions;
 }
@@ -131,6 +132,7 @@ export function installAddonRuntimeApi(): PiclawRuntimeAddonApi {
     registerStatusPanelProvider: registerAddonStatusPanelProvider,
     registerAdaptiveCardIntentHandler: registerAddonAdaptiveCardIntentHandler,
     createMedia,
+    getMediaById,
     postMessage: postMessagesToolMessage,
     streamSessions: runtimeStreamSessions,
   };

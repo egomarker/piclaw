@@ -25,6 +25,7 @@
     "runtime/desktop",
     "runtime/src",
     "runtime/extensions",
+    "addons",
     "runtime/skills",
     "runtime/web/static",
     "runtime/vendor",

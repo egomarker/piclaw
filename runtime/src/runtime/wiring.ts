@@ -9,10 +9,17 @@ import { ensureDreamTask, runDreamAgentTurn } from "../dream.js";
 import { WORKSPACE_DIR } from "../core/config.js";
 import { AUTO_DREAM_DEFAULT_DAYS } from "../dream-defaults.js";
 import { startIpcWatcher, type IpcDeps } from "../ipc.js";
+import { detectChannel } from "../router.js";
+import type { SendMessageOptions as WebSendMessageOptions } from "../channels/web/messaging/message-write-flows.js";
 import { startSchedulerLoop, type SchedulerDeps } from "../task-scheduler.js";
 import { createUuid } from "../utils/ids.js";
 import { createLogger } from "../utils/logger.js";
 import { executeApprovedProposal, rejectProposal } from "../remote/service-operations.js";
+import {
+  buildAttachmentContentBlocks,
+  getChannelTransport,
+  type RuntimeSendMessageOptions,
+} from "./channel-transport-registry.js";
 
 const log = createLogger("runtime.wiring");
 
@@ -37,16 +44,17 @@ export function workspaceNeedsDreamBootstrap(): boolean {
 }
 
 /** Minimal sender contract exposed to runtime worker wiring. */
-export type RuntimeSenders = Pick<IpcDeps, "sendMessage" | "sendNudge">;
-
-/** Optional sendMessage options accepted by web message dispatch. */
-export type RuntimeSendMessageOptions = Parameters<RuntimeSenders["sendMessage"]>[2];
+export interface RuntimeSenders {
+  sendMessage: (jid: string, text: string, options?: RuntimeSendMessageOptions) => Promise<void>;
+  sendNudge?: (text: string) => Promise<void>;
+}
 
 /** Web-channel capabilities required by runtime worker startup. */
 export interface RuntimeWebWorkerChannel {
-  sendMessage: RuntimeSenders["sendMessage"];
+  sendMessage: (jid: string, text: string, options?: WebSendMessageOptions) => Promise<void>;
   resumeChat: (chatJid: string, threadRootId?: number | null) => void;
   resumePendingChats: (chatJid?: string) => void;
+  broadcastEvent?(eventType: string, data: unknown): void;
 }
 
 /** Optional non-web channel capability for runtime worker startup. */
@@ -71,6 +79,36 @@ export function createRuntimeSenders(
       await web.sendMessage(jid, text, options);
       return;
     }
+
+    const channel = detectChannel(jid);
+    const transport = getChannelTransport(channel);
+    if (!transport) {
+      throw new Error(`No registered transport for chat ${jid} (${channel}).`);
+    }
+
+    await transport.sendMessage(jid, text, options);
+
+    const attachmentMediaIds = Array.isArray(options?.attachments)
+      ? options.attachments.map((attachment) => attachment.id).filter((id) => Number.isFinite(id) && id > 0)
+      : [];
+    const mediaIds = Array.isArray(options?.mediaIds)
+      ? [...options.mediaIds.filter((id) => Number.isFinite(id) && id > 0), ...attachmentMediaIds]
+      : attachmentMediaIds;
+    const attachmentBlocks = Array.isArray(options?.attachments)
+      ? buildAttachmentContentBlocks(options.attachments)
+      : [];
+    const contentBlocks = [
+      ...attachmentBlocks,
+      ...(Array.isArray(options?.contentBlocks) ? options.contentBlocks.filter((block) => block && typeof block === "object") : []),
+    ];
+
+    await web.sendMessage(jid, text, {
+      ...(options?.threadId !== undefined ? { threadId: options.threadId } : {}),
+      ...(options?.forceRoot !== undefined ? { forceRoot: options.forceRoot } : {}),
+      ...(options?.source ? { source: options.source } : {}),
+      ...(mediaIds.length > 0 ? { mediaIds } : {}),
+      ...(contentBlocks.length > 0 ? { contentBlocks } : {}),
+    });
   };
 
   const sendNudge = pushover

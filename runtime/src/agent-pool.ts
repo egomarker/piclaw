@@ -102,7 +102,10 @@ export interface AgentPoolRecoveryInstrumentationSnapshot {
 interface RuntimeInteropBridge {
   getChatJid?: (defaultValue?: string) => string;
   getChatChannel?: (defaultValue?: string) => string;
+  getAssistantName?: () => string;
   registerChannelDetector?: (detector: (chatJid: string) => string | null) => () => void;
+  registerChannelTransport?: (channel: string, transport: { sendMessage(chatJid: string, text: string, options?: unknown): Promise<void> | void; setTyping?(chatJid: string, isTyping: boolean): Promise<void> | void }) => () => void;
+  postMessage?: (chatJid: string, content: string, options?: Record<string, unknown>) => Promise<{ messageId: string; rowId: number | null }>;
   getExtensionKvStore?: () => {
     get<T = unknown>(extensionId: string, key: string, scope?: string, scopeKey?: string): T | null;
     set(extensionId: string, key: string, value: unknown, scope?: string, scopeKey?: string): void;

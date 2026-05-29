@@ -1,0 +1,40 @@
+{
+  "name": "@egomarker/piclaw-addon-telegram",
+  "version": "0.1.0",
+  "description": "Telegram Bot channel for Piclaw via the Bot API.",
+  "type": "module",
+  "main": "index.ts",
+  "license": "MIT",
+  "piclaw": {
+    "type": "extension",
+    "tags": [
+      "channel",
+      "messaging",
+      "telegram"
+    ]
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ],
+    "runtime": {
+      "entries": [
+        "runtime/index.ts"
+      ]
+    },
+    "web": {
+      "entries": [
+        "web/index.ts"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "keywords": [
+    "pi-package",
+    "piclaw",
+    "piclaw-addon",
+    "telegram"
+  ]
+}

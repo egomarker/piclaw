@@ -2,6 +2,7 @@
  * runtime/bootstrap.ts – Runtime bootstrap orchestration and default dependency wiring.
  */
 
+import { ensureAddonRuntimeEntriesLoaded } from "../addons/runtime-contributions.js";
 import {
   getIdentityConfig,
   getRoutingConfig,
@@ -12,6 +13,7 @@ import type { SchedulerDeps } from "../task-scheduler.js";
 import { stopSchedulerLoop } from "../task-scheduler.js";
 import { createLogger } from "../utils/logger.js";
 import type { RuntimeSignalRegistrar } from "./composition.js";
+import { installAddonRuntimeInterop } from "./addon-interop.js";
 import { registerRuntimeShutdownSignals } from "./composition.js";
 import { startRuntimeLoop, type StartRuntimeLoopDeps } from "./coordinator.js";
 import { registerOptionalProviders } from "./provider-bootstrap.js";
@@ -97,6 +99,16 @@ export interface RuntimeBootstrapDeps {
     web: RuntimeBootstrapWeb,
     senders: RuntimeSenders
   ): void;
+  installAddonRuntimeInterop(options: {
+    queue: RuntimeBootstrapQueue;
+    web: RuntimeBootstrapWeb;
+    state: RuntimeBootstrapState;
+    agentPool: RuntimeBootstrapAgentPool;
+    assistantName: string;
+    triggerPattern: RegExp;
+    sendMessage: RuntimeSenders["sendMessage"];
+  }): void;
+  ensureAddonRuntimeEntriesLoaded(): Promise<void>;
   queueStartupResumePendingIpc(): void;
   startRuntimeLoop(deps: StartRuntimeLoopDeps): Promise<void>;
   log(message: string): void;
@@ -122,6 +134,8 @@ export function createDefaultRuntimeBootstrapDeps(core: RuntimeBootstrapDefaultC
     registerRuntimeShutdownSignals,
     createRuntimeSenders,
     startRuntimeWorkers,
+    installAddonRuntimeInterop,
+    ensureAddonRuntimeEntriesLoaded,
     queueStartupResumePendingIpc,
     startRuntimeLoop,
     log: (message) => log.info(message, { operation: "bootstrap.banner" }),
@@ -155,8 +169,17 @@ export async function bootstrapRuntime(deps: RuntimeBootstrapDeps): Promise<void
   deps.registerRuntimeShutdownSignals(deps.signalRegistrar, shutdown);
 
   const senders = deps.createRuntimeSenders(web, pushover);
+  deps.installAddonRuntimeInterop({
+    queue,
+    web,
+    state,
+    agentPool,
+    assistantName: deps.assistantName,
+    triggerPattern: deps.triggerPattern,
+    sendMessage: senders.sendMessage,
+  });
+  await deps.ensureAddonRuntimeEntriesLoaded();
   deps.startRuntimeWorkers(queue, agentPool, web, senders);
-
 
   await deps.startRuntimeLoop({
     queue,
@@ -164,6 +187,7 @@ export async function bootstrapRuntime(deps: RuntimeBootstrapDeps): Promise<void
     agentPool,
     assistantName: deps.assistantName,
     triggerPattern: deps.triggerPattern,
+    sendMessage: senders.sendMessage,
     pollIntervalMs: deps.pollIntervalMs,
   });
 }
