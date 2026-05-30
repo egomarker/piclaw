@@ -410,6 +410,13 @@ async function startTelegramRuntime(): Promise<void> {
     setTyping: async (chatJid, isTyping) => {
       await channel.setTyping(chatJid, isTyping);
     },
+    createProgressMessage: async (chatJid, initialText, options) => {
+      return await channel.createProgressMessage(chatJid, initialText, {
+        replyToExternalMessageId: typeof options?.replyToExternalMessageId === "string"
+          ? options.replyToExternalMessageId
+          : null,
+      });
+    },
   });
 }
 

@@ -104,7 +104,21 @@ interface RuntimeInteropBridge {
   getChatChannel?: (defaultValue?: string) => string;
   getAssistantName?: () => string;
   registerChannelDetector?: (detector: (chatJid: string) => string | null) => () => void;
-  registerChannelTransport?: (channel: string, transport: { sendMessage(chatJid: string, text: string, options?: unknown): Promise<void> | void; setTyping?(chatJid: string, isTyping: boolean): Promise<void> | void }) => () => void;
+  registerChannelTransport?: (channel: string, transport: {
+    sendMessage(chatJid: string, text: string, options?: unknown): Promise<void> | void;
+    setTyping?(chatJid: string, isTyping: boolean): Promise<void> | void;
+    createProgressMessage?(
+      chatJid: string,
+      initialText: string,
+      options?: { replyToExternalMessageId?: string | null },
+    ): Promise<{
+      update(text: string): Promise<void> | void;
+      remove(): Promise<void> | void;
+    } | null> | {
+      update(text: string): Promise<void> | void;
+      remove(): Promise<void> | void;
+    } | null;
+  }) => () => void;
   postMessage?: (chatJid: string, content: string, options?: Record<string, unknown>) => Promise<{ messageId: string; rowId: number | null }>;
   getExtensionKvStore?: () => {
     get<T = unknown>(extensionId: string, key: string, scope?: string, scopeKey?: string): T | null;

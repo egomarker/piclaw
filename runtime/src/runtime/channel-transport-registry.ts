@@ -9,9 +9,23 @@ export interface RuntimeSendMessageOptions {
   attachments?: AttachmentInfo[];
 }
 
+export interface RuntimeProgressMessageOptions {
+  replyToExternalMessageId?: string | null;
+}
+
+export interface RuntimeProgressMessageHandle {
+  update(text: string): Promise<void> | void;
+  remove(): Promise<void> | void;
+}
+
 export interface RuntimeChannelTransport {
   sendMessage(chatJid: string, text: string, options?: RuntimeSendMessageOptions): Promise<void> | void;
   setTyping?(chatJid: string, isTyping: boolean): Promise<void> | void;
+  createProgressMessage?(
+    chatJid: string,
+    initialText: string,
+    options?: RuntimeProgressMessageOptions,
+  ): Promise<RuntimeProgressMessageHandle | null> | RuntimeProgressMessageHandle | null;
 }
 
 const transports = new Map<string, RuntimeChannelTransport>();

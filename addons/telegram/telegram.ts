@@ -89,6 +89,11 @@ type TelegramApiEnvelope<T> = {
   error_code?: number;
 };
 
+interface TelegramSendMessageOptions {
+  parseMode?: "Markdown" | null;
+  replyToMessageId?: number | null;
+}
+
 export class TelegramBotApi {
   constructor(private readonly botToken: string) {}
 
@@ -125,22 +130,45 @@ export class TelegramBotApi {
     return await this.requestJson<TelegramUpdate[]>("getUpdates", params);
   }
 
-  async sendMessage(chatId: string | number, text: string): Promise<void> {
+  async sendMessage(chatId: string | number, text: string, options: TelegramSendMessageOptions = {}): Promise<TelegramMessage> {
+    const payload: Record<string, unknown> = {
+      chat_id: chatId,
+      text,
+    };
+    const parseMode = options.parseMode === undefined ? "Markdown" : options.parseMode;
+    if (parseMode) payload.parse_mode = parseMode;
+    if (Number.isInteger(options.replyToMessageId) && Number(options.replyToMessageId) > 0) {
+      payload.reply_to_message_id = Number(options.replyToMessageId);
+      payload.allow_sending_without_reply = true;
+    }
+
     try {
-      await this.requestJson("sendMessage", {
-        chat_id: chatId,
-        text,
-        parse_mode: "Markdown",
-      });
+      return await this.requestJson<TelegramMessage>("sendMessage", payload);
     } catch (error) {
-      if (!/can't parse entities/i.test(String(error))) {
+      if (parseMode !== "Markdown" || !/can't parse entities/i.test(String(error))) {
         throw error;
       }
-      await this.requestJson("sendMessage", {
-        chat_id: chatId,
-        text,
-      });
+      const fallbackPayload = {
+        ...payload,
+      } satisfies Record<string, unknown>;
+      delete fallbackPayload.parse_mode;
+      return await this.requestJson<TelegramMessage>("sendMessage", fallbackPayload);
     }
+  }
+
+  async editMessageText(chatId: string | number, messageId: number, text: string): Promise<TelegramMessage> {
+    return await this.requestJson<TelegramMessage>("editMessageText", {
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+    });
+  }
+
+  async deleteMessage(chatId: string | number, messageId: number): Promise<void> {
+    await this.requestJson("deleteMessage", {
+      chat_id: chatId,
+      message_id: messageId,
+    });
   }
 
   async sendChatAction(chatId: string | number, action: "typing"): Promise<void> {
@@ -188,6 +216,17 @@ export class TelegramBotApi {
 function shouldSendAsTelegramPhoto(attachment: TelegramBinaryAttachment): boolean {
   const mimeType = String(attachment.contentType || "").toLowerCase();
   return ["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(mimeType);
+}
+
+function parseReplyToExternalMessageId(chatJid: string, externalMessageId?: string | null): number | null {
+  const trimmed = String(externalMessageId || "").trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/^(?:telegram|tg):([^:]+):(\d+)$/i);
+  if (!match) return null;
+  const { chatId } = parseTelegramChatJid(chatJid);
+  if (match[1] !== chatId) return null;
+  const parsed = Number.parseInt(match[2] || "", 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 export class TelegramChannel {
@@ -253,6 +292,39 @@ export class TelegramChannel {
         await this.api.sendDocument(chatId, attachment);
       }
     }
+  }
+
+  async createProgressMessage(
+    chatJid: string,
+    initialText: string,
+    options?: { replyToExternalMessageId?: string | null },
+  ): Promise<{ update(text: string): Promise<void>; remove(): Promise<void> }> {
+    if (!this.api || !this.connected) {
+      throw new Error("Telegram channel is not connected.");
+    }
+
+    const api = this.api;
+    const { chatId } = parseTelegramChatJid(chatJid);
+    const trimmed = String(initialText || "").trim() || "Thinking…";
+    const replyToMessageId = parseReplyToExternalMessageId(chatJid, options?.replyToExternalMessageId);
+    const sent = await api.sendMessage(chatId, trimmed, {
+      parseMode: null,
+      replyToMessageId,
+    });
+    const messageId = sent.message_id;
+    let lastText = trimmed;
+
+    return {
+      update: async (text: string) => {
+        const nextText = String(text || "").trim();
+        if (!nextText || nextText === lastText) return;
+        await api.editMessageText(chatId, messageId, nextText);
+        lastText = nextText;
+      },
+      remove: async () => {
+        await api.deleteMessage(chatId, messageId);
+      },
+    };
   }
 
   async setTyping(chatJid: string, isTyping: boolean): Promise<void> {

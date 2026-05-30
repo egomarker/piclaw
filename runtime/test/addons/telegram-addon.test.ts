@@ -107,6 +107,67 @@ test("telegram api sendMessage falls back to plain text when Markdown parsing fa
   expect(requests[1]).not.toHaveProperty("parse_mode");
 });
 
+test("telegram channel creates, updates, and removes plain-text progress replies", async () => {
+  const channel = new TelegramChannel({
+    botToken: "test",
+    onUpdate: async () => {},
+  }) as any;
+
+  const calls: Array<{ type: string; chatId: string; text?: string; messageId?: number; options?: Record<string, unknown> }> = [];
+  channel.api = {
+    sendMessage: async (chatId: string, text: string, options?: Record<string, unknown>) => {
+      calls.push({ type: "send", chatId, text, options });
+      return {
+        message_id: 42,
+        date: 0,
+        chat: { id: Number(chatId), type: "private" },
+      };
+    },
+    editMessageText: async (chatId: string, messageId: number, text: string) => {
+      calls.push({ type: "edit", chatId, messageId, text });
+      return {
+        message_id: messageId,
+        date: 0,
+        chat: { id: Number(chatId), type: "private" },
+      };
+    },
+    deleteMessage: async (chatId: string, messageId: number) => {
+      calls.push({ type: "delete", chatId, messageId });
+    },
+  };
+  channel.connected = true;
+
+  const progress = await channel.createProgressMessage("telegram:123456", "Thinking…", {
+    replyToExternalMessageId: "telegram:123456:77",
+  });
+
+  await progress.update("Thinking…\nTool: grep: runtime/src");
+  await progress.remove();
+
+  expect(calls).toEqual([
+    {
+      type: "send",
+      chatId: "123456",
+      text: "Thinking…",
+      options: {
+        parseMode: null,
+        replyToMessageId: 77,
+      },
+    },
+    {
+      type: "edit",
+      chatId: "123456",
+      messageId: 42,
+      text: "Thinking…\nTool: grep: runtime/src",
+    },
+    {
+      type: "delete",
+      chatId: "123456",
+      messageId: 42,
+    },
+  ]);
+});
+
 test("telegram channel sends SVGs as documents and PNGs as photos", async () => {
   const channel = new TelegramChannel({
     botToken: "test",

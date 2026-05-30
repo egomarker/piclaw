@@ -22,6 +22,17 @@ export type TelegramRuntimeInterop = {
     transport: {
       sendMessage(chatJid: string, text: string, options?: unknown): Promise<void> | void;
       setTyping?(chatJid: string, isTyping: boolean): Promise<void> | void;
+      createProgressMessage?(
+        chatJid: string,
+        initialText: string,
+        options?: { replyToExternalMessageId?: string | null },
+      ): Promise<{
+        update(text: string): Promise<void> | void;
+        remove(): Promise<void> | void;
+      } | null> | {
+        update(text: string): Promise<void> | void;
+        remove(): Promise<void> | void;
+      } | null;
     },
   ) => () => void;
   postMessage?: (

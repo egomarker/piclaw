@@ -245,6 +245,97 @@ test("processMessages threads transport replies under the triggering message roo
   });
 });
 
+test("processMessages updates and removes transport progress placeholders", async () => {
+  await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
+    const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
+    const loop = await importFresh<typeof import("../../src/runtime/message-loop.js")>("../src/runtime/message-loop.js");
+    db.initDatabase();
+
+    const chatJid = "telegram:123456";
+    const timestamp = "2026-04-17T01:04:20.000Z";
+    db.storeMessage({
+      ...makeMessage(chatJid, "@Pi inspect runtime", timestamp),
+      id: "telegram:123456:77",
+    });
+
+    const state = {
+      lastAgentTimestamp: {} as Record<string, string>,
+      wasCommandProcessed: () => false,
+      markCommandProcessed: () => {},
+      saveTimestamps: () => {},
+    };
+
+    const created: Array<{ text: string; options?: Record<string, unknown> }> = [];
+    const updates: string[] = [];
+    let removed = 0;
+    const unregisterDetector = registerChannelDetector((jid) => jid.startsWith("telegram:") ? "telegram" : null);
+
+    try {
+      registerChannelTransport("telegram", {
+        sendMessage: async () => {},
+        setTyping: async () => {},
+        createProgressMessage: async (_jid, text, options) => {
+          created.push({ text, options: options as Record<string, unknown> | undefined });
+          return {
+            update: async (nextText: string) => {
+              updates.push(nextText);
+            },
+            remove: async () => {
+              removed += 1;
+            },
+          };
+        },
+      });
+
+      const ok = await loop.processMessages(chatJid, {
+        state: state as any,
+        assistantName: "Pi",
+        triggerPattern: /@Pi/i,
+        agentPool: {
+          runAgent: async (_prompt: string, _nextChatJid: string, runOptions?: { onEvent?: (event: unknown) => void }) => {
+            runOptions?.onEvent?.({
+              type: "message_update",
+              assistantMessageEvent: { type: "thinking_start" },
+            });
+            runOptions?.onEvent?.({
+              type: "message_update",
+              assistantMessageEvent: { type: "thinking_delta", delta: "Inspecting runtime message loop\n" },
+            });
+            runOptions?.onEvent?.({
+              type: "message_update",
+              assistantMessageEvent: { type: "thinking_end", content: "Inspecting runtime message loop" },
+            });
+            runOptions?.onEvent?.({
+              type: "tool_execution_start",
+              toolCallId: "tool-1",
+              toolName: "grep",
+              args: { path: "runtime/src/runtime/message-loop.ts" },
+            });
+            return {
+              status: "success",
+              result: "done",
+            };
+          },
+        } as any,
+        sendMessage: noopSendMessage,
+      });
+
+      expect(ok).toBe(true);
+      expect(created).toEqual([
+        {
+          text: "Thinking…",
+          options: { replyToExternalMessageId: "telegram:123456:77" },
+        },
+      ]);
+      expect(updates.some((text) => text.includes("Thinking: Inspecting runtime message loop"))).toBe(true);
+      expect(updates.some((text) => text.includes("Tool: grep: runtime/src/runtime/message-loop.ts"))).toBe(true);
+      expect(removed).toBe(1);
+    } finally {
+      unregisterDetector();
+    }
+  });
+});
+
 test("processMessages emits typing updates for transport-backed chats", async () => {
   await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
     const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
