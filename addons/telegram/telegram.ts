@@ -90,7 +90,7 @@ type TelegramApiEnvelope<T> = {
 };
 
 interface TelegramSendMessageOptions {
-  parseMode?: "Markdown" | null;
+  parseMode?: "Markdown" | "HTML" | null;
   replyToMessageId?: number | null;
 }
 
@@ -156,12 +156,19 @@ export class TelegramBotApi {
     }
   }
 
-  async editMessageText(chatId: string | number, messageId: number, text: string): Promise<TelegramMessage> {
-    return await this.requestJson<TelegramMessage>("editMessageText", {
+  async editMessageText(
+    chatId: string | number,
+    messageId: number,
+    text: string,
+    options: { parseMode?: "Markdown" | "HTML" | null } = {},
+  ): Promise<TelegramMessage> {
+    const payload: Record<string, unknown> = {
       chat_id: chatId,
       message_id: messageId,
       text,
-    });
+    };
+    if (options.parseMode) payload.parse_mode = options.parseMode;
+    return await this.requestJson<TelegramMessage>("editMessageText", payload);
   }
 
   async deleteMessage(chatId: string | number, messageId: number): Promise<void> {
@@ -227,6 +234,93 @@ function parseReplyToExternalMessageId(chatJid: string, externalMessageId?: stri
   if (match[1] !== chatId) return null;
   const parsed = Number.parseInt(match[2] || "", 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function escapeTelegramHtml(text: string): string {
+  return String(text || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+type TelegramProgressBlockKind = "thinking" | "tool" | "status";
+
+type TelegramProgressBlock = {
+  kind: TelegramProgressBlockKind;
+  lines: string[];
+};
+
+function isThinkingPlaceholderLine(line: string): boolean {
+  return /^Thinking(?:…|\.\.\.)$/i.test(String(line || "").trim());
+}
+
+function normalizeTelegramProgressLines(text: string): string[] {
+  const lines = String(text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  if (lines.length <= 1) return lines;
+  const hasNonPlaceholderLine = lines.some((line) => !isThinkingPlaceholderLine(line));
+  return hasNonPlaceholderLine ? lines.filter((line) => !isThinkingPlaceholderLine(line)) : lines;
+}
+
+function classifyTelegramProgressLine(line: string): { kind: TelegramProgressBlockKind; text: string } {
+  if (/^Thinking:/i.test(line)) {
+    return {
+      kind: "thinking",
+      text: String(line.replace(/^Thinking:\s*/i, "").trim() || "Thinking…"),
+    };
+  }
+  if (/^Tool:/i.test(line)) {
+    return {
+      kind: "tool",
+      text: String(line.replace(/^Tool:\s*/i, "").trim() || "tool"),
+    };
+  }
+  if (isThinkingPlaceholderLine(line)) {
+    return {
+      kind: "thinking",
+      text: "Thinking…",
+    };
+  }
+  return {
+    kind: "status",
+    text: line,
+  };
+}
+
+function buildTelegramProgressBlocks(text: string): TelegramProgressBlock[] {
+  const blocks: TelegramProgressBlock[] = [];
+  for (const line of normalizeTelegramProgressLines(text)) {
+    const classified = classifyTelegramProgressLine(line);
+    const current = blocks[blocks.length - 1];
+    if (current?.kind === classified.kind) {
+      current.lines.push(classified.text);
+      continue;
+    }
+    blocks.push({ kind: classified.kind, lines: [classified.text] });
+  }
+  return blocks;
+}
+
+function renderTelegramProgressHtml(text: string): string {
+  const blocks = buildTelegramProgressBlocks(text);
+  if (blocks.length === 0) {
+    return `<b>🤔 Thinking</b>\n<blockquote>Thinking…</blockquote>`;
+  }
+  return blocks.map((block) => {
+    const body = escapeTelegramHtml(block.lines.join("\n"));
+    if (block.kind === "thinking") {
+      return `<b>🤔 Thinking</b>\n<blockquote>${body}</blockquote>`;
+    }
+    if (block.kind === "tool") {
+      return `<b>🛠 Tool call</b>\n<pre><code>${body}</code></pre>`;
+    }
+    return `<b>📌 Status</b>\n<blockquote>${body}</blockquote>`;
+  }).join("\n\n");
 }
 
 export class TelegramChannel {
@@ -307,19 +401,27 @@ export class TelegramChannel {
     const { chatId } = parseTelegramChatJid(chatJid);
     const trimmed = String(initialText || "").trim() || "Thinking…";
     const replyToMessageId = parseReplyToExternalMessageId(chatJid, options?.replyToExternalMessageId);
-    const sent = await api.sendMessage(chatId, trimmed, {
-      parseMode: null,
+    const initialHtml = renderTelegramProgressHtml(trimmed);
+    const sent = await api.sendMessage(chatId, initialHtml, {
+      parseMode: "HTML",
       replyToMessageId,
     });
     const messageId = sent.message_id;
-    let lastText = trimmed;
+    let lastRenderedHtml = initialHtml;
 
     return {
       update: async (text: string) => {
         const nextText = String(text || "").trim();
-        if (!nextText || nextText === lastText) return;
-        await api.editMessageText(chatId, messageId, nextText);
-        lastText = nextText;
+        if (!nextText) return;
+        const nextRenderedHtml = renderTelegramProgressHtml(nextText);
+        if (nextRenderedHtml === lastRenderedHtml) return;
+        try {
+          await api.editMessageText(chatId, messageId, nextRenderedHtml, { parseMode: "HTML" });
+        } catch (error) {
+          if (/message is not modified/i.test(String(error))) return;
+          throw error;
+        }
+        lastRenderedHtml = nextRenderedHtml;
       },
       remove: async () => {
         await api.deleteMessage(chatId, messageId);

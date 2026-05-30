@@ -107,7 +107,7 @@ test("telegram api sendMessage falls back to plain text when Markdown parsing fa
   expect(requests[1]).not.toHaveProperty("parse_mode");
 });
 
-test("telegram channel creates, updates, and removes plain-text progress replies", async () => {
+test("telegram channel renders progress replies as escaped HTML blocks", async () => {
   const channel = new TelegramChannel({
     botToken: "test",
     onUpdate: async () => {},
@@ -123,8 +123,8 @@ test("telegram channel creates, updates, and removes plain-text progress replies
         chat: { id: Number(chatId), type: "private" },
       };
     },
-    editMessageText: async (chatId: string, messageId: number, text: string) => {
-      calls.push({ type: "edit", chatId, messageId, text });
+    editMessageText: async (chatId: string, messageId: number, text: string, options?: Record<string, unknown>) => {
+      calls.push({ type: "edit", chatId, messageId, text, options });
       return {
         message_id: messageId,
         date: 0,
@@ -141,16 +141,16 @@ test("telegram channel creates, updates, and removes plain-text progress replies
     replyToExternalMessageId: "telegram:123456:77",
   });
 
-  await progress.update("Thinking…\nTool: grep: runtime/src");
+  await progress.update("Thinking…\nThinking: Checking <docs> & repo\nTool: grep: runtime/src <x>");
   await progress.remove();
 
   expect(calls).toEqual([
     {
       type: "send",
       chatId: "123456",
-      text: "Thinking…",
+      text: "<b>🤔 Thinking</b>\n<blockquote>Thinking…</blockquote>",
       options: {
-        parseMode: null,
+        parseMode: "HTML",
         replyToMessageId: 77,
       },
     },
@@ -158,7 +158,10 @@ test("telegram channel creates, updates, and removes plain-text progress replies
       type: "edit",
       chatId: "123456",
       messageId: 42,
-      text: "Thinking…\nTool: grep: runtime/src",
+      text: "<b>🤔 Thinking</b>\n<blockquote>Checking &lt;docs&gt; &amp; repo</blockquote>\n\n<b>🛠 Tool call</b>\n<pre><code>grep: runtime/src &lt;x&gt;</code></pre>",
+      options: {
+        parseMode: "HTML",
+      },
     },
     {
       type: "delete",
