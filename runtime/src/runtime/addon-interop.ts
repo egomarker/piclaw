@@ -1,4 +1,4 @@
-import { attachMediaToMessage, getMessageByRowId, storeChatMetadata, storeMessage } from "../db.js";
+import { attachMediaToMessage, getDb, getMessageByRowId, storeChatMetadata, storeMessage } from "../db.js";
 import type { AgentQueue } from "../queue.js";
 import type { NewMessage } from "../types.js";
 import { createUuid } from "../utils/ids.js";
@@ -78,6 +78,9 @@ export function installAddonRuntimeInterop(options: InstallAddonRuntimeInteropOp
       ? inboundOptions.messageId.trim()
       : `${source}:${createUuid("message")}`;
     const mediaIds = toPositiveMediaIds(inboundOptions.mediaIds);
+    const explicitThreadId = Number.isInteger(inboundOptions.threadId) && Number(inboundOptions.threadId) > 0
+      ? Number(inboundOptions.threadId)
+      : null;
     const message: NewMessage = {
       id: messageId,
       chat_jid: normalizedChatJid,
@@ -95,12 +98,15 @@ export function installAddonRuntimeInterop(options: InstallAddonRuntimeInteropOp
       is_from_me: inboundOptions.isFromMe === true,
       is_bot_message: inboundOptions.isBotMessage === true,
       content_blocks: Array.isArray(inboundOptions.contentBlocks) ? inboundOptions.contentBlocks : undefined,
-      thread_id: typeof inboundOptions.threadId === "number" ? inboundOptions.threadId : null,
+      thread_id: explicitThreadId,
     };
 
     const rowId = storeMessage(message);
     if (rowId > 0 && mediaIds.length > 0) {
       attachMediaToMessage(rowId, mediaIds);
+    }
+    if (rowId > 0 && explicitThreadId === null && message.is_bot_message !== true) {
+      getDb().prepare("UPDATE messages SET thread_id = ? WHERE rowid = ?").run(rowId, rowId);
     }
     storeChatMetadata(normalizedChatJid, timestamp, typeof inboundOptions.chatName === "string" ? inboundOptions.chatName.trim() || undefined : undefined);
     ensureChatTracked(options.state, normalizedChatJid);

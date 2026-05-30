@@ -205,6 +205,46 @@ test("processMessages does not consume non-web attachments via intermediate turn
   });
 });
 
+test("processMessages threads transport replies under the triggering message root", async () => {
+  await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
+    const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
+    const loop = await importFresh<typeof import("../../src/runtime/message-loop.js")>("../src/runtime/message-loop.js");
+    db.initDatabase();
+
+    const chatJid = `telegram:${Date.now()}`;
+    const timestamp = "2026-04-17T01:04:15.000Z";
+    const sourceRowId = db.storeMessage(makeMessage(chatJid, "@Pi hello", timestamp));
+
+    const state = {
+      lastAgentTimestamp: {} as Record<string, string>,
+      wasCommandProcessed: () => false,
+      markCommandProcessed: () => {},
+      saveTimestamps: () => {},
+    };
+
+    const sent: Array<{ text: string; options?: Record<string, unknown> }> = [];
+    const ok = await loop.processMessages(chatJid, {
+      state: state as any,
+      assistantName: "Pi",
+      triggerPattern: /@Pi/i,
+      agentPool: {
+        runAgent: async () => ({
+          status: "success",
+          result: "threaded reply",
+        }),
+      } as any,
+      sendMessage: async (_jid: string, text: string, options?: Record<string, unknown>) => {
+        sent.push({ text, options });
+      },
+    });
+
+    expect(ok).toBe(true);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.text).toBe("threaded reply");
+    expect(sent[0]?.options?.threadId).toBe(sourceRowId);
+  });
+});
+
 test("processMessages emits typing updates for transport-backed chats", async () => {
   await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
     const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");

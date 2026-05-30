@@ -21,7 +21,7 @@ import { formatRecoverySummary } from "../agent-pool/automatic-recovery.js";
 import { parseControlCommand, type AgentControlCommand } from "../agent-control/index.js";
 import { stripTrigger } from "../agent-control/parser-utils.js";
 import { isSlashCommandInvocation } from "../agent-pool/slash-command.js";
-import { getMessagesSince, getNewMessages } from "../db.js";
+import { getMessageThreadRootIdById, getMessagesSince, getNewMessages } from "../db.js";
 import type { AgentQueue } from "../queue.js";
 import { detectChannel, formatMessages, formatOutbound } from "../router.js";
 import { createLogger } from "../utils/logger.js";
@@ -35,6 +35,13 @@ function normalizeContentBlocks(value: unknown): Array<Record<string, unknown>> 
   return Array.isArray(value)
     ? value.filter((block): block is Record<string, unknown> => Boolean(block) && typeof block === "object")
     : undefined;
+}
+
+function getReplyThreadId(chatJid: string, message: { id: string; thread_id?: number | null }): number | undefined {
+  if (Number.isInteger(message.thread_id) && Number(message.thread_id) > 0) {
+    return Number(message.thread_id);
+  }
+  return getMessageThreadRootIdById(chatJid, message.id) ?? undefined;
 }
 
 function startChannelTyping(chatJid: string, channel: string): () => void {
@@ -113,7 +120,9 @@ export async function processMessages(
     const result = await deps.agentPool.applyControlCommand(chatJid, command);
     const formatted = formatOutbound(result.message || "", channel);
     if (formatted || result.mediaIds?.length || result.contentBlocks?.length) {
+      const threadId = getReplyThreadId(chatJid, message);
       await deps.sendMessage(chatJid, formatted || "", {
+        ...(threadId !== undefined ? { threadId } : {}),
         source: "control",
         mediaIds: result.mediaIds,
         contentBlocks: normalizeContentBlocks(result.contentBlocks),
@@ -149,7 +158,9 @@ export async function processMessages(
 
     if (result.message || result.mediaIds?.length || result.contentBlocks?.length) {
       const text = formatOutbound(result.message || "", channel);
+      const threadId = getReplyThreadId(chatJid, lastPrompt);
       await deps.sendMessage(chatJid, text || "", {
+        ...(threadId !== undefined ? { threadId } : {}),
         source: "slash-command",
         mediaIds: result.mediaIds,
         contentBlocks: normalizeContentBlocks(result.contentBlocks),
@@ -211,7 +222,9 @@ export async function processMessages(
 
   if (output.result || output.attachments?.length) {
     const text = formatOutbound(output.result || "", channel);
+    const threadId = lastPrompt ? getReplyThreadId(chatJid, lastPrompt) : undefined;
     await deps.sendMessage(chatJid, text || "", {
+      ...(threadId !== undefined ? { threadId } : {}),
       source: "agent",
       attachments: output.attachments,
     });
