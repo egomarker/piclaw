@@ -27,6 +27,9 @@ export interface AgentRecoveryDiagnosticEntry {
   hadCompletedTurnOutput: boolean;
   sawCompactionIntent: boolean;
   compactionErrorMessage: string | null;
+  toolUseBudgetExceeded?: boolean;
+  assistantToolUseMessageCount?: number;
+  toolExecutionCount?: number;
 }
 
 export interface AgentRecoveryMetadata {
@@ -46,6 +49,10 @@ export interface AgentOutput {
   error?: string;
   attachments?: AttachmentInfo[];
   recovery?: AgentRecoveryMetadata;
+  toolBudgetExceeded?: boolean;
+  toolStepsUsed?: number;
+  toolStepsBudget?: number;
+  nextAction?: string;
 }
 
 /** A single turn's output within a multi-turn agent run. */

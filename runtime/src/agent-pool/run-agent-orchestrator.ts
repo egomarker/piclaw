@@ -484,6 +484,49 @@ function buildRecoveryDiagnosticEntry(
     hadCompletedTurnOutput: Boolean(snapshot.hadCompletedTurnOutput),
     sawCompactionIntent: Boolean(snapshot.sawCompactionIntent),
     compactionErrorMessage: snapshot.compactionErrorMessage ?? null,
+    toolUseBudgetExceeded: Boolean(snapshot.toolUseBudgetExceeded),
+    assistantToolUseMessageCount: Number.isFinite(snapshot.assistantToolUseMessageCount)
+      ? snapshot.assistantToolUseMessageCount
+      : undefined,
+    toolExecutionCount: Number.isFinite(snapshot.toolExecutionCount)
+      ? snapshot.toolExecutionCount
+      : undefined,
+  };
+}
+
+function resolveToolBudgetSoftStopThreshold(budget: number): number {
+  const normalized = Math.max(1, Math.floor(Number.isFinite(budget) ? budget : 1));
+  const margin = Math.min(8, Math.max(1, Math.ceil(normalized * 0.125)));
+  return Math.max(1, normalized - margin);
+}
+
+function findToolBudgetDiagnostic(diagnostics: AgentRecoveryDiagnosticEntry[]): AgentRecoveryDiagnosticEntry | null {
+  return diagnostics.find((entry) => entry.toolUseBudgetExceeded
+    || entry.classifier === "tool_history_pressure"
+    || /tool(?:-| )use budget exceeded/i.test(entry.error)) ?? null;
+}
+
+function buildToolBudgetRecoveryTerminalError(
+  budgetDiagnostic: AgentRecoveryDiagnosticEntry,
+  retryErrorText: string,
+): { error: string; toolStepsUsed?: number; toolStepsBudget?: number; nextAction: string } {
+  const parsed = /\((\d+)\/(\d+) tool steps\)/i.exec(budgetDiagnostic.error);
+  const toolStepsUsed = Number.isFinite(budgetDiagnostic.assistantToolUseMessageCount)
+    ? budgetDiagnostic.assistantToolUseMessageCount
+    : parsed ? Number(parsed[1]) : undefined;
+  const toolStepsBudget = parsed ? Number(parsed[2]) : undefined;
+  const budgetDetail = Number.isFinite(toolStepsUsed) && Number.isFinite(toolStepsBudget)
+    ? `Tool-use budget exceeded before finalization (${toolStepsUsed}/${toolStepsBudget} tool steps).`
+    : "Tool-use budget exceeded before finalization.";
+  const retryDetail = retryErrorText.trim()
+    ? ` Automatic recovery compacted context and retried, but the retry still produced no terminal assistant reply: ${retryErrorText}`
+    : " Automatic recovery compacted context and retried, but the retry still produced no terminal assistant reply.";
+  const nextAction = "Ask me to continue; I will resume from the latest known partial state instead of replaying the whole turn.";
+  return {
+    error: `${budgetDetail}${retryDetail} ${nextAction}`,
+    toolStepsUsed: Number.isFinite(toolStepsUsed) ? toolStepsUsed : undefined,
+    toolStepsBudget: Number.isFinite(toolStepsBudget) ? toolStepsBudget : undefined,
+    nextAction,
   };
 }
 
@@ -634,6 +677,46 @@ async function runPromptAttempt(
   let midTurnContextAbortRequested = false;
   const sessionEntryBaseline = snapshotSessionEntryCount(session);
   const toolUseMessageBudget = getToolUseMessageBudget();
+  const toolUseSoftStopThreshold = resolveToolBudgetSoftStopThreshold(toolUseMessageBudget);
+  let toolUseSoftStopRequested = false;
+  let softStopSavedToolNames: string[] | null = null;
+  const requestToolBudgetSoftStop = () => {
+    if (toolUseSoftStopRequested || assistantToolUseMessageCount < toolUseSoftStopThreshold) return;
+    toolUseSoftStopRequested = true;
+    const toolControl = session as unknown as {
+      getActiveToolNames?: () => string[];
+      setActiveToolsByName?: (toolNames: string[]) => void;
+    };
+    if (typeof toolControl.getActiveToolNames === "function" && typeof toolControl.setActiveToolsByName === "function") {
+      softStopSavedToolNames = toolControl.getActiveToolNames();
+      toolControl.setActiveToolsByName([]);
+      options.onWarn?.("Tool-use budget soft threshold reached; disabling tools to force terminal reply", {
+        operation: "run_agent.tool_use_budget_soft_stop",
+        chatJid,
+        assistantToolUseMessageCount,
+        toolUseMessageBudget,
+        toolUseSoftStopThreshold,
+        ...getRunObservabilityDetails(runOptions),
+      });
+    } else {
+      options.onWarn?.("Tool-use budget soft threshold reached but active tools could not be disabled", {
+        operation: "run_agent.tool_use_budget_soft_stop_unavailable",
+        chatJid,
+        assistantToolUseMessageCount,
+        toolUseMessageBudget,
+        toolUseSoftStopThreshold,
+        ...getRunObservabilityDetails(runOptions),
+      });
+    }
+  };
+  const restoreToolBudgetSoftStop = () => {
+    if (!softStopSavedToolNames) return;
+    const toolControl = session as unknown as { setActiveToolsByName?: (toolNames: string[]) => void };
+    if (typeof toolControl.setActiveToolsByName === "function") {
+      toolControl.setActiveToolsByName(softStopSavedToolNames);
+    }
+    softStopSavedToolNames = null;
+  };
   runOptions.sessionLeafId = typeof session.sessionManager?.getLeafId === "function"
     ? session.sessionManager.getLeafId() ?? undefined
     : runOptions.sessionLeafId;
@@ -947,6 +1030,7 @@ async function runPromptAttempt(
               });
             });
           }
+          requestToolBudgetSoftStop();
           if (!toolUseBudgetExceeded && assistantToolUseMessageCount > toolUseMessageBudget) {
             toolUseBudgetExceeded = true;
             void session.abort().catch((err) => {
@@ -1031,6 +1115,7 @@ async function runPromptAttempt(
   } catch (error) {
     promptThrownError = error instanceof Error ? error.message : String(error);
   } finally {
+    restoreToolBudgetSoftStop();
     restoreUpstreamAutoCompaction();
     finishPromptTimeout();
     unregisterProgressAborter();
@@ -1063,11 +1148,12 @@ async function runPromptAttempt(
     output = {
       status: "error",
       result: null,
-      error: `Tool-use budget exceeded before finalization (${assistantToolUseMessageCount}/${toolUseMessageBudget} tool steps).`,
+      error: `Tool-use budget exceeded before finalization (${assistantToolUseMessageCount}/${toolUseMessageBudget} tool steps). Ask me to continue; I will resume from the latest known partial state instead of replaying the whole turn.`,
       toolBudgetExceeded: true,
       toolStepsUsed: assistantToolUseMessageCount,
       toolStepsBudget: toolUseMessageBudget,
-    } as any;
+      nextAction: "Ask me to continue; I will resume from the latest known partial state instead of replaying the whole turn.",
+    };
   } else if (promptThrownError) {
     output = { status: "error", result: null, error: promptThrownError };
   } else {
@@ -1506,21 +1592,35 @@ export async function runAgentPrompt(
 
         if (!effectiveDecision.recover || !effectiveDecision.strategy) {
           const duration = Date.now() - startTime;
-          const recoveryMeta = (recoveryAttemptsUsed > 0 || Boolean(lastClassifier))
-            ? buildRecoveryMetadata(recoveryAttemptsUsed, duration, false, true, lastClassifier, strategyHistory, recoveryDiagnostics)
+          const toolBudgetDiagnostic = recoveryAttemptsUsed > 0 ? findToolBudgetDiagnostic(recoveryDiagnostics) : null;
+          const terminalBudgetFailure = toolBudgetDiagnostic
+            && /Prompt completed without emitting an assistant reply before finalization/i.test(errorText)
+            ? buildToolBudgetRecoveryTerminalError(toolBudgetDiagnostic, errorText)
             : null;
-          writeAgentLog(options.logsDir, chatJid, duration, false, null, errorText, recoveryMeta);
+          const finalErrorText = terminalBudgetFailure?.error ?? errorText;
+          const finalClassifier = terminalBudgetFailure && toolBudgetDiagnostic ? toolBudgetDiagnostic.classifier : lastClassifier;
+          const recoveryMeta = (recoveryAttemptsUsed > 0 || Boolean(finalClassifier))
+            ? buildRecoveryMetadata(recoveryAttemptsUsed, duration, false, true, finalClassifier, strategyHistory, recoveryDiagnostics)
+            : null;
+          writeAgentLog(options.logsDir, chatJid, duration, false, null, finalErrorText, recoveryMeta);
           if (recoveryAttemptsUsed > 0 || effectiveDecision.classifier === "recovery_suppressed") {
             emitAgentSessionEvent(runOptions.onEvent, {
               type: "recovery_end",
               outcome: "exhausted",
               attemptsUsed: recoveryAttemptsUsed,
-              classifier: effectiveDecision.classifier,
-              errorMessage: errorText,
+              classifier: finalClassifier ?? effectiveDecision.classifier,
+              errorMessage: finalErrorText,
             });
           }
           if (recoveryMeta) {
             attempt.output.recovery = recoveryMeta;
+          }
+          if (terminalBudgetFailure) {
+            attempt.output.error = finalErrorText;
+            attempt.output.toolBudgetExceeded = true;
+            attempt.output.toolStepsUsed = terminalBudgetFailure.toolStepsUsed;
+            attempt.output.toolStepsBudget = terminalBudgetFailure.toolStepsBudget;
+            attempt.output.nextAction = terminalBudgetFailure.nextAction;
           }
           return attempt.output;
         }

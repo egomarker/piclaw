@@ -2182,6 +2182,70 @@ test("processChat keeps partial draft text and adds a rate-limit bubble when fal
   }));
 });
 
+test("processChat appends visible diagnostic text to recovered tool-budget drafts", async () => {
+  const ws = createTempWorkspace("piclaw-web-channel-");
+  cleanupWorkspace = ws.cleanup;
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+
+  const db = await import("../../../src/db.js");
+  db.initDatabase();
+  db.getDb().exec("DELETE FROM message_media; DELETE FROM messages; DELETE FROM chats; DELETE FROM chat_cursors; DELETE FROM chat_cursors;");
+  db.storeChatMetadata("web:default", new Date().toISOString(), "Web");
+
+  db.storeMessage({
+    id: `msg-${Math.random()}`,
+    chat_jid: "web:default",
+    sender: "user",
+    sender_name: "User",
+    content: "hello",
+    timestamp: new Date().toISOString(),
+    is_from_me: false,
+    is_bot_message: false,
+  });
+
+  const webMod = await import("../../../src/channels/web.js");
+  const web = new (webMod.WebChannel as any)({
+    queue: { enqueue: () => {} },
+    agentPool: {
+      setSessionBinder: () => {},
+      runAgent: async () => ({
+        status: "error",
+        error: "Tool-use budget exceeded before finalization (65/64 tool steps). Automatic recovery compacted context and retried, but the retry still produced no terminal assistant reply. Ask me to continue.",
+        result: null,
+        attachments: [],
+        toolBudgetExceeded: true,
+        toolStepsUsed: 65,
+        toolStepsBudget: 64,
+        nextAction: "Ask me to continue; I will resume from the latest known partial state.",
+        recovery: { attemptsUsed: 1, totalElapsedMs: 1000, recovered: false, exhausted: true, lastClassifier: "tool_history_pressure", strategyHistory: ["compact_then_retry"], diagnostics: [] },
+      }),
+      getContextUsageForChat: async () => null,
+    },
+  });
+
+  web.getBuffer = (_turnId: string, panel: string) => panel === "draft"
+    ? { text: "I’ll update the installed Plan Sidebar add-on…", totalLines: 1 }
+    : undefined;
+
+  await web.processChat("web:default", "default");
+
+  const timeline = db.getTimeline("web:default", 10);
+  const botMessages = timeline.filter((item: any) => item.data.type === "agent_response");
+  expect(botMessages.length).toBe(1);
+  expect(botMessages[0].data.content).toContain("I’ll update the installed Plan Sidebar add-on");
+  expect(botMessages[0].data.content).toContain("⚠️ Tool-use budget exceeded");
+  expect(botMessages[0].data.content).toContain("Ask me to continue");
+  expect(botMessages[0].data.content_blocks).toContainEqual(expect.objectContaining({
+    type: "turn_outcome_marker",
+    kind: "tool_budget",
+    draft_recovered: true,
+    classifier: "tool_history_pressure",
+    tool_budget_exceeded: true,
+    tool_steps_used: 65,
+    tool_steps_budget: 64,
+  }));
+});
+
 test("processChat includes the last action summary in visible failure fallbacks", async () => {
   const ws = createTempWorkspace("piclaw-web-channel-");
   cleanupWorkspace = ws.cleanup;
