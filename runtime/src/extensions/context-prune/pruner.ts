@@ -43,7 +43,7 @@ function collectSummarizedToolCalls(branchEntries: any[] | undefined): {
 }
 
 function compactToolArgs(args: unknown): string {
-  let raw = "";
+  let raw: string;
   try {
     raw = JSON.stringify(args ?? {});
   } catch {

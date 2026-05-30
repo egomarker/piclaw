@@ -40,6 +40,13 @@ interface AuthStorageLike {
       onPrompt: (prompt: { message: string; placeholder?: string }) => Promise<string>;
       onProgress?: (message: string) => void;
       onManualCodeInput?: () => Promise<string>;
+      onSelect?: (prompt: { message: string; options: Array<{ id: string; label: string }> }) => Promise<string>;
+      onDeviceCode?: (device: {
+        userCode: string;
+        verificationUri: string;
+        intervalSeconds?: number;
+        expiresInSeconds?: number;
+      }) => void;
     },
   ): Promise<void>;
   reload(): void;
@@ -217,19 +224,27 @@ function buildCard2ApiKey(def: ProviderDef): Record<string, unknown> {
   };
 }
 
-function buildCard2OAuth(def: ProviderDef, authUrl: string, instructions: string): Record<string, unknown> {
+function buildCard2OAuth(def: ProviderDef, authUrl: string, instructions: string, deviceCode?: string): Record<string, unknown> {
+  const isOpenAIDeviceCodeLogin = def.id === "openai-codex" && Boolean(deviceCode);
   const body: unknown[] = [
     { type: "TextBlock", text: `${def.name} — OAuth Login`, weight: "Bolder", size: "Medium" },
     { type: "TextBlock", text: "1. Click below to open the login page in your browser.", wrap: true },
   ];
-  if (instructions) {
+  if (isOpenAIDeviceCodeLogin) {
+    body.push(
+      { type: "TextBlock", text: instructions, wrap: true, isSubtle: true },
+      { type: "TextBlock", text: deviceCode || "", wrap: true, weight: "Bolder", fontType: "Monospace" },
+    );
+  } else if (instructions) {
     body.push({ type: "TextBlock", text: instructions, wrap: true, isSubtle: true });
   }
-  body.push(
-    { type: "TextBlock", text: "2. Complete login, then click Check below.", wrap: true, spacing: "medium" },
-    { type: "TextBlock", text: "3. If the callback didn't work, paste the redirect URL:", wrap: true },
-    { type: "Input.Text", id: "redirect_url", label: "Redirect URL (if needed)", placeholder: "http://localhost:..." },
-  );
+  body.push({ type: "TextBlock", text: "2. Complete login, then click Check below.", wrap: true, spacing: "medium" });
+  if (!isOpenAIDeviceCodeLogin) {
+    body.push(
+      { type: "TextBlock", text: "3. If the callback didn't work, paste the redirect URL:", wrap: true },
+      { type: "Input.Text", id: "redirect_url", label: "Redirect URL (if needed)", placeholder: "http://localhost:..." },
+    );
+  }
 
   return {
     type: "adaptive_card",
@@ -403,9 +418,10 @@ function resolveOAuthManualInput(providerId: string, redirectUrl: string): boole
 async function startOAuthBackground(
   authStorage: AuthStorageLike,
   providerId: string,
-): Promise<{ authUrl: string; instructions: string } | null> {
+): Promise<{ authUrl: string; instructions: string; deviceCode?: string } | null> {
   let authUrl = "";
   let instructions = "";
+  let deviceCode: string | undefined;
   let authReceived: (() => void) | null = null;
   const authReady = new Promise<void>((resolve) => { authReceived = resolve; });
 
@@ -420,6 +436,17 @@ async function startOAuthBackground(
     onAuth: (info) => { authUrl = info.url; instructions = info.instructions || ""; authReceived?.(); },
     onProgress: () => {},
     onPrompt: async () => "",
+    onSelect: async (prompt) => prompt.options.find((option) => option.id === "device_code")?.id || prompt.options[0]?.id || "",
+    onDeviceCode: (device) => {
+      if (providerId === "openai-codex") {
+        instructions = `Open ${device.verificationUri} and enter code:`;
+        deviceCode = device.userCode;
+      } else {
+        instructions = `Open ${device.verificationUri} and enter code ${device.userCode}.`;
+      }
+      authUrl = device.verificationUri;
+      authReceived?.();
+    },
     onManualCodeInput: () => new Promise<string>((resolve, reject) => {
       pendingOAuthInputs.set(providerId, { resolve, reject });
       // Safety timeout — if no card submission arrives within 5 minutes, reject.
@@ -448,7 +475,7 @@ async function startOAuthBackground(
   const timeout = new Promise<void>((resolve) => setTimeout(resolve, 10_000));
   await Promise.race([authReady, timeout]);
 
-  return authUrl ? { authUrl, instructions } : null;
+  return authUrl ? { authUrl, instructions, deviceCode } : null;
 }
 
 // ── Step handlers ───────────────────────────────────────────────
@@ -472,7 +499,7 @@ async function handleStep1(
     if (def.hasOAuth) {
       const result = await startOAuthBackground(authStorage, providerId);
       if (!result) return { status: "error", message: `Could not start OAuth for **${def.name}**.` };
-      return { status: "success", message: `OAuth login for ${def.name}`, contentBlocks: [buildCard2OAuth(def, result.authUrl, result.instructions)] };
+      return { status: "success", message: `OAuth login for ${def.name}`, contentBlocks: [buildCard2OAuth(def, result.authUrl, result.instructions, result.deviceCode)] };
     }
     if (def.hasApiKey) return { status: "success", message: `Enter API key for ${def.name}`, contentBlocks: [buildCard2ApiKey(def)] };
     if (def.isCustom) return { status: "success", message: `Configure ${def.name}`, contentBlocks: [buildCard2Config(def)] };
@@ -498,7 +525,7 @@ async function handleStep1Method(
     if (!def.hasOAuth) return { status: "error", message: `**${def.name}** doesn't support OAuth.` };
     const result = await startOAuthBackground(authStorage, providerId);
     if (!result) return { status: "error", message: `Could not start OAuth for **${def.name}**.` };
-    return { status: "success", message: `OAuth login for ${def.name}`, contentBlocks: [buildCard2OAuth(def, result.authUrl, result.instructions)] };
+    return { status: "success", message: `OAuth login for ${def.name}`, contentBlocks: [buildCard2OAuth(def, result.authUrl, result.instructions, result.deviceCode)] };
   }
   if (action === "api_key") {
     if (!def.hasApiKey) return { status: "error", message: `**${def.name}** doesn't support API key auth.` };

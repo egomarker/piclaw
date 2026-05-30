@@ -2,6 +2,7 @@
  * smart-compaction.test.ts – unit tests for selective-fragment compaction.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as actualCodingAgent from "../../../node_modules/@earendil-works/pi-coding-agent/dist/index.js";
 
 // We test the module by importing its factory and invoking it with a
 // mock ExtensionAPI, then firing the session_before_compact handler.
@@ -112,46 +113,52 @@ function buildLargeConversation(messageCount: number) {
 // Mock setup
 // ---------------------------------------------------------------------------
 
-// Mock completeSimple before importing the module under test
-vi.mock("@earendil-works/pi-ai", () => ({
-  completeSimple: vi.fn(),
-}));
+// Mock the compaction stream function rather than the package-global pi-ai
+// module. Bun's test-runner mock registry is process-wide, so package-level
+// streamSimple mocks can leak into later agent-loop tests.
+const completeSimple = vi.fn();
+const compactionStreamFn = (model: any, context: any, options: any) => ({
+  async *[Symbol.asyncIterator]() {},
+  result: () => completeSimple(model, context, options),
+});
 
 // Mock convertToLlm with the upstream behaviors we care about in these tests.
-vi.mock("@earendil-works/pi-coding-agent", () => ({
-  convertToLlm: (msgs: any[]) => msgs.flatMap((m: any) => {
-    switch (m.role) {
-      case "compactionSummary":
-        return [{
-          role: "user",
-          content: [{ type: "text", text: `The conversation history before this point was compacted into the following summary:\n\n<summary>\n${m.summary}\n</summary>` }],
-          timestamp: m.timestamp,
-        }];
-      case "branchSummary":
-        return [{
-          role: "user",
-          content: [{ type: "text", text: `The following is a summary of a branch that this conversation came back from:\n\n<summary>\n${m.summary}\n</summary>` }],
-          timestamp: m.timestamp,
-        }];
-      case "bashExecution":
-        return [{
-          role: "user",
-          content: [{ type: "text", text: `Ran \`${m.command}\`\n\n${m.output ?? "(no output)"}` }],
-          timestamp: m.timestamp,
-        }];
-      case "custom":
-        return [{
-          role: "user",
-          content: typeof m.content === "string" ? [{ type: "text", text: m.content }] : m.content,
-          timestamp: m.timestamp,
-        }];
-      default:
-        return [m];
-    }
-  }),
-}));
+vi.mock("@earendil-works/pi-coding-agent", () => {
+  return {
+    ...actualCodingAgent,
+    convertToLlm: (msgs: any[]) => msgs.flatMap((m: any) => {
+      switch (m.role) {
+        case "compactionSummary":
+          return [{
+            role: "user",
+            content: [{ type: "text", text: `The conversation history before this point was compacted into the following summary:\n\n<summary>\n${m.summary}\n</summary>` }],
+            timestamp: m.timestamp,
+          }];
+        case "branchSummary":
+          return [{
+            role: "user",
+            content: [{ type: "text", text: `The following is a summary of a branch that this conversation came back from:\n\n<summary>\n${m.summary}\n</summary>` }],
+            timestamp: m.timestamp,
+          }];
+        case "bashExecution":
+          return [{
+            role: "user",
+            content: [{ type: "text", text: `Ran \`${m.command}\`\n\n${m.output ?? "(no output)"}` }],
+            timestamp: m.timestamp,
+          }];
+        case "custom":
+          return [{
+            role: "user",
+            content: typeof m.content === "string" ? [{ type: "text", text: m.content }] : m.content,
+            timestamp: m.timestamp,
+          }];
+        default:
+          return [m];
+      }
+    }),
+  };
+});
 
-import { completeSimple } from "@earendil-works/pi-ai";
 import {
   buildProgressiveCompactionChunks,
   buildTargetContextCompactionInstructions,
@@ -161,7 +168,7 @@ import {
   estimatePostCompactionFit,
   getProgressiveCompactionBudget,
   getSafeCompactionMaxTokens,
-  smartCompaction,
+  createSmartCompactionExtension,
 } from "../../src/extensions/smart-compaction.js";
 import { consumeCompactionCancellationReason } from "../../src/agent-pool/compaction-cancel-reason.js";
 
@@ -176,7 +183,7 @@ describe("smart-compaction", () => {
         if (eventName === "session_before_compact") handler = fn;
       },
     };
-    smartCompaction(mockPi as any);
+    createSmartCompactionExtension({ streamFn: compactionStreamFn })(mockPi as any);
     vi.clearAllMocks();
   });
 
@@ -1126,8 +1133,8 @@ describe("smart-compaction", () => {
         },
       };
 
-      smartCompaction(mockPi1 as any);
-      smartCompaction(mockPi2 as any);
+      createSmartCompactionExtension({ streamFn: compactionStreamFn })(mockPi1 as any);
+      createSmartCompactionExtension({ streamFn: compactionStreamFn })(mockPi2 as any);
 
       // Both handlers exist and are independent function references
       expect(handler1).toBeTypeOf("function");

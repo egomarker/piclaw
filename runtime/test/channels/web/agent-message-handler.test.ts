@@ -191,8 +191,9 @@ describe("web agent message handler", () => {
     expect(broadcasts.some((entry) => entry.event === "new_post")).toBe(false);
   });
 
-  test("defers /compact while the current session is still active", async () => {
+  test("runs /compact immediately while the current session is still active", async () => {
     const queuedFollowups: Array<{ chatJid: string; content: string }> = [];
+    const sentMessages: Array<{ chatJid: string; content: string; options: unknown }> = [];
     let applyCalls = 0;
     let storeMessageCalls = 0;
 
@@ -200,9 +201,10 @@ describe("web agent message handler", () => {
       agentPool: {
         isStreaming: () => false,
         isActive: () => true,
-        applyControlCommand: async () => {
+        applyControlCommand: async (_chatJid: string, command: { type: string; raw: string }) => {
           applyCalls += 1;
-          return { status: "error", message: "should not run immediately" };
+          expect(command.type).toBe("compact");
+          return { status: "success", message: "Compaction requested immediately." };
         },
       },
       json: (payload: unknown, status = 200) =>
@@ -216,11 +218,19 @@ describe("web agent message handler", () => {
       },
       getQueuedFollowupCount: () => 0,
       broadcastEvent: () => {},
+      updateAgentStatus: () => {},
       storeMessage: () => {
         storeMessageCalls += 1;
-        return null;
+        return {
+          id: 456,
+          timestamp: "2026-03-14T21:10:00.000Z",
+          data: { thread_id: null },
+          content: "/compact keep current work",
+        };
       },
-      sendMessage: async () => {},
+      sendMessage: async (chatJid: string, content: string, options: unknown) => {
+        sentMessages.push({ chatJid, content, options });
+      },
     } as any;
 
     const req = new Request("https://example.com/agent/default/message", {
@@ -232,13 +242,15 @@ describe("web agent message handler", () => {
     const response = await handleAgentMessage(channel, req, "/agent/default/message", "web:default", "default");
     expect(response.status).toBe(201);
     const body = await response.json();
-    expect(body.queued).toBe("followup");
-    expect(queuedFollowups).toEqual([{ chatJid: "web:default", content: "/compact keep current work" }]);
-    expect(applyCalls).toBe(0);
-    expect(storeMessageCalls).toBe(0);
+    expect(body.queued).toBeUndefined();
+    expect(body.command?.status).toBe("success");
+    expect(queuedFollowups).toHaveLength(0);
+    expect(applyCalls).toBe(1);
+    expect(storeMessageCalls).toBe(1);
+    expect(sentMessages[0]?.content).toBe("Compaction requested immediately.");
   });
 
-  test("defers /model while the current session is still active", async () => {
+  test("runs /model immediately while the current session is still active", async () => {
     const queuedFollowups: Array<{ chatJid: string; content: string }> = [];
     let applyCalls = 0;
     let storeMessageCalls = 0;
@@ -247,9 +259,10 @@ describe("web agent message handler", () => {
       agentPool: {
         isStreaming: () => false,
         isActive: () => true,
-        applyControlCommand: async () => {
+        applyControlCommand: async (_chatJid: string, command: { type: string; raw: string }) => {
           applyCalls += 1;
-          return { status: "error", message: "should not run immediately" };
+          expect(command.type).toBe("model");
+          return { status: "success", message: "Model set.", model_label: "openai/gpt-4.1" };
         },
       },
       json: (payload: unknown, status = 200) =>
@@ -263,6 +276,7 @@ describe("web agent message handler", () => {
       },
       getQueuedFollowupCount: () => 0,
       broadcastEvent: () => {},
+      retryFailedOnModelSwitch: () => false,
       storeMessage: () => {
         storeMessageCalls += 1;
         return null;
@@ -277,15 +291,17 @@ describe("web agent message handler", () => {
     });
 
     const response = await handleAgentMessage(channel, req, "/agent/default/message", "web:default", "default");
-    expect(response.status).toBe(201);
+    expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.queued).toBe("followup");
-    expect(queuedFollowups).toEqual([{ chatJid: "web:default", content: "/model openai/gpt-4.1" }]);
-    expect(applyCalls).toBe(0);
+    expect(body.queued).toBeUndefined();
+    expect(body.ui_only).toBe(true);
+    expect(body.command?.status).toBe("success");
+    expect(queuedFollowups).toHaveLength(0);
+    expect(applyCalls).toBe(1);
     expect(storeMessageCalls).toBe(0);
   });
 
-  test("defers /model --compact while the current session is still active", async () => {
+  test("runs /model --compact immediately while the current session is still active", async () => {
     const queuedFollowups: Array<{ chatJid: string; content: string }> = [];
     let applyCalls = 0;
     let storeMessageCalls = 0;
@@ -294,9 +310,11 @@ describe("web agent message handler", () => {
       agentPool: {
         isStreaming: () => false,
         isActive: () => true,
-        applyControlCommand: async () => {
+        applyControlCommand: async (_chatJid: string, command: { type: string; raw: string; compact?: boolean }) => {
           applyCalls += 1;
-          return { status: "error", message: "should not run immediately" };
+          expect(command.type).toBe("model");
+          expect(command.compact).toBe(true);
+          return { status: "success", message: "Compacted and switched.", model_label: "openai/gpt-4.1" };
         },
       },
       json: (payload: unknown, status = 200) =>
@@ -310,6 +328,7 @@ describe("web agent message handler", () => {
       },
       getQueuedFollowupCount: () => 0,
       broadcastEvent: () => {},
+      retryFailedOnModelSwitch: () => false,
       storeMessage: () => {
         storeMessageCalls += 1;
         return null;
@@ -324,11 +343,13 @@ describe("web agent message handler", () => {
     });
 
     const response = await handleAgentMessage(channel, req, "/agent/default/message", "web:default", "default");
-    expect(response.status).toBe(201);
+    expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.queued).toBe("followup");
-    expect(queuedFollowups).toEqual([{ chatJid: "web:default", content: "/model openai/gpt-4.1 --compact" }]);
-    expect(applyCalls).toBe(0);
+    expect(body.queued).toBeUndefined();
+    expect(body.ui_only).toBe(true);
+    expect(body.command?.status).toBe("success");
+    expect(queuedFollowups).toHaveLength(0);
+    expect(applyCalls).toBe(1);
     expect(storeMessageCalls).toBe(0);
   });
 
@@ -463,6 +484,73 @@ describe("web agent message handler", () => {
     expect(broadcasts.some((entry) => entry.event === "new_post")).toBe(true);
     expect(getChatCursor(chatJid)).toBe(inflightTimestamp);
     expect(getInflightMessageId(chatJid)).toBe("active-message-id");
+  });
+
+  test("runs extension-style slash commands immediately while the current session is active", async () => {
+    initDatabase();
+
+    const queuedFollowups: Array<{ chatJid: string; content: string }> = [];
+    const sentMessages: Array<{ chatJid: string; content: string; options: unknown }> = [];
+    const broadcasts: Array<{ event: string; payload: unknown }> = [];
+    let applySlashCalls = 0;
+    let storeMessageCalls = 0;
+
+    const channel = {
+      lastCommandInteractionId: null,
+      agentPool: {
+        isStreaming: () => false,
+        isActive: () => true,
+        applySlashCommand: async (_chatJid: string, rawText: string) => {
+          applySlashCalls += 1;
+          expect(rawText).toBe("/custom-extension do it");
+          return { status: "success", message: "extension command ran" };
+        },
+      },
+      json: (payload: unknown, status = 200) =>
+        new Response(JSON.stringify(payload), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        }),
+      enqueueQueuedFollowupItem: (chatJid: string, _rowId: number, content: string) => {
+        queuedFollowups.push({ chatJid, content });
+        return 222;
+      },
+      getQueuedFollowupCount: () => 0,
+      broadcastEvent: (event: string, payload: unknown) => {
+        broadcasts.push({ event, payload });
+      },
+      updateAgentStatus: () => {},
+      storeMessage: () => {
+        storeMessageCalls += 1;
+        return {
+          id: 222,
+          timestamp: "2026-03-14T21:15:00.000Z",
+          data: { thread_id: null },
+          content: "/custom-extension do it",
+        };
+      },
+      sendMessage: async (chatJid: string, content: string, options: unknown) => {
+        sentMessages.push({ chatJid, content, options });
+      },
+    } as any;
+
+    const req = new Request("https://example.com/agent/default/message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "/custom-extension do it" }),
+    });
+
+    const response = await handleAgentMessage(channel, req, "/agent/default/message", "web:default", "default");
+    expect(response.status).toBe(201);
+
+    const body = await response.json();
+    expect(body.queued).toBeUndefined();
+    expect(body.command?.status).toBe("success");
+    expect(queuedFollowups).toHaveLength(0);
+    expect(applySlashCalls).toBe(1);
+    expect(storeMessageCalls).toBe(1);
+    expect(sentMessages[0]?.content).toBe("extension command ran");
+    expect(broadcasts.some((entry) => entry.event === "new_post")).toBe(true);
   });
 
   test("surfaces a successful /session-rotate result immediately when the chat is idle", async () => {

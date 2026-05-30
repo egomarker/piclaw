@@ -19,6 +19,7 @@ export function TimelineMenu({
     workspaceOpen,
     toggleWorkspace,
     chatOnlyMode,
+    openEditor,
     onOpenTerminalTab,
     onOpenVncTab,
     onToggleTerminal,
@@ -202,7 +203,7 @@ export function TimelineMenu({
                         ${recent.map((path) => {
                             const label = path.split('/').pop() || path;
                             return html`
-                                <button class="workspace-menu-item workspace-menu-recent-item" role="menuitem" title=${path} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:pane-open', { detail: { path, target: 'tab' } })))}>${label}</button>
+                                <button class="workspace-menu-item workspace-menu-recent-item" role="menuitem" title=${path} onClick=${() => run(() => openEditor?.(path))}>${label}</button>
                             `;
                         })}
                     `;

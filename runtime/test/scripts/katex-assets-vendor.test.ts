@@ -52,7 +52,7 @@ test("katex asset workflow vendors rewritten CSS + woff2 fonts with provenance m
   expect(meta.output_files.some((file) => file.package_path === "dist/fonts/KaTeX_Size4-Regular.woff2")).toBe(true);
 
   expect(css).toContain(`.katex .katex-version:after{content:"${katexPackage.version}"}`);
-  expect(css).toContain("url(../../static/fonts/KaTeX_Main-Regular.woff2) format(\"woff2\")");
+  expect(css).toContain("url(../../static/common/fonts/KaTeX_Main-Regular.woff2) format(\"woff2\")");
   expect(css).not.toContain("url(fonts/");
   expect(css).not.toContain('.woff) format("woff")');
   expect(css).not.toContain('.ttf) format("truetype")');

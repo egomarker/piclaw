@@ -271,7 +271,7 @@ export function noteCompactionSuccess(
   if (countSuccess) {
     const warningThreshold = getCompactionRuntimeConfig().warningThreshold;
     if (shouldEmitRepeatedCompactionWarning(previousWindow.warnedCount, nextSuccessCount, warningThreshold)) {
-      let warnedWindow = nextWindow;
+      let warnedWindow: typeof nextWindow;
       try {
         warnedWindow = setChatAutoCompactionWindow(chatJid, {
           ...nextWindow,

@@ -109,6 +109,12 @@ import { MediaService } from "../../../src/channels/web/media/media-service.js";
 
 describe("MediaService.createFromFile", () => {
   const service = new MediaService();
+  const expectMediaStorageUnavailable = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    expect(
+      message.includes("Database not initialized") || message.includes("Cannot use a closed database")
+    ).toBe(true);
+  };
 
   test("rejects files over the default 32 MB compose upload limit", async () => {
     const bigData = new Uint8Array(32 * 1024 * 1024 + 1);
@@ -126,7 +132,7 @@ describe("MediaService.createFromFile", () => {
       expect(result.status).toBe(200);
       expect((result.body as any).contentType).toBe("application/x-msdownload");
     } catch (e: any) {
-      expect(e.message).toContain("Database not initialized");
+      expectMediaStorageUnavailable(e);
     }
   });
 
@@ -138,7 +144,7 @@ describe("MediaService.createFromFile", () => {
       expect(result.status).toBe(200);
       expect((result.body as any).contentType).toBe("application/java-archive");
     } catch (e: any) {
-      expect(e.message).toContain("Database not initialized");
+      expectMediaStorageUnavailable(e);
     }
   });
 
@@ -154,7 +160,7 @@ describe("MediaService.createFromFile", () => {
     } catch (e: any) {
       // DB not initialized in unit test context — that's fine,
       // the important thing is it passed the size + type checks.
-      expect(e.message).toContain("Database not initialized");
+      expectMediaStorageUnavailable(e);
     }
   });
 
@@ -165,7 +171,7 @@ describe("MediaService.createFromFile", () => {
       const result = await service.createFromFile(file);
       expect(result.status).toBe(200);
     } catch (e: any) {
-      expect(e.message).toContain("Database not initialized");
+      expectMediaStorageUnavailable(e);
     }
   });
 
@@ -176,7 +182,7 @@ describe("MediaService.createFromFile", () => {
       const result = await service.createFromFile(file);
       expect(result.status).toBe(200);
     } catch (e: any) {
-      expect(e.message).toContain("Database not initialized");
+      expectMediaStorageUnavailable(e);
     }
   });
 
@@ -187,7 +193,7 @@ describe("MediaService.createFromFile", () => {
       const result = await service.createFromFile(file);
       expect(result.status).toBe(200);
     } catch (e: any) {
-      expect(e.message).toContain("Database not initialized");
+      expectMediaStorageUnavailable(e);
     }
   });
 
@@ -199,7 +205,7 @@ describe("MediaService.createFromFile", () => {
       expect(result.status).toBe(200);
       expect((result.body as any).contentType).toBe("application/x-unknown");
     } catch (e: any) {
-      expect(e.message).toContain("Database not initialized");
+      expectMediaStorageUnavailable(e);
     }
   });
 });

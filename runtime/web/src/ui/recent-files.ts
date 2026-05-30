@@ -2,7 +2,12 @@ export const RECENT_FILES_KEY = 'piclaw_recent_files';
 export const MAX_RECENT_FILES = 5;
 
 function isIgnoredPath(path: string): boolean {
-  return path.startsWith('__terminal') || path.startsWith('__vnc');
+  const normalizedPath = path.trim();
+  const legacyPath = normalizedPath.replace(/^\/+/, '');
+  return legacyPath.startsWith('__terminal')
+    || legacyPath.startsWith('__vnc')
+    || normalizedPath.startsWith('piclaw://terminal')
+    || normalizedPath.startsWith('piclaw://vnc');
 }
 
 function normalizeRecentFiles(value: unknown): string[] {

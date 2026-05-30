@@ -394,6 +394,33 @@ test("login config writes stay inside the overridden pi-agent dir", async () => 
   expect(modelsJson.providers?.ollama?.models?.map((entry: { id: string }) => entry.id)).toEqual(["llama3:latest", "qwen3:latest"]);
 });
 
+test("abort returns when session abort remains pending", async () => {
+  const ws = getTestWorkspace();
+  restoreEnv = setEnv({
+    PICLAW_WORKSPACE: ws.workspace,
+    PICLAW_STORE: ws.store,
+    PICLAW_DATA: ws.data,
+    PICLAW_ABORT_SETTLE_TIMEOUT_MS: "5",
+  });
+
+  const applyControlCommand = await getControl();
+  const session = new TestAgentControlSession(ws.workspace, registry);
+  session.abort = async () => {
+    session.abortCalls += 1;
+    await new Promise(() => {});
+  };
+  const runtime = createTestSessionRuntime(session);
+  const startedAt = Date.now();
+
+  const result = await applyControlCommand(runtime as any, registry, { type: "abort", raw: "/abort" });
+
+  expect(Date.now() - startedAt).toBeLessThan(250);
+  expect(result.status).toBe("success");
+  expect(result.message).toContain("Aborted current response.");
+  expect(result.message).toContain("Abort is still settling after 5ms.");
+  expect(session.abortCalls).toBe(1);
+});
+
 test("login refreshes model registry before activating newly authenticated provider models", async () => {
   const ws = getTestWorkspace();
   restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
@@ -426,6 +453,82 @@ test("login refreshes model registry before activating newly authenticated provi
   expect(result.model_label).toBe("github-copilot/gpt-4.1");
   expect(session.model?.provider).toBe("github-copilot");
   expect(session.model?.id).toBe("gpt-4.1");
+});
+
+test("OpenAI Codex OAuth defaults to device code and keeps browser fallback", async () => {
+  const ws = getTestWorkspace();
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+
+  const applyControlCommand = await getControl();
+
+  async function startOpenAiCodexLogin(options: Array<{ id: string; label: string }>) {
+    let selectedMethod: string | undefined;
+    const authStorage = {
+      getOAuthProviders: () => [{ id: "openai-codex", name: "ChatGPT Plus/Pro (Codex Subscription)", usesCallbackServer: true }],
+      get: () => undefined,
+      set: () => {},
+      reload: () => {},
+      login: async (_providerId: string, callbacks: any) => {
+        selectedMethod = await callbacks.onSelect({
+          message: "Select OpenAI Codex login method:",
+          options,
+        });
+        if (selectedMethod === "device_code") {
+          callbacks.onDeviceCode({
+            userCode: "ABCD-EFGH",
+            verificationUri: "https://auth.openai.com/codex/device",
+            intervalSeconds: 5,
+            expiresInSeconds: 900,
+          });
+        } else {
+          callbacks.onAuth({
+            url: "http://localhost:1455/auth/callback?code=fake",
+            instructions: "A browser window should open. Complete login to finish.",
+          });
+        }
+      },
+    };
+    const loginRegistry = createTestModelRegistry(
+      [{ provider: "openai-codex", id: "gpt-5.5", name: "GPT 5.5", reasoning: true }],
+      authStorage,
+    );
+    const session = new TestAgentControlSession(ws.workspace, loginRegistry);
+    const runtime = createTestSessionRuntime(session);
+    const result = await applyControlCommand(runtime as any, loginRegistry, {
+      type: "login",
+      provider: `__step1 ${JSON.stringify({ provider: "openai-codex" })}`,
+      raw: "/login __step1",
+    });
+    const card = result.contentBlocks?.[0] as any;
+    const body = card?.payload?.body ?? [];
+    const actions = card?.payload?.actions ?? [];
+    return {
+      result,
+      selectedMethod,
+      body,
+      openUrl: actions.find((action: any) => action.type === "Action.OpenUrl")?.url,
+      hasRedirectInput: body.some((item: any) => item.type === "Input.Text" && item.id === "redirect_url"),
+      deviceCodeBlock: body.find((item: any) => item.type === "TextBlock" && item.text === "ABCD-EFGH"),
+    };
+  }
+
+  const deviceCode = await startOpenAiCodexLogin([
+    { id: "browser", label: "Browser login (default)" },
+    { id: "device_code", label: "Device code login (headless)" },
+  ]);
+  expect(deviceCode.result.status).toBe("success");
+  expect(deviceCode.selectedMethod).toBe("device_code");
+  expect(deviceCode.openUrl).toBe("https://auth.openai.com/codex/device");
+  expect(deviceCode.deviceCodeBlock).toMatchObject({ fontType: "Monospace", weight: "Bolder" });
+  expect(deviceCode.hasRedirectInput).toBe(false);
+
+  const browserFallback = await startOpenAiCodexLogin([
+    { id: "browser", label: "Browser login (default)" },
+  ]);
+  expect(browserFallback.result.status).toBe("success");
+  expect(browserFallback.selectedMethod).toBe("browser");
+  expect(browserFallback.openUrl).toBe("http://localhost:1455/auth/callback?code=fake");
+  expect(browserFallback.hasRedirectInput).toBe(true);
 });
 
 test("agent control cycle and agent identity commands", async () => {

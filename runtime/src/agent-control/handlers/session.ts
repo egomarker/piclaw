@@ -7,7 +7,7 @@
  * Consumers: agent-control-handlers.ts dispatches to these handlers.
  */
 
-import { existsSync, appendFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { AgentSession, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import type { AgentControlCommand, AgentControlResult } from "../agent-control-types.js";
@@ -62,11 +62,10 @@ export async function handleNewSession(session: AgentSession, runtime: AgentSess
  * and any initial entries so the file is discoverable by session pickers
  * and `continueRecent()` after pool eviction.
  *
- * Note: The SDK's SessionManager._persist() will later append all fileEntries
- * again when the first assistant message arrives (since its internal `flushed`
- * flag resets on each non-assistant append). This creates benign duplicate
- * entries in the file that are safely deduplicated by ID on reload and cleaned
- * up on the next compaction/rewrite.
+ * Note: pi-coding-agent 0.76 writes the initial persisted file with `wx`
+ * when the first assistant message arrives. If we create the file eagerly, we
+ * must also mark the manager as flushed so later SDK appends use append mode
+ * instead of trying to exclusively create an already-existing file.
  */
 function ensureSessionFileOnDisk(session: AgentSession): void {
   const sm = session.sessionManager;
@@ -79,7 +78,8 @@ function ensureSessionFileOnDisk(session: AgentSession): void {
   const dir = dirname(filePath);
   mkdirSync(dir, { recursive: true });
   // Write only the header — minimal content for isValidSessionFile() to pass.
-  appendFileSync(filePath, JSON.stringify(header) + "\n");
+  writeFileSync(filePath, JSON.stringify(header) + "\n");
+  (sm as unknown as { flushed?: boolean }).flushed = true;
 }
 
 /** Handle /switch-session: switch to an existing session by path. */

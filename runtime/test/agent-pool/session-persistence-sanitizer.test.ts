@@ -46,7 +46,7 @@ describe("session persistence sanitizer", () => {
     console.warn = () => {};
     const tempRoot = mkdtempSync(join(tmpdir(), "piclaw-session-sanitize-resume-"));
     const sessionDir = join(tempRoot, "session");
-    const workspaceDir = "/workspace";
+    const workspaceDir = process.env.PICLAW_WORKSPACE || "/workspace";
     const authStorage = AuthStorage.create();
     const modelRegistry = ModelRegistry.inMemory(authStorage);
     const settingsManager = SettingsManager.create(workspaceDir, getAgentDir());
@@ -93,7 +93,7 @@ describe("session persistence sanitizer", () => {
     console.warn = () => {};
     const tempRoot = mkdtempSync(join(tmpdir(), "piclaw-session-sanitize-append-"));
     const sessionDir = join(tempRoot, "session");
-    const workspaceDir = "/workspace";
+    const workspaceDir = process.env.PICLAW_WORKSPACE || "/workspace";
     const authStorage = AuthStorage.create();
     const modelRegistry = ModelRegistry.inMemory(authStorage);
     const settingsManager = SettingsManager.create(workspaceDir, getAgentDir());

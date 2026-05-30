@@ -8,7 +8,7 @@
  *
  * Libraries:
  *   - docx-preview  — .docx → HTML rendering
- *   - xlsx (SheetJS) — .xlsx/.xls/.csv parsing → HTML table
+ *   - @e965/xlsx (SheetJS fork) — .xlsx/.xls/.csv parsing → HTML table
  *   - chart.js       — peer dependency for pptxviewjs chart rendering
  *   - pptxviewjs     — .pptx → canvas-based slide rendering
  *   - jszip          — peer dependency for pptxviewjs
@@ -48,7 +48,7 @@ const VENDOR_ENTRIES: VendorEntry[] = [
     outputFile: `${OUTPUT_DIR}/docx-preview.min.js`,
   },
   {
-    packageName: "xlsx",
+    packageName: "@e965/xlsx",
     packagePath: "dist/xlsx.full.min.js",
     outputFile: `${OUTPUT_DIR}/xlsx.full.min.js`,
   },

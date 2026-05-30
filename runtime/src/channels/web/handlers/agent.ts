@@ -799,30 +799,6 @@ export async function handleAgentMessage(
     }
   }
 
-  if (isModelControlCommand(command) && (isActive || hasQueuedBacklog) && (requestMode === "queue" || requestMode === "auto")) {
-    // Model/thinking changes are session mutations. Queue them behind active
-    // turns and existing backlog so a stale browser/model-picker request cannot
-    // silently reroute the currently running or already queued work. The queued
-    // item is server-owned and will drain even if the browser disconnects.
-    return queueDeferredFollowup(content, {
-      source: "web.model_command",
-      browserContext: browserObservability,
-      wakeIfIdle: hasQueuedBacklog && !isActive,
-    });
-  }
-
-  const isCompactionControlCommand = command?.type === "compact" || (command?.type === "model" && Boolean(command.compact));
-  if (isCompactionControlCommand && (isActive || hasQueuedBacklog) && (requestMode === "queue" || requestMode === "auto")) {
-    // session.compact() aborts the current agent operation before rewriting the
-    // branch. Queue explicit compaction requests behind the active turn/backlog
-    // so they operate on the complete current session instead of racing it.
-    return queueDeferredFollowup(content, {
-      source: command?.type === "compact" ? "web.compact_command" : "web.model_compact_command",
-      browserContext: browserObservability,
-      wakeIfIdle: hasQueuedBacklog && !isActive,
-    });
-  }
-
   if (command?.type === "steer" && isStreaming) {
     const steerText = (command.message || "").trim();
     if (steerText) {
@@ -969,6 +945,7 @@ export async function handleAgentMessage(
     !command &&
     !themeCommand &&
     !metersCommand &&
+    !isSlashCommandInvocation(trimmed) &&
     (isActive || hasQueuedBacklog) &&
     (requestMode === "queue" || requestMode === "auto");
 
