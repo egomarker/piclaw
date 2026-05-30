@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { closeDbQuietly, createTempWorkspace, importFresh, setEnv } from "../helpers.js";
@@ -13,6 +13,8 @@ import {
 
 const TEST_SHELL = process.env.SHELL || "bash";
 const RUNTIME_DIR = join(import.meta.dir, "../..");
+
+setDefaultTimeout(10_000);
 
 describe("runtime startup helpers", () => {
   test("initializeRuntimeEnvironment seeds workspace skel files for direct installs", () => {

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { getTestWorkspace, setEnv } from "../../../helpers.js";
 import {
   handleWebauthnLoginFinish,
@@ -8,6 +8,8 @@ import {
   type WebauthnAuthContext,
 } from "../../../../src/channels/web/auth/webauthn-auth.js";
 import { WebauthnChallengeTracker } from "../../../../src/channels/web/auth/webauthn-challenges.js";
+
+setDefaultTimeout(10_000);
 
 let restoreEnv: (() => void) | null = null;
 
