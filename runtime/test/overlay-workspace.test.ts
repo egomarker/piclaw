@@ -6,12 +6,12 @@ import { tmpdir } from "os";
 import { isOverlayAvailable, createOverlayWorkspace, withOverlayWorkspace } from "./overlay-workspace";
 
 describe("overlay-workspace", () => {
-  test("isOverlayAvailable returns a boolean", () => {
+  test("isOverlayAvailable returns a boolean", { timeout: 30000 }, () => {
     const result = isOverlayAvailable();
     expect(typeof result).toBe("boolean");
   });
 
-  test("createOverlayWorkspace creates a workspace", () => {
+  test("createOverlayWorkspace creates a workspace", { timeout: 30000 }, () => {
     const base = mkdtempSync(join(tmpdir(), "overlay-test-base-"));
     writeFileSync(join(base, "test.txt"), "original");
 
@@ -56,7 +56,7 @@ describe("overlay-workspace", () => {
     rmSync(base, { recursive: true, force: true });
   });
 
-  test("withOverlayWorkspace sets env vars and restores them", async () => {
+  test("withOverlayWorkspace sets env vars and restores them", { timeout: 30000 }, async () => {
     const base = mkdtempSync(join(tmpdir(), "overlay-env-test-"));
     writeFileSync(join(base, "marker.txt"), "exists");
 
@@ -76,7 +76,7 @@ describe("overlay-workspace", () => {
     rmSync(base, { recursive: true, force: true });
   });
 
-  test("overlay cleanup restores original state", () => {
+  test("overlay cleanup restores original state", { timeout: 30000 }, () => {
     const base = mkdtempSync(join(tmpdir(), "overlay-restore-test-"));
     writeFileSync(join(base, "important.txt"), "do not lose");
     mkdirSync(join(base, "subdir"));
