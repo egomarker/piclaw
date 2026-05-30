@@ -148,7 +148,7 @@ test("telegram channel renders progress replies as escaped HTML blocks", async (
     {
       type: "send",
       chatId: "123456",
-      text: "<b>🤔 Thinking</b>\n<blockquote>Thinking…</blockquote>",
+      text: "<b>Thinking…</b>",
       options: {
         parseMode: "HTML",
         replyToMessageId: 77,
@@ -158,7 +158,7 @@ test("telegram channel renders progress replies as escaped HTML blocks", async (
       type: "edit",
       chatId: "123456",
       messageId: 42,
-      text: "<b>🤔 Thinking</b>\n<blockquote>Checking &lt;docs&gt; &amp; repo</blockquote>\n\n<b>🛠 Tool call</b>\n<pre><code>grep: runtime/src &lt;x&gt;</code></pre>",
+      text: "<b>Thinking</b>\n<blockquote>Checking &lt;docs&gt; &amp; repo</blockquote>\n\n<b>Tool call</b>\n<pre><code>grep: runtime/src &lt;x&gt;</code></pre>",
       options: {
         parseMode: "HTML",
       },

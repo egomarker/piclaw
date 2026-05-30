@@ -309,17 +309,20 @@ function buildTelegramProgressBlocks(text: string): TelegramProgressBlock[] {
 function renderTelegramProgressHtml(text: string): string {
   const blocks = buildTelegramProgressBlocks(text);
   if (blocks.length === 0) {
-    return `<b>🤔 Thinking</b>\n<blockquote>Thinking…</blockquote>`;
+    return `<b>Thinking…</b>`;
   }
   return blocks.map((block) => {
+    if (block.kind === "thinking" && block.lines.length === 1 && isThinkingPlaceholderLine(block.lines[0] || "")) {
+      return `<b>Thinking…</b>`;
+    }
     const body = escapeTelegramHtml(block.lines.join("\n"));
     if (block.kind === "thinking") {
-      return `<b>🤔 Thinking</b>\n<blockquote>${body}</blockquote>`;
+      return `<b>Thinking</b>\n<blockquote>${body}</blockquote>`;
     }
     if (block.kind === "tool") {
-      return `<b>🛠 Tool call</b>\n<pre><code>${body}</code></pre>`;
+      return `<b>Tool call</b>\n<pre><code>${body}</code></pre>`;
     }
-    return `<b>📌 Status</b>\n<blockquote>${body}</blockquote>`;
+    return `<b>Status</b>\n<blockquote>${body}</blockquote>`;
   }).join("\n\n");
 }
 
