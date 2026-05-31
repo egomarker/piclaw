@@ -1,7 +1,6 @@
 import { parseControlCommand } from "../agent-control/index.js";
 import { attachMediaToMessage, getDb, getMessageByRowId, storeChatMetadata, storeMessage } from "../db.js";
 import type { AgentQueue } from "../queue.js";
-import { detectChannel, formatOutbound } from "../router.js";
 import type { NewMessage } from "../types.js";
 import { createUuid } from "../utils/ids.js";
 import { createLogger } from "../utils/logger.js";
@@ -131,24 +130,6 @@ export function installAddonRuntimeInterop(options: InstallAddonRuntimeInteropOp
       const steerResult = await options.agentPool.queueStreamingMessage(normalizedChatJid, immediateSteerText, "steer");
       if (steerResult.queued) {
         options.state.markCommandProcessed(normalizedChatJid, messageId);
-        const channel = detectChannel(normalizedChatJid);
-        const formatted = formatOutbound(`Steering queued: ${immediateSteerText}`, channel);
-        const threadId = explicitThreadId ?? (rowId > 0 ? rowId : undefined);
-        if (formatted) {
-          try {
-            await options.sendMessage(normalizedChatJid, formatted, {
-              ...(threadId !== undefined ? { threadId } : {}),
-              source: "control",
-            });
-          } catch (error) {
-            log.warn("Failed to send immediate steer acknowledgement", {
-              operation: "runtime_addon_interop.post_message.steer_ack",
-              chatJid: normalizedChatJid,
-              messageId,
-              err: error,
-            });
-          }
-        }
 
         log.info("Handled inbound steer command immediately", {
           operation: "runtime_addon_interop.post_message.immediate_steer",

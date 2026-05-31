@@ -92,14 +92,6 @@ test("installAddonRuntimeInterop fast-paths inbound /steer while the chat is str
       { chatJid: "telegram:123", messageId: "telegram:123:2" },
     ]);
     expect(enqueueCalls).toBe(0);
-    expect(sendCalls).toHaveLength(1);
-    expect(sendCalls[0]).toMatchObject({
-      jid: "telegram:123",
-      text: "Steering queued: focus on pricing",
-      options: {
-        source: "control",
-        threadId: result?.rowId,
-      },
-    });
+    expect(sendCalls).toEqual([]);
   });
 });
