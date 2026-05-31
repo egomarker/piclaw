@@ -171,6 +171,33 @@ test("telegram channel renders progress replies as escaped HTML blocks", async (
   ]);
 });
 
+test("telegram channel splits oversized text replies into multiple messages", async () => {
+  const channel = new TelegramChannel({
+    botToken: "test",
+    onUpdate: async () => {},
+  }) as any;
+
+  const calls: string[] = [];
+  channel.api = {
+    sendMessage: async (_chatId: string, text: string) => {
+      calls.push(text);
+      return {
+        message_id: calls.length,
+        date: 0,
+        chat: { id: 123456, type: "private" },
+      };
+    },
+  };
+  channel.connected = true;
+
+  const longText = `${"A".repeat(2500)}\n${"B".repeat(2500)}\n${"C".repeat(2500)}`;
+  await channel.sendMessage("telegram:123456", longText);
+
+  expect(calls.length).toBeGreaterThan(1);
+  expect(calls.every((chunk) => chunk.length <= 4000)).toBe(true);
+  expect(calls.join("")).toBe(longText);
+});
+
 test("telegram channel sends SVGs as documents and PNGs as photos", async () => {
   const channel = new TelegramChannel({
     botToken: "test",

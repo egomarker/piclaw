@@ -94,6 +94,10 @@ interface TelegramSendMessageOptions {
   replyToMessageId?: number | null;
 }
 
+// Telegram text messages are limited to ~4096 chars after entity parsing.
+// Keep a little headroom so Markdown-mode sends are less likely to bounce.
+const TELEGRAM_MAX_TEXT_CHARS = 4000;
+
 export class TelegramBotApi {
   constructor(private readonly botToken: string) {}
 
@@ -326,6 +330,54 @@ function renderTelegramProgressHtml(text: string): string {
   }).join("\n\n");
 }
 
+function splitTelegramText(text: string, chunkSize = TELEGRAM_MAX_TEXT_CHARS): string[] {
+  const normalized = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  if (!normalized) return [];
+
+  const rawLines = normalized.split("\n");
+  const lines = rawLines.map((line, index) => {
+    const hasTrailingNewline = index < rawLines.length - 1;
+    return hasTrailingNewline ? `${line}\n` : line;
+  });
+
+  const chunks: string[] = [];
+  let buffer = "";
+
+  const flushChunk = (chunk: string) => {
+    for (let index = 0; index < chunk.length; index += chunkSize) {
+      chunks.push(chunk.slice(index, index + chunkSize));
+    }
+  };
+
+  for (const line of lines) {
+    if (line.length > chunkSize) {
+      if (buffer) {
+        chunks.push(buffer);
+        buffer = "";
+      }
+      flushChunk(line);
+      continue;
+    }
+
+    if (!buffer) {
+      buffer = line;
+      continue;
+    }
+
+    const next = `${buffer}${line}`;
+    if (next.length > chunkSize) {
+      chunks.push(buffer);
+      buffer = line;
+      continue;
+    }
+
+    buffer = next;
+  }
+
+  if (buffer) chunks.push(buffer);
+  return chunks;
+}
+
 export class TelegramChannel {
   private api: TelegramBotApi | null = null;
   private connected = false;
@@ -376,10 +428,10 @@ export class TelegramChannel {
 
     const { chatId } = parseTelegramChatJid(chatJid);
     const attachments = Array.isArray(options?.attachments) ? options.attachments : [];
-    const trimmed = String(text || "").trim();
+    const textChunks = splitTelegramText(text);
 
-    if (trimmed) {
-      await this.api.sendMessage(chatId, trimmed);
+    for (const chunk of textChunks) {
+      await this.api.sendMessage(chatId, chunk);
     }
 
     for (const attachment of attachments) {
