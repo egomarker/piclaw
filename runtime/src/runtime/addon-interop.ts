@@ -5,6 +5,10 @@ import type { NewMessage } from "../types.js";
 import { createUuid } from "../utils/ids.js";
 import { createLogger } from "../utils/logger.js";
 import { processMessages, type MessageProcessingDeps } from "./message-loop.js";
+import {
+  getBlockedNonWebCommandMessage,
+  isAllowedNonWebControlCommand,
+} from "./non-web-command-policy.js";
 import type { RuntimeState } from "./state.js";
 import { registerChannelTransport, type RuntimeChannelTransport, type RuntimeSendMessageOptions } from "./channel-transport-registry.js";
 
@@ -122,11 +126,25 @@ export function installAddonRuntimeInterop(options: InstallAddonRuntimeInteropOp
     const parsedCommand = message.is_bot_message !== true
       ? parseControlCommand(message.content, options.triggerPattern)
       : null;
-    const immediateSteerText = parsedCommand?.type === "steer"
-      ? parsedCommand.message?.trim()
-      : "";
+    const immediateSteerCommand = parsedCommand?.type === "steer"
+      ? parsedCommand
+      : null;
+    const immediateSteerText = immediateSteerCommand?.message?.trim() || "";
 
-    if (inboundOptions.enqueue !== false && immediateSteerText && options.agentPool.isStreaming(normalizedChatJid)) {
+    if (inboundOptions.enqueue !== false && immediateSteerCommand && immediateSteerText && options.agentPool.isStreaming(normalizedChatJid)) {
+      if (!isAllowedNonWebControlCommand(normalizedChatJid, immediateSteerCommand)) {
+        const threadId = explicitThreadId ?? (rowId > 0 ? rowId : undefined);
+        await options.sendMessage(normalizedChatJid, getBlockedNonWebCommandMessage(immediateSteerCommand.raw), {
+          ...(threadId !== undefined ? { threadId } : {}),
+          source: "control",
+        });
+        options.state.markCommandProcessed(normalizedChatJid, messageId);
+        return {
+          messageId,
+          rowId: rowId > 0 ? rowId : null,
+        };
+      }
+
       const steerResult = await options.agentPool.queueStreamingMessage(normalizedChatJid, immediateSteerText, "steer");
       if (steerResult.queued) {
         options.state.markCommandProcessed(normalizedChatJid, messageId);

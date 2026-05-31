@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  getAddonNonWebCommandPolicies,
   getAddonRecoveryExcludedChatJidPrefixes,
   getAddonStatusPanelPayload,
   getInstalledAddonRuntimeEntryPaths,
@@ -25,6 +26,20 @@ test("installed addon runtime entries register status panel, card-intent, and st
         runtime: {
           entries: ["runtime.ts"],
           recovery: { excludeChatJidPrefixes: ["telegram:", "telegram:", "  ", 123] },
+          nonWebCommandPolicies: [
+            {
+              chatJidPrefixes: ["telegram:", "tg:", "TG:", "", 123],
+              allowedCommands: ["steer", "SHELL", "queue-all", "queue-all", ""],
+            },
+            {
+              chatJidPrefixes: ["signal:", "  signal:", null],
+              allowedCommands: [],
+            },
+            {
+              chatJidPrefixes: [],
+              allowedCommands: ["ignored"],
+            },
+          ],
         },
       },
     }, null, 2));
@@ -61,6 +76,16 @@ export {};
       join(addonDir, "runtime.ts"),
     ]);
     expect(getAddonRecoveryExcludedChatJidPrefixes(workspace.workspace)).toEqual(["telegram:"]);
+    expect(getAddonNonWebCommandPolicies(workspace.workspace)).toEqual([
+      {
+        chatJidPrefixes: ["telegram:", "tg:"],
+        allowedCommands: ["steer", "shell", "queue-all"],
+      },
+      {
+        chatJidPrefixes: ["signal:"],
+        allowedCommands: [],
+      },
+    ]);
 
     expect(await getAddonStatusPanelPayload("example", "web:test")).toEqual({
       key: "example",

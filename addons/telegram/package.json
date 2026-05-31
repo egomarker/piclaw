@@ -25,7 +25,33 @@
         "excludeChatJidPrefixes": [
           "telegram:"
         ]
-      }
+      },
+      "nonWebCommandPolicies": [
+        {
+          "chatJidPrefixes": [
+            "telegram:",
+            "tg:"
+          ],
+          "allowedCommands": [
+            "abort",
+            "bash",
+            "compact",
+            "context",
+            "dream",
+            "exit",
+            "export-html",
+            "last",
+            "restart",
+            "scheduled",
+            "shell",
+            "state",
+            "stats",
+            "steer",
+            "tasks",
+            "thinking"
+          ]
+        }
+      ]
     },
     "web": {
       "entries": [

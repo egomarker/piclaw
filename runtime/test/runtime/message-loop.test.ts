@@ -1,4 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   registerChannelTransport,
@@ -25,6 +27,32 @@ function makeMessage(chatJid: string, content: string, timestamp: string) {
     is_from_me: false,
     is_bot_message: false,
   };
+}
+
+function installNonWebCommandPolicyAddon(
+  workspaceDir: string,
+  options: {
+    chatJidPrefixes?: string[];
+    allowedCommands?: string[];
+  } = {},
+): void {
+  const addonDir = join(workspaceDir, ".pi", "extensions", "node_modules", "piclaw-addon-policy-test");
+  mkdirSync(addonDir, { recursive: true });
+  writeFileSync(join(addonDir, "package.json"), JSON.stringify({
+    name: "piclaw-addon-policy-test",
+    version: "0.1.0",
+    type: "module",
+    pi: {
+      runtime: {
+        nonWebCommandPolicies: [
+          {
+            chatJidPrefixes: options.chatJidPrefixes ?? ["telegram:"],
+            allowedCommands: options.allowedCommands ?? [],
+          },
+        ],
+      },
+    },
+  }, null, 2));
 }
 
 test("processMessages leaves lastAgentTimestamp unchanged when runAgent throws", async () => {
@@ -216,6 +244,158 @@ test("processMessages executes transport slash commands when forcePrompt is set"
       threadId: sourceRowId,
     });
     expect(state.lastAgentTimestamp[chatJid]).toBe(timestamp);
+  });
+});
+
+test("processMessages blocks disallowed non-web control commands from addon policy", async () => {
+  await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async (workspace) => {
+    installNonWebCommandPolicyAddon(workspace.workspace, { allowedCommands: ["state"] });
+
+    const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
+    const loop = await importFresh<typeof import("../../src/runtime/message-loop.js")>("../src/runtime/message-loop.js");
+    db.initDatabase();
+
+    const chatJid = "telegram:blocked-control";
+    const timestamp = "2026-04-17T01:02:45.000Z";
+    const sourceRowId = db.storeMessage({
+      ...makeMessage(chatJid, "/tree", timestamp),
+      id: "telegram:blocked-control:1",
+    });
+
+    const sent: Array<{ text: string; options?: Record<string, unknown> }> = [];
+    const ok = await loop.processMessages(chatJid, {
+      state: {
+        lastAgentTimestamp: {} as Record<string, string>,
+        wasCommandProcessed: () => false,
+        markCommandProcessed: () => {},
+        saveTimestamps: () => {},
+      } as any,
+      assistantName: "Pi",
+      triggerPattern: /@Pi/i,
+      agentPool: {
+        applyControlCommand: async () => {
+          throw new Error("disallowed control command must not execute");
+        },
+        runAgent: async () => {
+          throw new Error("disallowed control command must not start agent run");
+        },
+      } as any,
+      sendMessage: async (_jid: string, text: string, options?: Record<string, unknown>) => {
+        sent.push({ text, options });
+      },
+    }, { forcePrompt: true });
+
+    expect(ok).toBe(true);
+    expect(sent).toEqual([
+      {
+        text: "/tree is not available in this channel. Open this chat in the web UI for full command access.",
+        options: {
+          source: "control",
+          threadId: sourceRowId,
+          mediaIds: undefined,
+          contentBlocks: undefined,
+        },
+      },
+    ]);
+  });
+});
+
+test("processMessages allows control-command aliases via canonical allowlist names", async () => {
+  await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async (workspace) => {
+    installNonWebCommandPolicyAddon(workspace.workspace, { allowedCommands: ["thinking"] });
+
+    const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
+    const loop = await importFresh<typeof import("../../src/runtime/message-loop.js")>("../src/runtime/message-loop.js");
+    db.initDatabase();
+
+    const chatJid = "telegram:allowed-alias";
+    const timestamp = "2026-04-17T01:02:50.000Z";
+    const sourceRowId = db.storeMessage({
+      ...makeMessage(chatJid, "/effort high", timestamp),
+      id: "telegram:allowed-alias:1",
+    });
+
+    const sent: Array<{ text: string; options?: Record<string, unknown> }> = [];
+    let controlCalls = 0;
+    const ok = await loop.processMessages(chatJid, {
+      state: {
+        lastAgentTimestamp: {} as Record<string, string>,
+        wasCommandProcessed: () => false,
+        markCommandProcessed: () => {},
+        saveTimestamps: () => {},
+      } as any,
+      assistantName: "Pi",
+      triggerPattern: /@Pi/i,
+      agentPool: {
+        applyControlCommand: async () => {
+          controlCalls += 1;
+          return { status: "success", message: "thinking ok" };
+        },
+        runAgent: async () => {
+          throw new Error("allowed alias must not start agent run");
+        },
+      } as any,
+      sendMessage: async (_jid: string, text: string, options?: Record<string, unknown>) => {
+        sent.push({ text, options });
+      },
+    }, { forcePrompt: true });
+
+    expect(ok).toBe(true);
+    expect(controlCalls).toBe(1);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.text).toBe("thinking ok");
+    expect(sent[0]?.options).toMatchObject({
+      source: "control",
+      threadId: sourceRowId,
+    });
+  });
+});
+
+test("processMessages blocks disallowed non-web slash commands from addon policy", async () => {
+  await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async (workspace) => {
+    installNonWebCommandPolicyAddon(workspace.workspace, { allowedCommands: ["tasks"] });
+
+    const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
+    const loop = await importFresh<typeof import("../../src/runtime/message-loop.js")>("../src/runtime/message-loop.js");
+    db.initDatabase();
+
+    const chatJid = "telegram:blocked-slash";
+    const timestamp = "2026-04-17T01:02:55.000Z";
+    const sourceRowId = db.storeMessage({
+      ...makeMessage(chatJid, "/custom-addon arg", timestamp),
+      id: "telegram:blocked-slash:1",
+    });
+
+    const sent: Array<{ text: string; options?: Record<string, unknown> }> = [];
+    const ok = await loop.processMessages(chatJid, {
+      state: {
+        lastAgentTimestamp: {} as Record<string, string>,
+        wasCommandProcessed: () => false,
+        markCommandProcessed: () => {},
+        saveTimestamps: () => {},
+      } as any,
+      assistantName: "Pi",
+      triggerPattern: /@Pi/i,
+      agentPool: {
+        applyControlCommand: async () => {
+          throw new Error("blocked slash command must not route through control command handling");
+        },
+        applySlashCommand: async () => {
+          throw new Error("disallowed slash command must not execute");
+        },
+      } as any,
+      sendMessage: async (_jid: string, text: string, options?: Record<string, unknown>) => {
+        sent.push({ text, options });
+      },
+    }, { forcePrompt: true });
+
+    expect(ok).toBe(true);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.text).toBe("/custom-addon is not available in this channel. Open this chat in the web UI for full command access.");
+    expect(sent[0]?.options).toMatchObject({
+      source: "slash-command",
+      threadId: sourceRowId,
+    });
   });
 });
 

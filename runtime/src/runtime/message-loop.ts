@@ -34,6 +34,11 @@ import {
   type RuntimeProgressMessageHandle,
   type RuntimeSendMessageOptions,
 } from "./channel-transport-registry.js";
+import {
+  getBlockedNonWebCommandMessage,
+  isAllowedNonWebControlCommand,
+  isAllowedNonWebSlashCommand,
+} from "./non-web-command-policy.js";
 import type { RuntimeState } from "./state.js";
 
 const log = createLogger("runtime.message-loop");
@@ -367,7 +372,12 @@ export async function processMessages(
   }
 
   for (const { message, command } of commandQueue) {
-    const result = await deps.agentPool.applyControlCommand(chatJid, command);
+    const result = isAllowedNonWebControlCommand(chatJid, command)
+      ? await deps.agentPool.applyControlCommand(chatJid, command)
+      : {
+          status: "error" as const,
+          message: getBlockedNonWebCommandMessage(command.raw),
+        };
     const formatted = formatOutbound(result.message || "", channel);
     if (formatted || result.mediaIds?.length || result.contentBlocks?.length) {
       const threadId = getReplyThreadId(chatJid, message);
@@ -403,12 +413,19 @@ export async function processMessages(
       operation: "process_messages.slash_command",
       chatJid,
     });
-    const stopTyping = startChannelTyping(chatJid, channel);
     let result;
-    try {
-      result = await deps.agentPool.applySlashCommand(chatJid, cleaned);
-    } finally {
-      stopTyping();
+    if (isAllowedNonWebSlashCommand(chatJid, cleaned)) {
+      const stopTyping = startChannelTyping(chatJid, channel);
+      try {
+        result = await deps.agentPool.applySlashCommand(chatJid, cleaned);
+      } finally {
+        stopTyping();
+      }
+    } else {
+      result = {
+        status: "error" as const,
+        message: getBlockedNonWebCommandMessage(cleaned),
+      };
     }
 
     if (result.message || result.mediaIds?.length || result.contentBlocks?.length) {
@@ -428,6 +445,7 @@ export async function processMessages(
         chatJid,
         errorMessage: result.message,
       });
+      commitLastAgentTimestamp();
       return true;
     }
 

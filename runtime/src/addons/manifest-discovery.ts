@@ -3,6 +3,11 @@ import { join } from "node:path";
 
 import { WORKSPACE_DIR } from "../core/config.js";
 
+export interface AddonRuntimeNonWebCommandPolicyManifest {
+  chatJidPrefixes: string[];
+  allowedCommands: string[];
+}
+
 export type AddonPackageManifest = {
   name?: string;
   pi?: {
@@ -11,6 +16,10 @@ export type AddonPackageManifest = {
       recovery?: {
         excludeChatJidPrefixes?: string[];
       };
+      nonWebCommandPolicies?: Array<{
+        chatJidPrefixes?: string[];
+        allowedCommands?: string[];
+      }>;
     };
   };
 };
@@ -48,6 +57,18 @@ function toTrimmedStringArray(value: unknown): string[] {
       .map((entry) => entry.trim())
       .filter(Boolean)
     : [];
+}
+
+function toNormalizedStringArray(value: unknown): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const entry of toTrimmedStringArray(value)) {
+    const lowered = entry.toLowerCase();
+    if (seen.has(lowered)) continue;
+    seen.add(lowered);
+    normalized.push(lowered);
+  }
+  return normalized;
 }
 
 function getInstalledAddonPackageManifests(workspaceDir = getWorkspaceDir()): InstalledAddonManifest[] {
@@ -97,4 +118,26 @@ export function getAddonRecoveryExcludedChatJidPrefixes(workspaceDir = getWorksp
   }
 
   return prefixes;
+}
+
+export function getAddonNonWebCommandPolicies(workspaceDir = getWorkspaceDir()): AddonRuntimeNonWebCommandPolicyManifest[] {
+  const policies: AddonRuntimeNonWebCommandPolicyManifest[] = [];
+
+  for (const { manifest } of getInstalledAddonPackageManifests(workspaceDir)) {
+    const declared = Array.isArray(manifest?.pi?.runtime?.nonWebCommandPolicies)
+      ? manifest.pi.runtime.nonWebCommandPolicies
+      : [];
+
+    for (const entry of declared) {
+      if (!entry || typeof entry !== "object") continue;
+      const chatJidPrefixes = toNormalizedStringArray(entry.chatJidPrefixes);
+      if (chatJidPrefixes.length === 0) continue;
+      policies.push({
+        chatJidPrefixes,
+        allowedCommands: toNormalizedStringArray(entry.allowedCommands),
+      });
+    }
+  }
+
+  return policies;
 }

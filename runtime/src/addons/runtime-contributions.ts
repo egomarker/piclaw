@@ -41,6 +41,7 @@ let runtimeApiInstalled = false;
 let runtimeEntriesLoadPromise: Promise<void> | null = null;
 
 export {
+  getAddonNonWebCommandPolicies,
   getAddonRecoveryExcludedChatJidPrefixes,
   getInstalledAddonRuntimeEntryPaths,
 } from "./manifest-discovery.js";
