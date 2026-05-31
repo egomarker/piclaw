@@ -1,6 +1,7 @@
 import { parseControlCommand } from "../agent-control/index.js";
 import { attachMediaToMessage, getDb, getMessageByRowId, storeChatMetadata, storeMessage } from "../db.js";
 import type { AgentQueue } from "../queue.js";
+import { detectChannel, formatOutbound } from "../router.js";
 import type { NewMessage } from "../types.js";
 import { createUuid } from "../utils/ids.js";
 import { createLogger } from "../utils/logger.js";
@@ -58,6 +59,12 @@ function toPositiveMediaIds(value: unknown): number[] {
   return Array.isArray(value)
     ? value.filter((id): id is number => Number.isFinite(id) && id > 0)
     : [];
+}
+
+function normalizeContentBlocks(value: unknown): Array<Record<string, unknown>> | undefined {
+  return Array.isArray(value)
+    ? value.filter((block): block is Record<string, unknown> => Boolean(block) && typeof block === "object")
+    : undefined;
 }
 
 export function installAddonRuntimeInterop(options: InstallAddonRuntimeInteropOptions): void {
@@ -123,10 +130,51 @@ export function installAddonRuntimeInterop(options: InstallAddonRuntimeInteropOp
     const parsedCommand = message.is_bot_message !== true
       ? parseControlCommand(message.content, options.triggerPattern)
       : null;
+    const channel = detectChannel(normalizedChatJid);
+    const immediateAbortCommand = parsedCommand?.type === "abort"
+      ? parsedCommand
+      : null;
     const immediateSteerCommand = parsedCommand?.type === "steer"
       ? parsedCommand
       : null;
     const immediateSteerText = immediateSteerCommand?.message?.trim() || "";
+    const replyThreadId = explicitThreadId ?? (rowId > 0 ? rowId : undefined);
+
+    if (inboundOptions.enqueue !== false && immediateAbortCommand && options.agentPool.isActive(normalizedChatJid)) {
+      if (!isAllowedNonWebControlCommand(normalizedChatJid, immediateAbortCommand)) {
+        options.state.markCommandProcessed(normalizedChatJid, messageId);
+        return {
+          messageId,
+          rowId: rowId > 0 ? rowId : null,
+        };
+      }
+
+      const result = await options.agentPool.applyControlCommand(normalizedChatJid, immediateAbortCommand);
+      options.state.markCommandProcessed(normalizedChatJid, messageId);
+
+      const formatted = formatOutbound(result.message || "", channel);
+      if (formatted || result.mediaIds?.length || result.contentBlocks?.length) {
+        await options.sendMessage(normalizedChatJid, formatted || "", {
+          ...(replyThreadId !== undefined ? { threadId: replyThreadId } : {}),
+          source: "control",
+          mediaIds: result.mediaIds,
+          contentBlocks: normalizeContentBlocks(result.contentBlocks),
+        });
+      }
+
+      log.info("Handled inbound abort command immediately", {
+        operation: "runtime_addon_interop.post_message.immediate_abort",
+        chatJid: normalizedChatJid,
+        messageId,
+        rowId: rowId > 0 ? rowId : null,
+        status: result.status,
+      });
+
+      return {
+        messageId,
+        rowId: rowId > 0 ? rowId : null,
+      };
+    }
 
     if (inboundOptions.enqueue !== false && immediateSteerCommand && immediateSteerText && options.agentPool.isStreaming(normalizedChatJid)) {
       if (!isAllowedNonWebControlCommand(normalizedChatJid, immediateSteerCommand)) {

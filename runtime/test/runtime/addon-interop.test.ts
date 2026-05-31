@@ -124,6 +124,125 @@ test("installAddonRuntimeInterop fast-paths inbound /steer while the chat is str
   });
 });
 
+test("installAddonRuntimeInterop fast-paths inbound /abort while the chat is active and sends confirmation", async () => {
+  await withTempWorkspaceEnv("piclaw-addon-interop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
+    const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
+    const addonInterop = await importFresh<typeof import("../../src/runtime/addon-interop.js")>("../src/runtime/addon-interop.js");
+    db.initDatabase();
+
+    let enqueueCalls = 0;
+    const markCalls: Array<{ chatJid: string; messageId: string }> = [];
+    const sendCalls: Array<{ jid: string; text: string; options?: Record<string, unknown> }> = [];
+    const applyCalls: Array<{ chatJid: string; type: string }> = [];
+
+    addonInterop.installAddonRuntimeInterop({
+      queue: { enqueue: () => { enqueueCalls += 1; } } as any,
+      state: {
+        chatJids: new Set<string>(),
+        saveChats: () => {},
+        markCommandProcessed: (chatJid: string, messageId: string) => {
+          markCalls.push({ chatJid, messageId });
+        },
+      } as any,
+      agentPool: {
+        isActive: (chatJid: string) => chatJid === "telegram:123",
+        isStreaming: () => false,
+        applyControlCommand: async (chatJid: string, command: { type: string }) => {
+          applyCalls.push({ chatJid, type: command.type });
+          return { status: "success", message: "Aborted current response." };
+        },
+      } as any,
+      assistantName: "Pi",
+      triggerPattern: /@Pi/i,
+      sendMessage: async (jid: string, text: string, options?: Record<string, unknown>) => {
+        sendCalls.push({ jid, text, options });
+      },
+    });
+
+    const runtimeInterop = (globalThis as { __piclawRuntimeInterop?: { postMessage?: Function } }).__piclawRuntimeInterop;
+    const result = await runtimeInterop?.postMessage?.("telegram:123", "/abort", {
+      source: "telegram",
+      messageId: "telegram:123:3",
+      sender: "123",
+      senderName: "Alice",
+      enqueue: true,
+    });
+
+    expect(result?.rowId).toBeGreaterThan(0);
+    expect(applyCalls).toEqual([
+      { chatJid: "telegram:123", type: "abort" },
+    ]);
+    expect(markCalls).toEqual([
+      { chatJid: "telegram:123", messageId: "telegram:123:3" },
+    ]);
+    expect(enqueueCalls).toBe(0);
+    expect(sendCalls).toEqual([
+      {
+        jid: "telegram:123",
+        text: "Aborted current response.",
+        options: {
+          source: "control",
+          threadId: result?.rowId,
+          mediaIds: undefined,
+          contentBlocks: undefined,
+        },
+      },
+    ]);
+  });
+});
+
+test("installAddonRuntimeInterop queues inbound /abort when the chat is idle", async () => {
+  await withTempWorkspaceEnv("piclaw-addon-interop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
+    const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
+    const addonInterop = await importFresh<typeof import("../../src/runtime/addon-interop.js")>("../src/runtime/addon-interop.js");
+    db.initDatabase();
+
+    let enqueueCalls = 0;
+    const markCalls: Array<{ chatJid: string; messageId: string }> = [];
+    const sendCalls: Array<{ jid: string; text: string; options?: Record<string, unknown> }> = [];
+    let applyCalls = 0;
+
+    addonInterop.installAddonRuntimeInterop({
+      queue: { enqueue: () => { enqueueCalls += 1; } } as any,
+      state: {
+        chatJids: new Set<string>(),
+        saveChats: () => {},
+        markCommandProcessed: (chatJid: string, messageId: string) => {
+          markCalls.push({ chatJid, messageId });
+        },
+      } as any,
+      agentPool: {
+        isActive: () => false,
+        isStreaming: () => false,
+        applyControlCommand: async () => {
+          applyCalls += 1;
+          return { status: "success", message: "should not run immediately" };
+        },
+      } as any,
+      assistantName: "Pi",
+      triggerPattern: /@Pi/i,
+      sendMessage: async (jid: string, text: string, options?: Record<string, unknown>) => {
+        sendCalls.push({ jid, text, options });
+      },
+    });
+
+    const runtimeInterop = (globalThis as { __piclawRuntimeInterop?: { postMessage?: Function } }).__piclawRuntimeInterop;
+    const result = await runtimeInterop?.postMessage?.("telegram:123", "/abort", {
+      source: "telegram",
+      messageId: "telegram:123:4",
+      sender: "123",
+      senderName: "Alice",
+      enqueue: true,
+    });
+
+    expect(result?.rowId).toBeGreaterThan(0);
+    expect(applyCalls).toBe(0);
+    expect(markCalls).toEqual([]);
+    expect(enqueueCalls).toBe(1);
+    expect(sendCalls).toEqual([]);
+  });
+});
+
 test("installAddonRuntimeInterop silently drops disallowed fast-path /steer commands from addon policy", async () => {
   await withTempWorkspaceEnv("piclaw-addon-interop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async (workspace) => {
     installNonWebCommandPolicyAddon(workspace.workspace, { allowedCommands: ["state"] });
