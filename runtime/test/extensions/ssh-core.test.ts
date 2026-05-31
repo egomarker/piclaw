@@ -5,6 +5,7 @@ import { PassThrough, Writable } from "node:stream";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import sshCoreExtension, {
+  abortLiveSshCommand,
   applyLiveSshConfig,
   createChatSshCoreExtension,
   createSshAwareBashOperations,
@@ -94,6 +95,14 @@ class FakeSshChild extends EventEmitter {
     this.killCalls += 1;
     queueMicrotask(() => this.emit("close", null));
     return true;
+  }
+}
+
+async function waitForCondition(predicate: () => boolean, timeoutMs = 200): Promise<void> {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) throw new Error("Timed out waiting for condition");
+    await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
 
@@ -223,6 +232,49 @@ describe("ssh-core live state", () => {
     await unregisterLiveChatSshSession("web:default");
     setSshConnectionResolverForTests(null);
     expect(hasLiveChatSshSession("web:default")).toBe(false);
+  });
+
+  test("abortLiveSshCommand interrupts an active live SSH command", async () => {
+    const chatJid = "web:ssh-abort-live-command";
+    const child = new FakeSshChild();
+    setPersistentSshSpawnForTests(() => child as unknown as any);
+    setPersistentSshInterruptGraceMsForTests(10);
+    setSshConnectionResolverForTests(async (_rawTarget, localCwd, localHome, port) => ({
+      sshTarget: "agent@example.com",
+      port,
+      remoteCwd: "/srv/project",
+      remoteHome: "/home/agent",
+      localCwd,
+      localHome,
+      privateKeyPath: "/tmp/test-key",
+      controlPath: "/tmp/test-control",
+      strictHostKeyChecking: "yes",
+      tempDir: "/tmp/piclaw-ssh-test",
+    }) as any);
+
+    await registerLiveChatSshSession(chatJid, { localCwd: "/workspace", localHome: "/home/agent" });
+    await applyLiveSshConfig(chatJid, {
+      target: "agent@example.com:/srv/project",
+      port: 22,
+      privateKeyKeychain: "ssh-prod",
+      strictHostKeyChecking: "yes",
+    });
+
+    try {
+      const operations = createSshAwareBashOperations(chatJid, {
+        exec: async () => ({ exitCode: 0 }),
+      } as any);
+      const result = operations.exec("sleep 99", "/workspace", { onData() {}, timeout: 60 });
+      await waitForCondition(() => child.stdinWrites.some((value) => value.includes("sleep 99")));
+
+      expect(abortLiveSshCommand(chatJid)).toBe(true);
+
+      await expect(result).rejects.toThrow("aborted");
+      expect(child.stdinWrites.some((value) => value.includes("\x03"))).toBe(true);
+      expect(child.killCalls).toBeGreaterThanOrEqual(1);
+    } finally {
+      await unregisterLiveChatSshSession(chatJid);
+    }
   });
 
   test("ssh-aware bash operations use the live remote transport before falling back locally", async () => {

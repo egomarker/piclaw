@@ -194,6 +194,10 @@ function buildTurnOutcomeMarker(options: {
   draftRecovered?: boolean;
   attemptsUsed?: number;
   classifier?: string | null;
+  toolBudgetExceeded?: boolean;
+  toolStepsUsed?: number;
+  toolStepsBudget?: number;
+  nextAction?: string;
 }): Record<string, unknown> {
   return {
     type: "turn_outcome_marker",
@@ -205,6 +209,10 @@ function buildTurnOutcomeMarker(options: {
     draft_recovered: Boolean(options.draftRecovered),
     attempts_used: Number.isFinite(options.attemptsUsed) ? options.attemptsUsed : undefined,
     classifier: options.classifier ?? null,
+    tool_budget_exceeded: options.toolBudgetExceeded ? true : undefined,
+    tool_steps_used: Number.isFinite(options.toolStepsUsed) ? options.toolStepsUsed : undefined,
+    tool_steps_budget: Number.isFinite(options.toolStepsBudget) ? options.toolStepsBudget : undefined,
+    next_action: readTrimmedString(options.nextAction) || undefined,
   };
 }
 
@@ -224,6 +232,10 @@ function buildErrorOutcomeMarker(
     attemptsUsed?: number;
     classifier?: string | null;
     severity?: TurnOutcomeSeverity;
+    toolBudgetExceeded?: boolean;
+    toolStepsUsed?: number;
+    toolStepsBudget?: number;
+    nextAction?: string;
   } = {},
 ): Record<string, unknown> {
   if (isToolBudgetExceededError(errorText)) {
@@ -236,6 +248,10 @@ function buildErrorOutcomeMarker(
       draftRecovered: options.draftRecovered,
       attemptsUsed: options.attemptsUsed,
       classifier: options.classifier,
+      toolBudgetExceeded: options.toolBudgetExceeded ?? true,
+      toolStepsUsed: options.toolStepsUsed,
+      toolStepsBudget: options.toolStepsBudget,
+      nextAction: options.nextAction || "Ask me to continue; I will resume from the latest known partial state instead of replaying the whole turn.",
     });
   }
 
@@ -387,11 +403,25 @@ function buildFailureVisibleText(options: {
   actionSummary?: string;
   attemptsUsed?: number;
   classifier?: string;
+  inlineDiagnostic?: boolean;
 }): string {
   const draftText = readTrimmedString(options.draftText);
-  // Diagnostic info is now carried in the outcome marker content block
-  // and rendered by the client as a collapsible pill. The visible text
-  // is just the draft output (or a minimal fallback).
+  if (draftText && options.inlineDiagnostic) {
+    const title = readTrimmedString(options.title) || "Turn failed";
+    const detail = readTrimmedString(options.detail);
+    const nextAction = /tool-use budget exceeded/i.test(`${title} ${detail}`)
+      ? "Ask me to continue; I will resume from the latest known partial state."
+      : null;
+    const diagnostic = [
+      `⚠️ ${title}`,
+      detail || null,
+      nextAction,
+    ].filter(Boolean).join("\n");
+    return diagnostic ? `${draftText}\n\n${diagnostic}` : draftText;
+  }
+  // Diagnostic info is usually carried in the outcome marker content block and
+  // rendered by the client as a collapsible pill. Keep ordinary recovered drafts
+  // concise, but let high-risk terminal failures opt in to visible diagnostics.
   if (draftText) return draftText;
   return "";
 }
@@ -799,30 +829,6 @@ export async function handleAgentMessage(
     }
   }
 
-  if (isModelControlCommand(command) && (isActive || hasQueuedBacklog) && (requestMode === "queue" || requestMode === "auto")) {
-    // Model/thinking changes are session mutations. Queue them behind active
-    // turns and existing backlog so a stale browser/model-picker request cannot
-    // silently reroute the currently running or already queued work. The queued
-    // item is server-owned and will drain even if the browser disconnects.
-    return queueDeferredFollowup(content, {
-      source: "web.model_command",
-      browserContext: browserObservability,
-      wakeIfIdle: hasQueuedBacklog && !isActive,
-    });
-  }
-
-  const isCompactionControlCommand = command?.type === "compact" || (command?.type === "model" && Boolean(command.compact));
-  if (isCompactionControlCommand && (isActive || hasQueuedBacklog) && (requestMode === "queue" || requestMode === "auto")) {
-    // session.compact() aborts the current agent operation before rewriting the
-    // branch. Queue explicit compaction requests behind the active turn/backlog
-    // so they operate on the complete current session instead of racing it.
-    return queueDeferredFollowup(content, {
-      source: command?.type === "compact" ? "web.compact_command" : "web.model_compact_command",
-      browserContext: browserObservability,
-      wakeIfIdle: hasQueuedBacklog && !isActive,
-    });
-  }
-
   if (command?.type === "steer" && isStreaming) {
     const steerText = (command.message || "").trim();
     if (steerText) {
@@ -969,6 +975,7 @@ export async function handleAgentMessage(
     !command &&
     !themeCommand &&
     !metersCommand &&
+    !isSlashCommandInvocation(trimmed) &&
     (isActive || hasQueuedBacklog) &&
     (requestMode === "queue" || requestMode === "auto");
 
@@ -1868,13 +1875,19 @@ export async function processChat(
     const marker = withFailureActionMetadata(markerBase, lastAction);
     const title = readTrimmedString(marker?.title) || "Turn failed";
     const markerDetail = readTrimmedString(marker?.detail);
+    const markerKind = readTrimmedString(marker?.kind);
+    const markerClassifier = readTrimmedString(marker?.classifier);
+    const inlineDiagnostic = markerKind === "tool_budget"
+      || markerClassifier === "tool_history_pressure"
+      || markerClassifier === "budget_exhausted";
     const text = buildFailureVisibleText({
       draftText,
       title,
       detail: detail || markerDetail,
       actionSummary: lastAction?.summary,
       attemptsUsed: Number.isFinite(marker?.attempts_used) ? (marker?.attempts_used as number) : undefined,
-      classifier: readTrimmedString(marker?.classifier),
+      classifier: markerClassifier,
+      inlineDiagnostic,
     });
 
     return persistTerminalOutcome(text, marker);
@@ -1883,7 +1896,15 @@ export async function processChat(
   const publishDraftFallback = (
     reason?: "timeout" | "error" | "empty-final" | "rate-limit",
     detail?: string,
-    options: { requireDraft?: boolean } = {},
+    options: {
+      requireDraft?: boolean;
+      markerOptions?: {
+        toolBudgetExceeded?: boolean;
+        toolStepsUsed?: number;
+        toolStepsBudget?: number;
+        nextAction?: string;
+      };
+    } = {},
   ) => {
     // Draft fallback should publish the currently visible draft for whichever
     // turn failed to finalize, even if earlier turns in the same session were
@@ -1905,6 +1926,7 @@ export async function processChat(
             draftRecovered: Boolean(draftText),
             attemptsUsed: lastRecoveryMeta?.attemptsUsed,
             classifier: lastRecoveryMeta?.lastClassifier ?? null,
+            ...options.markerOptions,
           })
         : reason === "empty-final"
           ? buildTurnOutcomeMarker({
@@ -1921,6 +1943,7 @@ export async function processChat(
               draftRecovered: Boolean(draftText),
               attemptsUsed: lastRecoveryMeta?.attemptsUsed,
               classifier: lastRecoveryMeta?.lastClassifier ?? null,
+              ...options.markerOptions,
             });
 
     return persistVisibleFailureOutcome(markerBase, reason === "timeout" ? detail : undefined, options);
@@ -2100,13 +2123,19 @@ export async function processChat(
     const rateLimited = providerError?.category === "rate_limit" || isRateLimitError(errorText);
     const networkFailed = providerError?.category === "network" || isNetworkError(errorText);
     const networkDetail = providerError?.title || (networkFailed ? describeNetworkError(errorText) : null);
+    const markerOptions = {
+      toolBudgetExceeded: output.toolBudgetExceeded,
+      toolStepsUsed: output.toolStepsUsed,
+      toolStepsBudget: output.toolStepsBudget,
+      nextAction: output.nextAction,
+    };
     const fallbackPublished = errorText.toLowerCase().includes("timed out")
-      ? publishDraftFallback("timeout", errorText)
+      ? publishDraftFallback("timeout", errorText, { markerOptions })
       : rateLimited
-        ? publishDraftFallback("rate-limit", errorText)
+        ? publishDraftFallback("rate-limit", errorText, { markerOptions })
         : aborted
           ? false
-          : publishDraftFallback("error", errorText);
+          : publishDraftFallback("error", errorText, { markerOptions });
 
     if (aborted) {
       await finalizeSuccessfulRun();
@@ -2122,6 +2151,7 @@ export async function processChat(
       attemptsUsed: output.recovery?.attemptsUsed,
       classifier: output.recovery?.lastClassifier ?? null,
       severity: rateLimited ? "warning" : "error",
+      ...markerOptions,
     });
     const persisted = persistVisibleFailureOutcome(marker);
     if (persisted) {

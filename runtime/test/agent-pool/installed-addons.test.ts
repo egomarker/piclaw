@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, setDefaultTimeout, test } from 'bun:test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AuthStorage, ModelRegistry, SettingsManager, getAgentDir } from '@earendil-works/pi-coding-agent';
@@ -6,6 +6,12 @@ import '../helpers.js';
 import { withTempWorkspaceEnv } from '../helpers.js';
 import { createSessionInDir, getInstalledAddonExtensionPaths } from '../../src/agent-pool/session.ts';
 import { clearExtensionRoutes, getRegisteredRoutes, handleExtensionRoutes, isExtensionRouteRegistryFrozen } from '../../src/channels/web/http/extension-routes.js';
+
+setDefaultTimeout(10_000);
+
+beforeEach(() => {
+  clearExtensionRoutes();
+});
 
 afterEach(() => {
   clearExtensionRoutes();

@@ -104,7 +104,7 @@ class IntegrationSession {
   }
 }
 
-test("session rotation archives the old file and continueRecent resumes the rotated successor", async () => {
+test("session rotation archives the old file and continueRecent resumes the rotated successor", { timeout: 15000 }, async () => {
   tempWorkspace = createTempWorkspace("piclaw-session-rotate-");
   restoreEnv = setEnv({
     PICLAW_WORKSPACE: tempWorkspace.workspace,

@@ -1,4 +1,5 @@
 export {
+  abortLiveSshCommand,
   applyLiveSshConfig,
   clearLiveSshConfig,
   createChatSshCoreExtension,

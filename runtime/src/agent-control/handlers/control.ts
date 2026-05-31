@@ -16,6 +16,7 @@ import { getChatJid } from "../../core/chat-context.js";
 import { requestGracefulShutdown } from "../../runtime/shutdown-registry.js";
 import { createLogger, debugSuppressedError } from "../../utils/logger.js";
 import { killTrackedProcesses } from "../../utils/process-tracker.js";
+import { abortLiveSshCommand } from "../../extensions/ssh-core.js";
 import { pruneOrphanToolResults } from "../../agent-pool/orphan-tool-results.js";
 import {
   isCompactionCancellationError,
@@ -25,6 +26,7 @@ import {
 } from "../../agent-pool/compaction.js";
 
 const log = createLogger("agent-control.control");
+const DEFAULT_ABORT_SETTLE_TIMEOUT_MS = 1000;
 
 type RestartCommand = Extract<AgentControlCommand, { type: "restart" }>;
 type ExitCommand = Extract<AgentControlCommand, { type: "exit" }>;
@@ -37,6 +39,28 @@ type AbortBashCommand = Extract<AgentControlCommand, { type: "abort_bash" }>;
 
 function scheduleProcessExit(): void {
   requestGracefulShutdown("/exit command");
+}
+
+function getAbortSettleTimeoutMs(): number {
+  const raw = Number(process.env.PICLAW_ABORT_SETTLE_TIMEOUT_MS);
+  if (!Number.isFinite(raw)) return DEFAULT_ABORT_SETTLE_TIMEOUT_MS;
+  return Math.max(0, Math.min(10_000, Math.round(raw)));
+}
+
+async function waitForAbortToSettle(abortPromise: Promise<void>): Promise<"settled" | "timed_out"> {
+  const timeoutMs = getAbortSettleTimeoutMs();
+  if (timeoutMs <= 0) return "timed_out";
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      abortPromise.then(() => "settled" as const),
+      new Promise<"timed_out">((resolve) => {
+        timeoutHandle = setTimeout(() => resolve("timed_out"), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  }
 }
 
 function toCompactReportFilename(timestamp: string): string {
@@ -258,11 +282,23 @@ export async function handleAbort(session: AgentSession, _command: AbortCommand)
       const killedLabel = killed > 0 ? ` Killed ${killed} tracked tool process${killed === 1 ? "" : "es"}.` : "";
       return { status: "success", message: `Compaction aborted.${killedLabel}` };
     }
-    const abortPromise = session.abort();
+    const chatJid = getChatJid("control:/abort");
+    const abortPromise = Promise.resolve().then(() => session.abort());
+    const sshAborted = abortLiveSshCommand(chatJid);
     const killed = killTrackedProcesses();
-    await abortPromise;
+    const abortState = await waitForAbortToSettle(abortPromise);
+    if (abortState === "timed_out") {
+      abortPromise.catch((err) => {
+        debugSuppressedError(log, "Session abort settled late after /abort response.", err, {
+          operation: "agent_control.abort.late_settle",
+          chatJid,
+        });
+      });
+    }
+    const sshLabel = sshAborted ? " Interrupted active SSH command." : "";
     const killedLabel = killed > 0 ? ` Killed ${killed} tracked tool process${killed === 1 ? "" : "es"}.` : "";
-    return { status: "success", message: `Aborted current response.${killedLabel}` };
+    const pendingLabel = abortState === "timed_out" ? ` Abort is still settling after ${getAbortSettleTimeoutMs()}ms.` : "";
+    return { status: "success", message: `Aborted current response.${sshLabel}${killedLabel}${pendingLabel}` };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { status: "error", message };

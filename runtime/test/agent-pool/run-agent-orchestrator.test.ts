@@ -2004,6 +2004,7 @@ test("runAgentPrompt auto-compacts and retries when tool activity produced no te
 });
 
 test("runAgentPrompt auto-compacts and retries after tool-use budget exhaustion", async () => {
+  initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
@@ -2102,6 +2103,192 @@ test("runAgentPrompt auto-compacts and retries after tool-use budget exhaustion"
   } finally {
     setToolUseMessageBudget(previousToolUseBudget);
     restoreEnv();
+  }
+});
+
+test("runAgentPrompt preserves tool-budget root cause when recovery retry emits no assistant reply", async () => {
+  initDatabase();
+  const restoreEnv = setEnv({
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "1",
+    PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
+  });
+  const previousToolUseBudget = getToolUseMessageBudget();
+  setToolUseMessageBudget(8);
+
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    sessionManager = {
+      getLeafId: () => "leaf-1",
+      getEntries: () => [],
+    };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    promptCalls = 0;
+    compactCalls = 0;
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => {
+        this.listeners = this.listeners.filter((entry) => entry !== listener);
+      };
+    }
+    async prompt() {
+      this.promptCalls += 1;
+      if (this.promptCalls === 1) {
+        for (const listener of this.listeners) {
+          for (let i = 1; i <= 9; i += 1) {
+            listener({
+              type: "message_end",
+              message: {
+                role: "assistant",
+                stopReason: "toolUse",
+                content: [{ type: "toolCall", id: `tool-${i}`, name: "read", arguments: { path: `/tmp/${i}` } }],
+              },
+            });
+          }
+        }
+      }
+    }
+    async compact() {
+      this.compactCalls += 1;
+    }
+    async abort() {}
+  }
+
+  try {
+    const session = new StubSession();
+    const recoveryEnds: Array<{ classifier?: string | null; errorMessage?: string }> = [];
+    const turnCoordinator = new AgentTurnCoordinator({
+      takeAttachments: () => [],
+      touchSession: () => {},
+      recordMessageUsage: () => {},
+    });
+
+    const result = await runAgentPrompt("hello", "web:default", {
+      timeoutMs: 0,
+      onEvent: (event) => {
+        if (event.type === "recovery_end") {
+          recoveryEnds.push({
+            classifier: (event as any).classifier,
+            errorMessage: (event as any).errorMessage,
+          });
+        }
+      },
+    }, {
+      getOrCreateRuntime: async () => createRuntime(session) as any,
+      turnCoordinator,
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.error).toContain("Tool-use budget exceeded before finalization");
+    expect(result.error).toContain("retry still produced no terminal assistant reply");
+    expect(result.error).toContain("Ask me to continue");
+    expect(result.toolBudgetExceeded).toBe(true);
+    expect(result.toolStepsUsed).toBe(9);
+    expect(result.toolStepsBudget).toBe(8);
+    expect(result.recovery).toEqual(expect.objectContaining({
+      attemptsUsed: 1,
+      exhausted: true,
+      recovered: false,
+      lastClassifier: "tool_history_pressure",
+      strategyHistory: ["compact_then_retry"],
+    }));
+    expect(result.recovery?.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        classifier: "tool_history_pressure",
+        toolUseBudgetExceeded: true,
+        assistantToolUseMessageCount: 9,
+      }),
+    ]));
+    expect(recoveryEnds).toEqual([expect.objectContaining({
+      classifier: "tool_history_pressure",
+      errorMessage: expect.stringContaining("Tool-use budget exceeded"),
+    })]);
+    expect(session.promptCalls).toBe(2);
+    expect(session.compactCalls).toBe(1);
+  } finally {
+    setToolUseMessageBudget(previousToolUseBudget);
+    restoreEnv();
+  }
+});
+
+test("runAgentPrompt soft-stops near the tool-use budget by disabling tools", async () => {
+  initDatabase();
+  const previousToolUseBudget = getToolUseMessageBudget();
+  setToolUseMessageBudget(8);
+
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    private activeTools = ["bash", "read"];
+    toolSets: string[][] = [];
+    sessionManager = { getLeafId: () => "leaf-1", getEntries: () => [] };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    getActiveToolNames() {
+      return [...this.activeTools];
+    }
+    setActiveToolsByName(names: string[]) {
+      this.activeTools = [...names];
+      this.toolSets.push([...names]);
+    }
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => {
+        this.listeners = this.listeners.filter((entry) => entry !== listener);
+      };
+    }
+    async prompt() {
+      for (const listener of this.listeners) {
+        for (let i = 1; i <= 7; i += 1) {
+          listener({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              stopReason: "toolUse",
+              content: [{ type: "toolCall", id: `tool-${i}`, name: "read", arguments: { path: `/tmp/${i}` } }],
+            },
+          });
+        }
+        listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "summarized before hard budget" } });
+        listener({ type: "message_end", message: createAssistantMessage("summarized before hard budget") });
+      }
+    }
+    async compact() {}
+    async abort() {
+      throw new Error("soft stop should not abort");
+    }
+  }
+
+  try {
+    const session = new StubSession();
+    const warnings: Array<Record<string, unknown>> = [];
+    const result = await runAgentPrompt("hello", "web:default", { timeoutMs: 0 }, {
+      getOrCreateRuntime: async () => createRuntime(session) as any,
+      turnCoordinator: new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} }),
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+      onWarn: (_message, details) => warnings.push(details),
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.result).toBe("summarized before hard budget");
+    expect(session.toolSets).toContainEqual([]);
+    expect(session.toolSets.at(-1)).toEqual(["bash", "read"]);
+    expect(warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ operation: "run_agent.tool_use_budget_soft_stop", assistantToolUseMessageCount: 7 }),
+    ]));
+  } finally {
+    setToolUseMessageBudget(previousToolUseBudget);
   }
 });
 

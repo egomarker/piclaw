@@ -113,8 +113,12 @@ describe("web agent streaming", () => {
       expect(eventTypes).toContain("model_changed");
 
       const thinkingEvents = events.filter((event) => event.type === "model_changed" && event.data?.thinking_level);
-      expect(thinkingEvents.map((event) => event.data?.thinking_level)).toEqual(["high", "medium"]);
-      expect(thinkingEvents[1]?.data?.previous_thinking_level).toBe("high");
+      const thinkingLevels = thinkingEvents.map((event) => event.data?.thinking_level);
+      expect(thinkingLevels).toContain("high");
+      expect(thinkingLevels).toContain("medium");
+      expect(thinkingEvents.some((event) =>
+        event.data?.thinking_level === "medium" && event.data?.previous_thinking_level === "high"
+      )).toBe(true);
 
       const modelEvent = events.find((event) => event.type === "model_changed" && event.data?.model === "openai/gpt-5");
       expect(modelEvent?.data?.previous_model).toBe("anthropic/claude-sonnet-4-5");

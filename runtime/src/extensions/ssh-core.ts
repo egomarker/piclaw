@@ -325,6 +325,15 @@ export class PersistentRemoteShell {
     this.child = null;
   }
 
+  abortRunningCommand(): boolean {
+    const running = this.running;
+    if (!running) return false;
+    running.aborted = true;
+    this.interruptCurrentCommand();
+    this.scheduleHardStop();
+    return true;
+  }
+
   exec(command: string, cwd: string, options: { onData: (data: Buffer) => void; signal?: AbortSignal; timeout?: number; env?: NodeJS.ProcessEnv }): Promise<{ exitCode: number | null }> {
     return this.execOne(command, cwd, options);
   }
@@ -623,6 +632,10 @@ class SshTransport implements RemoteTransport {
     options: { onData: (data: Buffer) => void; signal?: AbortSignal; timeout?: number; env?: NodeJS.ProcessEnv },
   ): Promise<{ exitCode: number | null }> {
     return this.queue.enqueue(() => this.shell.exec(command, cwd, options));
+  }
+
+  abortRunningCommand(): boolean {
+    return this.shell.abortRunningCommand();
   }
 
   async readFile(remotePath: string): Promise<Buffer> {
@@ -945,6 +958,11 @@ export function hasLiveChatSshSession(chatJid: string): boolean {
 export function hasLiveChatSshConnection(chatJid: string): boolean {
   const state = liveChatSshStates.get(chatJid);
   return Boolean(state?.connection && state.transport);
+}
+
+export function abortLiveSshCommand(chatJid: string): boolean {
+  const state = liveChatSshStates.get(chatJid);
+  return state?.transport?.abortRunningCommand() ?? false;
 }
 
 export async function applyLiveSshConfig(

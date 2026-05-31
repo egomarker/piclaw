@@ -394,6 +394,33 @@ test("login config writes stay inside the overridden pi-agent dir", async () => 
   expect(modelsJson.providers?.ollama?.models?.map((entry: { id: string }) => entry.id)).toEqual(["llama3:latest", "qwen3:latest"]);
 });
 
+test("abort returns when session abort remains pending", async () => {
+  const ws = getTestWorkspace();
+  restoreEnv = setEnv({
+    PICLAW_WORKSPACE: ws.workspace,
+    PICLAW_STORE: ws.store,
+    PICLAW_DATA: ws.data,
+    PICLAW_ABORT_SETTLE_TIMEOUT_MS: "5",
+  });
+
+  const applyControlCommand = await getControl();
+  const session = new TestAgentControlSession(ws.workspace, registry);
+  session.abort = async () => {
+    session.abortCalls += 1;
+    await new Promise(() => {});
+  };
+  const runtime = createTestSessionRuntime(session);
+  const startedAt = Date.now();
+
+  const result = await applyControlCommand(runtime as any, registry, { type: "abort", raw: "/abort" });
+
+  expect(Date.now() - startedAt).toBeLessThan(250);
+  expect(result.status).toBe("success");
+  expect(result.message).toContain("Aborted current response.");
+  expect(result.message).toContain("Abort is still settling after 5ms.");
+  expect(session.abortCalls).toBe(1);
+});
+
 test("login refreshes model registry before activating newly authenticated provider models", async () => {
   const ws = getTestWorkspace();
   restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
