@@ -12,7 +12,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, wr
 import { basename, dirname, extname, join } from "path";
 import { formatBytes } from "./agent-control/agent-control-helpers.js";
 import { runCompactionWithTimeout } from "./agent-pool/compaction.js";
-import { createLogger } from "./utils/logger.js";
+import { createLogger, debugSuppressedError } from "./utils/logger.js";
 
 const log = createLogger("session-rotation");
 
@@ -99,15 +99,25 @@ export function getArchivePath(sessionFile: string): string {
   return candidate;
 }
 
+function markSessionManagerFlushed(sessionManager: SessionManager): void {
+  // SessionManager creates persisted files lazily with openSync(..., "wx") on
+  // first assistant append. When Piclaw eagerly writes a seed file during
+  // rotation, we must align that private state or the next turn can fail with
+  // EEXIST while trying to exclusively create a file that already exists.
+  (sessionManager as unknown as { flushed?: boolean }).flushed = true;
+}
+
 /** Persist the current session entries immediately, even before another assistant response arrives. */
 export function forcePersistSessionFile(session: AgentSession): void {
   const sessionFile = session.sessionFile;
   const header = session.sessionManager.getHeader();
   if (!sessionFile || !header) return;
 
+  mkdirSync(dirname(sessionFile), { recursive: true });
   const entries = session.sessionManager.getEntries();
   const content = [header, ...entries].map((entry) => JSON.stringify(entry)).join("\n");
   writeFileSync(sessionFile, `${content}\n`);
+  markSessionManagerFlushed(session.sessionManager);
 }
 
 /** Return true when compaction errors are safe to fall back from during rotation. */
@@ -270,26 +280,69 @@ export function seedEmergencyRotatedSession(
   sessionManager.appendCompaction(emergency.summary, "emergency-rotation", emergency.tokensBefore);
 }
 
-async function restoreCancelledRotationSession(
+interface RotationRestoreResult {
+  restored: boolean;
+  message: string | null;
+  replacementSessionFile: string | null;
+}
+
+async function restorePreviousRotationSession(
   runtime: AgentSessionRuntime,
   previousSessionFile: string,
-): Promise<string | null> {
-  const activeSessionFile = runtime.session.sessionFile?.trim();
-  if (!activeSessionFile || activeSessionFile === previousSessionFile) {
-    return null;
+  reason: "cancellation" | "failure",
+): Promise<RotationRestoreResult> {
+  const replacementSessionFile = runtime.session.sessionFile?.trim() || null;
+  if (!replacementSessionFile || replacementSessionFile === previousSessionFile) {
+    return { restored: true, message: null, replacementSessionFile: null };
   }
 
-  const result = await runtime.switchSession(previousSessionFile);
-  if (result.cancelled) {
-    return `Failed to restore previous session after cancellation: ${previousSessionFile}`;
+  try {
+    const result = await runtime.switchSession(previousSessionFile);
+    if (result.cancelled) {
+      return {
+        restored: false,
+        replacementSessionFile,
+        message: `Failed to restore previous session after ${reason}: ${previousSessionFile}`,
+      };
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      restored: false,
+      replacementSessionFile,
+      message: `Failed to restore previous session after ${reason}: ${detail}`,
+    };
   }
 
   const restoredSessionFile = runtime.session.sessionFile?.trim();
   if (restoredSessionFile !== previousSessionFile) {
-    return `Failed to restore previous session after cancellation: expected ${previousSessionFile} but active session is ${restoredSessionFile || "(none)"}`;
+    return {
+      restored: false,
+      replacementSessionFile,
+      message: `Failed to restore previous session after ${reason}: expected ${previousSessionFile} but active session is ${restoredSessionFile || "(none)"}`,
+    };
   }
 
-  return null;
+  return { restored: true, message: null, replacementSessionFile };
+}
+
+function cleanupInactiveReplacementSessionFile(
+  runtime: AgentSessionRuntime,
+  replacementSessionFile: string | null,
+  previousSessionFile: string,
+): void {
+  if (!replacementSessionFile || replacementSessionFile === previousSessionFile) return;
+  const activeSessionFile = runtime.session.sessionFile?.trim() || null;
+  if (activeSessionFile === replacementSessionFile) return;
+  try {
+    rmSync(replacementSessionFile, { recursive: true, force: true });
+  } catch (error) {
+    debugSuppressedError(log, "Failed to cleanup inactive replacement session file after rotation rollback.", error, {
+      operation: "session_rotation.cleanup_replacement_session_file",
+      replacementSessionFile,
+      previousSessionFile,
+    });
+  }
 }
 
 /** Rotate a persisted session into a newly-seeded successor session file. */
@@ -373,6 +426,8 @@ export async function rotateSession(
   const currentSessionName = session.sessionName?.trim() || undefined;
 
   let archived = false;
+  let committed = false;
+  let replacementSessionFile: string | null = null;
   try {
     copyFileSync(previousSessionFile, archivePath);
     archived = true;
@@ -396,23 +451,26 @@ export async function rotateSession(
         });
       },
     });
+    replacementSessionFile = runtime.session.sessionFile?.trim() || null;
 
     if (result.cancelled) {
       if (archived) rmSync(archivePath, { force: true });
-      const restoreError = await restoreCancelledRotationSession(runtime, previousSessionFile);
+      const restore = await restorePreviousRotationSession(runtime, previousSessionFile, "cancellation");
+      cleanupInactiveReplacementSessionFile(runtime, restore.replacementSessionFile ?? replacementSessionFile, previousSessionFile);
       return {
         status: "error",
         reason,
         compacted,
-        message: restoreError ? `Session rotation cancelled. ${restoreError}` : "Session rotation cancelled.",
+        message: restore.message ? `Session rotation cancelled. ${restore.message}` : "Session rotation cancelled.",
       };
     }
 
-    closeOpenAICodexWebSocketSessions(previousSessionId);
-
     const activeSession = runtime.session;
+    replacementSessionFile = activeSession.sessionFile?.trim() || replacementSessionFile;
     forcePersistSessionFile(activeSession);
+    closeOpenAICodexWebSocketSessions(previousSessionId);
     rmSync(previousSessionFile, { force: true });
+    committed = true;
 
     const nextSessionFile = activeSession.sessionFile || "(unavailable)";
     const nextSize = getSessionFileSize(activeSession.sessionFile);
@@ -445,14 +503,20 @@ export async function rotateSession(
       ].join("\n"),
     };
   } catch (err) {
-    if (archived) {
-      try {
-        rmSync(archivePath, { force: true });
-      } catch {
-        /* expected: failed rotation cleanup is best-effort because the archive path may already be gone. */
+    let restoreMessage: string | null = null;
+    if (!committed) {
+      const restore = await restorePreviousRotationSession(runtime, previousSessionFile, "failure");
+      restoreMessage = restore.message;
+      cleanupInactiveReplacementSessionFile(runtime, restore.replacementSessionFile ?? replacementSessionFile, previousSessionFile);
+      if (archived) {
+        try {
+          rmSync(archivePath, { force: true });
+        } catch {
+          /* expected: failed rotation cleanup is best-effort because the archive path may already be gone. */
+        }
       }
     }
     const message = err instanceof Error ? err.message : String(err);
-    return { status: "error", reason, compacted, message };
+    return { status: "error", reason, compacted, message: restoreMessage ? `${message} ${restoreMessage}` : message };
   }
 }

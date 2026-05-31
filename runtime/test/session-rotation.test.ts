@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
 import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
@@ -189,6 +189,18 @@ test("rotateSession emergency fallback archives bloated context when compaction 
   expect(nextContent).toContain("Recent visible assistant answer");
   expect(nextContent).not.toContain("ENCRYPTED_SIGNATURE");
   expect(nextContent).not.toContain("FULL_TOOL_RESULT");
+
+  expect(() => runtime.session.sessionManager.appendMessage({
+    role: "assistant",
+    content: [{ type: "text", text: "Turn after emergency rotation" }],
+    provider: "openai",
+    model: "gpt-test",
+    usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    stopReason: "stop",
+    timestamp: Date.now(),
+  } as any)).not.toThrow();
+  const appendedContent = readFileSync(runtime.session.sessionFile!, "utf8");
+  expect(appendedContent).toContain("Turn after emergency rotation");
 });
 
 test("rotateSession restores the previous session when a cancelled newSession already replaced runtime.session", async () => {
@@ -208,6 +220,7 @@ test("rotateSession restores the previous session when a cancelled newSession al
 
   const archivePath = getArchivePath(previousSessionFile!);
   let switchCalls = 0;
+  let replacementSessionFile: string | undefined;
 
   const runtime = {
     session: originalSession,
@@ -219,10 +232,14 @@ test("rotateSession restores the previous session when a cancelled newSession al
       const replacementManager = SessionManager.create(workspace.workspace, sessionDir);
       replacementManager.newSession({ parentSession: options?.parentSession });
       await options?.setup?.(replacementManager);
+      replacementSessionFile = replacementManager.getSessionFile()!;
+      const header = replacementManager.getHeader();
+      expect(header).toBeTruthy();
+      writeFileSync(replacementSessionFile, `${JSON.stringify(header)}\n`);
       runtime.session = {
-        ...createPersistedSession(workspace.workspace, sessionDir, "Cancelled replacement"),
+        ...originalSession,
         sessionManager: replacementManager,
-        sessionFile: replacementManager.getSessionFile(),
+        sessionFile: replacementSessionFile,
       } as any;
       return { cancelled: true };
     },
@@ -245,4 +262,66 @@ test("rotateSession restores the previous session when a cancelled newSession al
   expect(runtime.session.sessionFile).toBe(previousSessionFile);
   expect(existsSync(previousSessionFile!)).toBe(true);
   expect(existsSync(archivePath)).toBe(false);
+  expect(replacementSessionFile).toBeTruthy();
+  expect(existsSync(replacementSessionFile!)).toBe(false);
+});
+
+test("rotateSession restores the previous session and removes orphan successor when persistence fails", async () => {
+  const workspace = createTempWorkspace("piclaw-rotate-session-persist-fails-");
+  cleanupWorkspace = workspace.cleanup;
+  restoreEnv = setEnv({
+    PICLAW_WORKSPACE: workspace.workspace,
+    PICLAW_STORE: workspace.store,
+    PICLAW_DATA: workspace.data,
+  });
+
+  const { rotateSession, getArchivePath } = await importFresh<typeof import("../src/session-rotation.js")>("../src/session-rotation.js");
+  const sessionDir = join(workspace.workspace, "session-rotation-persist-fails");
+  const originalSession = createPersistedSession(workspace.workspace, sessionDir, "Original session");
+  const previousSessionFile = originalSession.sessionFile;
+  expect(previousSessionFile).toBeTruthy();
+
+  const archivePath = getArchivePath(previousSessionFile!);
+  let switchCalls = 0;
+  let replacementSessionFile: string | undefined;
+
+  const runtime = {
+    session: originalSession,
+    cwd: workspace.workspace,
+    diagnostics: [],
+    services: {} as any,
+    modelFallbackMessage: undefined,
+    newSession: async (options?: { parentSession?: string; setup?: (sessionManager: SessionManager) => Promise<void> | void }) => {
+      const replacementManager = SessionManager.create(workspace.workspace, sessionDir);
+      replacementManager.newSession({ parentSession: options?.parentSession });
+      await options?.setup?.(replacementManager);
+      replacementSessionFile = replacementManager.getSessionFile()!;
+      mkdirSync(replacementSessionFile);
+      runtime.session = {
+        ...originalSession,
+        sessionManager: replacementManager,
+        sessionFile: replacementSessionFile,
+      } as any;
+      return { cancelled: false };
+    },
+    switchSession: async (sessionPath: string) => {
+      switchCalls += 1;
+      expect(sessionPath).toBe(previousSessionFile);
+      runtime.session = originalSession as any;
+      return { cancelled: false };
+    },
+    fork: async () => ({ cancelled: false }),
+    importFromJsonl: async () => ({ cancelled: false }),
+    dispose: async () => {},
+  } as AgentSessionRuntime;
+
+  const result = await rotateSession(originalSession as any, runtime, { reason: "manual" });
+
+  expect(result.status).toBe("error");
+  expect(switchCalls).toBe(1);
+  expect(runtime.session.sessionFile).toBe(previousSessionFile);
+  expect(existsSync(previousSessionFile!)).toBe(true);
+  expect(existsSync(archivePath)).toBe(false);
+  expect(replacementSessionFile).toBeTruthy();
+  expect(existsSync(replacementSessionFile!)).toBe(false);
 });

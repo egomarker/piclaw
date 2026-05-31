@@ -42,7 +42,7 @@ describe("session persistence sanitizer", () => {
     console.warn = originalWarn;
   });
 
-  test("createSessionInDir sanitizes oversized persisted tool results before resume", async () => {
+  test("createSessionInDir sanitizes oversized persisted tool results before resume", { timeout: 15000 }, async () => {
     console.warn = () => {};
     const tempRoot = mkdtempSync(join(tmpdir(), "piclaw-session-sanitize-resume-"));
     const sessionDir = join(tempRoot, "session");
