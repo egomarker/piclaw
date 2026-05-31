@@ -529,21 +529,22 @@ export function searchMessagesAcrossChats(chatJids: string[] | null, query: stri
  * `lastTimestamp` across the given chat JIDs. Returns the messages and the
  * new high-water-mark timestamp for the next poll cycle.
  */
-export function getNewMessages(
+function getNewMessagesInternal(
   jids: string[],
   lastTimestamp: string,
-  botPrefix: string
+  botPrefix: string,
+  options: { includeSlashCommands?: boolean } = {},
 ): { messages: NewMessage[]; newTimestamp: string } {
   if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
   const db = getDb();
 
   const placeholders = jids.map(() => "?").join(",");
+  const slashFilterSql = options.includeSlashCommands ? "" : "\n      AND LTRIM(content) NOT LIKE '/%'";
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, screen_hint, timestamp
     FROM messages
     WHERE timestamp > ? AND chat_jid IN (${placeholders})
-      AND is_bot_message = 0 AND content NOT LIKE ?
-      AND LTRIM(content) NOT LIKE '/%'
+      AND is_bot_message = 0 AND content NOT LIKE ?${slashFilterSql}
       AND COALESCE(is_steering_message, 0) = 0
     ORDER BY timestamp
   `;
@@ -558,6 +559,44 @@ export function getNewMessages(
   return { messages: rows, newTimestamp };
 }
 
+function getMessagesSinceInternal(
+  chatJid: string,
+  sinceTimestamp: string,
+  botPrefix: string,
+  options: { includeSlashCommands?: boolean } = {},
+): NewMessage[] {
+  const db = getDb();
+  const slashFilterSql = options.includeSlashCommands ? "" : "\n      AND LTRIM(content) NOT LIKE '/%'";
+  const sql = `
+    SELECT id, chat_jid, sender, sender_name, content, screen_hint, timestamp, thread_id
+    FROM messages
+    WHERE chat_jid = ? AND timestamp > ?
+      AND is_bot_message = 0 AND content NOT LIKE ?${slashFilterSql}
+      AND COALESCE(is_steering_message, 0) = 0
+    ORDER BY timestamp
+  `;
+  return db.prepare(sql).all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
+}
+
+export function getNewMessages(
+  jids: string[],
+  lastTimestamp: string,
+  botPrefix: string
+): { messages: NewMessage[]; newTimestamp: string } {
+  return getNewMessagesInternal(jids, lastTimestamp, botPrefix);
+}
+
+/**
+ * Runtime-only polling query that keeps slash commands visible for non-web transports.
+ */
+export function getRuntimeNewMessages(
+  jids: string[],
+  lastTimestamp: string,
+  botPrefix: string,
+): { messages: NewMessage[]; newTimestamp: string } {
+  return getNewMessagesInternal(jids, lastTimestamp, botPrefix, { includeSlashCommands: true });
+}
+
 /**
  * Fetch non-bot messages since a given timestamp for a single chat.
  * Used by the task scheduler when building context for a scheduled task run.
@@ -567,15 +606,16 @@ export function getMessagesSince(
   sinceTimestamp: string,
   botPrefix: string
 ): NewMessage[] {
-  const db = getDb();
-  const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, screen_hint, timestamp, thread_id
-    FROM messages
-    WHERE chat_jid = ? AND timestamp > ?
-      AND is_bot_message = 0 AND content NOT LIKE ?
-      AND LTRIM(content) NOT LIKE '/%'
-      AND COALESCE(is_steering_message, 0) = 0
-    ORDER BY timestamp
-  `;
-  return db.prepare(sql).all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
+  return getMessagesSinceInternal(chatJid, sinceTimestamp, botPrefix);
+}
+
+/**
+ * Runtime-only drain query that keeps slash commands visible for transport chats.
+ */
+export function getRuntimeMessagesSince(
+  chatJid: string,
+  sinceTimestamp: string,
+  botPrefix: string,
+): NewMessage[] {
+  return getMessagesSinceInternal(chatJid, sinceTimestamp, botPrefix, { includeSlashCommands: true });
 }

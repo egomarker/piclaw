@@ -111,6 +111,58 @@ test("processMessages persists lastAgentTimestamp after a recovered successful a
   });
 });
 
+test("processMessages executes transport slash commands when forcePrompt is set", async () => {
+  await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
+    const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
+    const loop = await importFresh<typeof import("../../src/runtime/message-loop.js")>("../src/runtime/message-loop.js");
+    db.initDatabase();
+
+    const chatJid = "telegram:123456";
+    const timestamp = "2026-04-17T01:02:30.000Z";
+    const sourceRowId = db.storeMessage({
+      ...makeMessage(chatJid, "/custom-addon arg", timestamp),
+      id: "telegram:123456:77",
+    });
+
+    const state = {
+      lastAgentTimestamp: {} as Record<string, string>,
+      wasCommandProcessed: () => false,
+      markCommandProcessed: () => {},
+      saveTimestamps: () => {},
+    };
+
+    const sent: Array<{ text: string; options?: Record<string, unknown> }> = [];
+    let invoked = "";
+    const ok = await loop.processMessages(chatJid, {
+      state: state as any,
+      assistantName: "Pi",
+      triggerPattern: /@Pi/i,
+      agentPool: {
+        applyControlCommand: async () => {
+          throw new Error("extension-style slash command must not route through applyControlCommand");
+        },
+        applySlashCommand: async (_nextChatJid: string, rawText: string) => {
+          invoked = rawText;
+          return { status: "success", message: "slash ok" };
+        },
+      } as any,
+      sendMessage: async (_jid: string, text: string, options?: Record<string, unknown>) => {
+        sent.push({ text, options });
+      },
+    }, { forcePrompt: true });
+
+    expect(ok).toBe(true);
+    expect(invoked).toBe("/custom-addon arg");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.text).toBe("slash ok");
+    expect(sent[0]?.options).toMatchObject({
+      source: "slash-command",
+      threadId: sourceRowId,
+    });
+    expect(state.lastAgentTimestamp[chatJid]).toBe(timestamp);
+  });
+});
+
 test("processMessages treats leading path-like slash text after trigger as a normal prompt", async () => {
   await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
     const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");

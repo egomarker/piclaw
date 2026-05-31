@@ -870,6 +870,20 @@ test("getMessagesSince and getNewMessages filter bot messages, bot-prefixed cont
 
   const { messages } = db.getNewMessages([chatJid], "", "Pi");
   expect(messages.map((m) => m.content)).toEqual(["user message"]);
+
+  const runtimeSinceMessages = db.getRuntimeMessagesSince(chatJid, "", "Pi");
+  expect(runtimeSinceMessages.map((m) => m.content)).toEqual([
+    "/tree",
+    "   /theme gruvbox",
+    "user message",
+  ]);
+
+  const { messages: runtimeMessages } = db.getRuntimeNewMessages([chatJid], "", "Pi");
+  expect(runtimeMessages.map((m) => m.content)).toEqual([
+    "/tree",
+    "   /theme gruvbox",
+    "user message",
+  ]);
 });
 
 // --- Delete cascade & media cleanup ---

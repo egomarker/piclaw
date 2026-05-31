@@ -21,7 +21,11 @@ import { formatRecoverySummary } from "../agent-pool/automatic-recovery.js";
 import { parseControlCommand, type AgentControlCommand } from "../agent-control/index.js";
 import { stripTrigger } from "../agent-control/parser-utils.js";
 import { isSlashCommandInvocation } from "../agent-pool/slash-command.js";
-import { getMessageThreadRootIdById, getMessagesSince, getNewMessages } from "../db.js";
+import {
+  getMessageThreadRootIdById,
+  getRuntimeMessagesSince,
+  getRuntimeNewMessages,
+} from "../db.js";
 import type { AgentQueue } from "../queue.js";
 import { detectChannel, formatMessages, formatOutbound } from "../router.js";
 import { createLogger } from "../utils/logger.js";
@@ -342,7 +346,7 @@ export async function processMessages(
   options: { forcePrompt?: boolean } = {},
 ): Promise<boolean> {
   const since = deps.state.lastAgentTimestamp[chatJid] || "";
-  const messages = getMessagesSince(chatJid, since, deps.assistantName);
+  const messages = getRuntimeMessagesSince(chatJid, since, deps.assistantName);
   if (messages.length === 0) return true;
 
   const commandQueue: Array<{ message: (typeof messages)[number]; command: AgentControlCommand }> = [];
@@ -515,7 +519,7 @@ export async function runMessageLoop(deps: MessageLoopDeps): Promise<void> {
   while (true) {
     try {
       const jids = [...deps.state.chatJids];
-      const { messages, newTimestamp } = getNewMessages(jids, deps.state.lastTimestamp, deps.assistantName);
+      const { messages, newTimestamp } = getRuntimeNewMessages(jids, deps.state.lastTimestamp, deps.assistantName);
       if (messages.length > 0) {
         deps.state.lastTimestamp = newTimestamp;
         deps.state.saveTimestamps();
