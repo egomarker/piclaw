@@ -381,15 +381,20 @@ export async function processMessages(
     deps.state.markCommandProcessed(chatJid, message.id);
   }
 
-  // Check trigger on non-command messages only
-  const hasTrigger = options.forcePrompt === true || promptMessages.some((m) => deps.triggerPattern.test(m.content.trim()));
-  if (!hasTrigger) return true;
-
   const nextTimestamp = messages[messages.length - 1].timestamp;
   const commitLastAgentTimestamp = () => {
     deps.state.lastAgentTimestamp[chatJid] = nextTimestamp;
     deps.state.saveTimestamps();
   };
+
+  if (promptMessages.length === 0) {
+    commitLastAgentTimestamp();
+    return true;
+  }
+
+  // Check trigger on non-command messages only
+  const hasTrigger = options.forcePrompt === true || promptMessages.some((m) => deps.triggerPattern.test(m.content.trim()));
+  if (!hasTrigger) return true;
 
   const lastPrompt = promptMessages[promptMessages.length - 1];
   const cleaned = lastPrompt ? stripTrigger(lastPrompt.content, deps.triggerPattern) : "";

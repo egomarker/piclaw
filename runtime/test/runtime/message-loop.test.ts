@@ -111,6 +111,62 @@ test("processMessages persists lastAgentTimestamp after a recovered successful a
   });
 });
 
+test("processMessages handles transport control commands without starting an agent run", async () => {
+  await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
+    const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
+    const loop = await importFresh<typeof import("../../src/runtime/message-loop.js")>("../src/runtime/message-loop.js");
+    db.initDatabase();
+
+    const chatJid = "telegram:123456";
+    const timestamp = "2026-04-17T01:02:00.000Z";
+    const sourceRowId = db.storeMessage({
+      ...makeMessage(chatJid, "/tree", timestamp),
+      id: "telegram:123456:76",
+    });
+
+    let saveCalls = 0;
+    const state = {
+      lastAgentTimestamp: {} as Record<string, string>,
+      wasCommandProcessed: () => false,
+      markCommandProcessed: () => {},
+      saveTimestamps: () => {
+        saveCalls += 1;
+      },
+    };
+
+    const sent: Array<{ text: string; options?: Record<string, unknown> }> = [];
+    let controlCalls = 0;
+    const ok = await loop.processMessages(chatJid, {
+      state: state as any,
+      assistantName: "Pi",
+      triggerPattern: /@Pi/i,
+      agentPool: {
+        applyControlCommand: async () => {
+          controlCalls += 1;
+          return { status: "success", message: "tree ok" };
+        },
+        runAgent: async () => {
+          throw new Error("control-only transport command must not start agent run");
+        },
+      } as any,
+      sendMessage: async (_jid: string, text: string, options?: Record<string, unknown>) => {
+        sent.push({ text, options });
+      },
+    }, { forcePrompt: true });
+
+    expect(ok).toBe(true);
+    expect(controlCalls).toBe(1);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.text).toBe("tree ok");
+    expect(sent[0]?.options).toMatchObject({
+      source: "control",
+      threadId: sourceRowId,
+    });
+    expect(state.lastAgentTimestamp[chatJid]).toBe(timestamp);
+    expect(saveCalls).toBe(1);
+  });
+});
+
 test("processMessages executes transport slash commands when forcePrompt is set", async () => {
   await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
     const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
