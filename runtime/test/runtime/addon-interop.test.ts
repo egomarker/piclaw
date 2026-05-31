@@ -124,7 +124,7 @@ test("installAddonRuntimeInterop fast-paths inbound /steer while the chat is str
   });
 });
 
-test("installAddonRuntimeInterop blocks disallowed fast-path /steer commands from addon policy", async () => {
+test("installAddonRuntimeInterop silently drops disallowed fast-path /steer commands from addon policy", async () => {
   await withTempWorkspaceEnv("piclaw-addon-interop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async (workspace) => {
     installNonWebCommandPolicyAddon(workspace.workspace, { allowedCommands: ["state"] });
 
@@ -175,15 +175,6 @@ test("installAddonRuntimeInterop blocks disallowed fast-path /steer commands fro
       { chatJid: "telegram:123", messageId: "telegram:123:3" },
     ]);
     expect(enqueueCalls).toBe(0);
-    expect(sendCalls).toEqual([
-      {
-        jid: "telegram:123",
-        text: "/steer is not available in this channel. Open this chat in the web UI for full command access.",
-        options: {
-          source: "control",
-          threadId: result?.rowId,
-        },
-      },
-    ]);
+    expect(sendCalls).toEqual([]);
   });
 });

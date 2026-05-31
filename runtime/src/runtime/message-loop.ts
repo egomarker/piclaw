@@ -35,7 +35,6 @@ import {
   type RuntimeSendMessageOptions,
 } from "./channel-transport-registry.js";
 import {
-  getBlockedNonWebCommandMessage,
   isAllowedNonWebControlCommand,
   isAllowedNonWebSlashCommand,
 } from "./non-web-command-policy.js";
@@ -372,12 +371,12 @@ export async function processMessages(
   }
 
   for (const { message, command } of commandQueue) {
-    const result = isAllowedNonWebControlCommand(chatJid, command)
-      ? await deps.agentPool.applyControlCommand(chatJid, command)
-      : {
-          status: "error" as const,
-          message: getBlockedNonWebCommandMessage(command.raw),
-        };
+    if (!isAllowedNonWebControlCommand(chatJid, command)) {
+      deps.state.markCommandProcessed(chatJid, message.id);
+      continue;
+    }
+
+    const result = await deps.agentPool.applyControlCommand(chatJid, command);
     const formatted = formatOutbound(result.message || "", channel);
     if (formatted || result.mediaIds?.length || result.contentBlocks?.length) {
       const threadId = getReplyThreadId(chatJid, message);
@@ -413,19 +412,17 @@ export async function processMessages(
       operation: "process_messages.slash_command",
       chatJid,
     });
+    if (!isAllowedNonWebSlashCommand(chatJid, cleaned)) {
+      commitLastAgentTimestamp();
+      return true;
+    }
+
+    const stopTyping = startChannelTyping(chatJid, channel);
     let result;
-    if (isAllowedNonWebSlashCommand(chatJid, cleaned)) {
-      const stopTyping = startChannelTyping(chatJid, channel);
-      try {
-        result = await deps.agentPool.applySlashCommand(chatJid, cleaned);
-      } finally {
-        stopTyping();
-      }
-    } else {
-      result = {
-        status: "error" as const,
-        message: getBlockedNonWebCommandMessage(cleaned),
-      };
+    try {
+      result = await deps.agentPool.applySlashCommand(chatJid, cleaned);
+    } finally {
+      stopTyping();
     }
 
     if (result.message || result.mediaIds?.length || result.contentBlocks?.length) {

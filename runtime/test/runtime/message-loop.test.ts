@@ -247,7 +247,7 @@ test("processMessages executes transport slash commands when forcePrompt is set"
   });
 });
 
-test("processMessages blocks disallowed non-web control commands from addon policy", async () => {
+test("processMessages silently drops disallowed non-web control commands from addon policy", async () => {
   await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async (workspace) => {
     installNonWebCommandPolicyAddon(workspace.workspace, { allowedCommands: ["state"] });
 
@@ -257,7 +257,7 @@ test("processMessages blocks disallowed non-web control commands from addon poli
 
     const chatJid = "telegram:blocked-control";
     const timestamp = "2026-04-17T01:02:45.000Z";
-    const sourceRowId = db.storeMessage({
+    db.storeMessage({
       ...makeMessage(chatJid, "/tree", timestamp),
       id: "telegram:blocked-control:1",
     });
@@ -286,17 +286,7 @@ test("processMessages blocks disallowed non-web control commands from addon poli
     }, { forcePrompt: true });
 
     expect(ok).toBe(true);
-    expect(sent).toEqual([
-      {
-        text: "/tree is not available in this channel. Open this chat in the web UI for full command access.",
-        options: {
-          source: "control",
-          threadId: sourceRowId,
-          mediaIds: undefined,
-          contentBlocks: undefined,
-        },
-      },
-    ]);
+    expect(sent).toEqual([]);
   });
 });
 
@@ -351,7 +341,7 @@ test("processMessages allows control-command aliases via canonical allowlist nam
   });
 });
 
-test("processMessages blocks disallowed non-web slash commands from addon policy", async () => {
+test("processMessages silently drops disallowed non-web slash commands from addon policy", async () => {
   await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async (workspace) => {
     installNonWebCommandPolicyAddon(workspace.workspace, { allowedCommands: ["tasks"] });
 
@@ -361,7 +351,7 @@ test("processMessages blocks disallowed non-web slash commands from addon policy
 
     const chatJid = "telegram:blocked-slash";
     const timestamp = "2026-04-17T01:02:55.000Z";
-    const sourceRowId = db.storeMessage({
+    db.storeMessage({
       ...makeMessage(chatJid, "/custom-addon arg", timestamp),
       id: "telegram:blocked-slash:1",
     });
@@ -390,12 +380,7 @@ test("processMessages blocks disallowed non-web slash commands from addon policy
     }, { forcePrompt: true });
 
     expect(ok).toBe(true);
-    expect(sent).toHaveLength(1);
-    expect(sent[0]?.text).toBe("/custom-addon is not available in this channel. Open this chat in the web UI for full command access.");
-    expect(sent[0]?.options).toMatchObject({
-      source: "slash-command",
-      threadId: sourceRowId,
-    });
+    expect(sent).toEqual([]);
   });
 });
 

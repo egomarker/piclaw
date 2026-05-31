@@ -5,10 +5,7 @@ import type { NewMessage } from "../types.js";
 import { createUuid } from "../utils/ids.js";
 import { createLogger } from "../utils/logger.js";
 import { processMessages, type MessageProcessingDeps } from "./message-loop.js";
-import {
-  getBlockedNonWebCommandMessage,
-  isAllowedNonWebControlCommand,
-} from "./non-web-command-policy.js";
+import { isAllowedNonWebControlCommand } from "./non-web-command-policy.js";
 import type { RuntimeState } from "./state.js";
 import { registerChannelTransport, type RuntimeChannelTransport, type RuntimeSendMessageOptions } from "./channel-transport-registry.js";
 
@@ -133,11 +130,6 @@ export function installAddonRuntimeInterop(options: InstallAddonRuntimeInteropOp
 
     if (inboundOptions.enqueue !== false && immediateSteerCommand && immediateSteerText && options.agentPool.isStreaming(normalizedChatJid)) {
       if (!isAllowedNonWebControlCommand(normalizedChatJid, immediateSteerCommand)) {
-        const threadId = explicitThreadId ?? (rowId > 0 ? rowId : undefined);
-        await options.sendMessage(normalizedChatJid, getBlockedNonWebCommandMessage(immediateSteerCommand.raw), {
-          ...(threadId !== undefined ? { threadId } : {}),
-          source: "control",
-        });
         options.state.markCommandProcessed(normalizedChatJid, messageId);
         return {
           messageId,
