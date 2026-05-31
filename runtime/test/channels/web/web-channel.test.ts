@@ -1941,6 +1941,59 @@ test("processChat publishes draft fallback when final result is missing", async 
   expect(last.data.content).toContain("draft only");
 });
 
+test("processChat surfaces draft as informational when tool-complete has no final prose", async () => {
+  const ws = createTempWorkspace("piclaw-web-channel-");
+  cleanupWorkspace = ws.cleanup;
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+
+  const db = await import("../../../src/db.js");
+  db.initDatabase();
+  db.getDb().exec("DELETE FROM message_media; DELETE FROM messages; DELETE FROM chats; DELETE FROM chat_cursors; DELETE FROM chat_cursors;");
+  db.storeChatMetadata("web:default", new Date().toISOString(), "Web");
+
+  db.storeMessage({
+    id: `msg-${Math.random()}`,
+    chat_jid: "web:default",
+    sender: "user",
+    sender_name: "User",
+    content: "hello",
+    timestamp: new Date().toISOString(),
+    is_from_me: false,
+    is_bot_message: false,
+  });
+
+  const webMod = await import("../../../src/channels/web.js");
+  const web = new (webMod.WebChannel as any)({
+    queue: { enqueue: () => {} },
+    agentPool: {
+      setSessionBinder: () => {},
+      runAgent: async (_prompt: string, _chatJid: string, options: any) => {
+        options.onEvent?.({
+          type: "message_update",
+          assistantMessageEvent: { type: "text_start" },
+        });
+        options.onEvent?.({
+          type: "message_update",
+          assistantMessageEvent: { type: "text_delta", delta: "tool-backed draft" },
+        });
+        return { status: "tool_complete", result: null, attachments: [] };
+      },
+      getContextUsageForChat: async () => null,
+    },
+  });
+
+  await web.processChat("web:default", "default");
+
+  const timeline = db.getTimeline("web:default", 10);
+  const last = timeline[timeline.length - 1];
+  expect(last.data.content).toContain("tool-backed draft");
+  expect(last.data.content_blocks).toContainEqual(expect.objectContaining({
+    type: "turn_outcome_marker",
+    kind: "tool_complete",
+    draft_recovered: true,
+  }));
+});
+
 test("processChat final first turn does not consume a queued placeholder", async () => {
   const ws = createTempWorkspace("piclaw-web-channel-");
   cleanupWorkspace = ws.cleanup;

@@ -1220,7 +1220,12 @@ async function runPromptAttempt(
           && !isBlankTurnSessionDelta(blankTurnDelta)
           && !onlyReadOnlyToolActivity
           && detail.includes("provider stopped after tool use");
-        const isToolOnlyCompletion = isTerminalSideEffectCompletion || isRecoverableToolOnlyStop;
+        const isDraftBackedToolCompletion = hadToolActivity
+          && hadPartialOutput
+          && !hadToolFailure
+          && !isBlankTurnSessionDelta(blankTurnDelta)
+          && detail.includes("provider stopped after tool use");
+        const isToolOnlyCompletion = isTerminalSideEffectCompletion || isRecoverableToolOnlyStop || isDraftBackedToolCompletion;
         output = isToolOnlyCompletion
           ? {
             status: "tool_complete" as const,

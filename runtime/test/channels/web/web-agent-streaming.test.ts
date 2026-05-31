@@ -254,7 +254,7 @@ describe("web agent streaming", () => {
 
   test("pre-prompt compaction defers in background and resumes the chat lane", async () => {
     const previousForeground = process.env.PICLAW_PREPROMPT_COMPACTION_FOREGROUND_MS;
-    process.env.PICLAW_PREPROMPT_COMPACTION_FOREGROUND_MS = "1";
+    process.env.PICLAW_PREPROMPT_COMPACTION_FOREGROUND_MS = "0";
     const releaseCompaction = deferred<void>();
     let compactCalls = 0;
     let runCalls = 0;

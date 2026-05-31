@@ -2610,6 +2610,95 @@ test("runAgentPrompt treats terminal side-effect tool completion as informationa
   }
 });
 
+test("runAgentPrompt treats draft-backed provider stop after tool use as informational", async () => {
+  const restoreEnv = setEnv({
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
+    PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
+  });
+
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    private entries: any[] = [{ id: "base", type: "message" }];
+    sessionManager = {
+      getLeafId: () => "leaf-draft-backed-tool-stop",
+      getEntries: () => this.entries,
+    };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    promptCalls = 0;
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => {
+        this.listeners = this.listeners.filter((entry) => entry !== listener);
+      };
+    }
+    async prompt() {
+      this.promptCalls += 1;
+      for (const listener of this.listeners) {
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "toolUse",
+            content: [{ type: "toolCall", id: "tool-1", name: "bash", arguments: { command: "make test" } }],
+          },
+        });
+        this.entries.push({ id: "assistant-tool", type: "message" });
+        listener({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "bash", args: { command: "make test" } });
+        listener({ type: "tool_execution_end", toolCallId: "tool-1", toolName: "bash", isError: false });
+        this.entries.push({ id: "tool-result", type: "message" });
+        listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Tests passed; I am preparing the final summary." } });
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "stop",
+            content: [],
+          },
+        });
+        this.entries.push(...Array.from({ length: 113 }, (_, index) => ({ id: `entry-${index}`, type: "message" })));
+      }
+    }
+    async abort() {}
+  }
+
+  try {
+    const session = new StubSession();
+    const recoveryEvents: Array<{ type: string }> = [];
+    const turnCoordinator = new AgentTurnCoordinator({
+      takeAttachments: () => [],
+      touchSession: () => {},
+      recordMessageUsage: () => {},
+    });
+
+    const result = await runAgentPrompt("run tests", "web:default", {
+      timeoutMs: 0,
+      onEvent: (event) => {
+        if (event.type === "recovery_start" || event.type === "recovery_end") {
+          recoveryEvents.push({ type: String(event.type) });
+        }
+      },
+    }, {
+      getOrCreateRuntime: async () => createRuntime(session, { maxRetries: 5, baseDelayMs: 1, maxDelayMs: 60000 }) as any,
+      turnCoordinator,
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+    });
+
+    expect(result.status).toBe("tool_complete");
+    expect(result.error).toBeUndefined();
+    expect(session.promptCalls).toBe(1);
+    expect(recoveryEvents).toEqual([]);
+  } finally {
+    restoreEnv();
+  }
+});
+
 test("runAgentPrompt retries when provider stops after a read-only tool call without a final reply", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
