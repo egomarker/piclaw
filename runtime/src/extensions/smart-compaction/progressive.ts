@@ -42,6 +42,16 @@ export interface ProgressiveCompactionChunk {
   estimatedChars: number;
 }
 
+export interface ProgressiveCompactionResult {
+  summary: string;
+  complete: boolean;
+  processedChunkCount: number;
+  totalChunkCount: number;
+  nextUnprocessedMessageIndex?: number;
+  nextUnprocessedSourceMessageIndex?: number;
+  partialReason?: string;
+}
+
 export function getProgressiveCompactionBudget(model: unknown, targetContextWindow?: number | null): ProgressiveCompactionBudget {
   const reportedWindow = getModelContextWindow(model) ?? PROGRESSIVE_FALLBACK_CONTEXT_WINDOW;
   const contextWindow = typeof targetContextWindow === "number" && Number.isFinite(targetContextWindow) && targetContextWindow > 0
@@ -248,6 +258,68 @@ function buildMergePrompt(input: {
 
 function isCompactionInputOverflow(message: string): boolean {
   return /context\s*(?:length|window)|maximum context|max(?:imum)? tokens|too many tokens|input too large|prompt too large|exceeds.*(?:context|token)|token limit|exceeds safe model budget/i.test(message);
+}
+
+function sourceIndexForLlmIndex(sourceIndexesByLlmIndex: number[] | undefined, llmIndex: number | undefined): number | undefined {
+  if (!sourceIndexesByLlmIndex || llmIndex == null) return undefined;
+  for (let idx = Math.max(0, llmIndex); idx < sourceIndexesByLlmIndex.length; idx += 1) {
+    const sourceIndex = sourceIndexesByLlmIndex[idx];
+    if (Number.isFinite(sourceIndex)) return sourceIndex;
+  }
+  return undefined;
+}
+
+function buildDeterministicProgressiveSummary(input: {
+  summaries: string[];
+  chunks: ProgressiveCompactionChunk[];
+  complete: boolean;
+  reason?: string;
+}): string {
+  const firstChunk = input.chunks[0];
+  const lastChunk = input.chunks[input.summaries.length - 1];
+  const totalChunks = input.chunks.length;
+  const processedChunks = input.summaries.length;
+  const range = firstChunk && lastChunk
+    ? `${firstChunk.startMessageIndex}-${lastChunk.endMessageIndex}`
+    : "unknown";
+  const reason = input.reason?.trim() || "progressive compaction stopped before an LLM final merge";
+  const statusLine = input.complete
+    ? `All ${totalChunks} progressive chunks were summarized; final LLM merge was skipped because ${reason}.`
+    : `${processedChunks}/${totalChunks} progressive chunks were summarized; remaining messages are retained verbatim by moving the first kept entry to the first unsummarized chunk.`;
+
+  return [
+    "## Goal",
+    "Progressive compaction preserved completed chunk summaries deterministically.",
+    "",
+    "## Current Active Topic",
+    "- Continue from the retained live messages after this compaction entry.",
+    "",
+    "## Historical / Background Context",
+    `- ${statusLine}`,
+    `- Summarized LLM message range: ${range}.`,
+    "",
+    "## Constraints & Preferences",
+    "- Do not treat unsummarized chunks as dropped; they remain in the kept session context.",
+    "",
+    "## Progress",
+    "### Done",
+    `- [x] Summarized ${processedChunks}/${totalChunks} progressive chunk${processedChunks === 1 ? "" : "s"}.`,
+    "",
+    "### In Progress",
+    "- [ ] Resume from the kept live messages and continue normally.",
+    "",
+    "### Blocked",
+    input.complete ? "- none" : `- Progressive compaction stopped early: ${reason}.`,
+    "",
+    "## Key Decisions",
+    "- **Progressive compaction safety**: never merge or imply coverage for chunks that were not summarized.",
+    "",
+    "## Next Steps",
+    "1. Use the retained messages after the compaction boundary as authoritative current context.",
+    "",
+    "## Critical Context",
+    ...input.summaries.map((summary, index) => `\n### Completed Progressive Chunk ${index + 1}/${totalChunks}\n${summary.trim()}`),
+  ].join("\n").trim();
 }
 
 export function buildTrimmedProgressiveMergeRetryPrompt(promptText: string, targetPromptTokens: number): string | null {
@@ -469,6 +541,7 @@ async function mergeProgressiveSummaries(input: {
 export async function runProgressiveCompaction(input: {
   llmMessages: Message[];
   humanUserIndexes: Set<number>;
+  sourceIndexesByLlmIndex?: number[];
   model: any;
   auth: { apiKey?: string; headers?: Record<string, string> };
   settings: { reserveTokens: number };
@@ -490,7 +563,7 @@ export async function runProgressiveCompaction(input: {
   streamFn?: CompactionStreamFn;
   /** Progress callback (chars generated so far). */
   onProgress?: (generatedChars: number) => void;
-}): Promise<string> {
+}): Promise<ProgressiveCompactionResult> {
   const chunks = buildProgressiveCompactionChunks(
     input.llmMessages,
     input.budget.chunkBudgetChars,
@@ -515,9 +588,26 @@ export async function runProgressiveCompaction(input: {
     if (input.timeoutMs && input.startedAt) {
       const elapsed = Date.now() - input.startedAt;
       if (elapsed > input.timeoutMs * PROGRESSIVE_TIME_BUDGET_FRACTION) {
-        throw new Error(
-          `Progressive compaction time budget exhausted after ${chunkSummaries.length}/${chunks.length} chunks (${Math.round(elapsed / 1000)}s of ${Math.round(input.timeoutMs / 1000)}s); refusing to merge an incomplete summary`,
-        );
+        if (chunkSummaries.length === 0) {
+          throw new Error(
+            `Progressive compaction time budget exhausted before first chunk (${Math.round(elapsed / 1000)}s of ${Math.round(input.timeoutMs / 1000)}s)`,
+          );
+        }
+        const reason = `time budget exhausted after ${chunkSummaries.length}/${chunks.length} chunks (${Math.round(elapsed / 1000)}s of ${Math.round(input.timeoutMs / 1000)}s)`;
+        return {
+          summary: buildDeterministicProgressiveSummary({
+            summaries: chunkSummaries,
+            chunks,
+            complete: false,
+            reason,
+          }),
+          complete: false,
+          processedChunkCount: chunkSummaries.length,
+          totalChunkCount: chunks.length,
+          nextUnprocessedMessageIndex: chunk.startMessageIndex,
+          nextUnprocessedSourceMessageIndex: sourceIndexForLlmIndex(input.sourceIndexesByLlmIndex, chunk.startMessageIndex),
+          partialReason: reason,
+        };
       }
     }
     input.ctx.ui.setWorkingMessage?.(`Smart compaction: summarizing chunk ${chunk.index}/${chunks.length}…`);
@@ -539,27 +629,50 @@ export async function runProgressiveCompaction(input: {
     throw new Error("Progressive compaction produced no chunk summaries (time budget exhausted before first chunk)");
   }
 
-  return await mergeProgressiveSummaries({
-    summaries: chunkSummaries,
-    model: input.model,
-    auth: input.auth,
-    budget: input.budget,
-    maxTokens,
-    abortSignal: input.abortSignal,
-    ctx: input.ctx,
-    publishEstimate: input.publishEstimate,
-    timeoutMs: input.timeoutMs,
-    startedAt: input.startedAt,
-    streamFn: input.streamFn,
-    onProgress: input.onProgress,
-    finalPromptExtras: {
-      previousSummary: input.previousSummary,
-      keptMessagesSummary: input.keptMessagesSummary,
-      turnPrefixSummary: input.turnPrefixSummary,
-      customInstructions: input.customInstructions,
-      fileOps: input.fileOps,
-    },
-  });
+  try {
+    const summary = await mergeProgressiveSummaries({
+      summaries: chunkSummaries,
+      model: input.model,
+      auth: input.auth,
+      budget: input.budget,
+      maxTokens,
+      abortSignal: input.abortSignal,
+      ctx: input.ctx,
+      publishEstimate: input.publishEstimate,
+      timeoutMs: input.timeoutMs,
+      startedAt: input.startedAt,
+      streamFn: input.streamFn,
+      onProgress: input.onProgress,
+      finalPromptExtras: {
+        previousSummary: input.previousSummary,
+        keptMessagesSummary: input.keptMessagesSummary,
+        turnPrefixSummary: input.turnPrefixSummary,
+        customInstructions: input.customInstructions,
+        fileOps: input.fileOps,
+      },
+    });
+    return {
+      summary,
+      complete: true,
+      processedChunkCount: chunkSummaries.length,
+      totalChunkCount: chunks.length,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!/time budget exhausted/i.test(msg)) throw err;
+    return {
+      summary: buildDeterministicProgressiveSummary({
+        summaries: chunkSummaries,
+        chunks,
+        complete: true,
+        reason: msg,
+      }),
+      complete: true,
+      processedChunkCount: chunkSummaries.length,
+      totalChunkCount: chunks.length,
+      partialReason: msg,
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -108,6 +108,48 @@ function estimateEntryTokens(entry: any): number {
   return 0;
 }
 
+function sourceMessageIdentity(message: SourceMessage | undefined): string {
+  if (!message) return "";
+  return JSON.stringify({
+    role: message.role,
+    content: message.content,
+    timestamp: (message as any).timestamp ?? null,
+  });
+}
+
+function resolveFirstKeptEntryIdForSourceMessageIndex(
+  branchEntries: any[] | undefined,
+  messagesForCompaction: SourceMessage[],
+  sourceMessageIndex: number | undefined,
+): string | null {
+  if (!Array.isArray(branchEntries) || sourceMessageIndex == null) return null;
+  const source = messagesForCompaction[sourceMessageIndex];
+  if (!source) return null;
+  for (const entry of branchEntries) {
+    if (entry?.type === "message" && entry.message === source && typeof entry.id === "string") return entry.id;
+  }
+  const identity = sourceMessageIdentity(source);
+  if (!identity) return null;
+  for (const entry of branchEntries) {
+    if (entry?.type !== "message" || typeof entry.id !== "string") continue;
+    if (sourceMessageIdentity(entry.message as SourceMessage) === identity) return entry.id;
+  }
+  return null;
+}
+
+function estimateKeptTokensFromEntryId(branchEntries: any[] | undefined, firstKeptEntryId: string): number | null {
+  if (!Array.isArray(branchEntries) || !firstKeptEntryId) return null;
+  let found = false;
+  let tokens = 0;
+  for (const entry of branchEntries) {
+    if (!found && entry?.id === firstKeptEntryId) found = true;
+    if (!found) continue;
+    if (!entry || typeof entry !== "object" || entry.type === "header" || entry.type === "compaction") continue;
+    tokens += applyTokenEstimateSafetyMultiplier(estimateEntryTokens(entry));
+  }
+  return found ? tokens : null;
+}
+
 function chooseFirstKeptEntryForBudget(branchEntries: any[] | undefined, keepBudgetTokens: number): { firstKeptEntryId: string; estimatedKeepTokens: number } | null {
   if (!Array.isArray(branchEntries) || branchEntries.length === 0) return null;
   const budget = Math.max(0, Math.floor(keepBudgetTokens));
@@ -302,7 +344,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
         });
       }
 
-      const { llmMessages, humanUserIndexes } = convertMessagesWithMetadata(
+      const { llmMessages, humanUserIndexes, sourceIndexesByLlmIndex } = convertMessagesWithMetadata(
         messagesForCompaction,
       );
 
@@ -461,9 +503,10 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
           log.debug(
             `Progressive compaction enabled: prompt ${Math.round(promptText.length / 1000)}k chars / ~${Math.round(promptTokens / 1000)}k tokens exceeds safe single-pass budget (${Math.round(budget.promptBudgetChars / 1000)}k chars, ${budget.contextWindow.toLocaleString()} context)`,
           );
-          const progressiveSummary = await runProgressiveCompaction({
+          const progressiveResult = await runProgressiveCompaction({
             llmMessages,
             humanUserIndexes,
+            sourceIndexesByLlmIndex,
             model,
             auth,
             settings,
@@ -483,30 +526,69 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
               ctx.ui.setWorkingMessage(`Smart compaction: progressive summary… (${Math.round(chars / 4)}t)`);
             },
           });
-          const fullSummary = progressiveSummary.includes("<read-files>") || progressiveSummary.includes("<modified-files>")
-            ? progressiveSummary
-            : appendFileLists(progressiveSummary, preparation.fileOps);
+          const fullSummary = progressiveResult.summary.includes("<read-files>") || progressiveResult.summary.includes("<modified-files>")
+            ? progressiveResult.summary
+            : appendFileLists(progressiveResult.summary, preparation.fileOps);
 
-          const adjustedFit = maybeAdjustFirstKeptForFit({
-            summary: fullSummary,
-            currentFirstKeptEntryId: firstKeptEntryId,
-            configuredKeepRecent,
-            targetKeepRecent: safeKeepRecent,
-            contextWindow,
-            branchEntries,
-          });
-          finalContextTokens = adjustedFit.estimatedTotal;
-          publishContextEstimate(ctx, adjustedFit.estimatedTotal, "completed_progressive");
-          if (adjustedFit.adjusted) {
+          let finalFirstKeptEntryId = firstKeptEntryId;
+          let estimatedTotal = 0;
+          let margin = 0;
+          let adjusted = false;
+
+          if (!progressiveResult.complete) {
+            const partialFirstKeptEntryId = resolveFirstKeptEntryIdForSourceMessageIndex(
+              branchEntries,
+              messagesForCompaction,
+              progressiveResult.nextUnprocessedSourceMessageIndex,
+            );
+            if (!partialFirstKeptEntryId) {
+              return cancelCompactionWithReason(
+                ctx,
+                `Progressive compaction stopped early (${progressiveResult.partialReason ?? "time budget exhausted"}) but could not identify the first unsummarized entry to keep verbatim`,
+              );
+            }
+            const keptTokens = estimateKeptTokensFromEntryId(branchEntries, partialFirstKeptEntryId) ?? configuredKeepRecent;
+            const partialFit = estimatePostCompactionFit(fullSummary, keptTokens, contextWindow);
+            if (!partialFit.fits) {
+              return cancelCompactionWithReason(
+                ctx,
+                `Progressive compaction stopped early (${progressiveResult.partialReason ?? "time budget exhausted"}) and the safe partial boundary still exceeds context: estimated ${partialFit.estimatedTotal}t > ${contextWindow}t`,
+              );
+            }
+            finalFirstKeptEntryId = partialFirstKeptEntryId;
+            estimatedTotal = partialFit.estimatedTotal;
+            margin = partialFit.margin;
+            adjusted = partialFirstKeptEntryId !== firstKeptEntryId;
             log.debug(
-              `Progressive compaction adjusted kept window for ${contextWindow} context (firstKept ${firstKeptEntryId} → ${adjustedFit.firstKeptEntryId}, estimated ${adjustedFit.estimatedTotal}t, margin ${adjustedFit.margin}t).`,
+              `Progressive compaction stopped early but kept unsummarized messages verbatim (firstKept ${firstKeptEntryId} → ${partialFirstKeptEntryId}, processed ${progressiveResult.processedChunkCount}/${progressiveResult.totalChunkCount} chunks, estimated ${estimatedTotal}t, margin ${margin}t).`,
+            );
+          } else {
+            const adjustedFit = maybeAdjustFirstKeptForFit({
+              summary: fullSummary,
+              currentFirstKeptEntryId: firstKeptEntryId,
+              configuredKeepRecent,
+              targetKeepRecent: safeKeepRecent,
+              contextWindow,
+              branchEntries,
+            });
+            finalFirstKeptEntryId = adjustedFit.firstKeptEntryId;
+            estimatedTotal = adjustedFit.estimatedTotal;
+            margin = adjustedFit.margin;
+            adjusted = adjustedFit.adjusted;
+          }
+
+          finalContextTokens = estimatedTotal;
+          publishContextEstimate(ctx, estimatedTotal, progressiveResult.complete ? "completed_progressive" : "completed_progressive_partial");
+          if (adjusted && progressiveResult.complete) {
+            log.debug(
+              `Progressive compaction adjusted kept window for ${contextWindow} context (firstKept ${firstKeptEntryId} → ${finalFirstKeptEntryId}, estimated ${estimatedTotal}t, margin ${margin}t).`,
             );
           }
-          log.debug("Progressive compaction complete ✓");
+          log.debug(progressiveResult.complete ? "Progressive compaction complete ✓" : "Progressive compaction partial boundary complete ✓");
           return {
             compaction: {
               summary: fullSummary,
-              firstKeptEntryId: adjustedFit.firstKeptEntryId,
+              firstKeptEntryId: finalFirstKeptEntryId,
               tokensBefore,
             } satisfies CompactionResult,
           };

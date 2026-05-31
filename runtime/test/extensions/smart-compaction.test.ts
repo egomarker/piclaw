@@ -1000,6 +1000,60 @@ describe("smart-compaction", () => {
       expect(ctx.ui.setWorkingMessage).toHaveBeenCalledWith(expect.stringContaining("progressive iterative mode"));
     });
 
+    it("keeps unsummarized messages verbatim when progressive chunking exhausts time after partial progress", async () => {
+      const previousPromptChars = process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS;
+      process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS = "4000";
+      const messages: any[] = [];
+      for (let i = 0; i < 60; i++) {
+        messages.push(userMsg(`Partial-timeout fact ${i}: ${"x".repeat(700)}`));
+        messages.push(_assistantTextMsg(`Acknowledged partial-timeout fact ${i}.`));
+      }
+      const branchEntries = messages.map((message, index) => ({ id: `entry-${index}`, type: "message", message }));
+
+      let now = 1_000;
+      const dateSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+      (completeSimple as any).mockImplementation(async (_model: any, context: any) => {
+        const prompt = context.messages[0].content[0].text as string;
+        now += 50_000;
+        const range = prompt.match(/Message index range: ([0-9-]+)/)?.[1] ?? "unknown";
+        return {
+          content: [{ type: "text", text: `## Chunk Range\n- ${range}\n\n## Goals / User Intent\n- Preserve partial timeout chunk ${range}\n\n## Constraints & Preferences\n- keep unsummarized chunks\n\n## Decisions\n- partial compaction is safe only if the tail is retained\n\n## Files / Commands / Tool Outcomes\n- none\n\n## Progress\n- Done: chunk summarized\n- In progress: retain tail\n- Blocked: time budget\n\n## Open Questions / Next Steps\n- resume\n\n## Key Continuity Facts\n- Partial-timeout fact in ${range}` }],
+          stopReason: "end",
+        };
+      });
+
+      try {
+        const ctx = makeCtx({ model: { provider: "test", id: "partial-context", contextWindow: 128_000, reasoning: false } });
+        const result = await handler!(
+          {
+            preparation: makePreparation(messages.length, {
+              messagesToSummarize: messages,
+              tokensBefore: 60_000,
+              firstKeptEntryId: "entry-119",
+              settings: { enabled: true, reserveTokens: 8192, keepRecentTokens: 1000 },
+            }),
+            branchEntries,
+            signal: new AbortController().signal,
+          },
+          ctx,
+        );
+
+        expect(result.compaction.summary).toContain("remaining messages are retained verbatim");
+        expect(result.compaction.summary).toContain("Completed Progressive Chunk");
+        expect(result.compaction.firstKeptEntryId).not.toBe("entry-119");
+        const keptIndex = branchEntries.findIndex((entry) => entry.id === result.compaction.firstKeptEntryId);
+        expect(keptIndex).toBeGreaterThan(0);
+        expect(keptIndex).toBeLessThan(messages.length - 1);
+        expect(consumeCompactionCancellationReason(ctx, Number.POSITIVE_INFINITY)).toBeNull();
+        const prompts = (completeSimple as any).mock.calls.map((call: any[]) => call[1].messages[0].content[0].text as string);
+        expect(prompts.every((prompt: string) => prompt.includes("deterministic chunk"))).toBe(true);
+      } finally {
+        dateSpy.mockRestore();
+        if (previousPromptChars === undefined) delete process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS;
+        else process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS = previousPromptChars;
+      }
+    });
+
     it("records a real failure reason instead of plain user-cancel when progressive time budget is exhausted", async () => {
       const longMessages: any[] = [];
       for (let i = 0; i < 80; i++) {
