@@ -44,6 +44,7 @@ const log = createLogger("runtime.message-loop");
 const TYPING_REFRESH_MS = 4_000;
 const MAX_PROGRESS_LINES = 12;
 const MAX_PROGRESS_LINE_CHARS = 160;
+const MAX_VISIBLE_ERROR_CHARS = 500;
 
 function normalizeContentBlocks(value: unknown): Array<Record<string, unknown>> | undefined {
   return Array.isArray(value)
@@ -99,6 +100,37 @@ function normalizeProgressLine(text: string): string {
   const normalized = String(text || "").replace(/\s+/g, " ").trim();
   if (!normalized) return "";
   return truncateText(normalized, MAX_PROGRESS_LINE_CHARS);
+}
+
+function isAbortError(errorText: string | null | undefined): boolean {
+  if (!errorText) return false;
+  return /\b(?:aborterror|aborted|operation was aborted|request was aborted)\b/i.test(errorText);
+}
+
+function buildVisibleAgentErrorMessage(
+  errorText: string | null | undefined,
+  recoverySummary: string | null,
+  nextAction?: string | null,
+): string | null {
+  const normalizedError = String(errorText || "").replace(/\s+/g, " ").trim() || "Agent error";
+  if (isAbortError(normalizedError)) return null;
+
+  const lines = [
+    "Sorry — I couldn't finish that reply.",
+    "",
+    `Error: ${truncateText(normalizedError, MAX_VISIBLE_ERROR_CHARS)}`,
+  ];
+  if (recoverySummary) {
+    lines.push(recoverySummary);
+  }
+  if (typeof nextAction === "string" && nextAction.trim()) {
+    lines.push(nextAction.trim());
+  } else if (/\b429\b|rate[ -]?limit|too many requests|retry-after/i.test(normalizedError)) {
+    lines.push("Please try again in a bit.");
+  } else {
+    lines.push("Please try again.");
+  }
+  return lines.join("\n");
 }
 
 function extractToolArgs(args: unknown): Record<string, unknown> | null {
@@ -490,14 +522,30 @@ export async function processMessages(
 
 
   if (output.status === "error") {
+    const errorText = output.error || "Agent error";
+    const visibleErrorMessage = buildVisibleAgentErrorMessage(errorText, recoverySummary, output.nextAction);
+
     log.error("Agent run failed", {
       operation: "process_messages.prompt",
       chatJid,
-      errorMessage: output.error,
+      errorMessage: errorText,
       recovery: output.recovery || null,
       recoverySummary,
+      visibleError: Boolean(visibleErrorMessage),
     });
+
     await progressReporter?.remove();
+
+    if (visibleErrorMessage) {
+      const text = formatOutbound(visibleErrorMessage, channel);
+      const threadId = lastPrompt ? getReplyThreadId(chatJid, lastPrompt) : undefined;
+      await deps.sendMessage(chatJid, text || visibleErrorMessage, {
+        ...(threadId !== undefined ? { threadId } : {}),
+        source: "agent",
+      });
+    }
+
+    commitLastAgentTimestamp();
     return true;
   }
 

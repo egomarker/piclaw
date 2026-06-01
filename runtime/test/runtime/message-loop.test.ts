@@ -139,6 +139,132 @@ test("processMessages persists lastAgentTimestamp after a recovered successful a
   });
 });
 
+test("processMessages surfaces visible non-web agent failures and persists lastAgentTimestamp", async () => {
+  await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
+    const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
+    const loop = await importFresh<typeof import("../../src/runtime/message-loop.js")>("../src/runtime/message-loop.js");
+    db.initDatabase();
+
+    const chatJid = "telegram:visible-error";
+    const timestamp = "2026-04-17T01:05:30.000Z";
+    const sourceRowId = db.storeMessage({
+      ...makeMessage(chatJid, "Что это?", timestamp),
+      id: "telegram:visible-error:1",
+    });
+
+    let saveCalls = 0;
+    let removed = 0;
+    const sent: Array<{ text: string; options?: Record<string, unknown> }> = [];
+    const state = {
+      lastAgentTimestamp: {} as Record<string, string>,
+      wasCommandProcessed: () => false,
+      markCommandProcessed: () => {},
+      saveTimestamps: () => {
+        saveCalls += 1;
+      },
+    };
+    const unregisterDetector = registerChannelDetector((jid) => jid.startsWith("telegram:") ? "telegram" : null);
+
+    try {
+      registerChannelTransport("telegram", {
+        sendMessage: async () => {},
+        setTyping: async () => {},
+        createProgressMessage: async () => ({
+          update: async () => {},
+          remove: async () => {
+            removed += 1;
+          },
+        }),
+      });
+
+      const ok = await loop.processMessages(chatJid, {
+        state: state as any,
+        assistantName: "Pi",
+        triggerPattern: /@Pi/i,
+        agentPool: {
+          runAgent: async () => ({
+            status: "error",
+            result: null,
+            error: "WebSocket closed 1006 Connection ended",
+            recovery: {
+              attemptsUsed: 0,
+              totalElapsedMs: 46081,
+              recovered: false,
+              exhausted: true,
+              lastClassifier: "tool_activity",
+              strategyHistory: [],
+              diagnostics: [],
+            },
+          }),
+        } as any,
+        sendMessage: async (_jid: string, text: string, options?: Record<string, unknown>) => {
+          sent.push({ text, options });
+        },
+      }, { forcePrompt: true });
+
+      expect(ok).toBe(true);
+      expect(removed).toBe(1);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]?.text).toContain("Sorry — I couldn't finish that reply.");
+      expect(sent[0]?.text).toContain("Error: WebSocket closed 1006 Connection ended");
+      expect(sent[0]?.text).toContain("Automatic recovery exhausted after 0 attempt(s) (tool_activity).");
+      expect(sent[0]?.text).toContain("Please try again.");
+      expect(sent[0]?.options).toMatchObject({
+        source: "agent",
+        threadId: sourceRowId,
+      });
+      expect(state.lastAgentTimestamp[chatJid]).toBe(timestamp);
+      expect(saveCalls).toBe(1);
+    } finally {
+      unregisterDetector();
+    }
+  });
+});
+
+test("processMessages suppresses visible aborted non-web agent failures but persists lastAgentTimestamp", async () => {
+  await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
+    const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
+    const loop = await importFresh<typeof import("../../src/runtime/message-loop.js")>("../src/runtime/message-loop.js");
+    db.initDatabase();
+
+    const chatJid = `wa:${Date.now()}`;
+    const timestamp = "2026-04-17T01:05:45.000Z";
+    db.storeMessage(makeMessage(chatJid, "hello", timestamp));
+
+    let saveCalls = 0;
+    const sent: Array<{ text: string; options?: Record<string, unknown> }> = [];
+    const state = {
+      lastAgentTimestamp: {} as Record<string, string>,
+      wasCommandProcessed: () => false,
+      markCommandProcessed: () => {},
+      saveTimestamps: () => {
+        saveCalls += 1;
+      },
+    };
+
+    const ok = await loop.processMessages(chatJid, {
+      state: state as any,
+      assistantName: "Pi",
+      triggerPattern: /@Pi/i,
+      agentPool: {
+        runAgent: async () => ({
+          status: "error",
+          result: null,
+          error: "Operation was aborted",
+        }),
+      } as any,
+      sendMessage: async (_jid: string, text: string, options?: Record<string, unknown>) => {
+        sent.push({ text, options });
+      },
+    }, { forcePrompt: true });
+
+    expect(ok).toBe(true);
+    expect(sent).toEqual([]);
+    expect(state.lastAgentTimestamp[chatJid]).toBe(timestamp);
+    expect(saveCalls).toBe(1);
+  });
+});
+
 test("processMessages handles transport control commands without starting an agent run", async () => {
   await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
     const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
