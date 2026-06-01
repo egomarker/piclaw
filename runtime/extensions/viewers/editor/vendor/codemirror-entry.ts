@@ -1,4 +1,4 @@
-import { EditorState } from "@codemirror/state";
+import { EditorState, StateEffect, StateField } from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -15,9 +15,10 @@ import {
   drawSelection,
 } from "@codemirror/view";
 import { history, defaultKeymap, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { defaultHighlightStyle, StreamLanguage, HighlightStyle, syntaxHighlighting, syntaxTree, indentOnInput, indentUnit } from "@codemirror/language";
+import { defaultHighlightStyle, StreamLanguage, HighlightStyle, syntaxHighlighting, syntaxTree, ensureSyntaxTree, indentOnInput, indentUnit } from "@codemirror/language";
 
-export { EditorState, Compartment, RangeSetBuilder, RangeSet, Prec } from "@codemirror/state";
+export { EditorState, Compartment, RangeSetBuilder, RangeSet, Prec, StateEffect, StateField } from "@codemirror/state";
+export type { Extension, Range, Transaction } from "@codemirror/state";
 export {
   EditorView,
   keymap,
@@ -32,6 +33,7 @@ export {
   ViewPlugin,
   WidgetType,
 } from "@codemirror/view";
+export type { DecorationSet, ViewUpdate } from "@codemirror/view";
 export { javascript } from "@codemirror/lang-javascript";
 export { python } from "@codemirror/lang-python";
 export { markdown, markdownLanguage } from "@codemirror/lang-markdown";
@@ -44,7 +46,7 @@ export { rust, rustLanguage } from "@codemirror/lang-rust";
 export { yaml } from "@codemirror/lang-yaml";
 export { sql } from "@codemirror/lang-sql";
 export { xml } from "@codemirror/lang-xml";
-export { StreamLanguage, HighlightStyle, syntaxHighlighting, syntaxTree, indentOnInput, indentUnit } from "@codemirror/language";
+export { StreamLanguage, HighlightStyle, syntaxHighlighting, syntaxTree, ensureSyntaxTree, indentOnInput, indentUnit } from "@codemirror/language";
 export { tags, classHighlighter } from "@lezer/highlight";
 export { shell } from "@codemirror/legacy-modes/mode/shell";
 export { indentWithTab } from "@codemirror/commands";

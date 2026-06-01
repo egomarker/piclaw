@@ -16,12 +16,14 @@ import {
     ViewPlugin,
     WidgetType,
     RangeSet,
+    StateEffect,
+    StateField,
     syntaxTree,
 } from '#editor-vendor/codemirror';
-import type { DecorationSet, ViewUpdate } from '@codemirror/view';
-import type { Range } from '@codemirror/state';
+import type { DecorationSet, Range, ViewUpdate } from '#editor-vendor/codemirror';
 import type { SyntaxNode } from '@lezer/common';
 import { isAlwaysDecoratedNode, usesBlockCursorGate } from './cursor-gating.js';
+import { treeGrowthEffect } from './tree-progress.js';
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -64,6 +66,64 @@ export function cursorInRange(view: EditorView, from: number, to: number): boole
     return false;
 }
 
+interface LineAddressableDocument {
+    length: number;
+    lineAt(pos: number): { to: number };
+}
+
+export type ReplaceDecorationSpec = Parameters<typeof Decoration.replace>[0];
+
+/**
+ * Split a range into same-line segments. CodeMirror rejects plugin-sourced
+ * Decoration.replace() ranges that cross line breaks, but Lezer can emit
+ * multi-line markdown nodes (for example wrapped link/image titles).
+ */
+export function splitRangeByDocumentLines(
+    doc: LineAddressableDocument,
+    from: number,
+    to: number,
+): Array<{ from: number; to: number }> {
+    const docLength = Math.max(0, doc.length);
+    let cursor = Math.max(0, Math.min(from, docLength));
+    const end = Math.max(0, Math.min(to, docLength));
+    const ranges: Array<{ from: number; to: number }> = [];
+
+    while (cursor < end) {
+        const line = doc.lineAt(cursor);
+        const segmentTo = Math.min(end, line.to);
+        if (segmentTo > cursor) {
+            ranges.push({ from: cursor, to: segmentTo });
+        }
+        if (line.to >= end) break;
+        cursor = line.to + 1; // leave the line break itself visible
+    }
+
+    return ranges;
+}
+
+/**
+ * Push a Decoration.replace() as one or more same-line DecorationEntry items.
+ * If the range spans line breaks, the first segment keeps the widget/spec and
+ * later segments become plain hides to avoid duplicated widgets.
+ */
+export function pushSafeReplace(
+    entries: DecorationEntry[],
+    doc: LineAddressableDocument,
+    from: number,
+    to: number,
+    spec: ReplaceDecorationSpec = {},
+): void {
+    let firstSegment = true;
+    for (const range of splitRangeByDocumentLines(doc, from, to)) {
+        entries.push({
+            from: range.from,
+            to: range.to,
+            decoration: Decoration.replace(firstSegment ? spec : {}),
+        });
+        firstSegment = false;
+    }
+}
+
 // ── ViewPlugin ──────────────────────────────────────────────────
 
 export function getSelectionLineSignature(view: Pick<EditorView, 'state'>): string {
@@ -78,6 +138,83 @@ export function getSelectionLineSignature(view: Pick<EditorView, 'state'>): stri
 }
 
 const LIVE_PREVIEW_DEBOUNCE_MS = 300;
+const LIVE_PREVIEW_FREEZE_TAIL_MS = 100;
+
+export const setLivePreviewFrozen = StateEffect.define<boolean>();
+
+export const livePreviewFrozenField = StateField.define<boolean>({
+    create: () => false,
+    update(value, transaction) {
+        for (const effect of transaction.effects) {
+            if (effect.is(setLivePreviewFrozen)) return effect.value;
+        }
+        return value;
+    },
+});
+
+function transactionHasFreezeEffect(update: ViewUpdate): boolean {
+    return update.transactions.some((transaction) =>
+        transaction.effects.some((effect) => effect.is(setLivePreviewFrozen)),
+    );
+}
+
+function transactionHasTreeGrowthEffect(update: ViewUpdate): boolean {
+    return update.transactions.some((transaction) =>
+        transaction.effects.some((effect) => effect.is(treeGrowthEffect)),
+    );
+}
+
+class LivePreviewPointerFreezePlugin {
+    private pointerDown = false;
+    private releaseTimer: ReturnType<typeof setTimeout> | null = null;
+
+    private readonly onPointerDown = (event: PointerEvent) => {
+        if (event.button !== 0) return;
+        const target = event.target;
+        if (!(target instanceof Node) || !this.view.contentDOM.contains(target)) return;
+
+        this.pointerDown = true;
+        if (this.releaseTimer !== null) {
+            clearTimeout(this.releaseTimer);
+            this.releaseTimer = null;
+        }
+        if (!this.view.state.field(livePreviewFrozenField, false)) {
+            this.view.dispatch({ effects: setLivePreviewFrozen.of(true) });
+        }
+    };
+
+    private readonly onPointerUp = () => {
+        if (!this.pointerDown) return;
+        this.pointerDown = false;
+        if (this.releaseTimer !== null) clearTimeout(this.releaseTimer);
+        this.releaseTimer = setTimeout(() => {
+            this.releaseTimer = null;
+            if (!this.view.state.field(livePreviewFrozenField, false)) return;
+            try {
+                this.view.dispatch({ effects: setLivePreviewFrozen.of(false) });
+            } catch (error) {
+                console.debug('[editor/live-preview] ignored freeze release after view disposal', error);
+            }
+        }, LIVE_PREVIEW_FREEZE_TAIL_MS);
+    };
+
+    constructor(private readonly view: EditorView) {
+        // Capture phase ensures freeze is active before CM6 handles pointer-driven
+        // selection changes that would otherwise reveal markdown syntax mid-click.
+        view.dom.addEventListener('pointerdown', this.onPointerDown, true);
+        window.addEventListener('pointerup', this.onPointerUp);
+        window.addEventListener('pointercancel', this.onPointerUp);
+    }
+
+    destroy() {
+        this.view.dom.removeEventListener('pointerdown', this.onPointerDown, true);
+        window.removeEventListener('pointerup', this.onPointerUp);
+        window.removeEventListener('pointercancel', this.onPointerUp);
+        if (this.releaseTimer !== null) clearTimeout(this.releaseTimer);
+    }
+}
+
+export const livePreviewPointerFreeze = ViewPlugin.fromClass(LivePreviewPointerFreezePlugin);
 
 class LivePreviewPlugin {
     decorations: DecorationSet;
@@ -98,10 +235,16 @@ class LivePreviewPlugin {
         const selectionLineChanged = nextSelectionLineSignature !== this.selectionLineSignature;
         this.selectionLineSignature = nextSelectionLineSignature;
 
+        const frozen = update.state.field(livePreviewFrozenField, false);
+        const freezeReleased = transactionHasFreezeEffect(update) && !frozen;
+        const treeGrew = transactionHasTreeGrowthEffect(update);
+
         const needsRebuild =
             update.docChanged ||
             update.viewportChanged ||
-            (update.selectionSet && selectionLineChanged);
+            treeGrew ||
+            freezeReleased ||
+            (update.selectionSet && selectionLineChanged && !frozen);
 
         if (!needsRebuild) return;
 

@@ -25,16 +25,18 @@ import './footnote.js';
 import './tag.js';
 
 // Core engine + theme
-import { livePreviewPlugin } from './live-preview.js';
+import { livePreviewFrozenField, livePreviewPlugin, livePreviewPointerFreeze } from './live-preview.js';
 import { markdownPreviewTheme } from './theme.js';
 import { livePreviewCursorNav } from './cursor-nav.js';
+import { imageBlocks } from './image-block.js';
+import { livePreviewTableKeymap } from './table-keymap.js';
 
 // Parser extensions (for markdown() config)
 import { frontmatterExtension } from './frontmatter.js';
 import { footnoteExtension } from './footnote.js';
 import { hashtagExtension } from './tag.js';
 
-import type { Extension } from '@codemirror/state';
+import type { Extension } from '#editor-vendor/codemirror';
 
 /**
  * Custom lezer parser extensions for frontmatter, footnotes, and tags.
@@ -57,8 +59,12 @@ export const markdownParserExtensions = [
  *   view.dispatch({ effects: mdPreviewCompartment.reconfigure([]) });
  */
 export const markdownLivePreview: Extension = [
+    livePreviewFrozenField,
+    livePreviewPointerFreeze,
+    imageBlocks(),
     livePreviewPlugin,
 
     livePreviewCursorNav,
+    livePreviewTableKeymap,
     markdownPreviewTheme,
 ];

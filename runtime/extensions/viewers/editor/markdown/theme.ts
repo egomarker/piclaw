@@ -63,16 +63,15 @@ export const markdownPreviewTheme = EditorView.theme({
     '.cm-md-h-line': { paddingTop: '0.1em' },
     // IMPORTANT: avoid vertical margins on .cm-line decorations
     // (CodeMirror coordinate mapping drifts when line margins accumulate).
-    '.cm-md-h1-line': { paddingTop: '0.9em' },
-    '.cm-md-h2-line': { paddingTop: '0.82em' },
-    '.cm-md-h3-line': { paddingTop: '0.72em' },
-    '.cm-md-h4-line, .cm-md-h5-line, .cm-md-h6-line': { paddingTop: '0.6em' },
-    '.cm-md-h1': { fontSize: '1.42em', fontWeight: '700', lineHeight: '1.24', letterSpacing: '-0.01em' },
-    '.cm-md-h2': { fontSize: '1.28em', fontWeight: '700', lineHeight: '1.25', letterSpacing: '-0.005em' },
-    '.cm-md-h3': { fontSize: '1.16em', fontWeight: '650', lineHeight: '1.26' },
-    '.cm-md-h4': { fontSize: '1.08em', fontWeight: '650', lineHeight: '1.28' },
-    '.cm-md-h5': { fontSize: '1.02em', fontWeight: '600', lineHeight: '1.3' },
-    '.cm-md-h6': { fontSize: '0.98em', fontWeight: '600', lineHeight: '1.32', opacity: '0.92' },
+    // Heading typography lives on line decorations so active/raw and
+    // inactive/preview states keep the same line height.
+    '.cm-md-h1-line': { paddingTop: '0.9em', fontSize: '1.42em', fontWeight: '700', lineHeight: '1.24', letterSpacing: '-0.01em' },
+    '.cm-md-h2-line': { paddingTop: '0.82em', fontSize: '1.28em', fontWeight: '700', lineHeight: '1.25', letterSpacing: '-0.005em' },
+    '.cm-md-h3-line': { paddingTop: '0.72em', fontSize: '1.16em', fontWeight: '650', lineHeight: '1.26' },
+    '.cm-md-h4-line': { paddingTop: '0.6em', fontSize: '1.08em', fontWeight: '650', lineHeight: '1.28' },
+    '.cm-md-h5-line': { paddingTop: '0.6em', fontSize: '1.02em', fontWeight: '600', lineHeight: '1.3' },
+    '.cm-md-h6-line': { paddingTop: '0.6em', fontSize: '0.98em', fontWeight: '600', lineHeight: '1.32', opacity: '0.92' },
+    '.cm-md-h1, .cm-md-h2, .cm-md-h3, .cm-md-h4, .cm-md-h5, .cm-md-h6': { fontSize: 'inherit', fontWeight: 'inherit', lineHeight: 'inherit', letterSpacing: 'inherit' },
     '.cm-md-heading-fold': {
         display: 'inline-flex',
         alignItems: 'center',
@@ -542,6 +541,10 @@ export const markdownPreviewTheme = EditorView.theme({
         maxWidth: '100%',
         margin: '8px 0',
         gap: '4px',
+    },
+    '.cm-md-image-block': {
+        display: 'flex',
+        width: 'fit-content',
     },
     '.cm-md-image': {
         maxWidth: '100%',
