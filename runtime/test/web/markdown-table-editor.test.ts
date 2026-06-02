@@ -164,6 +164,28 @@ test("editable table cell inline parser handles entities, autolinks, images, and
   ]);
 });
 
+test("editable table cell inline parser leaves invalid or ambiguous markdown as text", () => {
+  expect(parseTableCellInlineMarkdown("snake_case &unknown; <ftp://example.com> ![bad](javascript:alert(1))")).toEqual([
+    { type: "text", text: "snake_case &unknown; <ftp://example.com> " },
+    { type: "image", raw: "![bad](javascript:alert(1)", alt: "bad", url: "javascript:alert(1" },
+    { type: "text", text: ")" },
+  ]);
+  expect(parseTableCellInlineMarkdown("**unclosed [nope]( )")).toEqual([
+    { type: "text", text: "**unclosed [nope]( )" },
+  ]);
+});
+
+test("editable table cell inline parser preserves nested link and mark shape", () => {
+  expect(parseTableCellInlineMarkdown("__[strong link](https://example.com)__ and *soft [em](mailto:a@example.com)*")).toEqual([
+    { type: "strong", delimiter: "__", children: [{ type: "link", children: [{ type: "text", text: "strong link" }], url: "https://example.com" }] },
+    { type: "text", text: " and " },
+    { type: "emphasis", delimiter: "*", children: [
+      { type: "text", text: "soft " },
+      { type: "link", children: [{ type: "text", text: "em" }], url: "mailto:a@example.com" },
+    ] },
+  ]);
+});
+
 test("editable table column mutation preserves alignment and rows", () => {
   const model = normalizeTableModel({
     header: ["A", "B"],

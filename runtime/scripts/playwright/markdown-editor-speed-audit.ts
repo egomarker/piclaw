@@ -223,8 +223,8 @@ window.__speedHarness = {
     return { totalMs: performance.now() - start, steps: 80, scrollTop: scroller.scrollTop, scrollHeight: scroller.scrollHeight };
   },
   measureTableEdit: async () => {
-    const cell = document.querySelector('.cm-md-editable-table tbody td');
-    if (!cell) return { totalMs: Number.NaN, p95Ms: Number.NaN, operations: 0, skipped: 'no editable table' };
+    const cell = document.querySelector('.cm-md-editable-table tbody td .cm-md-table-cell-source');
+    if (!cell) return { totalMs: Number.NaN, p95Ms: Number.NaN, operations: 0, skipped: 'no editable table source' };
     const times = [];
     cell.focus();
     cell.textContent = '';
