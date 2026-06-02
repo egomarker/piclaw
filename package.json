@@ -124,7 +124,7 @@
     "docx-preview": "0.3.7",
     "electrobun": "1.18.1",
     "fflate": "0.8.3",
-    "ghostty-web": "github:rcarmo/ghostty-web#9f58b1b",
+    "ghostty-web": "github:rcarmo/ghostty-web#4e8a47e",
     "gifenc": "1.0.3",
     "htm": "3.1.1",
     "js-yaml": "4.1.1",
