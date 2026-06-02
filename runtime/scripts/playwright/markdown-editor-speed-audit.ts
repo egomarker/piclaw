@@ -18,6 +18,7 @@ const viewports = [
 
 const runs = Number(process.env.SPEED_AUDIT_RUNS || 7);
 const warmups = Number(process.env.SPEED_AUDIT_WARMUPS || 2);
+const stressTables = process.env.SPEED_AUDIT_STRESS_TABLES === '1';
 
 function median(values: number[]): number {
   const sorted = values.slice().sort((a, b) => a - b);
@@ -67,6 +68,14 @@ function buildSource(): string {
     if (i % 20 === 0) chunks.push(`\n| Col A | Col B |\n| --- | --- |\n| ${i} | table row |\n`);
     if (i % 30 === 0) chunks.push(`\n${image}\n`);
   }
+  if (stressTables) {
+    for (let table = 0; table < 48; table++) {
+      chunks.push(`\n### Stress table ${table}\n\n| A | B | C | D | E | F |\n| --- | ---: | :---: | --- | --- | --- |\n`);
+      for (let row = 0; row < 18; row++) {
+        chunks.push(`| ${table}-${row}-0 | ${row} | center ${row} | text ${row} | pipe \\| value | tail |\n`);
+      }
+    }
+  }
   return chunks.join('');
 }
 
@@ -81,7 +90,11 @@ async function ensureBaselineWorktree() {
 }
 
 async function cleanupBaselineWorktree() {
-  await $`git -C ${repoRoot} worktree remove --force ${baselineRoot}`.quiet().catch(() => {});
+  try {
+    await $`git -C ${repoRoot} worktree remove --force ${baselineRoot}`.quiet();
+  } catch (error) {
+    console.warn('[markdown-editor-speed-audit] failed to remove baseline worktree', error);
+  }
   rmSync(baselineRoot, { recursive: true, force: true });
 }
 
@@ -399,7 +412,7 @@ async function main() {
     const baseline = await runSuite(browser, 'baseline-head-parent', baselineRoot, { skipTyping: true });
     const head = await runSuite(browser, 'atomic-port-head', repoRoot);
     const rows = compare(baseline, head);
-    const output = { baselineRef, headRef: 'working-tree', runs, warmups, sourceLength: source.length, baseline, head, comparison: rows };
+    const output = { baselineRef, headRef: 'working-tree', runs, warmups, stressTables, sourceLength: source.length, baseline, head, comparison: rows };
     const reportPath = process.env.SPEED_AUDIT_REPORT || join(runtimeRoot, 'generated/cache/markdown-editor-speed-audit.json');
     writeFileSync(reportPath, JSON.stringify(output, null, 2));
     console.log(`REPORT ${reportPath}`);

@@ -26,3 +26,19 @@ test("reveal range ignores empty queries", () => {
   const state = EditorState.create({ doc: "Target paragraph" });
   expect(findRevealRange(state.doc, "   ")).toBeNull();
 });
+
+test("reveal range falls back to truncated long snippets", () => {
+  const target = "Long snippet target ".repeat(12).trim();
+  const state = EditorState.create({ doc: `before\n${target}\nafter` });
+  const massaged = `${target} with extra generated words that do not exist in source`.repeat(2);
+
+  expect(findRevealRange(state.doc, massaged)).toEqual({ from: 7, to: 146 });
+});
+
+test("reveal candidates filter ambiguous short collapsed lines", () => {
+  expect(buildRevealCandidates("a\nbe\nthe\nlong enough line")).toEqual([
+    "a\nbe\nthe\nlong enough line",
+    "a be the long enough line",
+    "long enough line",
+  ]);
+});

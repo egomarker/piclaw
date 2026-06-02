@@ -92,6 +92,44 @@ test("editable table column alignment mutation updates delimiter serialization",
   expect(serializeMarkdownTable(model).split("\n")[1]).toBe("| :---: | ---: |");
 });
 
+test("editable table large model serializes and parses back without losing shape", () => {
+  const model = normalizeTableModel({
+    header: Array.from({ length: 12 }, (_, index) => `H${index}`),
+    alignments: Array.from({ length: 12 }, (_, index) => index % 3 === 0 ? "center" : index % 3 === 1 ? "right" : "left"),
+    rows: Array.from({ length: 250 }, (_, row) => Array.from({ length: 12 }, (_, col) => `r${row}|c${col}`)),
+  });
+
+  const serialized = serializeMarkdownTable(model);
+  const parsed = parseMarkdownTableLines(serialized.split("\n"));
+
+  expect(parsed?.header).toHaveLength(12);
+  expect(parsed?.rows).toHaveLength(250);
+  expect(parsed?.rows[249][11]).toBe("r249|c11");
+  expect(serialized).toContain("r0\\|c0");
+});
+
+test("editable table repeated row and column mutations remain rectangular", () => {
+  let model = normalizeTableModel({
+    header: ["A", "B", "C"],
+    alignments: ["left", "center", "right"],
+    rows: [["1", "2", "3"], ["4", "5", "6"]],
+  });
+
+  for (let index = 0; index < 25; index++) {
+    model = insertTableRow(model, index % model.rows.length);
+    model = insertTableColumn(model, index % model.header.length);
+  }
+  for (let index = 0; index < 10; index++) {
+    model = deleteTableRow(model, 0);
+    model = deleteTableColumn(model, 0);
+  }
+
+  const width = model.header.length;
+  expect(width).toBeGreaterThan(1);
+  expect(model.rows.every((row) => row.length === width)).toBe(true);
+  expect(model.alignments).toHaveLength(width);
+});
+
 test("editable table column mutation preserves alignment and rows", () => {
   const model = normalizeTableModel({
     header: ["A", "B"],

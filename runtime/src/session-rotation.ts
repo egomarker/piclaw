@@ -353,8 +353,14 @@ export function syncRotatedSessionModel(session: AgentSession, model: RotationMo
     agent?: { state?: { model?: unknown } };
   };
   if (!sessionLike.modelRegistry || !sessionLike.agent?.state) return false;
+  if (typeof sessionLike.modelRegistry.find !== "function") return false;
 
-  const resolvedModel = sessionLike.modelRegistry.find(model.provider, model.modelId);
+  let resolvedModel: any;
+  try {
+    resolvedModel = sessionLike.modelRegistry.find(model.provider, model.modelId);
+  } catch {
+    return false;
+  }
   if (!resolvedModel) {
     log.warn("Unable to sync rotated session model because it is not registered", {
       operation: "session_rotation.sync_model_missing",
@@ -363,7 +369,7 @@ export function syncRotatedSessionModel(session: AgentSession, model: RotationMo
     });
     return false;
   }
-  if (!sessionLike.modelRegistry.hasConfiguredAuth(resolvedModel)) {
+  if (typeof sessionLike.modelRegistry.hasConfiguredAuth === "function" && !sessionLike.modelRegistry.hasConfiguredAuth(resolvedModel)) {
     log.warn("Unable to sync rotated session model because it has no configured auth", {
       operation: "session_rotation.sync_model_no_auth",
       provider: model.provider,
