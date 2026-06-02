@@ -201,7 +201,9 @@ export type TableCellInlineToken =
     | { type: 'emphasis'; delimiter: '*' | '_'; children: TableCellInlineToken[] }
     | { type: 'strike'; children: TableCellInlineToken[] }
     | { type: 'code'; text: string }
-    | { type: 'link'; children: TableCellInlineToken[]; url: string };
+    | { type: 'entity'; raw: string; text: string }
+    | { type: 'image'; raw: string; alt: string; url: string }
+    | { type: 'link'; children: TableCellInlineToken[]; url: string; raw?: string; autolink?: boolean };
 
 export function parseTableCellInlineMarkdown(raw: string): TableCellInlineToken[] {
     const tokens: TableCellInlineToken[] = [];
@@ -234,10 +236,37 @@ export function parseTableCellInlineMarkdown(raw: string): TableCellInlineToken[
     return tokens;
 }
 
+function decodeTableCellEntity(raw: string): string | null {
+    if (/^#x[0-9a-f]+$/i.test(raw)) {
+        const codePoint = Number.parseInt(raw.slice(2), 16);
+        return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : null;
+    }
+    if (/^#[0-9]+$/.test(raw)) {
+        const codePoint = Number.parseInt(raw.slice(1), 10);
+        return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : null;
+    }
+    const named: Record<string, string> = {
+        amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0', copy: '©', reg: '®', trade: '™', hellip: '…', mdash: '—', ndash: '–', laquo: '«', raquo: '»', lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', euro: '€', pound: '£', yen: '¥', cent: '¢', deg: '°', plusmn: '±', times: '×', divide: '÷', middot: '·', bull: '•',
+    };
+    return named[raw] ?? null;
+}
+
 function matchTableCellInlineToken(raw: string, from: number): { token: TableCellInlineToken; end: number } | null {
     const rest = raw.slice(from);
     let match = rest.match(/^`([^`\n]+?)`/);
     if (match) return { token: { type: 'code', text: match[1] }, end: from + match[0].length };
+
+    match = rest.match(/^!\[([^\]\n]*)\]\(([^\s)"'\n]+)\)/);
+    if (match) return { token: { type: 'image', raw: match[0], alt: match[1], url: match[2] }, end: from + match[0].length };
+
+    match = rest.match(/^<((?:https?:\/\/|mailto:)[^\s<>]+)>/i);
+    if (match) return { token: { type: 'link', children: [{ type: 'text', text: match[1] }], url: match[1], raw: match[0], autolink: true }, end: from + match[0].length };
+
+    match = rest.match(/^&(#x[0-9a-f]+|#[0-9]+|[a-z][a-z0-9]+);/i);
+    if (match) {
+        const decoded = decodeTableCellEntity(match[1]);
+        if (decoded !== null) return { token: { type: 'entity', raw: match[0], text: decoded }, end: from + match[0].length };
+    }
 
     match = rest.match(/^\*\*([\s\S]+?)\*\*/);
     if (match) return { token: { type: 'strong', delimiter: '**', children: parseTableCellInlineMarkdown(match[1]) }, end: from + match[0].length };
@@ -270,11 +299,34 @@ function markSpan(doc: Document, text: string): HTMLElement {
 
 function renderTableCellToken(token: TableCellInlineToken, doc: Document): Node {
     if (token.type === 'text') return doc.createTextNode(token.text);
+    if (token.type === 'entity') {
+        const entity = doc.createElement('span');
+        entity.className = 'cm-md-table-cell-entity';
+        entity.dataset.raw = token.raw;
+        entity.textContent = token.text;
+        return entity;
+    }
     if (token.type === 'code') {
         const code = doc.createElement('code');
         code.className = 'cm-md-table-cell-code';
         code.appendChild(doc.createTextNode(token.text));
         return code;
+    }
+    if (token.type === 'image') {
+        const href = normalizeLinkHref(token.url);
+        if (!href) return doc.createTextNode(token.raw);
+        const wrap = doc.createElement('span');
+        wrap.className = 'cm-md-table-cell-image-wrap';
+        wrap.dataset.raw = token.raw;
+        const img = doc.createElement('img');
+        img.className = 'cm-md-table-cell-image';
+        img.src = href;
+        img.alt = token.alt;
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        img.contentEditable = 'false';
+        wrap.appendChild(img);
+        return wrap;
     }
 
     const wrap = doc.createElement('span');
@@ -312,17 +364,25 @@ function renderTableCellToken(token: TableCellInlineToken, doc: Document): Node 
     wrap.className = 'cm-md-table-cell-link-wrap';
     const href = normalizeLinkHref(token.url);
     if (href) wrap.dataset.href = href;
-    wrap.appendChild(markSpan(doc, '['));
+    if (token.autolink) {
+        wrap.appendChild(markSpan(doc, '<'));
+    } else {
+        wrap.appendChild(markSpan(doc, '['));
+    }
     const inner = doc.createElement('span');
     inner.className = 'cm-md-table-cell-link';
     appendTableCellTokens(inner, token.children, doc);
     wrap.appendChild(inner);
-    wrap.appendChild(markSpan(doc, ']'));
-    wrap.appendChild(markSpan(doc, '('));
-    const urlMark = markSpan(doc, token.url);
-    urlMark.classList.add('cm-md-table-cell-link-url');
-    wrap.appendChild(urlMark);
-    wrap.appendChild(markSpan(doc, ')'));
+    if (token.autolink) {
+        wrap.appendChild(markSpan(doc, '>'));
+    } else {
+        wrap.appendChild(markSpan(doc, ']'));
+        wrap.appendChild(markSpan(doc, '('));
+        const urlMark = markSpan(doc, token.url);
+        urlMark.classList.add('cm-md-table-cell-link-url');
+        wrap.appendChild(urlMark);
+        wrap.appendChild(markSpan(doc, ')'));
+    }
     if (href) {
         const icon = doc.createElement('span');
         icon.className = 'cm-md-table-cell-link-icon';
@@ -398,10 +458,22 @@ function updateActiveMarkForSource(source: HTMLElement): void {
     }
 }
 
+function readDecoratedSourceRaw(node: Node): string {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
+    if (!(node instanceof HTMLElement)) {
+        return Array.from(node.childNodes).map(readDecoratedSourceRaw).join('');
+    }
+    if (node.classList.contains('cm-md-table-cell-link-icon')) return '';
+    if (node.classList.contains('cm-md-table-cell-entity') || node.classList.contains('cm-md-table-cell-image-wrap')) {
+        return node.dataset.raw ?? node.textContent ?? '';
+    }
+    return Array.from(node.childNodes).map(readDecoratedSourceRaw).join('');
+}
+
 function commitDecoratedCellSource(source: HTMLElement, commit: () => void): void {
     const cell = source.parentElement;
     if (!cell) return;
-    cell.dataset.raw = source.textContent ?? '';
+    cell.dataset.raw = readDecoratedSourceRaw(source);
     const offset = getCaretCharOffset(source);
     renderCellSourceDecorated(source);
     if (offset !== null) setCaretCharOffset(source, offset);
@@ -604,8 +676,13 @@ class EditableTableWidget extends WidgetType {
             });
             source.addEventListener('click', (event) => {
                 const icon = linkIconFromEvent(event);
-                if (!icon) return;
-                const href = icon.closest<HTMLElement>('.cm-md-table-cell-link-wrap')?.dataset.href;
+                const target = event.target;
+                const linkWrap = icon
+                    ? icon.closest<HTMLElement>('.cm-md-table-cell-link-wrap')
+                    : target instanceof Element && (event.metaKey || event.ctrlKey)
+                        ? target.closest<HTMLElement>('.cm-md-table-cell-link-wrap')
+                        : null;
+                const href = linkWrap?.dataset.href;
                 if (!href) return;
                 event.preventDefault();
                 event.stopPropagation();

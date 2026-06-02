@@ -55,6 +55,10 @@ function buildFixture(): string {
     ['syscr/syscw delta', '**0**', 'Zero system calls in 15 min'],
     ['VmRSS delta', '`0`', 'No memory allocation'],
     ['Reference', '[docs](https://example.com)', 'Clickable-looking link rendering'],
+    ['Autolink', '<https://example.com/auto>', 'Autolink text interaction'],
+    ['Entity', '&amp; &#169; &#x1f642;', 'Entity decoding with raw preservation'],
+    ['Image', '![alt](https://example.com/image.png)', 'Inline image preview'],
+    ['Nested', '**bold _em_**', 'Nested delimiter rendering'],
     ['utime growth', '100 ticks/s', 'Exactly one core saturated'],
   ]));
   parts.push('');
@@ -143,6 +147,10 @@ try {
     const rawPipeLines = Array.from(document.querySelectorAll('.cm-line'))
       .map((line) => line.textContent || '')
       .filter((text) => text.includes('| Metric |') || text.includes('| State |') || text.includes('| syscr/syscw delta |'));
+    const openedUrls: string[] = [];
+    const originalOpen = window.open;
+    window.open = ((url: string) => { openedUrls.push(String(url)); return null; }) as typeof window.open;
+
     const metricSource = Array.from(document.querySelectorAll<HTMLElement>('.cm-md-table-cell-source'))
       .find((element) => (element.textContent || '').includes('**0**'));
     if (metricSource) {
@@ -158,12 +166,24 @@ try {
         metricSource.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'ArrowRight' }));
       }
     }
+
+    document.querySelector<HTMLElement>('.cm-md-table-cell-link-icon')?.click();
+    const linkText = document.querySelector<HTMLElement>('.cm-md-table-cell-link');
+    linkText?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+    window.open = originalOpen;
+
+    const entityText = Array.from(document.querySelectorAll<HTMLElement>('.cm-md-table-cell-entity')).map((element) => element.textContent).join('');
+    const imageAlts = Array.from(document.querySelectorAll<HTMLImageElement>('.cm-md-table-cell-image')).map((image) => image.alt);
+    const lateDoc = harness.editor.view.state.doc.toString();
     const markdownClassCounts = {
       source: document.querySelectorAll('.cm-md-table-cell-source').length,
       strong: document.querySelectorAll('.cm-md-table-cell-strong').length,
       code: document.querySelectorAll('.cm-md-table-cell-code').length,
       link: document.querySelectorAll('.cm-md-table-cell-link').length,
       linkIcon: document.querySelectorAll('.cm-md-table-cell-link-icon').length,
+      image: document.querySelectorAll('.cm-md-table-cell-image').length,
+      entity: document.querySelectorAll('.cm-md-table-cell-entity').length,
+      nestedEm: document.querySelectorAll('.cm-md-table-cell-strong .cm-md-table-cell-em').length,
       activeMarkWrap: document.querySelectorAll('.cm-md-table-cell-strong-wrap.active, .cm-md-table-cell-em-wrap.active, .cm-md-table-cell-strike-wrap.active, .cm-md-table-cell-link-wrap.active').length,
     };
 
@@ -172,6 +192,10 @@ try {
       widgets,
       rawPipeLines,
       markdownClassCounts,
+      openedUrls,
+      entityText,
+      imageAlts,
+      rawPreserved: lateDoc.includes('&amp; &#169; &#x1f642;') && lateDoc.includes('![alt](https://example.com/image.png)') && lateDoc.includes('<https://example.com/auto>'),
       lateTablePos: harness.lateTablePos,
       scrollTop: (document.querySelector('.cm-scroller') as HTMLElement | null)?.scrollTop ?? null,
       viewport: (view as any).viewport ?? null,
@@ -190,13 +214,29 @@ try {
   if (result.markdownClassCounts.source < 1
       || result.markdownClassCounts.strong < 1
       || result.markdownClassCounts.code < 1
-      || result.markdownClassCounts.link < 1
-      || result.markdownClassCounts.linkIcon < 1
+      || result.markdownClassCounts.link < 2
+      || result.markdownClassCounts.linkIcon < 2
+      || result.markdownClassCounts.image < 1
+      || result.markdownClassCounts.entity < 3
+      || result.markdownClassCounts.nestedEm < 1
       || result.markdownClassCounts.activeMarkWrap < 1) {
     throw new Error(`table cell markdown did not render expected Atomic-style structure/classes: ${JSON.stringify(result.markdownClassCounts)}`);
   }
 
-  console.log(`late table rendering ok: parserTables=${result.parserTables.length}, visibleWidgets=${result.widgets.length}, markdown=${JSON.stringify(result.markdownClassCounts)}`);
+  if (!result.entityText.includes('&') || !result.entityText.includes('©') || !result.entityText.includes('🙂')) {
+    throw new Error(`table cell entities did not decode visibly: ${JSON.stringify(result.entityText)}`);
+  }
+  if (!result.imageAlts.includes('alt')) {
+    throw new Error(`table cell image preview missing expected alt text: ${JSON.stringify(result.imageAlts)}`);
+  }
+  if (!result.openedUrls.some((url) => url.includes('https://example.com')) || result.openedUrls.length < 2) {
+    throw new Error(`table cell link interactions did not open icon and ctrl-click links: ${JSON.stringify(result.openedUrls)}`);
+  }
+  if (!result.rawPreserved) {
+    throw new Error('table cell raw markdown was not preserved for entities/images/autolinks');
+  }
+
+  console.log(`late table rendering ok: parserTables=${result.parserTables.length}, visibleWidgets=${result.widgets.length}, markdown=${JSON.stringify(result.markdownClassCounts)}, opens=${result.openedUrls.length}`);
   await browser.close();
 } finally {
   server.stop();

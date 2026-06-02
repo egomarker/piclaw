@@ -642,6 +642,7 @@ export const markdownPreviewTheme = EditorView.theme({
         color: 'var(--accent-color, #1d9bf0)',
         textDecoration: 'underline',
         textDecorationColor: 'var(--accent-soft, rgba(29,155,240,0.3))',
+        cursor: 'pointer',
     },
     '.cm-md-table-cell-source .cm-md-table-cell-link-wrap.active > .cm-md-table-cell-link-url': {
         fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
@@ -662,6 +663,23 @@ export const markdownPreviewTheme = EditorView.theme({
     },
     '.cm-md-table-cell-link-icon:hover': {
         opacity: '1',
+    },
+    '.cm-md-table-cell-entity': {
+        whiteSpace: 'pre-wrap',
+    },
+    '.cm-md-table-cell-image-wrap': {
+        display: 'inline-flex',
+        alignItems: 'center',
+        maxWidth: '100%',
+        verticalAlign: 'middle',
+    },
+    '.cm-md-table-cell-image': {
+        display: 'inline-block',
+        maxWidth: '14em',
+        maxHeight: '10em',
+        borderRadius: '4px',
+        objectFit: 'contain',
+        border: '1px solid var(--border-color, rgba(127,127,127,0.28))',
     },
 
     /* ── Links ── */

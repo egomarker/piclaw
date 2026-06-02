@@ -145,6 +145,25 @@ test("editable table cell inline parser decorates markdown while preserving raw 
   ]);
 });
 
+test("editable table cell inline parser handles entities, autolinks, images, and nested marks", () => {
+  expect(parseTableCellInlineMarkdown("&amp; &#169; &#x1f642; <https://example.com> ![alt](https://example.com/i.png) **bold _em_**")).toEqual([
+    { type: "entity", raw: "&amp;", text: "&" },
+    { type: "text", text: " " },
+    { type: "entity", raw: "&#169;", text: "©" },
+    { type: "text", text: " " },
+    { type: "entity", raw: "&#x1f642;", text: "🙂" },
+    { type: "text", text: " " },
+    { type: "link", children: [{ type: "text", text: "https://example.com" }], url: "https://example.com", raw: "<https://example.com>", autolink: true },
+    { type: "text", text: " " },
+    { type: "image", raw: "![alt](https://example.com/i.png)", alt: "alt", url: "https://example.com/i.png" },
+    { type: "text", text: " " },
+    { type: "strong", delimiter: "**", children: [
+      { type: "text", text: "bold " },
+      { type: "emphasis", delimiter: "_", children: [{ type: "text", text: "em" }] },
+    ] },
+  ]);
+});
+
 test("editable table column mutation preserves alignment and rows", () => {
   const model = normalizeTableModel({
     header: ["A", "B"],
