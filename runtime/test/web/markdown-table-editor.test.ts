@@ -8,6 +8,7 @@ import {
   normalizeTableModel,
   parseMarkdownTableLines,
   parseTableAlignments,
+  parseTableCellInlineMarkdown,
   serializeMarkdownTable,
   setTableColumnAlignment,
   splitMarkdownTableRow,
@@ -128,6 +129,20 @@ test("editable table repeated row and column mutations remain rectangular", () =
   expect(width).toBeGreaterThan(1);
   expect(model.rows.every((row) => row.length === width)).toBe(true);
   expect(model.alignments).toHaveLength(width);
+});
+
+test("editable table cell inline parser decorates markdown while preserving raw delimiters", () => {
+  expect(parseTableCellInlineMarkdown("**bold** _em_ ~~gone~~ `code` [link](https://example.com)")).toEqual([
+    { type: "strong", delimiter: "**", children: [{ type: "text", text: "bold" }] },
+    { type: "text", text: " " },
+    { type: "emphasis", delimiter: "_", children: [{ type: "text", text: "em" }] },
+    { type: "text", text: " " },
+    { type: "strike", children: [{ type: "text", text: "gone" }] },
+    { type: "text", text: " " },
+    { type: "code", text: "code" },
+    { type: "text", text: " " },
+    { type: "link", children: [{ type: "text", text: "link" }], url: "https://example.com" },
+  ]);
 });
 
 test("editable table column mutation preserves alignment and rows", () => {

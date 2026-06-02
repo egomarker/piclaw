@@ -7,6 +7,7 @@ import {
 } from '#editor-vendor/codemirror';
 import type { DecorationSet, EditorState, Extension, Range, Transaction } from '#editor-vendor/codemirror';
 import type { SyntaxNode } from '@lezer/common';
+import { normalizeLinkHref } from './link.js';
 import { treeGrowthEffect } from './tree-progress.js';
 
 export type TableAlign = 'left' | 'center' | 'right';
@@ -194,6 +195,143 @@ function insertPlainTextIntoCell(cell: HTMLElement, text: string): void {
     selection.addRange(range);
 }
 
+export type TableCellInlineToken =
+    | { type: 'text'; text: string }
+    | { type: 'strong'; delimiter: '**' | '__'; children: TableCellInlineToken[] }
+    | { type: 'emphasis'; delimiter: '*' | '_'; children: TableCellInlineToken[] }
+    | { type: 'strike'; children: TableCellInlineToken[] }
+    | { type: 'code'; text: string }
+    | { type: 'link'; children: TableCellInlineToken[]; url: string };
+
+export function parseTableCellInlineMarkdown(raw: string): TableCellInlineToken[] {
+    const tokens: TableCellInlineToken[] = [];
+    let buffer = '';
+    let index = 0;
+    const flush = () => {
+        if (!buffer) return;
+        tokens.push({ type: 'text', text: buffer });
+        buffer = '';
+    };
+
+    while (index < raw.length) {
+        if (raw[index] === '\\' && index + 1 < raw.length && /[!-/:-@[-`{-~]/.test(raw[index + 1])) {
+            buffer += raw[index + 1];
+            index += 2;
+            continue;
+        }
+        const match = matchTableCellInlineToken(raw, index);
+        if (match) {
+            flush();
+            tokens.push(match.token);
+            index = match.end;
+            continue;
+        }
+        buffer += raw[index];
+        index++;
+    }
+
+    flush();
+    return tokens;
+}
+
+function matchTableCellInlineToken(raw: string, from: number): { token: TableCellInlineToken; end: number } | null {
+    const rest = raw.slice(from);
+    let match = rest.match(/^`([^`\n]+?)`/);
+    if (match) return { token: { type: 'code', text: match[1] }, end: from + match[0].length };
+
+    match = rest.match(/^\*\*([\s\S]+?)\*\*/);
+    if (match) return { token: { type: 'strong', delimiter: '**', children: parseTableCellInlineMarkdown(match[1]) }, end: from + match[0].length };
+    match = rest.match(/^__([\s\S]+?)__/);
+    if (match) return { token: { type: 'strong', delimiter: '__', children: parseTableCellInlineMarkdown(match[1]) }, end: from + match[0].length };
+    match = rest.match(/^~~([\s\S]+?)~~/);
+    if (match) return { token: { type: 'strike', children: parseTableCellInlineMarkdown(match[1]) }, end: from + match[0].length };
+    match = rest.match(/^\[([^\]\n]+)\]\(([^\s)"'\n]+)\)/);
+    if (match) return { token: { type: 'link', children: parseTableCellInlineMarkdown(match[1]), url: match[2] }, end: from + match[0].length };
+    match = rest.match(/^\*([^*\n]+?)\*/);
+    if (match) return { token: { type: 'emphasis', delimiter: '*', children: parseTableCellInlineMarkdown(match[1]) }, end: from + match[0].length };
+    const previous = from > 0 ? raw[from - 1] : '';
+    if (!/\w/.test(previous)) {
+        match = rest.match(/^_([^_\n]+?)_/);
+        if (match) return { token: { type: 'emphasis', delimiter: '_', children: parseTableCellInlineMarkdown(match[1]) }, end: from + match[0].length };
+    }
+    return null;
+}
+
+function appendTableCellTokens(parent: Node, tokens: readonly TableCellInlineToken[], doc: Document): void {
+    for (const token of tokens) parent.appendChild(renderTableCellToken(token, doc));
+}
+
+function markSpan(doc: Document, text: string): HTMLElement {
+    const element = doc.createElement('span');
+    element.className = 'cm-md-table-cell-mark';
+    element.textContent = text;
+    return element;
+}
+
+function renderTableCellToken(token: TableCellInlineToken, doc: Document): Node {
+    if (token.type === 'text') return doc.createTextNode(token.text);
+    if (token.type === 'code') {
+        const code = doc.createElement('code');
+        code.className = 'cm-md-table-cell-code';
+        code.appendChild(doc.createTextNode(token.text));
+        return code;
+    }
+
+    const wrap = doc.createElement('span');
+    if (token.type === 'strong') {
+        wrap.className = 'cm-md-table-cell-strong-wrap';
+        wrap.appendChild(markSpan(doc, token.delimiter));
+        const inner = doc.createElement('span');
+        inner.className = 'cm-md-table-cell-strong';
+        appendTableCellTokens(inner, token.children, doc);
+        wrap.appendChild(inner);
+        wrap.appendChild(markSpan(doc, token.delimiter));
+        return wrap;
+    }
+    if (token.type === 'emphasis') {
+        wrap.className = 'cm-md-table-cell-em-wrap';
+        wrap.appendChild(markSpan(doc, token.delimiter));
+        const inner = doc.createElement('span');
+        inner.className = 'cm-md-table-cell-em';
+        appendTableCellTokens(inner, token.children, doc);
+        wrap.appendChild(inner);
+        wrap.appendChild(markSpan(doc, token.delimiter));
+        return wrap;
+    }
+    if (token.type === 'strike') {
+        wrap.className = 'cm-md-table-cell-strike-wrap';
+        wrap.appendChild(markSpan(doc, '~~'));
+        const inner = doc.createElement('span');
+        inner.className = 'cm-md-table-cell-strike';
+        appendTableCellTokens(inner, token.children, doc);
+        wrap.appendChild(inner);
+        wrap.appendChild(markSpan(doc, '~~'));
+        return wrap;
+    }
+
+    wrap.className = 'cm-md-table-cell-link-wrap';
+    const href = normalizeLinkHref(token.url);
+    if (href) wrap.dataset.href = href;
+    wrap.appendChild(markSpan(doc, '['));
+    const inner = doc.createElement('span');
+    inner.className = 'cm-md-table-cell-link';
+    appendTableCellTokens(inner, token.children, doc);
+    wrap.appendChild(inner);
+    wrap.appendChild(markSpan(doc, ']'));
+    wrap.appendChild(markSpan(doc, '('));
+    const urlMark = markSpan(doc, token.url);
+    urlMark.classList.add('cm-md-table-cell-link-url');
+    wrap.appendChild(urlMark);
+    wrap.appendChild(markSpan(doc, ')'));
+    return wrap;
+}
+
+function renderDecoratedTableCell(cell: HTMLElement, raw: string): void {
+    cell.dataset.raw = raw;
+    cell.replaceChildren();
+    appendTableCellTokens(cell, parseTableCellInlineMarkdown(raw), cell.ownerDocument);
+}
+
 class EditableTableWidget extends WidgetType {
     private currentTo: number;
     private composing = false;
@@ -335,7 +473,7 @@ class EditableTableWidget extends WidgetType {
             cell.className = `cm-md-editable-table-cell cm-md-editable-table-cell-${align}`;
             cell.contentEditable = 'true';
             cell.spellcheck = false;
-            cell.textContent = text;
+            renderDecoratedTableCell(cell, text);
             cell.dataset.row = String(row);
             cell.dataset.col = String(col);
             const markActive = () => {
@@ -354,12 +492,14 @@ class EditableTableWidget extends WidgetType {
                 contextMenu.hidden = false;
             });
             cell.addEventListener('compositionstart', () => { this.composing = true; });
-            cell.addEventListener('compositionend', () => { this.composing = false; commitFromDom(); });
-            cell.addEventListener('input', commitFromDom);
+            const syncRawFromDom = () => { cell.dataset.raw = cell.textContent ?? ''; };
+            cell.addEventListener('compositionend', () => { this.composing = false; syncRawFromDom(); commitFromDom(); });
+            cell.addEventListener('input', () => { syncRawFromDom(); commitFromDom(); });
             cell.addEventListener('paste', (event) => {
                 event.preventDefault();
                 const text = event.clipboardData?.getData('text/plain') ?? '';
                 insertPlainTextIntoCell(cell, text.replace(/\r?\n/g, ' '));
+                syncRawFromDom();
                 commitFromDom();
             });
             cell.addEventListener('keydown', (event) => {
@@ -430,12 +570,16 @@ function buildTableDom(
     table.appendChild(tbody);
 }
 
+function readCellRaw(cell: HTMLTableCellElement): string {
+    return cell.dataset.raw ?? cell.textContent ?? '';
+}
+
 function readModelFromTable(table: HTMLTableElement, alignments: readonly TableAlign[]): EditableTableModel {
     const header = Array.from(table.querySelectorAll<HTMLTableCellElement>('thead th'))
-        .map((cell) => cell.textContent ?? '');
+        .map(readCellRaw);
     const rows = Array.from(table.querySelectorAll<HTMLTableRowElement>('tbody tr'))
         .map((row) => Array.from(row.querySelectorAll<HTMLTableCellElement>('td'))
-            .map((cell) => cell.textContent ?? ''));
+            .map(readCellRaw));
     return normalizeTableModel({ header, alignments: Array.from(alignments), rows });
 }
 

@@ -54,6 +54,7 @@ function buildFixture(): string {
     ['State', '`R` (running)', 'Not waiting on I/O or locks'],
     ['syscr/syscw delta', '**0**', 'Zero system calls in 15 min'],
     ['VmRSS delta', '`0`', 'No memory allocation'],
+    ['Reference', '[docs](https://example.com)', 'Clickable-looking link rendering'],
     ['utime growth', '100 ticks/s', 'Exactly one core saturated'],
   ]));
   parts.push('');
@@ -142,11 +143,17 @@ try {
     const rawPipeLines = Array.from(document.querySelectorAll('.cm-line'))
       .map((line) => line.textContent || '')
       .filter((text) => text.includes('| Metric |') || text.includes('| State |') || text.includes('| syscr/syscw delta |'));
+    const markdownClassCounts = {
+      strong: document.querySelectorAll('.cm-md-table-cell-strong').length,
+      code: document.querySelectorAll('.cm-md-table-cell-code').length,
+      link: document.querySelectorAll('.cm-md-table-cell-link').length,
+    };
 
     return {
       parserTables,
       widgets,
       rawPipeLines,
+      markdownClassCounts,
       lateTablePos: harness.lateTablePos,
       scrollTop: (document.querySelector('.cm-scroller') as HTMLElement | null)?.scrollTop ?? null,
       viewport: (view as any).viewport ?? null,
@@ -162,8 +169,11 @@ try {
   if (result.rawPipeLines.length > 0) {
     throw new Error(`late table rendered as raw pipe markup: ${JSON.stringify(result.rawPipeLines)}`);
   }
+  if (result.markdownClassCounts.strong < 1 || result.markdownClassCounts.code < 1 || result.markdownClassCounts.link < 1) {
+    throw new Error(`table cell markdown did not render expected inline classes: ${JSON.stringify(result.markdownClassCounts)}`);
+  }
 
-  console.log(`late table rendering ok: parserTables=${result.parserTables.length}, visibleWidgets=${result.widgets.length}`);
+  console.log(`late table rendering ok: parserTables=${result.parserTables.length}, visibleWidgets=${result.widgets.length}, markdown=${JSON.stringify(result.markdownClassCounts)}`);
   await browser.close();
 } finally {
   server.stop();

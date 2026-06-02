@@ -609,6 +609,39 @@ export const markdownPreviewTheme = EditorView.theme({
         boxShadow: 'inset 0 0 0 2px var(--accent-color, #1d9bf0)',
         backgroundColor: 'rgba(29, 155, 240, 0.12) !important',
     },
+    '.cm-md-editable-table-cell .cm-md-table-cell-mark': {
+        display: 'none',
+    },
+    '.cm-md-editable-table-cell:focus .cm-md-table-cell-mark': {
+        display: 'inline',
+        color: 'var(--text-muted, #6b7280)',
+        opacity: '0.78',
+    },
+    '.cm-md-table-cell-strong': {
+        fontWeight: '700',
+    },
+    '.cm-md-table-cell-em': {
+        fontStyle: 'italic',
+    },
+    '.cm-md-table-cell-strike': {
+        textDecoration: 'line-through',
+    },
+    '.cm-md-table-cell-code': {
+        fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
+        fontSize: '0.92em',
+        padding: '0 0.25em',
+        borderRadius: '3px',
+        backgroundColor: 'var(--code-bg, rgba(127, 127, 127, 0.16))',
+    },
+    '.cm-md-table-cell-link': {
+        color: 'var(--accent-color, #1d9bf0)',
+        textDecoration: 'underline',
+        textDecorationColor: 'var(--accent-soft, rgba(29,155,240,0.3))',
+    },
+    '.cm-md-editable-table-cell:focus .cm-md-table-cell-link-url': {
+        fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
+        fontSize: '0.88em',
+    },
 
     /* ── Links ── */
     '.cm-md-link': {
