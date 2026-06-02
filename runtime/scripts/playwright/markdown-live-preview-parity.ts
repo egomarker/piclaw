@@ -36,6 +36,7 @@ import {
 } from '#editor-vendor/codemirror';
 import { markdownLivePreview, markdownParserExtensions } from '../../../extensions/viewers/editor/markdown/index.ts';
 import { livePreviewFrozenField } from '../../../extensions/viewers/editor/markdown/live-preview.ts';
+import { openEditorSearch, revealText, searchRevealExtension, isEditorSearchOpen } from '../../../extensions/viewers/editor/search-reveal.ts';
 
 const source = ${JSON.stringify(source)};
 const root = document.getElementById('editor');
@@ -50,6 +51,7 @@ const view = new EditorView({
       lineNumbers(),
       markdown({ base: markdownLanguage, extensions: markdownParserExtensions }),
       EditorView.lineWrapping,
+      searchRevealExtension,
       markdownLivePreview,
     ],
   }),
@@ -61,6 +63,9 @@ window.__piclawMarkdownHarness = {
   doc: () => view.state.doc.toString(),
   reset: () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: source }, selection: { anchor: 0 } }),
   isFrozen: () => view.state.field(livePreviewFrozenField, false),
+  openSearch: (query) => openEditorSearch(view, query),
+  isSearchOpen: () => isEditorSearchOpen(view.state),
+  reveal: (query) => revealText(view, query),
   focus: () => view.focus(),
   setCursor: (pos) => view.dispatch({ selection: { anchor: pos }, scrollIntoView: true }),
   scrollTo: (pos) => view.dispatch({ effects: EditorView.scrollIntoView(pos, { y: 'center' }) }),
@@ -146,6 +151,27 @@ async function runScenario(page: Page, baseUrl: string, scenario: typeof scenari
   assert(await count(page, '.cm-md-heading-fold') >= 1, `${scenario.name}: missing heading fold affordance`);
   assert(await count(page, '.cm-md-callout') >= 1, `${scenario.name}: missing callout decoration`);
   assert(await count(page, '.cm-md-frontmatter-line') >= 1, `${scenario.name}: missing frontmatter decoration`);
+
+  const revealSearch = await page.evaluate(async () => {
+    const harness = (window as any).__piclawMarkdownHarness;
+    const before = harness.selection().head;
+    harness.openSearch('frontmatter');
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const searchOpen = harness.isSearchOpen();
+    const revealed = harness.reveal('missing first line\nFootnote reference');
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    return {
+      searchOpen,
+      revealed,
+      revealCount: document.querySelectorAll('.cm-initialRevealMatch').length,
+      after: harness.selection().head,
+      before,
+    };
+  });
+  assert(revealSearch.searchOpen, `${scenario.name}: openSearch API did not open search panel`);
+  assert(revealSearch.revealed && revealSearch.revealed.from < revealSearch.revealed.to, `${scenario.name}: revealText API did not find fallback snippet`);
+  assert(revealSearch.revealCount >= 1, `${scenario.name}: revealText API did not paint reveal highlight`);
+  assert(revealSearch.after === revealSearch.before, `${scenario.name}: revealText API moved the editor selection`);
 
   await page.evaluate(() => {
     const harness = (window as any).__piclawMarkdownHarness;

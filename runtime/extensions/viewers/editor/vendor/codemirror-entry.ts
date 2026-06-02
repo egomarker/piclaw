@@ -50,7 +50,7 @@ export { StreamLanguage, HighlightStyle, syntaxHighlighting, syntaxTree, ensureS
 export { tags, classHighlighter } from "@lezer/highlight";
 export { shell } from "@codemirror/legacy-modes/mode/shell";
 export { indentWithTab } from "@codemirror/commands";
-export { search, openSearchPanel, closeSearchPanel, searchKeymap, highlightSelectionMatches } from "@codemirror/search";
+export { search, openSearchPanel, closeSearchPanel, searchPanelOpen, getSearchQuery, setSearchQuery, SearchQuery, findNext, findPrevious, searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 export { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 export { lintGutter } from "@codemirror/lint";
 export { vim } from "@replit/codemirror-vim";

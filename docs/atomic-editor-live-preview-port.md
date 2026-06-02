@@ -39,6 +39,17 @@ Deferred until serialization policy is accepted:
   - tight bullet/task-list Enter continuation
   - mid-typing emphasis styling supplement for the active line while parser state catches up
 
+## Search/reveal API
+
+Piclaw now ports Atomic's non-wiki search/reveal API shape at the editor-extension level:
+
+- `openSearch(query?)` opens the existing CM6 search panel, optionally pre-filled.
+- `closeSearch()` closes it.
+- `isSearchOpen()` reports panel state.
+- `revealText(query)` finds the first matching source range using Atomic's progressive fallback strategy (exact text, whitespace-collapsed text, individual lines, and truncated prefixes), scrolls the match near the top, paints a transient `.cm-initialRevealMatch` highlight, and does not move the editor selection.
+
+Wiki links remain intentionally unported.
+
 ## Recommendation gate
 
 Keep Piclaw's editor engine and shell, with Atomic hardening borrowed as local CM6 extensions. Do not adopt Atomic's React wrapper or depend on `@atomic-editor/editor` directly unless Piclaw's vendor/import model changes.
@@ -85,6 +96,6 @@ Latest speed-audit notes:
 - Cursor medians stayed near or faster than the pre-port baseline after the offscreen-selection rebuild guard.
 - Scroll medians stayed within small absolute deltas; table-boundary Backspace remains a small absolute-cost increase because it intentionally selects the table atomically before deletion.
 - A first normalized/WYSIWYG table-editor slice now exists: rendered contenteditable cells serialize back to normalized Markdown, Tab navigates cells, Tab past the final cell appends a row, toolbar buttons add/remove rows and columns, pasted newlines are flattened, literal pipes are escaped as `\\|`, and alignment buttons update delimiter serialization.
-- Browser coverage now exercises cell edit serialization, Tab and Shift-Tab focus movement, Tab-past-end row append, paste-in-middle flattening with caret preservation, pipe escaping with caret preservation, composition deferral through `compositionend`, alignment changes, row/column add/delete, context-menu row insertion, and focus restoration after mutations across desktop/tablet/mobile.
+- Browser coverage now exercises search/reveal API behavior, cell edit serialization, Tab and Shift-Tab focus movement, Tab-past-end row append, paste-in-middle flattening with caret preservation, pipe escaping with caret preservation, composition deferral through `compositionend`, alignment changes, row/column add/delete, context-menu row insertion, and focus restoration after mutations across desktop/tablet/mobile.
 - Speed-audit coverage now includes editable table typing and row/column mutation timings in addition to table-boundary behavior.
 - Full Atomic parity still has follow-up room for manual mobile IME testing and richer Markdown rendering inside table cells, which Atomic also treated as limited/scope-cut behavior in the inspected version.
