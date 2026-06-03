@@ -101,6 +101,15 @@ export const BUDGET_SAFETY_MARGIN = 0.85;
  */
 export const MAX_PROGRESSIVE_CHUNKS = parsePositiveEnvInt("PICLAW_PROGRESSIVE_COMPACTION_MAX_CHUNKS") ?? 0;
 
+/** Number of progressive chunk summaries to run concurrently. Keep this small to avoid provider throttling. */
+export const PROGRESSIVE_COMPACTION_CONCURRENCY = Math.min(
+  8,
+  Math.max(1, parsePositiveEnvInt("PICLAW_PROGRESSIVE_COMPACTION_CONCURRENCY") ?? 3),
+);
+
+/** Minimum interval between live smart-compaction progress updates. */
+export const SMART_COMPACTION_PROGRESS_INTERVAL_MS = parsePositiveEnvInt("PICLAW_SMART_COMPACTION_PROGRESS_INTERVAL_MS") ?? 5_000;
+
 /** Maximum fraction of context window that keepRecentTokens may consume. */
 export const MAX_KEEP_RECENT_FRACTION = 0.50;
 

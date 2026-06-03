@@ -104,6 +104,58 @@ describe("web recovery helpers", () => {
     }]);
   });
 
+  test("recoverInflightRuns advances past pending manual compact when stale manual compaction is quarantined", () => {
+    const quarantined: Array<{ chatJid: string; reason: string; backoffUntil?: string | null }> = [];
+    const backoffs: string[] = [];
+    const clearedInflight: string[] = [];
+
+    const ctx: WebRecoveryContext = {
+      assistantName: "Pi",
+      defaultAgentId: "default",
+      enqueue: async () => {},
+      processChat: async () => {},
+      now: () => new Date("2026-01-01T00:10:00Z").getTime(),
+    };
+
+    const store: WebRecoveryStore = {
+      getPreflightRuns: () => [],
+      getActiveChatCompactions: () => [{ chatJid: "web:compact", startedAt: "2026-01-01T00:00:00Z", reason: "manual" }],
+      getInflightRuns: () => [],
+      transaction: (run) => run(),
+      getAgentReplyStateAfter: () => "none",
+      getChatCompactionBackoff: () => ({ failureCount: 1 }),
+      setChatCompactionBackoff: (chatJid) => { backoffs.push(chatJid); },
+      quarantinePendingManualCompactCommands: (chatJid, options) => {
+        quarantined.push({ chatJid, reason: options.reason, backoffUntil: options.backoffUntil });
+        return {
+          chatJid,
+          prevTs: "t0",
+          cursorTs: "t-compact",
+          skippedCount: 2,
+          lastMessageRowId: 42,
+          lastMessageId: "msg-compact-2",
+          reason: options.reason,
+        };
+      },
+      clearChatCompactionActive: () => { throw new Error("should be handled by quarantinePendingManualCompactCommands"); },
+      clearInflightMarker: (chatJid) => { clearedInflight.push(chatJid); },
+      rollbackInflightRun: () => {},
+      getAllChatCursors: () => ({}),
+      getKnownChatJids: () => [],
+      getDeferredQueuedFollowups: () => [],
+      getMessagesSince: () => [],
+    };
+
+    recoverInflightRuns(ctx, store);
+
+    expect(quarantined).toHaveLength(1);
+    expect(quarantined[0].chatJid).toBe("web:compact");
+    expect(quarantined[0].reason).toContain("Stale manual compaction recovered after 600s");
+    expect(quarantined[0].backoffUntil).toBe("2026-01-01T04:10:00.000Z");
+    expect(backoffs).toEqual([]);
+    expect(clearedInflight).toEqual([]);
+  });
+
   test("recoverInflightRuns triggers backoff after repeated fresh compaction failures", () => {
     const clearedCompactions: string[] = [];
     const backoffs: Array<{ chatJid: string; failureCount: number; backoffUntil: string }> = [];

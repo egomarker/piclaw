@@ -10,7 +10,7 @@ describe("web http shell dispatch", () => {
     expect(response).toBeNull();
   });
 
-  test("dispatches index/manifest/service-worker/static/docs/sse/terminal-session/vnc routes", async () => {
+  test("dispatches index/manifest/service-worker/static/docs/sse/terminal-session/vnc routes without ghostty compatibility assets", async () => {
     const staticRequests: string[] = [];
     const channel = {
       serveStatic: (rel: string, req?: Request) => {
@@ -36,13 +36,13 @@ describe("web http shell dispatch", () => {
     const serviceWorkerFlags = buildRouteFlags({ isServiceWorker: true });
     expect(await (await handleShellRoutes(channel, new Request("https://e/sw.js", { method: "GET" }), "/sw.js", serviceWorkerFlags, async () => new Response()))?.text()).toBe("static:sw.js");
 
-    expect(await (await handleShellRoutes(channel, new Request("https://e/ghostty-vt.wasm", { method: "GET" }), "/ghostty-vt.wasm", buildRouteFlags(), async () => new Response()))?.text()).toBe("static:common/js/vendor/ghostty-vt.wasm");
+    expect(await handleShellRoutes(channel, new Request("https://e/ghostty-vt.wasm", { method: "GET" }), "/ghostty-vt.wasm", buildRouteFlags(), async () => new Response())).toBeNull();
 
     const staticFlags = buildRouteFlags({ isStaticAsset: true });
     expect(await (await handleShellRoutes(channel, new Request("https://e/static/x.js", { method: "GET" }), "/static/x.js", staticFlags, async () => new Response()))?.text()).toBe("static:x.js");
     expect(staticRequests).toContain("classic/index.html:https://e/");
     expect(staticRequests).toContain("sw.js:https://e/sw.js");
-    expect(staticRequests).toContain("common/js/vendor/ghostty-vt.wasm:https://e/ghostty-vt.wasm");
+    expect(staticRequests.some((entry) => entry.includes("ghostty"))).toBe(false);
     expect(staticRequests).toContain("x.js:https://e/static/x.js");
 
     const docsFlags = buildRouteFlags({ isDocsAsset: true });

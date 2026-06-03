@@ -63,16 +63,15 @@ export const markdownPreviewTheme = EditorView.theme({
     '.cm-md-h-line': { paddingTop: '0.1em' },
     // IMPORTANT: avoid vertical margins on .cm-line decorations
     // (CodeMirror coordinate mapping drifts when line margins accumulate).
-    '.cm-md-h1-line': { paddingTop: '0.9em' },
-    '.cm-md-h2-line': { paddingTop: '0.82em' },
-    '.cm-md-h3-line': { paddingTop: '0.72em' },
-    '.cm-md-h4-line, .cm-md-h5-line, .cm-md-h6-line': { paddingTop: '0.6em' },
-    '.cm-md-h1': { fontSize: '1.42em', fontWeight: '700', lineHeight: '1.24', letterSpacing: '-0.01em' },
-    '.cm-md-h2': { fontSize: '1.28em', fontWeight: '700', lineHeight: '1.25', letterSpacing: '-0.005em' },
-    '.cm-md-h3': { fontSize: '1.16em', fontWeight: '650', lineHeight: '1.26' },
-    '.cm-md-h4': { fontSize: '1.08em', fontWeight: '650', lineHeight: '1.28' },
-    '.cm-md-h5': { fontSize: '1.02em', fontWeight: '600', lineHeight: '1.3' },
-    '.cm-md-h6': { fontSize: '0.98em', fontWeight: '600', lineHeight: '1.32', opacity: '0.92' },
+    // Heading typography lives on line decorations so active/raw and
+    // inactive/preview states keep the same line height.
+    '.cm-md-h1-line': { paddingTop: '0.9em', fontSize: '1.42em', fontWeight: '700', lineHeight: '1.24', letterSpacing: '-0.01em' },
+    '.cm-md-h2-line': { paddingTop: '0.82em', fontSize: '1.28em', fontWeight: '700', lineHeight: '1.25', letterSpacing: '-0.005em' },
+    '.cm-md-h3-line': { paddingTop: '0.72em', fontSize: '1.16em', fontWeight: '650', lineHeight: '1.26' },
+    '.cm-md-h4-line': { paddingTop: '0.6em', fontSize: '1.08em', fontWeight: '650', lineHeight: '1.28' },
+    '.cm-md-h5-line': { paddingTop: '0.6em', fontSize: '1.02em', fontWeight: '600', lineHeight: '1.3' },
+    '.cm-md-h6-line': { paddingTop: '0.6em', fontSize: '0.98em', fontWeight: '600', lineHeight: '1.32', opacity: '0.92' },
+    '.cm-md-h1, .cm-md-h2, .cm-md-h3, .cm-md-h4, .cm-md-h5, .cm-md-h6': { fontSize: 'inherit', fontWeight: 'inherit', lineHeight: 'inherit', letterSpacing: 'inherit' },
     '.cm-md-heading-fold': {
         display: 'inline-flex',
         alignItems: 'center',
@@ -511,6 +510,177 @@ export const markdownPreviewTheme = EditorView.theme({
     '.cm-md-table-line .cm-highlightSpace::before': {
         content: 'none !important',
     },
+    '.cm-md-editable-table-wrap': {
+        position: 'relative',
+        display: 'block',
+        maxWidth: '100%',
+        overflowX: 'auto',
+        margin: '6px 0',
+        padding: '1px 0',
+    },
+    '.cm-md-editable-table-toolbar': {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: '4px',
+        margin: '0 0 4px',
+        opacity: '0.72',
+    },
+    '.cm-md-editable-table-wrap:focus-within .cm-md-editable-table-toolbar, .cm-md-editable-table-wrap:hover .cm-md-editable-table-toolbar': {
+        opacity: '1',
+    },
+    '.cm-md-editable-table-button': {
+        border: '1px solid var(--border-color, #333)',
+        borderRadius: '4px',
+        background: 'var(--bg-secondary, #2a2a2a)',
+        color: 'var(--text-secondary, #a0a0a0)',
+        fontSize: '11px',
+        lineHeight: '1.2',
+        padding: '2px 6px',
+        cursor: 'pointer',
+    },
+    '.cm-md-editable-table-button:hover, .cm-md-editable-table-button:focus-visible': {
+        color: 'var(--text-primary, #d6d6d6)',
+        borderColor: 'var(--accent-color, #1d9bf0)',
+        outline: 'none',
+    },
+    '.cm-md-editable-table-context-menu': {
+        position: 'absolute',
+        zIndex: '20',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(2, minmax(56px, auto))',
+        gap: '4px',
+        padding: '6px',
+        border: '1px solid var(--border-color, #333)',
+        borderRadius: '6px',
+        background: 'var(--bg-primary, #1e1e1e)',
+        boxShadow: '0 8px 20px rgba(0, 0, 0, 0.28)',
+    },
+    '.cm-md-editable-table-context-menu[hidden]': {
+        display: 'none',
+    },
+    '.cm-md-editable-table-menu-button': {
+        border: '1px solid var(--border-color, #333)',
+        borderRadius: '4px',
+        background: 'var(--bg-secondary, #2a2a2a)',
+        color: 'var(--text-secondary, #a0a0a0)',
+        fontSize: '11px',
+        padding: '3px 6px',
+        cursor: 'pointer',
+    },
+    '.cm-md-editable-table-menu-button:hover, .cm-md-editable-table-menu-button:focus-visible': {
+        color: 'var(--text-primary, #d6d6d6)',
+        borderColor: 'var(--accent-color, #1d9bf0)',
+        outline: 'none',
+    },
+    '.cm-md-editable-table': {
+        borderCollapse: 'separate',
+        borderSpacing: '0',
+        minWidth: 'min(100%, 420px)',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+        fontSize: '0.95em',
+        color: 'var(--text-primary, #d6d6d6)',
+    },
+    '.cm-md-editable-table th, .cm-md-editable-table td': {
+        borderRight: '1px solid var(--border-color, #333)',
+        borderBottom: '1px solid var(--border-color, #333)',
+        padding: '5px 8px',
+        minWidth: '8ch',
+        outline: 'none',
+        whiteSpace: 'pre-wrap',
+    },
+    '.cm-md-editable-table th:first-child, .cm-md-editable-table td:first-child': {
+        borderLeft: '1px solid var(--border-color, #333)',
+    },
+    '.cm-md-editable-table thead th': {
+        borderTop: '1px solid var(--border-color, #333)',
+        backgroundColor: 'var(--bg-secondary, #2a2a2a)',
+        fontWeight: '700',
+    },
+    '.cm-md-editable-table tbody tr:nth-child(odd) td': {
+        backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    },
+    '.cm-md-editable-table-cell-left': { textAlign: 'left' },
+    '.cm-md-editable-table-cell-center': { textAlign: 'center' },
+    '.cm-md-editable-table-cell-right': {
+        textAlign: 'right',
+        fontVariantNumeric: 'tabular-nums',
+    },
+    '.cm-md-editable-table-cell:focus-within': {
+        boxShadow: 'inset 0 0 0 2px var(--accent-color, #1d9bf0)',
+        backgroundColor: 'rgba(29, 155, 240, 0.12) !important',
+    },
+    '.cm-md-table-cell-source': {
+        minHeight: '1.2em',
+        outline: 'none',
+        whiteSpace: 'pre-wrap',
+    },
+    '.cm-md-table-cell-source .cm-md-table-cell-mark': {
+        display: 'none',
+    },
+    '.cm-md-table-cell-source .cm-md-table-cell-strong-wrap.active > .cm-md-table-cell-mark, .cm-md-table-cell-source .cm-md-table-cell-em-wrap.active > .cm-md-table-cell-mark, .cm-md-table-cell-source .cm-md-table-cell-strike-wrap.active > .cm-md-table-cell-mark, .cm-md-table-cell-source .cm-md-table-cell-link-wrap.active > .cm-md-table-cell-mark': {
+        display: 'inline',
+        color: 'var(--text-muted, #6b7280)',
+        opacity: '0.78',
+    },
+    '.cm-md-table-cell-strong': {
+        fontWeight: '700',
+    },
+    '.cm-md-table-cell-em': {
+        fontStyle: 'italic',
+    },
+    '.cm-md-table-cell-strike': {
+        textDecoration: 'line-through',
+    },
+    '.cm-md-table-cell-code': {
+        fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
+        fontSize: '0.92em',
+        padding: '0 0.25em',
+        borderRadius: '3px',
+        backgroundColor: 'var(--code-bg, rgba(127, 127, 127, 0.16))',
+    },
+    '.cm-md-table-cell-link': {
+        color: 'var(--accent-color, #1d9bf0)',
+        textDecoration: 'underline',
+        textDecorationColor: 'var(--accent-soft, rgba(29,155,240,0.3))',
+        cursor: 'pointer',
+    },
+    '.cm-md-table-cell-source .cm-md-table-cell-link-wrap.active > .cm-md-table-cell-link-url': {
+        fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
+        fontSize: '0.88em',
+    },
+    '.cm-md-table-cell-link-icon': {
+        display: 'inline-block',
+        width: '0.78em',
+        height: '0.78em',
+        marginLeft: '0.18em',
+        verticalAlign: '0.02em',
+        backgroundColor: 'currentColor',
+        opacity: '0.72',
+        cursor: 'pointer',
+        userSelect: 'none',
+        WebkitMask: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\'%3E%3Cpath fill=\'black\' d=\'M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42 9.3-9.29H14V3ZM5 5h6v2H7v10h10v-4h2v6H5V5Z\'/%3E%3C/svg%3E") center / contain no-repeat',
+        mask: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\'%3E%3Cpath fill=\'black\' d=\'M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42 9.3-9.29H14V3ZM5 5h6v2H7v10h10v-4h2v6H5V5Z\'/%3E%3C/svg%3E") center / contain no-repeat',
+    },
+    '.cm-md-table-cell-link-icon:hover': {
+        opacity: '1',
+    },
+    '.cm-md-table-cell-entity': {
+        whiteSpace: 'pre-wrap',
+    },
+    '.cm-md-table-cell-image-wrap': {
+        display: 'inline-flex',
+        alignItems: 'center',
+        maxWidth: '100%',
+        verticalAlign: 'middle',
+    },
+    '.cm-md-table-cell-image': {
+        display: 'inline-block',
+        maxWidth: '14em',
+        maxHeight: '10em',
+        borderRadius: '4px',
+        objectFit: 'contain',
+        border: '1px solid var(--border-color, rgba(127,127,127,0.28))',
+    },
 
     /* ── Links ── */
     '.cm-md-link': {
@@ -542,6 +712,10 @@ export const markdownPreviewTheme = EditorView.theme({
         maxWidth: '100%',
         margin: '8px 0',
         gap: '4px',
+    },
+    '.cm-md-image-block': {
+        display: 'flex',
+        width: 'fit-content',
     },
     '.cm-md-image': {
         maxWidth: '100%',

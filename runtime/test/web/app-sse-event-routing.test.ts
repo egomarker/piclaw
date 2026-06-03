@@ -35,7 +35,7 @@ test('resolveSseEventRoutingContext trims event chat ids and matches current cha
   });
 });
 
-test('resolveSseEventRoutingContext treats connected/workspace events without chat ids as global', () => {
+test('resolveSseEventRoutingContext treats connected/workspace/profile events without chat ids as global', () => {
   expect(resolveSseEventRoutingContext('connected', {}, 'chat:active')).toEqual({
     turnId: undefined,
     eventChatJid: null,
@@ -44,6 +44,13 @@ test('resolveSseEventRoutingContext treats connected/workspace events without ch
   });
 
   expect(resolveSseEventRoutingContext('workspace_update', { chat_jid: '   ' }, 'chat:active')).toEqual({
+    turnId: undefined,
+    eventChatJid: null,
+    isGlobalUiEvent: true,
+    isCurrentChatEvent: true,
+  });
+
+  expect(resolveSseEventRoutingContext('profile_update', {}, 'chat:active')).toEqual({
     turnId: undefined,
     eventChatJid: null,
     isGlobalUiEvent: true,

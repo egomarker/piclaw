@@ -869,6 +869,87 @@ export function quarantineStalePreflightRun(
   };
 }
 
+export interface ManualCompactQuarantineRecord {
+  chatJid: string;
+  prevTs: string;
+  cursorTs: string;
+  skippedCount: number;
+  lastMessageRowId: number;
+  lastMessageId: string;
+  reason: string;
+}
+
+/**
+ * Advance past pending leading manual `/compact` commands after a stale manual
+ * compaction failure. Manual compaction is an operator command, not user task
+ * content; replaying the same command after recovery can poison the runtime in
+ * a restart loop. Only skips a contiguous prefix of pending `/compact` messages
+ * so later real user input remains pending.
+ */
+export function quarantinePendingManualCompactCommands(
+  chatJid: string,
+  options: { createdAt: string; reason: string; backoffUntil?: string | null },
+): ManualCompactQuarantineRecord | null {
+  const db = getDb();
+  const cursor = db.prepare(`SELECT cursor_ts FROM chat_cursors WHERE chat_jid = ?`).get(chatJid) as { cursor_ts?: string | null } | undefined;
+  const prevTs = cursor?.cursor_ts ?? "";
+  const rows = db.prepare(`
+    SELECT rowid, id, timestamp, content
+    FROM messages
+    WHERE chat_jid = ? AND timestamp > ? AND COALESCE(is_bot_message, 0) = 0
+    ORDER BY timestamp ASC, rowid ASC
+    LIMIT 25
+  `).all(chatJid, prevTs) as Array<{ rowid: number; id: string; timestamp: string; content: string | null }>;
+
+  const compactRows: typeof rows = [];
+  for (const row of rows) {
+    if (String(row.content ?? "").trim() !== "/compact") break;
+    compactRows.push(row);
+  }
+  if (compactRows.length === 0) return null;
+
+  const last = compactRows[compactRows.length - 1];
+  db.prepare(`
+    UPDATE chat_cursors
+    SET cursor_ts                 = ?,
+        preflight_prev_ts         = NULL,
+        preflight_message_id      = NULL,
+        preflight_started_at      = NULL,
+        inflight_prev_ts          = NULL,
+        inflight_message_id       = NULL,
+        inflight_started_at       = NULL,
+        failed_prev_ts            = NULL,
+        failed_ts                 = NULL,
+        failed_message_id         = NULL,
+        failed_thread_root        = NULL,
+        failed_created_at         = NULL,
+        queued_followups_json     = '[]',
+        compaction_failure_count  = COALESCE(compaction_failure_count, 0) + 1,
+        compaction_last_failed_at = ?,
+        compaction_backoff_until  = COALESCE(?, compaction_backoff_until),
+        compaction_last_error     = ?,
+        compaction_active_started_at = NULL,
+        compaction_active_reason     = NULL
+    WHERE chat_jid = ?
+  `).run(
+    last.timestamp,
+    options.createdAt,
+    options.backoffUntil ?? null,
+    options.reason,
+    chatJid,
+  );
+
+  return {
+    chatJid,
+    prevTs,
+    cursorTs: last.timestamp,
+    skippedCount: compactRows.length,
+    lastMessageRowId: last.rowid,
+    lastMessageId: last.id,
+    reason: options.reason,
+  };
+}
+
 /** Return every chat that has an active inflight marker. */
 export function getInflightRuns(): InflightRun[] {
   const db = getDb();

@@ -281,6 +281,13 @@ test("agent control queue, compact, and abort commands", async () => {
   expect(compactCorruption.message).toContain("prunes orphaned tool-result blocks and corrupt image blocks automatically");
   session.compactError = null;
 
+  const compactBackoffBlocked = await applyControlCommand(runtime as any, registry, { type: "compact", raw: "/compact" });
+  expect(compactBackoffBlocked.status).toBe("error");
+  expect(compactBackoffBlocked.message).toContain("Compaction is in backoff");
+  expect(compactBackoffBlocked.message).toContain("Manual /compact is disabled while compaction backoff is active");
+  db.clearChatCompactionBackoff("web:default");
+  db.clearChatCompactionBackoff("control:/compact");
+
   const originalCompact = session.compact.bind(session);
   const restoreTimeoutEnv = setEnv({ PICLAW_COMPACTION_TIMEOUT_MS: "20" });
   try {

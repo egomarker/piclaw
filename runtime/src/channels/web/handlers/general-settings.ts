@@ -34,6 +34,7 @@ import {
 } from "../../../core/config.js";
 import { updateAssistantConfig, updateUserConfig } from "../../../agent-control/agent-control-helpers.js";
 import { generateTotpQr } from "../../../utils/totp-qr.js";
+import { ensureAvatarCache, resolveAvatarUrl, type AvatarKind } from "../media/avatar-service.js";
 import { getServerUiThemeConfig, setServerUiThemeConfig } from "../ui-state.js";
 
 export interface GeneralSettingsData {
@@ -88,6 +89,15 @@ export interface GeneralSettingsInput {
   uiTint?: unknown;
 }
 
+export interface GeneralSettingsProfileUpdatePayload {
+  agent_id: "default";
+  agent_name: string;
+  agent_avatar: string | null;
+  user_name: string | null;
+  user_avatar: string | null;
+  user_avatar_background: string | null;
+}
+
 function normalizeOptionalString(value: unknown): string | null | undefined {
   if (value === undefined) return undefined;
   const trimmed = String(value ?? "").trim();
@@ -103,6 +113,39 @@ function normalizeOptionalInt(value: unknown, min: number, max: number): number 
 
 function normalizeOptionalBoolean(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
+}
+
+function shouldPrecacheAvatarSource(source: string | null | undefined): source is string {
+  const raw = String(source || "").trim();
+  return Boolean(raw && !raw.startsWith("http://") && !raw.startsWith("https://"));
+}
+
+async function maybePrecacheAvatar(kind: AvatarKind, source: string | null | undefined): Promise<void> {
+  if (!shouldPrecacheAvatarSource(source)) return;
+  const cached = await ensureAvatarCache(kind, source);
+  if (!cached?.file) {
+    throw new Error(`Failed to prepare ${kind} avatar image.`);
+  }
+}
+
+function withAvatarVersion(url: string | null, version: string): string | null {
+  if (!url) return null;
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}v=${encodeURIComponent(version)}`;
+}
+
+export function buildGeneralSettingsProfileUpdate(
+  settings: GeneralSettingsData,
+  version = String(Date.now()),
+): GeneralSettingsProfileUpdatePayload {
+  return {
+    agent_id: "default",
+    agent_name: settings.assistantName || "PiClaw",
+    agent_avatar: withAvatarVersion(resolveAvatarUrl("agent", settings.assistantAvatar), version),
+    user_name: settings.userName || null,
+    user_avatar: withAvatarVersion(resolveAvatarUrl("user", settings.userAvatar), version),
+    user_avatar_background: settings.userAvatarBackground || null,
+  };
 }
 
 function buildTotpSettingsData(): GeneralSettingsData["instanceTotp"] {
@@ -179,7 +222,9 @@ export async function saveGeneralSettings(input: GeneralSettingsInput): Promise<
   const nextAssistantAvatar = normalizeOptionalString(input.assistantAvatar);
   if (nextAssistantAvatar !== undefined) {
     const updated = updateAssistantConfig({ avatar: nextAssistantAvatar });
-    setAssistantAvatar(updated.avatar || process.env.PICLAW_ASSISTANT_AVATAR || process.env.ASSISTANT_AVATAR || "");
+    const effectiveAvatar = updated.avatar || process.env.PICLAW_ASSISTANT_AVATAR || process.env.ASSISTANT_AVATAR || "";
+    setAssistantAvatar(effectiveAvatar);
+    await maybePrecacheAvatar("agent", effectiveAvatar);
   }
 
   const nextUserName = normalizeOptionalString(input.userName);
@@ -194,7 +239,9 @@ export async function saveGeneralSettings(input: GeneralSettingsInput): Promise<
       avatar: nextUserAvatar,
       avatarBackground: nextUserAvatar === null ? null : undefined,
     });
-    setUserAvatar(updated.avatar || process.env.PICLAW_USER_AVATAR || "");
+    const effectiveAvatar = updated.avatar || process.env.PICLAW_USER_AVATAR || "";
+    setUserAvatar(effectiveAvatar);
+    await maybePrecacheAvatar("user", effectiveAvatar);
     if (nextUserAvatar === null) {
       setUserAvatarBackground(process.env.PICLAW_USER_AVATAR_BACKGROUND || "");
     }

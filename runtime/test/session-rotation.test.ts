@@ -203,6 +203,92 @@ test("rotateSession emergency fallback archives bloated context when compaction 
   expect(appendedContent).toContain("Turn after emergency rotation");
 });
 
+test("rotateSession syncs active in-memory model to carried model after emergency successor creation", async () => {
+  const workspace = createTempWorkspace("piclaw-rotate-session-model-sync-");
+  cleanupWorkspace = workspace.cleanup;
+  restoreEnv = setEnv({
+    PICLAW_WORKSPACE: workspace.workspace,
+    PICLAW_STORE: workspace.store,
+    PICLAW_DATA: workspace.data,
+  });
+
+  const { rotateSession } = await importFresh<typeof import("../src/session-rotation.js")>("../src/session-rotation.js");
+  const sessionDir = join(workspace.workspace, "session-rotation-model-sync");
+  const sessionManager = SessionManager.create(workspace.workspace, sessionDir);
+  sessionManager.appendSessionInfo("Model sync session");
+  sessionManager.appendMessage({ role: "user", content: "Continue the carried model work", timestamp: Date.now() } as const);
+  const sessionFile = sessionManager.getSessionFile();
+  const header = sessionManager.getHeader();
+  expect(sessionFile).toBeTruthy();
+  writeFileSync(sessionFile!, `${[header, ...sessionManager.getEntries()].map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+
+  const carriedModel = { provider: "github-copilot", id: "gpt-5.5", api: "openai-responses" };
+  const staleDefaultModel = { provider: "openai-codex", id: "gpt-5.5", api: "openai-codex-responses" };
+  const modelRegistry = {
+    find(provider: string, modelId: string) {
+      if (provider === carriedModel.provider && modelId === carriedModel.id) return carriedModel;
+      if (provider === staleDefaultModel.provider && modelId === staleDefaultModel.id) return staleDefaultModel;
+      return undefined;
+    },
+    hasConfiguredAuth(model: { provider: string }) {
+      return model.provider === carriedModel.provider;
+    },
+  };
+  const makeSession = (manager: SessionManager, file: string | undefined, activeModel: typeof carriedModel | typeof staleDefaultModel) => ({
+    sessionManager: manager,
+    sessionFile: file,
+    sessionName: "Model sync session",
+    agent: { state: { model: activeModel } },
+    modelRegistry,
+    get model() { return this.agent.state.model; },
+    isStreaming: false,
+    isCompacting: false,
+    isRetrying: false,
+    pendingMessageCount: 0,
+    async compact() {
+      throw new Error("Compaction timed out after 180s");
+    },
+  });
+
+  const originalSession = makeSession(sessionManager, sessionFile, carriedModel);
+  const runtime = {
+    session: originalSession,
+    cwd: workspace.workspace,
+    diagnostics: [],
+    services: {} as any,
+    modelFallbackMessage: undefined,
+    newSession: async (options?: { parentSession?: string; setup?: (sessionManager: SessionManager) => Promise<void> | void }) => {
+      const nextManager = SessionManager.create(workspace.workspace, sessionDir);
+      nextManager.newSession({ parentSession: options?.parentSession });
+      // Mirror pi-coding-agent new-session behavior: the fresh in-memory session
+      // starts on its default model before Piclaw seeds the carried model entry.
+      nextManager.appendModelChange(staleDefaultModel.provider, staleDefaultModel.id);
+      await options?.setup?.(nextManager);
+      runtime.session = makeSession(nextManager, nextManager.getSessionFile(), staleDefaultModel) as any;
+      return { cancelled: false };
+    },
+    switchSession: async () => ({ cancelled: false }),
+    fork: async () => ({ cancelled: false }),
+    importFromJsonl: async () => ({ cancelled: false }),
+    dispose: async () => {},
+  } as AgentSessionRuntime;
+
+  const result = await rotateSession(originalSession as any, runtime, { reason: "automatic", fallbackOnCompactionFailure: true });
+
+  expect(result.status).toBe("success");
+  expect(runtime.session.model.provider).toBe("github-copilot");
+  expect(runtime.session.model.id).toBe("gpt-5.5");
+  const nextEntries = readFileSync(runtime.session.sessionFile!, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  const modelChanges = nextEntries.filter((entry) => entry.type === "model_change");
+  expect(modelChanges.map((entry) => `${entry.provider}/${entry.modelId}`)).toEqual([
+    "openai-codex/gpt-5.5",
+    "github-copilot/gpt-5.5",
+  ]);
+});
+
 test("rotateSession restores the previous session when a cancelled newSession already replaced runtime.session", async () => {
   const workspace = createTempWorkspace("piclaw-rotate-session-cancelled-");
   cleanupWorkspace = workspace.cleanup;

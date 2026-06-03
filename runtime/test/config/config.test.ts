@@ -59,6 +59,20 @@ function loadConfigInSubprocess(
   return runConfigSubprocess(workspace, exports, options).snapshot;
 }
 
+test("uses 300s as the default compaction timeout", () => {
+  const ws = createTempWorkspace("piclaw-config-");
+
+  try {
+    const snapshot = loadConfigInSubprocess(ws, ["call:getCompactionRuntimeConfig"], {
+      env: { PICLAW_COMPACTION_TIMEOUT_MS: undefined },
+    });
+
+    expect(snapshot["call:getCompactionRuntimeConfig"].timeoutMs).toBe(300_000);
+  } finally {
+    ws.cleanup();
+  }
+});
+
 test("loads config-file aliases for pushover and identity fields", () => {
   const ws = createTempWorkspace("piclaw-config-");
 

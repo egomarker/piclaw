@@ -20,7 +20,12 @@ import {
   handleUninstallAddon,
 } from "../handlers/addons.js";
 import { getCompactionSettingsData, resetCompactionBackoff, saveCompactionSettings } from "../handlers/compaction-settings.js";
-import { getGeneralSettingsData, rotateWidgetTokenSettings, saveGeneralSettings } from "../handlers/general-settings.js";
+import {
+  buildGeneralSettingsProfileUpdate,
+  getGeneralSettingsData,
+  rotateWidgetTokenSettings,
+  saveGeneralSettings,
+} from "../handlers/general-settings.js";
 import { getQuickActionsSettingsData, saveQuickActionsSettings } from "../handlers/quick-actions-settings.js";
 import { handleScheduledTasksManagementAction, handleScheduledTasksManagementList } from "../handlers/scheduled-tasks-management.js";
 import { getWorkspaceSettingsData, saveWorkspaceSettings } from "../handlers/workspace-settings.js";
@@ -418,6 +423,7 @@ const EXACT_AGENT_ROUTES: ExactAgentRoute[] = [
         const body = await req.json().catch(() => ({}));
         const saved = await saveGeneralSettings((body && typeof body === "object") ? body as Record<string, unknown> : {});
         channel.broadcastEvent("ui_theme", { theme: saved.uiTheme, tint: saved.uiTint });
+        channel.broadcastEvent("profile_update", buildGeneralSettingsProfileUpdate(saved));
         return channel.json({ ok: true, settings: saved });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

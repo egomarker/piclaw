@@ -5,8 +5,7 @@ import {
     RangeSet,
     syntaxTree,
 } from '#editor-vendor/codemirror';
-import type { DecorationSet, ViewUpdate } from '@codemirror/view';
-import type { Range } from '@codemirror/state';
+import type { DecorationSet, Range, ViewUpdate } from '#editor-vendor/codemirror';
 
 class CodeBlockMonospacePlugin {
     decorations: DecorationSet;

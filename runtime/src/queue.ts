@@ -134,7 +134,17 @@ export class AgentQueue {
     lane.running = true;
     lane.current = item;
     this.metrics.started += 1;
-    lane.runningPromise = this.executeItem(lane, item);
+    // Do not invoke the queued function synchronously from enqueue(). An async
+    // function runs inline until its first await, and web submit handlers enqueue
+    // processChat() before returning the POST response. If processChat performs
+    // expensive synchronous setup before its first await, the user's message is
+    // not displayed or acted upon until that setup completes. Starting work on
+    // the next event-loop turn keeps enqueue() as a cheap scheduling operation.
+    lane.runningPromise = new Promise<void>((resolve) => {
+      setTimeout(() => {
+        void this.executeItem(lane, item).finally(resolve);
+      }, 0);
+    });
   }
 
   /** Run the item's function, handle errors with retry, and advance within the lane. */

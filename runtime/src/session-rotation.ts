@@ -17,6 +17,7 @@ import { createLogger, debugSuppressedError } from "./utils/logger.js";
 const log = createLogger("session-rotation");
 
 type PersistableSessionMessage = Parameters<SessionManager["appendMessage"]>[0];
+type RotationModel = { provider: string; modelId: string };
 
 /** Rotation trigger source. */
 export type SessionRotationReason = "manual" | "automatic";
@@ -156,7 +157,7 @@ export function seedRotatedSession(
   context: SessionContext,
   options: {
     sessionName?: string;
-    model?: { provider: string; modelId: string } | null;
+    model?: RotationModel | null;
   }
 ): void {
   if (options.sessionName?.trim()) {
@@ -262,7 +263,7 @@ export function seedEmergencyRotatedSession(
   context: SessionContext,
   options: {
     sessionName?: string;
-    model?: { provider: string; modelId: string } | null;
+    model?: RotationModel | null;
     reason?: string | null;
     previousSessionFile?: string | null;
     archivePath?: string | null;
@@ -343,6 +344,51 @@ function cleanupInactiveReplacementSessionFile(
       previousSessionFile,
     });
   }
+}
+
+export function syncRotatedSessionModel(session: AgentSession, model: RotationModel | null): boolean {
+  if (!model) return false;
+  const sessionLike = session as AgentSession & {
+    modelRegistry?: AgentSession["modelRegistry"];
+    agent?: { state?: { model?: unknown } };
+  };
+  if (!sessionLike.modelRegistry || !sessionLike.agent?.state) return false;
+  if (typeof sessionLike.modelRegistry.find !== "function") return false;
+
+  let resolvedModel: any;
+  try {
+    resolvedModel = sessionLike.modelRegistry.find(model.provider, model.modelId);
+  } catch {
+    return false;
+  }
+  if (!resolvedModel) {
+    log.warn("Unable to sync rotated session model because it is not registered", {
+      operation: "session_rotation.sync_model_missing",
+      provider: model.provider,
+      modelId: model.modelId,
+    });
+    return false;
+  }
+  if (typeof sessionLike.modelRegistry.hasConfiguredAuth === "function" && !sessionLike.modelRegistry.hasConfiguredAuth(resolvedModel)) {
+    log.warn("Unable to sync rotated session model because it has no configured auth", {
+      operation: "session_rotation.sync_model_no_auth",
+      provider: model.provider,
+      modelId: model.modelId,
+    });
+    return false;
+  }
+
+  const previous = session.model ? `${session.model.provider}/${session.model.id}` : null;
+  sessionLike.agent.state.model = resolvedModel;
+  const next = `${resolvedModel.provider}/${resolvedModel.id}`;
+  if (previous !== next) {
+    log.info("Synced rotated session active model to carried context model", {
+      operation: "session_rotation.sync_model",
+      previous,
+      next,
+    });
+  }
+  return true;
 }
 
 /** Rotate a persisted session into a newly-seeded successor session file. */
@@ -467,6 +513,7 @@ export async function rotateSession(
 
     const activeSession = runtime.session;
     replacementSessionFile = activeSession.sessionFile?.trim() || replacementSessionFile;
+    syncRotatedSessionModel(activeSession, currentModel);
     forcePersistSessionFile(activeSession);
     closeOpenAICodexWebSocketSessions(previousSessionId);
     rmSync(previousSessionFile, { force: true });

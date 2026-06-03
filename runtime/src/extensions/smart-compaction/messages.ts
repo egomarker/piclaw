@@ -64,15 +64,21 @@ export function isRealUserSourceMessage(msg: SourceMessage): boolean {
 export function convertMessagesWithMetadata(sourceMessages: SourceMessage[]): {
   llmMessages: Message[];
   humanUserIndexes: Set<number>;
+  sourceIndexesByLlmIndex: number[];
 } {
   const llmMessages: Message[] = [];
   const humanUserIndexes = new Set<number>();
+  const sourceIndexesByLlmIndex: number[] = [];
 
-  for (const source of sourceMessages) {
+  for (let sourceIndex = 0; sourceIndex < sourceMessages.length; sourceIndex += 1) {
+    const source = sourceMessages[sourceIndex];
     const converted = convertToLlm([source as any]);
     if (converted.length === 0) continue;
     const start = llmMessages.length;
     llmMessages.push(...converted);
+    for (let i = 0; i < converted.length; i += 1) {
+      sourceIndexesByLlmIndex[start + i] = sourceIndex;
+    }
     if (isRealUserSourceMessage(source)) {
       for (let i = 0; i < converted.length; i++) {
         humanUserIndexes.add(start + i);
@@ -80,7 +86,7 @@ export function convertMessagesWithMetadata(sourceMessages: SourceMessage[]): {
     }
   }
 
-  return { llmMessages, humanUserIndexes };
+  return { llmMessages, humanUserIndexes, sourceIndexesByLlmIndex };
 }
 
 export function buildPreview(text: string, maxChars = USER_PREVIEW_MAX_CHARS): string {

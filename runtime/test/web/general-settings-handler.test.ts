@@ -45,6 +45,14 @@ test('saveGeneralSettings persists and applies general settings immediately', as
     });
     expect(saved.instanceTotp.configured).toBe(false);
     expect(handler.getGeneralSettingsData()).toMatchObject(saved);
+    expect(handler.buildGeneralSettingsProfileUpdate(saved, 'test-version')).toMatchObject({
+      agent_id: 'default',
+      agent_name: 'Smith',
+      agent_avatar: '/avatar/agent?v=test-version',
+      user_name: 'Rui',
+      user_avatar: '/avatar/user?v=test-version',
+      user_avatar_background: null,
+    });
 
     const persisted = JSON.parse(readFileSync(join(workspace.workspace, '.piclaw', 'config.json'), 'utf8'));
     expect(persisted).toMatchObject({
@@ -69,5 +77,26 @@ test('saveGeneralSettings persists and applies general settings immediately', as
         tint: '#7c3aed',
       },
     });
+  });
+});
+
+test('saveGeneralSettings prepares uploaded avatar data for immediate /avatar serving', async () => {
+  await withTempWorkspaceEnv('piclaw-general-settings-avatar-', {}, async () => {
+    const handler = await importFresh<typeof import('../../src/channels/web/handlers/general-settings.js')>(
+      '../src/channels/web/handlers/general-settings.js',
+    );
+    const avatar = await importFresh<typeof import('../../src/channels/web/media/avatar-service.js')>(
+      '../src/channels/web/media/avatar-service.js',
+    );
+
+    const svgData = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%221%22 height=%221%22%3E%3Crect width=%221%22 height=%221%22 fill=%22red%22/%3E%3C/svg%3E';
+    const saved = await handler.saveGeneralSettings({ userAvatar: svgData });
+    expect(saved.userAvatar).toBe(svgData);
+
+    const response = await avatar.buildAvatarResponse('user', saved.userAvatar, new Request('http://localhost/avatar/user'));
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get('Cache-Control')).toBe('no-store');
+    expect(response?.headers.get('Content-Type')?.startsWith('image/')).toBe(true);
+    expect(handler.buildGeneralSettingsProfileUpdate(saved, 'avatar-test').user_avatar).toBe('/avatar/user?v=avatar-test');
   });
 });

@@ -8,10 +8,12 @@
  * Consumers: agent-control-handlers.ts dispatches to these handlers.
  */
 
+import { spawn } from "node:child_process";
+import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AgentControlCommand, AgentControlResult } from "../agent-control-types.js";
 import { formatCompactNumber } from "../agent-control-helpers.js";
-import { createMedia } from "../../db.js";
+import { createMedia, getChatCompactionBackoff } from "../../db.js";
 import { getChatJid } from "../../core/chat-context.js";
 import { requestGracefulShutdown } from "../../runtime/shutdown-registry.js";
 import { createLogger, debugSuppressedError } from "../../utils/logger.js";
@@ -20,6 +22,7 @@ import { abortLiveSshCommand } from "../../extensions/ssh-core.js";
 import { pruneOrphanToolResults } from "../../agent-pool/orphan-tool-results.js";
 import {
   isCompactionCancellationError,
+  getCompactionTimeoutMs,
   noteCompactionFailure,
   noteCompactionSuccess,
   runCompactionWithTimeout,
@@ -127,6 +130,72 @@ function formatCompactFailureMessage(message: string): string {
   return `⚠️ API error — the session may be corrupted:\n\n\`${message.slice(0, 500)}\`\n\nPiClaw now prunes orphaned tool-result blocks and corrupt image blocks automatically when you use \`/compact\`. If the rewritten session still fails, use \`/new-session\` to start fresh.`;
 }
 
+function getActiveCompactionBackoffMessage(chatJid: string, now = Date.now()): string | null {
+  const backoff = getChatCompactionBackoff(chatJid);
+  if (!backoff?.backoffUntil) return null;
+  const untilMs = Date.parse(backoff.backoffUntil);
+  if (!Number.isFinite(untilMs) || untilMs <= now) return null;
+  const detail = backoff.lastErrorMessage ? ` Last error: ${backoff.lastErrorMessage.slice(0, 300)}` : "";
+  return `Compaction is in backoff for this chat until ${backoff.backoffUntil} after ${backoff.failureCount} failed attempt${backoff.failureCount === 1 ? "" : "s"}.${detail}`;
+}
+
+function shouldDisableExternalCompactionFailsafe(): boolean {
+  const raw = String(process.env.PICLAW_MANUAL_COMPACTION_EXTERNAL_FAILSAFE || "").trim().toLowerCase();
+  return raw === "0" || raw === "false" || process.env.NODE_ENV === "test";
+}
+
+function startManualCompactionExternalFailsafe(chatJid: string): (() => void) | null {
+  if (shouldDisableExternalCompactionFailsafe()) return null;
+  const timeoutMs = getCompactionTimeoutMs();
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return null;
+
+  const graceMs = Math.max(1_000, Math.min(60_000, Number.parseInt(process.env.PICLAW_MANUAL_COMPACTION_FAILSAFE_GRACE_MS || "15000", 10) || 15_000));
+  const delaySec = Math.max(1, Math.ceil((timeoutMs + graceMs) / 1000));
+  const pid = process.pid;
+  const marker = `/tmp/piclaw-manual-compact-${pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.watchdog`;
+  try {
+    writeFileSync(marker, JSON.stringify({ pid, chatJid, startedAt: new Date().toISOString(), timeoutMs, graceMs }) + "\n", { mode: 0o600 });
+    const script = [
+      `sleep ${delaySec}`,
+      `if [ -e '${marker}' ] && kill -0 ${pid} 2>/dev/null; then`,
+      `  echo 'Piclaw manual /compact external failsafe terminating pid ${pid} for ${chatJid}' >&2`,
+      `  kill -TERM ${pid} 2>/dev/null || true`,
+      `  sleep 5`,
+      `  kill -KILL ${pid} 2>/dev/null || true`,
+      `fi`,
+    ].join("\n");
+    const child = spawn("/bin/sh", ["-c", script], { detached: true, stdio: "ignore" });
+    child.unref();
+    log.warn("Started manual /compact external failsafe", {
+      operation: "agent_control.manual_compact.external_failsafe.start",
+      chatJid,
+      pid,
+      marker,
+      timeoutMs,
+      graceMs,
+      delaySec,
+    });
+    return () => {
+      try {
+        if (existsSync(marker)) unlinkSync(marker);
+      } catch (error) {
+        debugSuppressedError(log, "Failed to clear manual /compact external failsafe marker", error, {
+          operation: "agent_control.manual_compact.external_failsafe.clear",
+          chatJid,
+          marker,
+        });
+      }
+    };
+  } catch (error) {
+    debugSuppressedError(log, "Failed to start manual /compact external failsafe", error, {
+      operation: "agent_control.manual_compact.external_failsafe.start_failed",
+      chatJid,
+      pid,
+    });
+    return null;
+  }
+}
+
 /** Handle /restart: reload the agent session from disk. */
 export async function handleRestart(session: AgentSession, _command: RestartCommand): Promise<AgentControlResult> {
   try {
@@ -180,55 +249,71 @@ export async function handleExit(session: AgentSession, _command: ExitCommand): 
 export async function handleCompact(session: AgentSession, command: CompactCommand): Promise<AgentControlResult> {
   try {
     const chatJid = getChatJid("control:/compact");
-    const prunedToolResults = pruneOrphanToolResults(session, chatJid);
-    const compactionResult = await runCompactionWithTimeout(
-      session,
-      chatJid,
-      {
-        onWarn: (message, details) => {
-          log.warn(message, details);
-        },
-      },
-      async () => await session.compact(command.instructions?.trim() || undefined),
-      "manual",
-    );
-    if (!compactionResult.ok) {
-      if (!isCompactionCancellationError(compactionResult.errorMessage)) {
-        noteCompactionFailure(chatJid, compactionResult.errorMessage);
-      }
-      const timedOut = /timed out/i.test(compactionResult.errorMessage);
+    const backoffMessage = getActiveCompactionBackoffMessage(chatJid);
+    if (backoffMessage) {
       return {
         status: "error",
-        message: timedOut
-          ? `${compactionResult.errorMessage}. Compaction was aborted and the session was not rewritten.`
-          : formatCompactFailureMessage(compactionResult.errorMessage),
+        message: `${backoffMessage}\n\nManual /compact is disabled while compaction backoff is active so a failed compaction cannot poison restart recovery. Use /session-rotate or wait for the backoff to expire.`,
       };
     }
 
-    noteCompactionSuccess(session, chatJid, "manual", {
-      onInfo: (message, details) => log.info(message, details),
-      onWarn: (message, details) => log.warn(message, details),
-      countSuccess: false,
-    });
-    const generatedAt = new Date().toISOString();
-    const attachmentId = createCompactReportAttachment(
-      compactionResult.result.summary,
-      compactionResult.result.tokensBefore,
-      compactionResult.result.firstKeptEntryId,
-      generatedAt
-    );
-    const lines = [
-      "Compaction complete.",
-      prunedToolResults > 0 ? `Removed ${prunedToolResults} orphaned tool-result block${prunedToolResults === 1 ? "" : "s"} before rewriting the session.` : null,
-      `Tokens before: ${formatCompactNumber(compactionResult.result.tokensBefore)}`,
-      `First kept entry: ${compactionResult.result.firstKeptEntryId}`,
-      attachmentId ? "Attached: full compaction report (.md)." : "Full compaction report attachment unavailable.",
-    ].filter(Boolean) as string[];
-    return {
-      status: "success",
-      message: lines.join("\n"),
-      ...(attachmentId ? { mediaIds: [attachmentId] } : {}),
-    };
+    const clearExternalFailsafe = startManualCompactionExternalFailsafe(chatJid);
+    let compactionResult: Awaited<ReturnType<typeof runCompactionWithTimeout>>;
+    try {
+      const prunedToolResults = pruneOrphanToolResults(session, chatJid);
+      compactionResult = await runCompactionWithTimeout(
+        session,
+        chatJid,
+        {
+          onWarn: (message, details) => {
+            log.warn(message, details);
+          },
+        },
+        async () => await session.compact(command.instructions?.trim() || undefined),
+        "manual",
+      );
+      clearExternalFailsafe?.();
+      if (!compactionResult.ok) {
+        if (!isCompactionCancellationError(compactionResult.errorMessage)) {
+          noteCompactionFailure(chatJid, compactionResult.errorMessage);
+        }
+        const timedOut = /timed out/i.test(compactionResult.errorMessage);
+        return {
+          status: "error",
+          message: timedOut
+            ? `${compactionResult.errorMessage}. Compaction was aborted and the session was not rewritten.`
+            : formatCompactFailureMessage(compactionResult.errorMessage),
+        };
+      }
+
+      noteCompactionSuccess(session, chatJid, "manual", {
+        onInfo: (message, details) => log.info(message, details),
+        onWarn: (message, details) => log.warn(message, details),
+        countSuccess: false,
+      });
+      const compactResult = compactionResult.result as { summary: string; tokensBefore: number; firstKeptEntryId: string | number | null | undefined };
+      const generatedAt = new Date().toISOString();
+      const attachmentId = createCompactReportAttachment(
+        compactResult.summary,
+        compactResult.tokensBefore,
+        compactResult.firstKeptEntryId,
+        generatedAt
+      );
+      const lines = [
+        "Compaction complete.",
+        prunedToolResults > 0 ? `Removed ${prunedToolResults} orphaned tool-result block${prunedToolResults === 1 ? "" : "s"} before rewriting the session.` : null,
+        `Tokens before: ${formatCompactNumber(compactResult.tokensBefore)}`,
+        `First kept entry: ${compactResult.firstKeptEntryId}`,
+        attachmentId ? "Attached: full compaction report (.md)." : "Full compaction report attachment unavailable.",
+      ].filter(Boolean) as string[];
+      return {
+        status: "success",
+        message: lines.join("\n"),
+        ...(attachmentId ? { mediaIds: [attachmentId] } : {}),
+      };
+    } finally {
+      clearExternalFailsafe?.();
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { status: "error", message: formatCompactFailureMessage(message) };

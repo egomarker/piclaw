@@ -12,6 +12,7 @@
 
 import { streamSimple } from "@earendil-works/pi-ai";
 import type { AssistantMessage, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { SMART_COMPACTION_PROGRESS_INTERVAL_MS } from "./config.js";
 
 /**
  * A stream function compatible with the upstream StreamFn type.
@@ -42,7 +43,7 @@ export interface StreamCompleteOptions {
   streamFn?: CompactionStreamFn;
   /** Called periodically with the number of text characters generated so far. */
   onProgress?: (generatedChars: number) => void;
-  /** Interval in ms between progress reports (default: 500ms). */
+  /** Interval in ms between progress reports (default: 5000ms). */
   progressIntervalMs?: number;
 }
 
@@ -55,7 +56,7 @@ export async function streamComplete(opts: StreamCompleteOptions): Promise<Assis
   const {
     model, systemPrompt, userPrompt, maxTokens, signal,
     apiKey, headers, reasoning, streamFn, onProgress,
-    progressIntervalMs = 500,
+    progressIntervalMs = SMART_COMPACTION_PROGRESS_INTERVAL_MS,
   } = opts;
 
   const context = {

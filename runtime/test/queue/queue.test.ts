@@ -12,6 +12,20 @@ import { AgentQueue } from "../../src/queue.js";
 import { getRetryDelay, shouldRetry } from "../../src/queue/retry-policy.js";
 
 describe("AgentQueue", () => {
+  test("enqueue schedules work without running the task synchronously", async () => {
+    const queue = new AgentQueue();
+    let ran = false;
+
+    queue.enqueue(async () => {
+      ran = true;
+    });
+
+    expect(ran).toBe(false);
+    await Bun.sleep(20);
+    expect(ran).toBe(true);
+    await queue.shutdown(100);
+  });
+
   test("executes tasks sequentially", async () => {
     const queue = new AgentQueue();
     const order: number[] = [];

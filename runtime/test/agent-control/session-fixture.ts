@@ -28,6 +28,8 @@ export function createTestModelRegistry(models: any[] = [DEFAULT_TEST_MODEL], au
     refresh: () => {},
     getAvailable: () => models,
     getAll: () => models,
+    find: (provider: string, modelId: string) => models.find((m: any) => m.provider === provider && m.id === modelId) ?? null,
+    hasConfiguredAuth: () => true,
     authStorage,
   } as any;
 }

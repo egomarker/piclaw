@@ -13,7 +13,9 @@ export function resolveSseEventRoutingContext(
   const turnId = payload?.turn_id;
   const rawChatJid = payload?.chat_jid;
   const eventChatJid = typeof rawChatJid === 'string' && rawChatJid.trim() ? rawChatJid.trim() : null;
-  const isGlobalUiEvent = eventType === 'connected' || eventType === 'workspace_update';
+  const isGlobalUiEvent = eventType === 'connected'
+    || eventType === 'workspace_update'
+    || eventType === 'profile_update';
   const isCurrentChatEvent = eventChatJid ? eventChatJid === currentChatJid : isGlobalUiEvent;
 
   return {

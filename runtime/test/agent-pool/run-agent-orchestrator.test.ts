@@ -2218,7 +2218,7 @@ test("runAgentPrompt preserves tool-budget root cause when recovery retry emits 
   }
 });
 
-test("runAgentPrompt soft-stops near the tool-use budget by disabling tools", async () => {
+test("runAgentPrompt soft-stops near the tool-use budget after threshold tool calls finish", async () => {
   initDatabase();
   const previousToolUseBudget = getToolUseMessageBudget();
   setToolUseMessageBudget(8);
@@ -2227,6 +2227,7 @@ test("runAgentPrompt soft-stops near the tool-use budget by disabling tools", as
     private listeners: Array<(event: any) => void> = [];
     private activeTools = ["bash", "read"];
     toolSets: string[][] = [];
+    toolsBeforeExecution: string[][] = [];
     sessionManager = { getLeafId: () => "leaf-1", getEntries: () => [] };
     isStreaming = false;
     isCompacting = false;
@@ -2255,6 +2256,9 @@ test("runAgentPrompt soft-stops near the tool-use budget by disabling tools", as
               content: [{ type: "toolCall", id: `tool-${i}`, name: "read", arguments: { path: `/tmp/${i}` } }],
             },
           });
+          this.toolsBeforeExecution.push([...this.activeTools]);
+          listener({ type: "tool_execution_start", toolCallId: `tool-${i}`, toolName: "read", args: { path: `/tmp/${i}` } });
+          listener({ type: "tool_execution_end", toolCallId: `tool-${i}`, toolName: "read", isError: false, durationMs: 1 });
         }
         listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "summarized before hard budget" } });
         listener({ type: "message_end", message: createAssistantMessage("summarized before hard budget") });
@@ -2282,11 +2286,91 @@ test("runAgentPrompt soft-stops near the tool-use budget by disabling tools", as
 
     expect(result.status).toBe("success");
     expect(result.result).toBe("summarized before hard budget");
+    expect(session.toolsBeforeExecution.at(-1)).toEqual(["bash", "read"]);
     expect(session.toolSets).toContainEqual([]);
     expect(session.toolSets.at(-1)).toEqual(["bash", "read"]);
     expect(warnings).toEqual(expect.arrayContaining([
       expect.objectContaining({ operation: "run_agent.tool_use_budget_soft_stop", assistantToolUseMessageCount: 7 }),
     ]));
+  } finally {
+    setToolUseMessageBudget(previousToolUseBudget);
+  }
+});
+
+test("runAgentPrompt accepts draft-backed completion after a synthetic soft-stop tool miss", async () => {
+  initDatabase();
+  const previousToolUseBudget = getToolUseMessageBudget();
+  setToolUseMessageBudget(8);
+
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    private activeTools = ["bash", "read"];
+    toolSets: string[][] = [];
+    sessionManager = { getLeafId: () => "leaf-soft-stop-draft", getEntries: () => [{ id: "baseline", type: "message" }] };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    getActiveToolNames() {
+      return [...this.activeTools];
+    }
+    setActiveToolsByName(names: string[]) {
+      this.activeTools = [...names];
+      this.toolSets.push([...names]);
+    }
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => {
+        this.listeners = this.listeners.filter((entry) => entry !== listener);
+      };
+    }
+    async prompt() {
+      for (const listener of this.listeners) {
+        listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Draft answer before final tool." } });
+        for (let i = 1; i <= 7; i += 1) {
+          listener({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              stopReason: "toolUse",
+              content: [{ type: "toolCall", id: `tool-${i}`, name: "read", arguments: { path: `/tmp/${i}` } }],
+            },
+          });
+          listener({ type: "tool_execution_start", toolCallId: `tool-${i}`, toolName: "read", args: { path: `/tmp/${i}` } });
+          listener({ type: "tool_execution_end", toolCallId: `tool-${i}`, toolName: "read", isError: false, durationMs: 1 });
+        }
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "toolUse",
+            content: [{ type: "toolCall", id: "tool-8", name: "bash", arguments: { command: "pwd" } }],
+          },
+        });
+        listener({ type: "tool_execution_start", toolCallId: "tool-8", toolName: "bash", args: { command: "pwd" } });
+        listener({ type: "tool_execution_end", toolCallId: "tool-8", toolName: "bash", isError: true, durationMs: 1 });
+        listener({ type: "message_end", message: { role: "assistant", stopReason: "stop", content: [] } });
+      }
+    }
+    async compact() {}
+    async abort() {}
+  }
+
+  try {
+    const session = new StubSession();
+    const result = await runAgentPrompt("hello", "web:default", { timeoutMs: 0 }, {
+      getOrCreateRuntime: async () => createRuntime(session) as any,
+      turnCoordinator: new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} }),
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+      onWarn: () => {},
+    });
+
+    expect(result.status).toBe("tool_complete");
+    expect(session.toolSets).toContainEqual([]);
+    expect(session.toolSets.at(-1)).toEqual(["bash", "read"]);
   } finally {
     setToolUseMessageBudget(previousToolUseBudget);
   }
@@ -2585,6 +2669,95 @@ test("runAgentPrompt treats terminal side-effect tool completion as informationa
     });
 
     const result = await runAgentPrompt("restart after deploy", "web:default", {
+      timeoutMs: 0,
+      onEvent: (event) => {
+        if (event.type === "recovery_start" || event.type === "recovery_end") {
+          recoveryEvents.push({ type: String(event.type) });
+        }
+      },
+    }, {
+      getOrCreateRuntime: async () => createRuntime(session, { maxRetries: 5, baseDelayMs: 1, maxDelayMs: 60000 }) as any,
+      turnCoordinator,
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+    });
+
+    expect(result.status).toBe("tool_complete");
+    expect(result.error).toBeUndefined();
+    expect(session.promptCalls).toBe(1);
+    expect(recoveryEvents).toEqual([]);
+  } finally {
+    restoreEnv();
+  }
+});
+
+test("runAgentPrompt treats draft-backed provider stop after tool use as informational", async () => {
+  const restoreEnv = setEnv({
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
+    PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
+  });
+
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    private entries: any[] = [{ id: "base", type: "message" }];
+    sessionManager = {
+      getLeafId: () => "leaf-draft-backed-tool-stop",
+      getEntries: () => this.entries,
+    };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    promptCalls = 0;
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => {
+        this.listeners = this.listeners.filter((entry) => entry !== listener);
+      };
+    }
+    async prompt() {
+      this.promptCalls += 1;
+      for (const listener of this.listeners) {
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "toolUse",
+            content: [{ type: "toolCall", id: "tool-1", name: "bash", arguments: { command: "make test" } }],
+          },
+        });
+        this.entries.push({ id: "assistant-tool", type: "message" });
+        listener({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "bash", args: { command: "make test" } });
+        listener({ type: "tool_execution_end", toolCallId: "tool-1", toolName: "bash", isError: false });
+        this.entries.push({ id: "tool-result", type: "message" });
+        listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Tests passed; I am preparing the final summary." } });
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "stop",
+            content: [],
+          },
+        });
+        this.entries.push(...Array.from({ length: 113 }, (_, index) => ({ id: `entry-${index}`, type: "message" })));
+      }
+    }
+    async abort() {}
+  }
+
+  try {
+    const session = new StubSession();
+    const recoveryEvents: Array<{ type: string }> = [];
+    const turnCoordinator = new AgentTurnCoordinator({
+      takeAttachments: () => [],
+      touchSession: () => {},
+      recordMessageUsage: () => {},
+    });
+
+    const result = await runAgentPrompt("run tests", "web:default", {
       timeoutMs: 0,
       onEvent: (event) => {
         if (event.type === "recovery_start" || event.type === "recovery_end") {

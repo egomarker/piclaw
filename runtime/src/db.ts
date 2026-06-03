@@ -113,6 +113,7 @@ export {
   getFailedRun,
   clearFailedRun,
   getPreflightRuns,
+  quarantinePendingManualCompactCommands,
   quarantineStalePreflightRun,
   getInflightRuns,
   rollbackInflightRun,
@@ -140,6 +141,7 @@ export type {
   ChatCompactionBackoffState,
   ActiveCompactionState,
   ChatAutoCompactionWindowState,
+  ManualCompactQuarantineRecord,
   StalePreflightRecoveryRecord,
 } from "./db/chat-cursors.js";
 export {

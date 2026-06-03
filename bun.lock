@@ -21,7 +21,6 @@
         "docx-preview": "0.3.7",
         "electrobun": "1.18.1",
         "fflate": "0.8.3",
-        "ghostty-web": "github:rcarmo/ghostty-web#9f58b1b",
         "gifenc": "1.0.3",
         "htm": "3.1.1",
         "js-yaml": "4.1.1",
@@ -905,8 +904,6 @@
     "get-proto": ["get-proto@1.0.1", "", { "dependencies": { "dunder-proto": "^1.0.1", "es-object-atoms": "^1.0.0" } }, "sha512-sTSfBjoXBp89JvIKIefqw7U2CCebsc74kiY6awiGogKtoSGbgjYE/G/+l9sF3MWFPNc9IcoOC4ODfKHfxFmp0g=="],
 
     "get-uri": ["get-uri@6.0.5", "", { "dependencies": { "basic-ftp": "^5.0.2", "data-uri-to-buffer": "^6.0.2", "debug": "^4.3.4" } }, "sha512-b1O07XYq8eRuVzBNgJLstU6FYc1tS6wnMtF1I1D9lE8LxZSOGZ7LhxN54yPP6mGw5f2CkXY2BQUL9Fx41qvcIg=="],
-
-    "ghostty-web": ["ghostty-web@github:rcarmo/ghostty-web#9f58b1b", {}, "rcarmo-ghostty-web-9f58b1b", "sha512-DlBfkLu1PpFL7JEselfTLxCV2UYoqxWRSW4Eq5TPtITqXkWWWPJI/kaXiSL+v7gAj8cwZZxPPB0drOP2IYvW7w=="],
 
     "gifenc": ["gifenc@1.0.3", "", {}, "sha512-xdr6AdrfGBcfzncONUOlXMBuc5wJDtOueE3c5rdG0oNgtINLD+f2iFZltrBRZYzACRbKr+mSVU/x98zv2u3jmw=="],
 

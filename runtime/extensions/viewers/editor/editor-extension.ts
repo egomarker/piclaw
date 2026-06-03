@@ -68,6 +68,13 @@ import {
     restoreEditorViewStateBestEffort,
     setLocalBoolBestEffort,
 } from './editor-safety.ts';
+import {
+    closeEditorSearch,
+    isEditorSearchOpen,
+    openEditorSearch,
+    revealText as revealEditorText,
+    searchRevealExtension,
+} from './search-reveal.js';
 
 // ── Constants ───────────────────────────────────────────────────
 
@@ -618,6 +625,7 @@ export class StandaloneEditorInstance implements PaneInstance {
             ...(enableRichFeatures ? [autocompletion({ activateOnTyping: false })] : []),
             ...(enableRichFeatures ? [syntaxHighlighting(headingStyle), syntaxHighlighting(classHighlighter)] : []),
             search(),
+            searchRevealExtension,
             this.vimCompartment.of([]), // vim loaded async after mount
             this.themeCompartment.of(isDark ? githubDark : githubLight),
             this.accentCompartment.of(this.buildAccentTheme()),
@@ -1193,6 +1201,25 @@ export class StandaloneEditorInstance implements PaneInstance {
     focus(): void {
         const cm = this.view?.contentDOM;
         if (cm) cm.focus();
+    }
+
+    openSearch(query?: string): void {
+        if (!this.view) return;
+        openEditorSearch(this.view, query);
+    }
+
+    closeSearch(): void {
+        if (!this.view) return;
+        closeEditorSearch(this.view);
+    }
+
+    isSearchOpen(): boolean {
+        return this.view ? isEditorSearchOpen(this.view.state) : false;
+    }
+
+    revealText(query: string): { from: number; to: number } | null {
+        if (!this.view) return null;
+        return revealEditorText(this.view, query);
     }
 
     resize(): void {
