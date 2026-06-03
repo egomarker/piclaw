@@ -34,12 +34,20 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
 
+function shouldBypassServiceWorkerFetch(request, url) {
+  if (url.pathname.startsWith('/sse/') || url.pathname.startsWith('/ws/')) {
+    return true;
+  }
+  return String(request.headers.get('accept') || '').toLowerCase().includes('text/event-stream');
+}
+
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (!request || request.method !== 'GET') return;
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  if (shouldBypassServiceWorkerFetch(request, url)) return;
 
   event.respondWith(fetch(request));
 });

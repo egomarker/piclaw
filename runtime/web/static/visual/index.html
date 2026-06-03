@@ -51,7 +51,7 @@
                 var raw = localStorage.getItem('piclawPwaDisplayScalePercent');
                 var parsed = raw && raw.trim().endsWith('%') ? Number(raw.trim().slice(0, -1)) : Number(raw);
                 if (parsed > 0 && parsed <= 2) parsed *= 100;
-                if (!Number.isFinite(parsed)) parsed = 100;
+                if (!Number.isFinite(parsed) || parsed <= 0) parsed = 100;
                 var percent = Math.min(115, Math.max(20, Math.round(parsed)));
                 if (isMobile && standalone && percent !== 100) {
                     var scale = (percent / 100).toFixed(2).replace(/0+$/, '').replace(/\.$/, '');

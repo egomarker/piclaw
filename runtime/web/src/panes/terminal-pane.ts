@@ -51,6 +51,10 @@ function asset(path) {
   return `${ASSET_BASE}/${path.replace(/^\/+/, "")}`;
 }
 
+function debugTerminalCleanup(label, error) {
+  console.debug(`[terminal-pane] ${label} failed`, error);
+}
+
 function injectStyles(ownerDocument = document) {
   if (!ownerDocument?.head) return;
   if (!ownerDocument.getElementById(XTERM_CSS_ID)) {
@@ -107,21 +111,6 @@ function injectStyles(ownerDocument = document) {
       .terminal-pane-xterm .xterm-viewport,
       .terminal-pane-xterm .xterm-screen {
         background: transparent !important;
-      }
-      .terminal-pane-xterm .xterm-viewport {
-        scrollbar-width: thin;
-        scrollbar-color: color-mix(in srgb, var(--text-secondary, #8b949e) 45%, transparent) transparent;
-      }
-      .terminal-pane-xterm .xterm-viewport::-webkit-scrollbar {
-        width: 2px;
-        height: 2px;
-      }
-      .terminal-pane-xterm .xterm-viewport::-webkit-scrollbar-track {
-        background: transparent;
-      }
-      .terminal-pane-xterm .xterm-viewport::-webkit-scrollbar-thumb {
-        background: color-mix(in srgb, var(--text-secondary, #8b949e) 45%, transparent);
-        border-radius: 999px;
       }
       .terminal-pane-xterm .terminal-status {
         position: absolute;
@@ -306,7 +295,9 @@ export function buildTerminalWebSocketUrl(path, handoffToken = null, clientToken
 function createTerminalClientToken(runtimeWindow = window) {
   try {
     if (typeof runtimeWindow?.crypto?.randomUUID === "function") return runtimeWindow.crypto.randomUUID();
-  } catch {}
+  } catch (error) {
+    console.debug("[terminal-pane] randomUUID unavailable", error);
+  }
   return `terminal-client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
@@ -428,7 +419,9 @@ function getPreferredRenderer(runtimeWindow = window) {
   try {
     const value = String(runtimeWindow.localStorage?.getItem(RENDERER_STORAGE_KEY) || "").trim().toLowerCase();
     if (value === "webgl") return "webgl";
-  } catch {}
+  } catch (error) {
+    console.debug("[terminal-pane] renderer preference unavailable", error);
+  }
   return "canvas";
 }
 
@@ -505,6 +498,7 @@ class TerminalPaneInstance {
         fontFamily: getTerminalFontFamily(this.ownerDocument),
         fontSize: 13,
         lineHeight: 1.12,
+        overviewRuler: { width: 2 },
         scrollback: 10_000,
         tabStopWidth: 8,
         theme: buildTerminalTheme(this.ownerWindow, this.ownerDocument),
@@ -559,7 +553,7 @@ class TerminalPaneInstance {
     try {
       terminal.unicode.activeVersion = "15-graphemes";
     } catch {
-      try { terminal.unicode.activeVersion = "11"; } catch {}
+      try { terminal.unicode.activeVersion = "11"; } catch (error) { debugTerminalCleanup("unicode fallback", error); }
     }
 
     this.loadAddon(new runtime.webLinks.WebLinksAddon(), "web-links");
@@ -602,7 +596,7 @@ class TerminalPaneInstance {
         const addon = new runtime.webgl.WebglAddon(false);
         addon.onContextLoss?.(() => {
           console.warn("[terminal-pane] WebGL context lost; disposing renderer addon.");
-          try { addon.dispose(); } catch {}
+          try { addon.dispose(); } catch (error) { debugTerminalCleanup("webgl dispose after context loss", error); }
         });
         this.rendererAddon = this.loadAddon(addon, "webgl");
         if (this.rendererAddon) return;
@@ -658,7 +652,7 @@ class TerminalPaneInstance {
     this.terminal.options.theme = theme;
     this.root.style.backgroundColor = theme.background;
     this.root.style.color = theme.foreground;
-    try { this.terminal.refresh?.(0, this.terminal.rows - 1); } catch {}
+    try { this.terminal.refresh?.(0, this.terminal.rows - 1); } catch (error) { debugTerminalCleanup("terminal refresh", error); }
     this.scheduleResize(true);
   }
 
@@ -932,11 +926,11 @@ class TerminalPaneInstance {
     this.manualSocketClose = true;
     this.clearHeartbeat();
     this.clearReconnectTimer();
-    try { this.inputDisposable?.dispose?.(); } catch {}
-    try { this.resizeDisposable?.dispose?.(); } catch {}
-    try { this.socket?.close?.(); } catch {}
-    try { this.resizeObserver?.disconnect?.(); } catch {}
-    try { this.themeObserver?.disconnect?.(); } catch {}
+    try { this.inputDisposable?.dispose?.(); } catch (error) { debugTerminalCleanup("input disposable cleanup", error); }
+    try { this.resizeDisposable?.dispose?.(); } catch (error) { debugTerminalCleanup("resize disposable cleanup", error); }
+    try { this.socket?.close?.(); } catch (error) { debugTerminalCleanup("socket close", error); }
+    try { this.resizeObserver?.disconnect?.(); } catch (error) { debugTerminalCleanup("resize observer cleanup", error); }
+    try { this.themeObserver?.disconnect?.(); } catch (error) { debugTerminalCleanup("theme observer cleanup", error); }
     if (this.resizeListener) {
       this.ownerWindow.removeEventListener("resize", this.resizeListener);
       this.ownerWindow.removeEventListener("dock-resize", this.resizeListener);
@@ -946,9 +940,9 @@ class TerminalPaneInstance {
       if (this.mediaQuery.removeEventListener) this.mediaQuery.removeEventListener("change", this.mediaQueryListener);
       else if (this.mediaQuery.removeListener) this.mediaQuery.removeListener(this.mediaQueryListener);
     }
-    try { this.rendererAddon?.dispose?.(); } catch {}
-    try { this.fitAddon?.dispose?.(); } catch {}
-    try { this.terminal?.dispose?.(); } catch {}
+    try { this.rendererAddon?.dispose?.(); } catch (error) { debugTerminalCleanup("renderer addon cleanup", error); }
+    try { this.fitAddon?.dispose?.(); } catch (error) { debugTerminalCleanup("fit addon cleanup", error); }
+    try { this.terminal?.dispose?.(); } catch (error) { debugTerminalCleanup("terminal cleanup", error); }
     this.root?.remove?.();
   }
 }

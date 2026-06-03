@@ -9,10 +9,13 @@ test('saveGeneralSettings persists and applies general settings immediately', as
   await withTempWorkspaceEnv('piclaw-general-settings-', {
     PICLAW_WEB_COMPOSE_UPLOAD_LIMIT_MB: undefined,
     PICLAW_WEB_WORKSPACE_UPLOAD_LIMIT_MB: undefined,
+    PICLAW_USER_AVATAR_BACKGROUND: undefined,
   }, async (workspace) => {
     const handler = await importFresh<typeof import('../../src/channels/web/handlers/general-settings.js')>(
       '../src/channels/web/handlers/general-settings.js',
     );
+    const config = await import('../../src/core/config.js');
+    config.setUserAvatarBackground('');
 
     const saved = await handler.saveGeneralSettings({
       assistantName: 'Smith',

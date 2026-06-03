@@ -75,6 +75,32 @@ test('service worker ignores non-GET and cross-origin fetches', () => {
   expect(responded).toBe(false);
 });
 
+test('service worker bypasses long-lived live and streaming requests', () => {
+  let responded = false;
+  const fetchHandler = handlers.get('fetch');
+  const respondWith = () => {
+    responded = true;
+  };
+
+  fetchHandler?.({
+    request: new Request('https://example.com/sse/stream?chat_jid=web%3Adefault', { method: 'GET' }),
+    respondWith,
+  });
+  fetchHandler?.({
+    request: new Request('https://example.com/ws/terminal', { method: 'GET' }),
+    respondWith,
+  });
+  fetchHandler?.({
+    request: new Request('https://example.com/events', {
+      method: 'GET',
+      headers: { Accept: 'text/event-stream' },
+    }),
+    respondWith,
+  });
+
+  expect(responded).toBe(false);
+});
+
 test('service worker reuses an existing root app tab for relative notification targets', async () => {
   let focused = false;
   let navigatedTo = '';

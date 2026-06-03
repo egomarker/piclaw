@@ -3,6 +3,7 @@
  */
 
 import { describe, expect, test, beforeEach } from "bun:test";
+import { readFileSync } from "node:fs";
 import { tryRun } from "../helpers.js";
 
 import {
@@ -289,6 +290,14 @@ test('core terminal renderer is the xterm implementation, not the optional Ghost
     expect(isCoreTerminalRenderer()).toBe(true);
     expect(terminalPaneExtension.label).toBe('Terminal');
     expect(terminalTabPaneExtension.label).toBe('Terminal');
+});
+
+test('terminal uses xterm overviewRuler width to size the native scrollbar', () => {
+    const source = readFileSync(new URL('../../web/src/panes/terminal-pane.ts', import.meta.url), 'utf8');
+    expect(source).toContain('overviewRuler: { width: 2 },');
+    expect(source).not.toContain('terminal-scrollbar-thumb');
+    expect(source).not.toContain('syncOverlayScrollbar');
+    expect(source).not.toContain('.xterm-scrollable-element > .scrollbar.vertical');
 });
 
 test('getOrCreateAnonymousTerminalClientToken persists a stable client token', () => {
