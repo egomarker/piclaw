@@ -108,6 +108,21 @@ function injectStyles(ownerDocument = document) {
       .terminal-pane-xterm .xterm-screen {
         background: transparent !important;
       }
+      .terminal-pane-xterm .xterm-viewport {
+        scrollbar-width: thin;
+        scrollbar-color: color-mix(in srgb, var(--text-secondary, #8b949e) 45%, transparent) transparent;
+      }
+      .terminal-pane-xterm .xterm-viewport::-webkit-scrollbar {
+        width: 2px;
+        height: 2px;
+      }
+      .terminal-pane-xterm .xterm-viewport::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .terminal-pane-xterm .xterm-viewport::-webkit-scrollbar-thumb {
+        background: color-mix(in srgb, var(--text-secondary, #8b949e) 45%, transparent);
+        border-radius: 999px;
+      }
       .terminal-pane-xterm .terminal-status {
         position: absolute;
         top: 8px;

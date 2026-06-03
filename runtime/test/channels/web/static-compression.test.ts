@@ -35,6 +35,15 @@ test("serveStatic falls back to runtime gzip when brotli is accepted but no side
   expect(response.headers.get("Content-Encoding")).toBe("gzip");
 });
 
+test("serveStatic serves vendored ESM modules with a JavaScript MIME type", async () => {
+  const response = await serveStatic("common/js/vendor/xterm/xterm.mjs", notFound);
+
+  expect(response.status).toBe(200);
+  expect(response.headers.get("Content-Encoding")).toBeNull();
+  expect(response.headers.get("Content-Type")).toBe("text/javascript; charset=utf-8");
+  expect(response.headers.get("Vary")).toBe("Accept-Encoding");
+});
+
 test("serveStatic gzip-compresses wasm assets when requested", async () => {
   const req = new Request("https://example.test/static/common/js/vendor/remote-display-decoder.wasm", {
     headers: { "Accept-Encoding": "gzip" },

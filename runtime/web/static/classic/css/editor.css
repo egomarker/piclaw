@@ -279,6 +279,18 @@
     font-family: var(--font-family-mono);
 }
 
+.editor-codemirror .cm-content {
+    caret-color: var(--accent-color);
+}
+
+.editor-codemirror .cm-cursor,
+.editor-codemirror .cm-dropCursor {
+    border-left: 2px solid var(--accent-color) !important;
+    margin-left: -1px;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-primary) 70%, transparent),
+        0 0 6px color-mix(in srgb, var(--accent-color) 55%, transparent);
+}
+
 .editor-codemirror .cm-highlightSpace,
 .editor-codemirror .cm-highlightTab {
     opacity: 0.35;

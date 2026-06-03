@@ -72,11 +72,14 @@ PiClaw is single-user, mobile-friendly, and streams updates over SSE.
 | Status UX | Tool/intended status stays visible during silence probing, recent activity restores useful context, and tool rows can show compact `x ago` hints in the meta row |
 | Workspace | Sidebar browser, drag-and-drop uploads, file-reference pills, explorer search/reindex status |
 | Editor | CodeMirror 6, search/replace, dirty-state tracking, syntax highlighting, lazy local bundle |
-| Terminal | Ghostty-based web terminal as dock or tab; detachable popouts |
+| Terminal | Bundled xterm.js web terminal as dock or tab; detachable popouts; Ghostty is available separately as an optional add-on |
 | Viewers | Draw.io, Office docs, CSV/TSV, PDF, images, video, code previews, kanban boards, VNC |
 | Automation | `/image`, `/flux`, `image_process`, `cdp_browser`, `mcp`, experimental `m365`, Windows-only `win_*` tools |
 
 For the full feature tour, see [docs/web-ui.md](docs/web-ui.md).
+
+> [!NOTE]
+> The default terminal renderer is now the bundled xterm.js implementation. The former Ghostty/WASM renderer was moved out of core and is available as the optional [`@rcarmo/piclaw-addon-ghostty-terminal`](https://rcarmo.github.io/piclaw-addons/addons/ghostty-terminal/) add-on for high-end browsers.
 
 ## Configuration
 
@@ -85,7 +88,7 @@ Most users only need a few environment variables:
 | Variable | Default | Purpose |
 |---|---|---|
 | `PICLAW_WEB_PORT` | `8080` | Web UI port |
-| `PICLAW_WEB_TERMINAL_ENABLED` | `1` on Linux/macOS, `0` on Windows | Enable or disable the authenticated Ghostty-based web terminal |
+| `PICLAW_WEB_TERMINAL_ENABLED` | `1` on Linux/macOS, `0` on Windows | Enable or disable the authenticated bundled web terminal |
 | `PICLAW_WEB_VNC_ALLOW_DIRECT` | `1` on Linux/macOS/Windows | Allow or disable direct VNC targets supplied at runtime |
 | `PICLAW_WEB_TOTP_SECRET` | _(empty)_ | Base32 TOTP secret; enables login gate (or initialize with `/totp`) |
 | `PICLAW_WEB_PASSKEY_MODE` | `totp-fallback` | `totp-fallback`, `passkey-only`, or `totp-only` |
