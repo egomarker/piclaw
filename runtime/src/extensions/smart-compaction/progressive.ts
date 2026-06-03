@@ -14,9 +14,11 @@ import {
   MAX_PROMPT_CHARS,
   MIN_SUMMARY_CHARS,
   PROGRESSIVE_CHUNK_FRACTION,
+  PROGRESSIVE_COMPACTION_CONCURRENCY,
   PROGRESSIVE_FALLBACK_CONTEXT_WINDOW,
   PROGRESSIVE_INPUT_CONTEXT_FRACTION,
   PROGRESSIVE_TIME_BUDGET_FRACTION,
+  SMART_COMPACTION_PROGRESS_INTERVAL_MS,
   parsePositiveEnvInt,
 } from "./config.js";
 import { getEffectiveContextWindow, getSystemPromptOverheadTokens } from "../../utils/context-window-budget.js";
@@ -421,6 +423,13 @@ async function mergeProgressiveSummaries(input: {
   const MAX_PROGRESSIVE_MERGE_PASSES = 12;
   let summaries = input.summaries;
   let pass = 1;
+  let lastProgressUiAt = 0;
+  const setProgressMessage = (message: string, force = false) => {
+    const now = Date.now();
+    if (!force && now - lastProgressUiAt < SMART_COMPACTION_PROGRESS_INTERVAL_MS) return;
+    lastProgressUiAt = now;
+    input.ctx.ui.setWorkingMessage?.(message);
+  };
   const buildFinalPrompt = () => buildMergePrompt({
     summaries,
     rangeLabel: "final",
@@ -455,7 +464,7 @@ async function mergeProgressiveSummaries(input: {
     for (const summary of summaries) {
       const nextChars = summary.length + 2;
       if (batch.length > 0 && chars + nextChars > input.budget.mergeBudgetChars) {
-        input.ctx.ui.setWorkingMessage?.(`Smart compaction: merging pass ${pass}, batch ${next.length + 1}…`);
+        setProgressMessage(`Smart compaction: merging pass ${pass}, batch ${next.length + 1}…`);
         const mergePrompt = buildMergePrompt({ summaries: batch, rangeLabel: `merge-pass-${pass}`, final: false });
         input.publishEstimate?.(estimateCompactionPromptTokens(mergePrompt), `merge_pass_${pass}_batch_${next.length + 1}`);
         next.push(await completeCompactionPrompt(
@@ -474,7 +483,7 @@ async function mergeProgressiveSummaries(input: {
       chars += nextChars;
     }
     if (batch.length > 0) {
-      input.ctx.ui.setWorkingMessage?.(`Smart compaction: merging pass ${pass}, batch ${next.length + 1}…`);
+      setProgressMessage(`Smart compaction: merging pass ${pass}, batch ${next.length + 1}…`);
       const mergePrompt = buildMergePrompt({ summaries: batch, rangeLabel: `merge-pass-${pass}`, final: false });
       input.publishEstimate?.(estimateCompactionPromptTokens(mergePrompt), `merge_pass_${pass}_batch_${next.length + 1}`);
       next.push(await completeCompactionPrompt(
@@ -494,7 +503,7 @@ async function mergeProgressiveSummaries(input: {
       );
     }
 
-    input.ctx.ui.setWorkingMessage?.(`Smart compaction: merge pass ${pass} reduced ${summaries.length} → ${next.length} summaries…`);
+    setProgressMessage(`Smart compaction: merge pass ${pass} reduced ${summaries.length} → ${next.length} summaries…`);
     summaries = next;
     pass += 1;
   }
@@ -508,12 +517,12 @@ async function mergeProgressiveSummaries(input: {
     }
   }
 
-  input.ctx.ui.setWorkingMessage?.("Smart compaction: final progressive merge…");
+  setProgressMessage("Smart compaction: final progressive merge…", true);
   let finalPrompt = buildFinalPrompt();
   for (let compressPass = 1; !hasSafeCompactionOutputRoom(input.model, finalPrompt, input.maxTokens) && summaries.length === 1 && compressPass <= 3; compressPass += 1) {
     const compressPrompt = buildMergePrompt({ summaries, rangeLabel: `final-fit-compress-${compressPass}`, final: false });
     if (!hasSafeCompactionOutputRoom(input.model, compressPrompt, input.maxTokens)) break;
-    input.ctx.ui.setWorkingMessage?.(`Smart compaction: compressing final summary to fit context (${compressPass}/3)…`);
+    setProgressMessage(`Smart compaction: compressing final summary to fit context (${compressPass}/3)…`, true);
     input.publishEstimate?.(estimateCompactionPromptTokens(compressPrompt), `merge_final_compress_${compressPass}`);
     summaries = [await completeCompactionPrompt(
       input.model,
@@ -578,51 +587,74 @@ export async function runProgressiveCompaction(input: {
     );
   }
   const maxTokens = Math.floor(0.8 * input.settings.reserveTokens);
-  input.ctx.ui.setWorkingMessage?.(
+  let lastProgressUiAt = 0;
+  const setProgressMessage = (message: string, force = false) => {
+    const now = Date.now();
+    if (!force && now - lastProgressUiAt < SMART_COMPACTION_PROGRESS_INTERVAL_MS) return;
+    lastProgressUiAt = now;
+    input.ctx.ui.setWorkingMessage?.(message);
+  };
+  setProgressMessage(
     `Smart compaction: ${input.llmMessages.length} messages → ${chunks.length} chunks…`,
+    true,
   );
 
   const chunkSummaries: string[] = [];
-  for (const chunk of chunks) {
-    // Time budget guard: abort if we've consumed most of the timeout
+  const buildTimeBudgetPartial = (chunk: ProgressiveCompactionChunk, elapsed: number): ProgressiveCompactionResult => {
+    if (chunkSummaries.length === 0) {
+      throw new Error(
+        `Progressive compaction time budget exhausted before first chunk (${Math.round(elapsed / 1000)}s of ${Math.round((input.timeoutMs ?? 0) / 1000)}s)`,
+      );
+    }
+    const reason = `time budget exhausted after ${chunkSummaries.length}/${chunks.length} chunks (${Math.round(elapsed / 1000)}s of ${Math.round((input.timeoutMs ?? 0) / 1000)}s)`;
+    return {
+      summary: buildDeterministicProgressiveSummary({
+        summaries: chunkSummaries,
+        chunks,
+        complete: false,
+        reason,
+      }),
+      complete: false,
+      processedChunkCount: chunkSummaries.length,
+      totalChunkCount: chunks.length,
+      nextUnprocessedMessageIndex: chunk.startMessageIndex,
+      nextUnprocessedSourceMessageIndex: sourceIndexForLlmIndex(input.sourceIndexesByLlmIndex, chunk.startMessageIndex),
+      partialReason: reason,
+    };
+  };
+
+  for (let offset = 0; offset < chunks.length;) {
+    const firstChunk = chunks[offset]!;
     if (input.timeoutMs && input.startedAt) {
       const elapsed = Date.now() - input.startedAt;
       if (elapsed > input.timeoutMs * PROGRESSIVE_TIME_BUDGET_FRACTION) {
-        if (chunkSummaries.length === 0) {
-          throw new Error(
-            `Progressive compaction time budget exhausted before first chunk (${Math.round(elapsed / 1000)}s of ${Math.round(input.timeoutMs / 1000)}s)`,
-          );
-        }
-        const reason = `time budget exhausted after ${chunkSummaries.length}/${chunks.length} chunks (${Math.round(elapsed / 1000)}s of ${Math.round(input.timeoutMs / 1000)}s)`;
-        return {
-          summary: buildDeterministicProgressiveSummary({
-            summaries: chunkSummaries,
-            chunks,
-            complete: false,
-            reason,
-          }),
-          complete: false,
-          processedChunkCount: chunkSummaries.length,
-          totalChunkCount: chunks.length,
-          nextUnprocessedMessageIndex: chunk.startMessageIndex,
-          nextUnprocessedSourceMessageIndex: sourceIndexForLlmIndex(input.sourceIndexesByLlmIndex, chunk.startMessageIndex),
-          partialReason: reason,
-        };
+        return buildTimeBudgetPartial(firstChunk, elapsed);
       }
     }
-    input.ctx.ui.setWorkingMessage?.(`Smart compaction: summarizing chunk ${chunk.index}/${chunks.length}…`);
-    const chunkPrompt = buildChunkSummaryPrompt(chunk, chunks.length);
-    input.publishEstimate?.(estimateCompactionPromptTokens(chunkPrompt), `progressive_chunk_${chunk.index}`);
-    chunkSummaries.push(await completeCompactionPrompt(
-      input.model,
-      input.auth,
-      chunkPrompt,
-      maxTokens,
-      input.abortSignal,
-      input.streamFn,
-      input.onProgress,
-    ));
-    input.ctx.ui.setWorkingMessage?.(`Smart compaction: summarized chunk ${chunk.index}/${chunks.length}…`);
+
+    const batch = chunks.slice(offset, offset + PROGRESSIVE_COMPACTION_CONCURRENCY);
+    const lastChunk = batch.at(-1)!;
+    const batchLabel = batch.length === 1
+      ? `${firstChunk.index}/${chunks.length}`
+      : `${firstChunk.index}-${lastChunk.index}/${chunks.length}`;
+    setProgressMessage(`Smart compaction: summarizing chunks ${batchLabel}…`);
+
+    const batchSummaries = await Promise.all(batch.map(async (chunk) => {
+      const chunkPrompt = buildChunkSummaryPrompt(chunk, chunks.length);
+      input.publishEstimate?.(estimateCompactionPromptTokens(chunkPrompt), `progressive_chunk_${chunk.index}`);
+      return await completeCompactionPrompt(
+        input.model,
+        input.auth,
+        chunkPrompt,
+        maxTokens,
+        input.abortSignal,
+        input.streamFn,
+        input.onProgress,
+      );
+    }));
+    chunkSummaries.push(...batchSummaries);
+    offset += batch.length;
+    setProgressMessage(`Smart compaction: summarized ${chunkSummaries.length}/${chunks.length} chunks…`);
   }
 
   if (chunkSummaries.length === 0) {

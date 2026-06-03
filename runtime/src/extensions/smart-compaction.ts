@@ -16,7 +16,7 @@ import { applyTokenEstimateSafetyMultiplier, getEffectiveContextWindow } from ".
 import { recordCompactionCancellationReason } from "../agent-pool/compaction-cancel-reason.js";
 
 import { getCompactionRuntimeConfig } from "../core/config.js";
-import { FULL_PASS_FALLBACK_MAX_PROMPT_TOKENS, MIN_COMPACTION_OUTPUT_TOKENS, MIN_SUMMARY_CHARS, PROGRESSIVE_FALLBACK_CONTEXT_WINDOW, SELECTIVE_THRESHOLD, SYSTEM_PROMPT_OVERHEAD_TOKENS } from "./smart-compaction/config.js";
+import { FULL_PASS_FALLBACK_MAX_PROMPT_TOKENS, MIN_COMPACTION_OUTPUT_TOKENS, MIN_SUMMARY_CHARS, PROGRESSIVE_FALLBACK_CONTEXT_WINDOW, SELECTIVE_THRESHOLD, SMART_COMPACTION_PROGRESS_INTERVAL_MS, SYSTEM_PROMPT_OVERHEAD_TOKENS } from "./smart-compaction/config.js";
 import { estimateCompactionPromptTokens, estimateTokensFromChars, getContextWindowEstimate, publishContextEstimate } from "./smart-compaction/context.js";
 import { compressFilePaths, fileListsFromOps } from "./smart-compaction/files.js";
 import { convertMessagesWithMetadata, type SourceMessage } from "./smart-compaction/messages.js";
@@ -323,6 +323,13 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
       // instead of falling through — which would crash upstream when it accesses
       // the already-cleared controller.
       const abortSignal = signal;
+      let lastProgressUiAt = 0;
+      const setThrottledProgressMessage = (message: string) => {
+        const now = Date.now();
+        if (now - lastProgressUiAt < SMART_COMPACTION_PROGRESS_INTERVAL_MS) return;
+        lastProgressUiAt = now;
+        ctx.ui.setWorkingMessage(message);
+      };
 
       // ── Compute topic-shift signal once for all downstream paths ──────
       // Both tryNoOpCompaction (to gate the minimal-content fast path) and
@@ -522,8 +529,8 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
             startedAt: compactionStartedAt,
             publishEstimate: (tokens, phase) => publishContextEstimate(ctx, tokens, phase),
             streamFn: options.streamFn,
-            onProgress: (chars) => {
-              ctx.ui.setWorkingMessage(`Smart compaction: progressive summary… (${Math.round(chars / 4)}t)`);
+            onProgress: () => {
+              setThrottledProgressMessage("Smart compaction: progressive summary still running…");
             },
           });
           const fullSummary = progressiveResult.summary.includes("<read-files>") || progressiveResult.summary.includes("<modified-files>")
@@ -623,8 +630,8 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
             headers: authForCompletion.headers,
             reasoning: (model as any).reasoning ? getCompactionReasoningEffort(model) : undefined,
             streamFn: options.streamFn,
-            onProgress: (chars) => {
-              ctx.ui.setWorkingMessage(`Smart compaction: generating summary… (${Math.round(chars / 4)}t)`);
+            onProgress: () => {
+              setThrottledProgressMessage("Smart compaction: generating summary still running…");
             },
           });
         };
