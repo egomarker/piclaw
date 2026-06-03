@@ -115,6 +115,21 @@ function injectStyles(ownerDocument = document) {
         width: 0;
         height: 0;
       }
+      .terminal-pane-xterm .xterm .xterm-scrollable-element > .scrollbar.vertical {
+        width: 2px !important;
+        right: 2px !important;
+        left: auto !important;
+        background: transparent !important;
+      }
+      .terminal-pane-xterm .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider {
+        width: 2px !important;
+        left: 0 !important;
+        right: auto !important;
+        border-radius: 999px !important;
+      }
+      .terminal-pane-xterm .xterm .xterm-scrollable-element > .scrollbar.vertical > .scra {
+        display: none !important;
+      }
       .terminal-scrollbar-thumb {
         position: absolute;
         right: 2px;

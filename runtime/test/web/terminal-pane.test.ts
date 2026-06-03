@@ -297,6 +297,8 @@ test('terminal uses a 2px overlay scrollbar instead of the native xterm scrollba
     expect(source).toContain('scrollbar-width: none;');
     expect(source).toContain('width: 0;');
     expect(source).toContain('className = "terminal-scrollbar-thumb"');
+    expect(source).toContain('.xterm-scrollable-element > .scrollbar.vertical');
+    expect(source).toContain('width: 2px !important;');
     expect(source).toContain('width: 2px;');
     expect(source).toContain('syncOverlayScrollbar()');
 });
