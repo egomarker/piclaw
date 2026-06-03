@@ -36,11 +36,11 @@ test("serveStatic falls back to runtime gzip when brotli is accepted but no side
 });
 
 test("serveStatic gzip-compresses wasm assets when requested", async () => {
-  const req = new Request("https://example.test/static/common/js/vendor/ghostty-vt.wasm", {
+  const req = new Request("https://example.test/static/common/js/vendor/remote-display-decoder.wasm", {
     headers: { "Accept-Encoding": "gzip" },
   });
 
-  const response = await serveStatic("common/js/vendor/ghostty-vt.wasm", notFound, req);
+  const response = await serveStatic("common/js/vendor/remote-display-decoder.wasm", notFound, req);
 
   expect(response.status).toBe(200);
   expect(response.headers.get("Content-Encoding")).toBe("gzip");

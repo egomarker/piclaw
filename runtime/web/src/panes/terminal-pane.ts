@@ -1,1046 +1,968 @@
+// @ts-nocheck
 /**
- * terminal-pane.ts — Terminal dock pane extension.
+ * terminal-pane.ts — xterm.js terminal pane for Piclaw.
  *
- * Bootstraps the vendored ghostty-web frontend and connects it to the
- * authenticated web terminal backend when available.
+ * Core/default terminal renderer. Uses Piclaw's existing /terminal/session +
+ * /terminal/ws JSON protocol and vendored xterm.js browser assets. Ghostty is
+ * available only through the optional ghostty-terminal add-on.
  */
 
-import type { WebPaneExtension, PaneContext, PaneInstance, PaneCapability } from './pane-types.js';
-import { consumePanePopoutTransferToken } from './editor-popout-transfer.js';
-import {
-    clearContainerContentBestEffort,
-    detachTerminalHostListenersBestEffort,
-    disposeTerminalRuntimeBestEffort,
-    resizeTerminalRuntimeBestEffort,
-} from './terminal-lifecycle-runtime.js';
-import { applyTerminalThemeBestEffort } from './terminal-theme-runtime.js';
+const ASSET_BASE = "/static/common/js/vendor/xterm";
+export const TERMINAL_TAB_PATH = "piclaw://terminal";
+const TERMINAL_ANON_CLIENT_HEADER = "x-piclaw-terminal-client";
+const TERMINAL_ANON_CLIENT_STORAGE_KEY = "piclaw_terminal_client";
+const RENDERER_STORAGE_KEY = "piclaw:terminal:renderer";
+const STYLE_ID = "piclaw-terminal-style";
+const XTERM_CSS_ID = "piclaw-terminal-xterm-css";
+const TERMINAL_FONT_FAMILY = 'FiraCode Nerd Font Mono, JetBrainsMono Nerd Font Mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace';
+const TERMINAL_HEARTBEAT_MS = 25_000;
+const TERMINAL_RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 5_000, 10_000];
 
-const GHOSTTY_WEB_MODULE = '/static/common/js/vendor/ghostty-web.js';
-const GHOSTTY_WASM_MODULE = '/static/common/js/vendor/ghostty-vt.wasm';
-export const TERMINAL_TAB_PATH = 'piclaw://terminal';
-const TERMINAL_FONT_FAMILY = 'FiraCode Nerd Font Mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace';
-const TERMINAL_FONT_LOAD_SPEC = '400 13px "FiraCode Nerd Font Mono"';
-const TERMINAL_FONT_LOAD_SPEC_BOLD = '700 13px "FiraCode Nerd Font Mono"';
-const TERMINAL_ANON_CLIENT_HEADER = 'x-piclaw-terminal-client';
-const TERMINAL_ANON_CLIENT_STORAGE_KEY = 'piclaw_terminal_client';
 const LIGHT_TERMINAL_PALETTE = {
-    yellow: '#9a6700',
-    magenta: '#8250df',
-    cyan: '#1b7c83',
-    brightBlack: '#57606a',
-    brightRed: '#cf222e',
-    brightGreen: '#1a7f37',
-    brightYellow: '#bf8700',
-    brightBlue: '#0550ae',
-    brightMagenta: '#6f42c1',
-    brightCyan: '#0a7b83',
+  yellow: "#9a6700",
+  magenta: "#8250df",
+  cyan: "#1b7c83",
+  brightBlack: "#57606a",
+  brightRed: "#cf222e",
+  brightGreen: "#1a7f37",
+  brightYellow: "#bf8700",
+  brightBlue: "#0550ae",
+  brightMagenta: "#6f42c1",
+  brightCyan: "#0a7b83",
 };
+
 const DARK_TERMINAL_PALETTE = {
-    yellow: '#d29922',
-    magenta: '#bc8cff',
-    cyan: '#39c5cf',
-    brightBlack: '#8b949e',
-    brightRed: '#ff7b72',
-    brightGreen: '#7ee787',
-    brightYellow: '#e3b341',
-    brightBlue: '#79c0ff',
-    brightMagenta: '#d2a8ff',
-    brightCyan: '#56d4dd',
+  yellow: "#d29922",
+  magenta: "#bc8cff",
+  cyan: "#39c5cf",
+  brightBlack: "#8b949e",
+  brightRed: "#ff7b72",
+  brightGreen: "#7ee787",
+  brightYellow: "#e3b341",
+  brightBlue: "#79c0ff",
+  brightMagenta: "#d2a8ff",
+  brightCyan: "#56d4dd",
 };
 
-let ghosttyInitPromise = null;
-let terminalFontsReadyPromise = null;
+let xtermRuntimePromise = null;
+let fontsReadyPromise = null;
 
-function normalizeShortcutCode(event: { code?: string | null; key?: string | null } | null | undefined): string {
-    if (!event) return '';
-    const code = String(event.code || '').trim().toLowerCase();
-    if (code) return code;
-    const key = String(event.key || '').trim().toLowerCase();
-    if (!key) return '';
-    if (key.length === 1 && /[a-z]/.test(key)) return `key${key}`;
-    if (key === 'insert') return 'insert';
-    return key;
+function asset(path) {
+  return `${ASSET_BASE}/${path.replace(/^\/+/, "")}`;
 }
 
-export function isTerminalClipboardCopyShortcut(event: {
-    code?: string | null;
-    key?: string | null;
-    ctrlKey?: boolean;
-    metaKey?: boolean;
-    shiftKey?: boolean;
-    altKey?: boolean;
-} | null | undefined): boolean {
-    if (!event) return false;
-    if (!event.shiftKey || event.altKey) return false;
-    if (!(event.ctrlKey || event.metaKey)) return false;
-    return normalizeShortcutCode(event) === 'keyc';
+function injectStyles(ownerDocument = document) {
+  if (!ownerDocument?.head) return;
+  if (!ownerDocument.getElementById(XTERM_CSS_ID)) {
+    const link = ownerDocument.createElement("link");
+    link.id = XTERM_CSS_ID;
+    link.rel = "stylesheet";
+    link.href = asset("xterm.css");
+    ownerDocument.head.appendChild(link);
+  }
+  if (!ownerDocument.getElementById(STYLE_ID)) {
+    const style = ownerDocument.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = `
+      .terminal-pane-xterm {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+        width: 100%;
+        height: 100%;
+        position: relative;
+        overflow: hidden;
+        background: var(--bg-primary, #0d1117);
+        color: var(--text-primary, #e6edf3);
+        font-family: var(--font-family-terminal, ${TERMINAL_FONT_FAMILY});
+      }
+      .terminal-pane-xterm .terminal-body {
+        display: flex;
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        padding: 6px;
+        box-sizing: border-box;
+      }
+      .terminal-pane-xterm .terminal-host {
+        display: flex;
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: 0;
+        width: 100%;
+        height: 100%;
+      }
+      .terminal-pane-xterm .xterm {
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: 0;
+        width: 100%;
+        height: 100%;
+        padding: 0;
+      }
+      .terminal-pane-xterm .xterm-viewport,
+      .terminal-pane-xterm .xterm-screen {
+        background: transparent !important;
+      }
+      .terminal-pane-xterm .terminal-status {
+        position: absolute;
+        top: 8px;
+        right: 10px;
+        z-index: 20;
+        padding: 3px 7px;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--bg-secondary, #161b22) 88%, transparent);
+        border: 1px solid var(--border-color, rgba(148,163,184,.24));
+        color: var(--text-secondary, #8b949e);
+        font: 11px/1.3 var(--font-family-ui, system-ui, sans-serif);
+        pointer-events: none;
+        opacity: .82;
+      }
+      .terminal-pane-xterm[data-connection-status="Connected"] .terminal-status,
+      .terminal-pane-xterm[data-connection-status="Connected"] .terminal-status {
+        opacity: 0;
+        transition: opacity .4s ease 1.4s;
+      }
+      .terminal-pane-xterm:focus-within .terminal-status {
+        opacity: .82;
+        transition-delay: 0s;
+      }
+      .terminal-placeholder {
+        margin: auto;
+        color: var(--text-secondary, #8b949e);
+        font: 13px/1.5 var(--font-family-ui, system-ui, sans-serif);
+        text-align: center;
+      }
+    `;
+    ownerDocument.head.appendChild(style);
+  }
 }
 
-export function isTerminalClipboardPasteShortcut(event: {
-    code?: string | null;
-    key?: string | null;
-    ctrlKey?: boolean;
-    metaKey?: boolean;
-    shiftKey?: boolean;
-    altKey?: boolean;
-} | null | undefined): boolean {
-    if (!event) return false;
-    if (event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && normalizeShortcutCode(event) === 'insert') {
-        return true;
-    }
-    if (!event.shiftKey || event.altKey) return false;
-    if (!(event.ctrlKey || event.metaKey)) return false;
-    return normalizeShortcutCode(event) === 'keyv';
+function detectDarkTheme(runtimeWindow = window, runtimeDocument = document) {
+  const root = runtimeDocument?.documentElement;
+  const body = runtimeDocument?.body;
+  const rootTheme = root?.getAttribute?.("data-theme")?.toLowerCase?.() || "";
+  if (rootTheme === "dark") return true;
+  if (rootTheme === "light") return false;
+  if (root?.classList?.contains("dark") || body?.classList?.contains("dark")) return true;
+  if (root?.classList?.contains("light") || body?.classList?.contains("light")) return false;
+  return Boolean(runtimeWindow?.matchMedia?.("(prefers-color-scheme: dark)")?.matches);
 }
 
-export async function readClipboardTextBestEffort(runtimeNavigator: Navigator | null | undefined = typeof navigator !== 'undefined' ? navigator : null): Promise<string | null> {
-    const readText = runtimeNavigator?.clipboard?.readText;
-    if (typeof readText !== 'function') return null;
-    try {
-        const text = await readText.call(runtimeNavigator.clipboard);
-        return typeof text === 'string' ? text : null;
-    } catch (error) {
-        console.debug('[terminal-pane] Clipboard read failed.', error);
-        return null;
-    }
-}
-
-function shouldRewriteGhosttyWasmRequest(url) {
-    if (!url) return false;
-    return url.startsWith('data:application/wasm') || /(^|\/)ghostty-vt\.wasm(?:[?#].*)?$/.test(url);
-}
-
-async function withGhosttyWasmFetchShim(run) {
-    const originalFetch = globalThis.fetch?.bind(globalThis);
-    if (!originalFetch) {
-        return await run();
-    }
-    const wasmUrl = new URL(GHOSTTY_WASM_MODULE, window.location.origin).href;
-    const patchedFetch = (input, init) => {
-        const requestUrl = input instanceof Request
-            ? input.url
-            : input instanceof URL
-                ? input.href
-                : String(input);
-        if (!shouldRewriteGhosttyWasmRequest(requestUrl)) {
-            return originalFetch(input, init);
-        }
-        if (input instanceof Request) {
-            return originalFetch(new Request(wasmUrl, input));
-        }
-        return originalFetch(wasmUrl, init);
-    };
-    globalThis.fetch = patchedFetch as typeof fetch;
-    try {
-        return await run();
-    } finally {
-        globalThis.fetch = originalFetch;
-    }
-}
-
-async function loadGhosttyWeb() {
-    const moduleUrl = new URL(GHOSTTY_WEB_MODULE, window.location.origin).href;
-    const mod = await import(moduleUrl);
-    if (!ghosttyInitPromise) {
-        ghosttyInitPromise = withGhosttyWasmFetchShim(() => Promise.resolve(mod.init?.())).catch((error) => {
-            ghosttyInitPromise = null;
-            throw error;
-        });
-    }
-    await ghosttyInitPromise;
-    return mod;
-}
-
-async function ensureTerminalFontsReady() {
-    if (typeof document === 'undefined' || !('fonts' in document) || !document.fonts) {
-        return;
-    }
-    if (!terminalFontsReadyPromise) {
-        terminalFontsReadyPromise = Promise.allSettled([
-            document.fonts.load(TERMINAL_FONT_LOAD_SPEC),
-            document.fonts.load(TERMINAL_FONT_LOAD_SPEC_BOLD),
-            document.fonts.ready,
-        ]).then(() => undefined).catch(() => undefined);
-    }
-    await terminalFontsReadyPromise;
-}
-
-function createTerminalClientToken(runtimeWindow = typeof window !== 'undefined' ? window : null) {
-    try {
-        if (typeof runtimeWindow?.crypto?.randomUUID === 'function') {
-            return runtimeWindow.crypto.randomUUID();
-        }
-    } catch (error) {
-        console.debug('[terminal-pane] Failed to generate crypto-backed terminal client token; falling back.', error);
-    }
-    return `terminal-client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-export function getOrCreateAnonymousTerminalClientToken(runtimeWindow = typeof window !== 'undefined' ? window : null) {
-    if (!runtimeWindow) return null;
-    try {
-        const storage = runtimeWindow.localStorage;
-        const existing = typeof storage?.getItem === 'function'
-            ? String(storage.getItem(TERMINAL_ANON_CLIENT_STORAGE_KEY) || '').trim()
-            : '';
-        if (existing) return existing;
-        const created = createTerminalClientToken(runtimeWindow);
-        storage?.setItem?.(TERMINAL_ANON_CLIENT_STORAGE_KEY, created);
-        return created;
-    } catch (_error) {
-        return createTerminalClientToken(runtimeWindow);
-    }
-}
-
-async function fetchTerminalSession(clientToken = getOrCreateAnonymousTerminalClientToken()) {
-    const response = await fetch('/terminal/session', {
-        method: 'GET',
-        credentials: 'same-origin',
-        headers: clientToken ? { [TERMINAL_ANON_CLIENT_HEADER]: clientToken } : undefined,
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-        throw new Error(body?.error || `HTTP ${response.status}`);
-    }
-    return body;
-}
-
-async function requestTerminalHandoff(clientToken = getOrCreateAnonymousTerminalClientToken()) {
-    const response = await fetch('/terminal/handoff', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: clientToken ? { [TERMINAL_ANON_CLIENT_HEADER]: clientToken } : undefined,
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-        throw new Error(body?.error || `HTTP ${response.status}`);
-    }
-    return typeof body?.handoff?.token === 'string' && body.handoff.token.trim()
-        ? body.handoff.token.trim()
-        : null;
-}
-
-function buildTerminalWebSocketUrl(path, handoffToken = null, clientToken = getOrCreateAnonymousTerminalClientToken()) {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = new URL(`${protocol}//${window.location.host}${path}`);
-    if (handoffToken) {
-        url.searchParams.set('handoff', String(handoffToken));
-    }
-    if (clientToken) {
-        url.searchParams.set('client', String(clientToken));
-    }
-    return url.toString();
-}
-
-function detectDarkTheme(runtimeWindow = typeof window !== 'undefined' ? window : null, runtimeDocument = typeof document !== 'undefined' ? document : null) {
-    if (!runtimeWindow || !runtimeDocument) return false;
-    const root = runtimeDocument.documentElement;
-    const body = runtimeDocument.body;
-    const rootTheme = root?.getAttribute?.('data-theme')?.toLowerCase?.() || '';
-    if (rootTheme === 'dark') return true;
-    if (rootTheme === 'light') return false;
-    if (root?.classList?.contains('dark') || body?.classList?.contains('dark')) return true;
-    if (root?.classList?.contains('light') || body?.classList?.contains('light')) return false;
-    return Boolean(runtimeWindow.matchMedia?.('(prefers-color-scheme: dark)')?.matches);
-}
-
-function readThemeVar(name, fallback = '', runtimeDocument = typeof document !== 'undefined' ? document : null) {
-    if (!runtimeDocument) return fallback;
-    const value = getComputedStyle(runtimeDocument.documentElement).getPropertyValue(name)?.trim();
-    return value || fallback;
+function readThemeVar(name, fallback = "", runtimeDocument = document) {
+  const value = getComputedStyle(runtimeDocument.documentElement).getPropertyValue(name)?.trim();
+  return value || fallback;
 }
 
 function parseThemeColor(input) {
-    const raw = String(input || '').trim();
-    if (!raw) return null;
-    const hex = raw.startsWith('#') ? raw.slice(1) : raw;
-    if (/^[0-9a-fA-F]{3}$/.test(hex) || /^[0-9a-fA-F]{6}$/.test(hex)) {
-        const full = hex.length === 3 ? hex.split('').map((c) => c + c).join('') : hex;
-        const int = parseInt(full, 16);
-        return {
-            r: (int >> 16) & 255,
-            g: (int >> 8) & 255,
-            b: int & 255,
-        };
-    }
-    const rgbMatch = raw.match(/rgba?\(\s*(\d+)[,\s]\s*(\d+)[,\s]\s*(\d+)/i);
-    if (rgbMatch) {
-        return {
-            r: parseInt(rgbMatch[1], 10),
-            g: parseInt(rgbMatch[2], 10),
-            b: parseInt(rgbMatch[3], 10),
-        };
-    }
-    return null;
+  const raw = String(input || "").trim();
+  if (!raw) return null;
+  const hex = raw.startsWith("#") ? raw.slice(1) : raw;
+  if (/^[0-9a-fA-F]{3}$/.test(hex) || /^[0-9a-fA-F]{6}$/.test(hex)) {
+    const full = hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex;
+    const int = parseInt(full, 16);
+    return { r: (int >> 16) & 255, g: (int >> 8) & 255, b: int & 255 };
+  }
+  const rgbMatch = raw.match(/rgba?\(\s*(\d+)[,\s]\s*(\d+)[,\s]\s*(\d+)/i);
+  if (rgbMatch) return { r: parseInt(rgbMatch[1], 10), g: parseInt(rgbMatch[2], 10), b: parseInt(rgbMatch[3], 10) };
+  return null;
 }
 
 function relativeLuminance(color) {
-    const toLinear = (value) => {
-        const s = value / 255;
-        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-    };
-    return 0.2126 * toLinear(color.r) + 0.7152 * toLinear(color.g) + 0.0722 * toLinear(color.b);
+  const toLinear = (value) => {
+    const s = value / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * toLinear(color.r) + 0.7152 * toLinear(color.g) + 0.0722 * toLinear(color.b);
 }
 
 function contrastRatio(a, b) {
-    const l1 = relativeLuminance(a);
-    const l2 = relativeLuminance(b);
-    const lighter = Math.max(l1, l2);
-    const darker = Math.min(l1, l2);
-    return (lighter + 0.05) / (darker + 0.05);
-}
-
-function getHighestContrastTextColor(background) {
-    const bg = parseThemeColor(background);
-    if (!bg) return '#ffffff';
-    const white = { r: 255, g: 255, b: 255 };
-    const black = { r: 0, g: 0, b: 0 };
-    return contrastRatio(bg, white) >= contrastRatio(bg, black) ? '#ffffff' : '#000000';
+  const l1 = relativeLuminance(a);
+  const l2 = relativeLuminance(b);
+  return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
 }
 
 function toHexColor(color) {
-    const clamp = (value) => Math.max(0, Math.min(255, Math.round(value || 0)));
-    return `#${[color.r, color.g, color.b].map((value) => clamp(value).toString(16).padStart(2, '0')).join('')}`;
+  const clamp = (value) => Math.max(0, Math.min(255, Math.round(value || 0)));
+  return `#${[color.r, color.g, color.b].map((value) => clamp(value).toString(16).padStart(2, "0")).join("")}`;
+}
+
+function getHighestContrastTextColor(background) {
+  const bg = parseThemeColor(background);
+  if (!bg) return "#ffffff";
+  const white = { r: 255, g: 255, b: 255 };
+  const black = { r: 0, g: 0, b: 0 };
+  return contrastRatio(bg, white) >= contrastRatio(bg, black) ? "#ffffff" : "#000000";
 }
 
 function mixThemeColors(base, target, amount) {
-    const ratio = Math.max(0, Math.min(1, Number.isFinite(amount) ? amount : 0));
-    return {
-        r: base.r + ((target.r - base.r) * ratio),
-        g: base.g + ((target.g - base.g) * ratio),
-        b: base.b + ((target.b - base.b) * ratio),
-    };
+  const ratio = Math.max(0, Math.min(1, Number.isFinite(amount) ? amount : 0));
+  return {
+    r: base.r + ((target.r - base.r) * ratio),
+    g: base.g + ((target.g - base.g) * ratio),
+    b: base.b + ((target.b - base.b) * ratio),
+  };
 }
 
 function ensureTerminalColorContrast(background, color, minimumRatio = 4.5) {
-    const bg = parseThemeColor(background);
-    const fg = parseThemeColor(color);
-    if (!bg || !fg) return color;
-
-    if (contrastRatio(bg, fg) >= minimumRatio) return toHexColor(fg);
-
-    const targetColor = parseThemeColor(getHighestContrastTextColor(background));
-    if (!targetColor) return toHexColor(fg);
-
-    let best = targetColor;
-    let bestAmount = 1;
-    let low = 0;
-    let high = 1;
-    for (let index = 0; index < 14; index += 1) {
-        const mid = (low + high) / 2;
-        const mixed = mixThemeColors(fg, targetColor, mid);
-        if (contrastRatio(bg, mixed) >= minimumRatio) {
-            best = mixed;
-            bestAmount = mid;
-            high = mid;
-        } else {
-            low = mid;
-        }
+  const bg = parseThemeColor(background);
+  const fg = parseThemeColor(color);
+  if (!bg || !fg) return color;
+  if (contrastRatio(bg, fg) >= minimumRatio) return toHexColor(fg);
+  const targetColor = parseThemeColor(getHighestContrastTextColor(background));
+  if (!targetColor) return toHexColor(fg);
+  let best = targetColor;
+  let low = 0;
+  let high = 1;
+  for (let index = 0; index < 14; index += 1) {
+    const mid = (low + high) / 2;
+    const mixed = mixThemeColors(fg, targetColor, mid);
+    if (contrastRatio(bg, mixed) >= minimumRatio) {
+      best = mixed;
+      high = mid;
+    } else {
+      low = mid;
     }
-
-    let resolved = toHexColor(best);
-    let resolvedColor = parseThemeColor(resolved);
-    while (resolvedColor && contrastRatio(bg, resolvedColor) < minimumRatio && bestAmount < 1) {
-        bestAmount = Math.min(1, bestAmount + 0.01);
-        resolved = toHexColor(mixThemeColors(fg, targetColor, bestAmount));
-        resolvedColor = parseThemeColor(resolved);
-    }
-    return resolved;
+  }
+  const result = toHexColor(best);
+  const resultColor = parseThemeColor(result);
+  if (resultColor && contrastRatio(bg, resultColor) >= minimumRatio) return result;
+  return toHexColor(targetColor);
 }
 
 function withAlpha(hexColor, alphaHex) {
-    if (!hexColor || !hexColor.startsWith('#')) return hexColor;
-    const value = hexColor.slice(1);
-    if (value.length === 3) {
-        return `#${value[0]}${value[0]}${value[1]}${value[1]}${value[2]}${value[2]}${alphaHex}`;
+  if (!hexColor || !hexColor.startsWith("#")) return hexColor;
+  const value = hexColor.slice(1);
+  if (value.length === 3) return `#${value[0]}${value[0]}${value[1]}${value[1]}${value[2]}${value[2]}${alphaHex}`;
+  if (value.length === 6) return `#${value}${alphaHex}`;
+  return hexColor;
+}
+
+export function buildTerminalTheme(runtimeWindow = window, runtimeDocument = document) {
+  const isDark = detectDarkTheme(runtimeWindow, runtimeDocument);
+  const palette = isDark ? DARK_TERMINAL_PALETTE : LIGHT_TERMINAL_PALETTE;
+  const background = readThemeVar("--bg-primary", isDark ? "#000000" : "#ffffff", runtimeDocument);
+  const themeTextPrimary = readThemeVar("--text-primary", isDark ? "#e7e9ea" : "#0f1419", runtimeDocument);
+  const foreground = ensureTerminalColorContrast(background, themeTextPrimary || getHighestContrastTextColor(background), 7);
+  const accent = readThemeVar("--accent-color", "#1d9bf0", runtimeDocument);
+  const danger = readThemeVar("--danger-color", isDark ? "#ff7b72" : "#cf222e", runtimeDocument);
+  const success = readThemeVar("--success-color", isDark ? "#7ee787" : "#1a7f37", runtimeDocument);
+  const hover = readThemeVar("--bg-hover", isDark ? "#1d1f23" : "#e8ebed", runtimeDocument);
+  const selectionBackground = readThemeVar("--accent-soft-strong", withAlpha(accent, isDark ? "47" : "33"), runtimeDocument);
+
+  return {
+    background,
+    foreground,
+    cursor: ensureTerminalColorContrast(background, accent, 3),
+    cursorAccent: background,
+    selectionBackground,
+    selectionForeground: foreground,
+    black: ensureTerminalColorContrast(background, hover, 3),
+    red: ensureTerminalColorContrast(background, danger, 4.5),
+    green: ensureTerminalColorContrast(background, success, 4.5),
+    yellow: ensureTerminalColorContrast(background, palette.yellow, 4.5),
+    blue: ensureTerminalColorContrast(background, accent, 4.5),
+    magenta: ensureTerminalColorContrast(background, palette.magenta, 4.5),
+    cyan: ensureTerminalColorContrast(background, palette.cyan, 4.5),
+    white: foreground,
+    brightBlack: ensureTerminalColorContrast(background, palette.brightBlack, 3),
+    brightRed: ensureTerminalColorContrast(background, palette.brightRed, 4.5),
+    brightGreen: ensureTerminalColorContrast(background, palette.brightGreen, 4.5),
+    brightYellow: ensureTerminalColorContrast(background, palette.brightYellow, 4.5),
+    brightBlue: ensureTerminalColorContrast(background, palette.brightBlue, 4.5),
+    brightMagenta: ensureTerminalColorContrast(background, palette.brightMagenta, 4.5),
+    brightCyan: ensureTerminalColorContrast(background, palette.brightCyan, 4.5),
+    brightWhite: foreground,
+  };
+}
+
+export function buildTerminalWebSocketUrl(path, handoffToken = null, clientToken = null, runtimeWindow = window) {
+  const protocol = runtimeWindow.location.protocol === "https:" ? "wss:" : "ws:";
+  const url = new URL(`${protocol}//${runtimeWindow.location.host}${path || "/terminal/ws"}`);
+  if (handoffToken) url.searchParams.set("handoff", String(handoffToken));
+  if (clientToken) url.searchParams.set("client", String(clientToken));
+  return url.toString();
+}
+
+function createTerminalClientToken(runtimeWindow = window) {
+  try {
+    if (typeof runtimeWindow?.crypto?.randomUUID === "function") return runtimeWindow.crypto.randomUUID();
+  } catch {}
+  return `terminal-client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export function getOrCreateAnonymousTerminalClientToken(runtimeWindow = window) {
+  if (!runtimeWindow) return null;
+  try {
+    const storage = runtimeWindow.localStorage;
+    const existing = typeof storage?.getItem === "function" ? String(storage.getItem(TERMINAL_ANON_CLIENT_STORAGE_KEY) || "").trim() : "";
+    if (existing) return existing;
+    const created = createTerminalClientToken(runtimeWindow);
+    storage?.setItem?.(TERMINAL_ANON_CLIENT_STORAGE_KEY, created);
+    return created;
+  } catch {
+    return createTerminalClientToken(runtimeWindow);
+  }
+}
+
+async function fetchTerminalSession(clientToken = getOrCreateAnonymousTerminalClientToken()) {
+  const response = await fetch("/terminal/session", {
+    method: "GET",
+    credentials: "same-origin",
+    headers: clientToken ? { [TERMINAL_ANON_CLIENT_HEADER]: clientToken } : undefined,
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error || `HTTP ${response.status}`);
+  return body;
+}
+
+async function requestTerminalHandoff(clientToken = getOrCreateAnonymousTerminalClientToken()) {
+  const response = await fetch("/terminal/handoff", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: clientToken ? { [TERMINAL_ANON_CLIENT_HEADER]: clientToken } : undefined,
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error || `HTTP ${response.status}`);
+  return typeof body?.handoff?.token === "string" && body.handoff.token.trim() ? body.handoff.token.trim() : null;
+}
+
+async function ensureFontsReady(ownerDocument = document) {
+  if (!ownerDocument || !("fonts" in ownerDocument) || !ownerDocument.fonts) return;
+  if (!fontsReadyPromise) {
+    fontsReadyPromise = Promise.allSettled([
+      ownerDocument.fonts.load('400 13px "FiraCode Nerd Font Mono"'),
+      ownerDocument.fonts.load('700 13px "FiraCode Nerd Font Mono"'),
+      ownerDocument.fonts.ready,
+    ]).then(() => undefined).catch(() => undefined);
+  }
+  await fontsReadyPromise;
+}
+
+async function importAddon(name) {
+  return import(asset(`addon-${name}.mjs`));
+}
+
+async function importCanvasAddon() {
+  await import(asset("addon-canvas.js"));
+  return globalThis.CanvasAddon || globalThis.canvasAddon || null;
+}
+
+async function loadXtermRuntime() {
+  if (xtermRuntimePromise) return xtermRuntimePromise;
+  xtermRuntimePromise = (async () => {
+    const [xterm, fit, ligatures, webgl, clipboard, image, search, serialize, unicode11, webLinks, progress, unicodeGraphemes, attach] = await Promise.all([
+      import(asset("xterm.mjs")),
+      importAddon("fit"),
+      importAddon("ligatures"),
+      importAddon("webgl"),
+      importAddon("clipboard"),
+      importAddon("image"),
+      importAddon("search"),
+      importAddon("serialize"),
+      importAddon("unicode11"),
+      importAddon("web-links"),
+      importAddon("progress"),
+      importAddon("unicode-graphemes"),
+      importAddon("attach"),
+    ]);
+    const canvas = await importCanvasAddon().catch(() => null);
+    return { xterm, fit, ligatures, webgl, canvas, clipboard, image, search, serialize, unicode11, webLinks, progress, unicodeGraphemes, attach };
+  })().catch((error) => {
+    xtermRuntimePromise = null;
+    throw error;
+  });
+  return xtermRuntimePromise;
+}
+
+function getTerminalFontFamily(runtimeDocument = document) {
+  try {
+    const token = getComputedStyle(runtimeDocument.documentElement).getPropertyValue("--font-family-terminal")?.trim();
+    return token || TERMINAL_FONT_FAMILY;
+  } catch {
+    return TERMINAL_FONT_FAMILY;
+  }
+}
+
+function normalizeShortcutCode(event) {
+  const code = String(event?.code || "").trim().toLowerCase();
+  if (code) return code;
+  const key = String(event?.key || "").trim().toLowerCase();
+  if (key.length === 1 && /[a-z]/.test(key)) return `key${key}`;
+  return key;
+}
+
+function isCopyShortcut(event) {
+  return Boolean(event?.shiftKey && !event?.altKey && (event?.ctrlKey || event?.metaKey) && normalizeShortcutCode(event) === "keyc");
+}
+
+function isPasteShortcut(event) {
+  if (event?.shiftKey && !event?.ctrlKey && !event?.metaKey && !event?.altKey && normalizeShortcutCode(event) === "insert") return true;
+  return Boolean(event?.shiftKey && !event?.altKey && (event?.ctrlKey || event?.metaKey) && normalizeShortcutCode(event) === "keyv");
+}
+
+function isFindShortcut(event) {
+  return Boolean(event?.shiftKey && !event?.altKey && (event?.ctrlKey || event?.metaKey) && normalizeShortcutCode(event) === "keyf");
+}
+
+function getPreferredRenderer(runtimeWindow = window) {
+  try {
+    const value = String(runtimeWindow.localStorage?.getItem(RENDERER_STORAGE_KEY) || "").trim().toLowerCase();
+    if (value === "webgl") return "webgl";
+  } catch {}
+  return "canvas";
+}
+
+class TerminalPaneInstance {
+  constructor(container, context = {}) {
+    this.container = container;
+    this.context = context;
+    this.ownerDocument = container.ownerDocument || document;
+    this.ownerWindow = this.ownerDocument.defaultView || window;
+    this.disposed = false;
+    this.resizeFrame = 0;
+    this.resizeObserver = null;
+    this.themeObserver = null;
+    this.themeChangeListener = null;
+    this.mediaQuery = null;
+    this.mediaQueryListener = null;
+    this.resizeListener = null;
+    this.socket = null;
+    this.heartbeatTimer = null;
+    this.reconnectTimer = null;
+    this.reconnectAttempt = 0;
+    this.manualSocketClose = false;
+    this.terminalExited = false;
+    this.inputDisposable = null;
+    this.resizeDisposable = null;
+    this.terminal = null;
+    this.fitAddon = null;
+    this.searchAddon = null;
+    this.serializeAddon = null;
+    this.rendererAddon = null;
+    this.loadedAddons = [];
+    this.pendingHandoffToken = typeof context?.transferState?.handoffToken === "string" && context.transferState.handoffToken.trim()
+      ? context.transferState.handoffToken.trim()
+      : null;
+    this.standbyHandoffToken = null;
+    this.standbyHandoffRequest = null;
+
+    injectStyles(this.ownerDocument);
+
+    this.root = this.ownerDocument.createElement("div");
+    this.root.className = "terminal-pane-xterm";
+    this.root.tabIndex = 0;
+    this.body = this.ownerDocument.createElement("div");
+    this.body.className = "terminal-body";
+    this.body.innerHTML = '<div class="terminal-placeholder">Bootstrapping xterm.js…</div>';
+    this.status = this.ownerDocument.createElement("span");
+    this.status.className = "terminal-status";
+    this.status.textContent = "Loading…";
+    this.root.append(this.body, this.status);
+    container.appendChild(this.root);
+
+    void this.bootstrap();
+  }
+
+  setStatus(message) {
+    this.status.textContent = message;
+    this.root.dataset.connectionStatus = message;
+    this.root.setAttribute("aria-label", `Terminal ${message}`);
+  }
+
+  async bootstrap() {
+    try {
+      const runtime = await loadXtermRuntime();
+      await ensureFontsReady(this.ownerDocument);
+      if (this.disposed) return;
+
+      const { Terminal } = runtime.xterm;
+      const terminal = new Terminal({
+        allowProposedApi: true,
+        convertEol: false,
+        cursorBlink: true,
+        cursorStyle: "block",
+        drawBoldTextInBrightColors: true,
+        fontFamily: getTerminalFontFamily(this.ownerDocument),
+        fontSize: 13,
+        lineHeight: 1.12,
+        scrollback: 10_000,
+        tabStopWidth: 8,
+        theme: buildTerminalTheme(this.ownerWindow, this.ownerDocument),
+        windowsMode: false,
+      });
+
+      this.terminal = terminal;
+      this.installPreOpenAddons(runtime);
+
+      this.body.innerHTML = "";
+      this.host = this.ownerDocument.createElement("div");
+      this.host.className = "terminal-host";
+      this.body.appendChild(this.host);
+      terminal.open(this.host);
+      this.installPostOpenAddons(runtime);
+      this.installClipboardAndSearchShortcuts();
+      this.installResizeSync();
+      this.installThemeSync();
+      this.scheduleResize(true);
+      this.queueResizeRetries();
+
+      await this.connectBackend();
+    } catch (error) {
+      console.error("[terminal-pane] failed to bootstrap xterm.js", error);
+      if (!this.disposed) {
+        this.body.innerHTML = `<div class="terminal-placeholder">Terminal failed to load: ${String(error?.message || error)}</div>`;
+        this.setStatus("Load failed");
+      }
     }
-    if (value.length === 6) {
-        return `#${value}${alphaHex}`;
+  }
+
+  loadAddon(addon, name) {
+    if (!addon || !this.terminal) return null;
+    try {
+      this.terminal.loadAddon(addon);
+      this.loadedAddons.push(name);
+      return addon;
+    } catch (error) {
+      console.warn(`[terminal-pane] failed to load xterm addon ${name}`, error);
+      return null;
     }
-    return hexColor;
-}
+  }
 
-export function buildTerminalTheme(runtimeWindow = typeof window !== 'undefined' ? window : null, runtimeDocument = typeof document !== 'undefined' ? document : null) {
-    const isDark = detectDarkTheme(runtimeWindow, runtimeDocument);
-    const palette = isDark ? DARK_TERMINAL_PALETTE : LIGHT_TERMINAL_PALETTE;
-    const background = readThemeVar('--bg-primary', isDark ? '#000000' : '#ffffff', runtimeDocument);
-    const themeTextPrimary = readThemeVar('--text-primary', isDark ? '#e7e9ea' : '#0f1419', runtimeDocument);
-    const foreground = ensureTerminalColorContrast(background, themeTextPrimary || getHighestContrastTextColor(background), 7);
-    const accent = readThemeVar('--accent-color', '#1d9bf0', runtimeDocument);
-    const danger = readThemeVar('--danger-color', isDark ? '#ff7b72' : '#cf222e', runtimeDocument);
-    const success = readThemeVar('--success-color', isDark ? '#7ee787' : '#1a7f37', runtimeDocument);
-    const hover = readThemeVar('--bg-hover', isDark ? '#1d1f23' : '#e8ebed', runtimeDocument);
-    const selectionBackground = readThemeVar('--accent-soft-strong', withAlpha(accent, isDark ? '47' : '33'), runtimeDocument);
+  installPreOpenAddons(runtime) {
+    const terminal = this.terminal;
+    if (!terminal) return;
 
-    return {
-        background,
-        foreground,
-        cursor: ensureTerminalColorContrast(background, accent, 3),
-        cursorAccent: background,
-        selectionBackground,
-        selectionForeground: foreground,
-        black: ensureTerminalColorContrast(background, hover, 3),
-        red: ensureTerminalColorContrast(background, danger, 4.5),
-        green: ensureTerminalColorContrast(background, success, 4.5),
-        yellow: ensureTerminalColorContrast(background, palette.yellow, 4.5),
-        blue: ensureTerminalColorContrast(background, accent, 4.5),
-        magenta: ensureTerminalColorContrast(background, palette.magenta, 4.5),
-        cyan: ensureTerminalColorContrast(background, palette.cyan, 4.5),
-        white: foreground,
-        brightBlack: ensureTerminalColorContrast(background, palette.brightBlack, 3),
-        brightRed: ensureTerminalColorContrast(background, palette.brightRed, 4.5),
-        brightGreen: ensureTerminalColorContrast(background, palette.brightGreen, 4.5),
-        brightYellow: ensureTerminalColorContrast(background, palette.brightYellow, 4.5),
-        brightBlue: ensureTerminalColorContrast(background, palette.brightBlue, 4.5),
-        brightMagenta: ensureTerminalColorContrast(background, palette.brightMagenta, 4.5),
-        brightCyan: ensureTerminalColorContrast(background, palette.brightCyan, 4.5),
-        brightWhite: foreground,
-    };
-}
+    this.fitAddon = this.loadAddon(new runtime.fit.FitAddon(), "fit");
 
-export function relocateTerminalPaneRoot(root: HTMLElement | null | undefined, container: HTMLElement | null | undefined): boolean {
-    if (!root || !container || typeof container.appendChild !== 'function') return false;
-    clearContainerContentBestEffort(container);
-    container.appendChild(root);
-    return true;
-}
+    this.loadAddon(new runtime.unicode11.Unicode11Addon(), "unicode11");
+    this.loadAddon(new runtime.unicodeGraphemes.UnicodeGraphemesAddon(), "unicode-graphemes");
+    try {
+      terminal.unicode.activeVersion = "15-graphemes";
+    } catch {
+      try { terminal.unicode.activeVersion = "11"; } catch {}
+    }
 
-export function blurActiveElementBeforeTerminalFocus(ownerDocument: Document | null | undefined): boolean {
-    const active = ownerDocument?.activeElement as HTMLElement | null | undefined;
-    if (!active || active === ownerDocument?.body || active === ownerDocument?.documentElement) return false;
-    if (typeof active.blur !== 'function') return false;
-    active.blur();
-    return true;
-}
+    this.loadAddon(new runtime.webLinks.WebLinksAddon(), "web-links");
+    this.searchAddon = this.loadAddon(new runtime.search.SearchAddon(), "search");
+    this.serializeAddon = this.loadAddon(new runtime.serialize.SerializeAddon(), "serialize");
+    this.loadAddon(new runtime.progress.ProgressAddon(), "progress");
 
-export function resetTerminalImeState(terminal: any, terminalHost?: HTMLElement | null): void {
-    const candidates = [
-        terminal?.inputElement,
-        terminal?.textarea,
-        terminal?.container,
-        terminalHost,
-        terminalHost?.querySelector?.('textarea'),
-    ].filter((element, index, all): element is HTMLElement => (
-        Boolean(element) && all.indexOf(element) === index
-    ));
+    try {
+      const provider = typeof runtime.clipboard.BrowserClipboardProvider === "function"
+        ? new runtime.clipboard.BrowserClipboardProvider()
+        : undefined;
+      this.loadAddon(new runtime.clipboard.ClipboardAddon(undefined, provider), "clipboard");
+    } catch (error) {
+      console.warn("[terminal-pane] clipboard addon unavailable", error);
+    }
 
-    for (const element of candidates) {
+    try {
+      this.loadAddon(new runtime.image.ImageAddon({ enableSizeReports: true, pixelLimit: 16_777_216, storageLimit: 10 }), "image");
+    } catch (error) {
+      console.warn("[terminal-pane] image addon unavailable", error);
+    }
+
+    // AttachAddon is intentionally not activated: Piclaw's terminal socket uses
+    // JSON control frames rather than a raw PTY byte stream. Keep it vendored and
+    // import-validated with the rest of the xterm family.
+    this.attachAddonModule = runtime.attach;
+  }
+
+  installPostOpenAddons(runtime) {
+    this.loadAddon(new runtime.ligatures.LigaturesAddon(), "ligatures");
+    // Renderer add-ons should be activated after ligatures so the renderer can
+    // pick up font-feature settings and the already-open terminal dimensions.
+    this.installRendererAddon(runtime);
+  }
+
+  installRendererAddon(runtime) {
+    const preferred = getPreferredRenderer(this.ownerWindow);
+    if (preferred === "webgl") {
+      try {
+        const addon = new runtime.webgl.WebglAddon(false);
+        addon.onContextLoss?.(() => {
+          console.warn("[terminal-pane] WebGL context lost; disposing renderer addon.");
+          try { addon.dispose(); } catch {}
+        });
+        this.rendererAddon = this.loadAddon(addon, "webgl");
+        if (this.rendererAddon) return;
+      } catch (error) {
+        console.warn("[terminal-pane] webgl renderer unavailable; falling back to canvas", error);
+      }
+    }
+
+    const CanvasAddon = runtime.canvas?.CanvasAddon || runtime.canvas?.default?.CanvasAddon || null;
+    if (typeof CanvasAddon === "function") {
+      try {
+        this.rendererAddon = this.loadAddon(new CanvasAddon(), "canvas");
+        if (this.rendererAddon) return;
+      } catch (error) {
+        console.warn("[terminal-pane] canvas renderer unavailable; using xterm default renderer", error);
+      }
+    }
+  }
+
+  installClipboardAndSearchShortcuts() {
+    const terminal = this.terminal;
+    if (!terminal?.attachCustomKeyEventHandler) return;
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (isCopyShortcut(event)) {
         try {
-            const ownerWindow = element.ownerDocument?.defaultView || window;
-            const event = typeof ownerWindow.CompositionEvent === 'function'
-                ? new ownerWindow.CompositionEvent('compositionend', { data: '' })
-                : new ownerWindow.Event('compositionend');
-            element.dispatchEvent?.(event);
+          const selected = typeof terminal.getSelection === "function" ? String(terminal.getSelection() || "") : "";
+          if (selected) void this.ownerWindow.navigator?.clipboard?.writeText?.(selected);
         } catch (error) {
-            console.debug('[terminal-pane] Failed to dispatch best-effort IME composition reset.', error);
+          console.debug("[terminal-pane] copy shortcut failed", error);
         }
-    }
-
-    if (terminal && typeof terminal === 'object') {
-        terminal.isComposing = false;
-        terminal.pendingKeyAfterComposition = null;
-        terminal.compositionJustEnded = false;
-    }
-}
-
-export function focusTerminalCleanly(options: {
-    terminal?: any;
-    terminalHost?: HTMLElement | null;
-    termEl?: HTMLElement | null;
-    ownerDocument?: Document | null;
-}): void {
-    blurActiveElementBeforeTerminalFocus(options.ownerDocument);
-    resetTerminalImeState(options.terminal, options.terminalHost || null);
-    if (typeof options.terminal?.focus === 'function') {
-        options.terminal.focus();
-    } else {
-        options.termEl?.focus?.();
-    }
-    resetTerminalImeState(options.terminal, options.terminalHost || null);
-}
-
-class TerminalPaneInstance implements PaneInstance {
-    private container: HTMLElement;
-    private ownerDocument: Document;
-    private ownerWindow: Window & typeof globalThis;
-    private disposed = false;
-    private termEl: HTMLElement;
-    private bodyEl: HTMLElement;
-    private statusEl: HTMLElement;
-    private terminal = null;
-    private fitAddon = null;
-    private socket = null;
-    private themeObserver = null;
-    private themeChangeListener = null;
-    private mediaQuery = null;
-    private mediaQueryListener = null;
-    private resizeObserver = null;
-    private dockResizeListener = null;
-    private windowResizeListener = null;
-    private resizeFrame = 0;
-    private resizeRetryTimers = new Set<number>();
-    private lastAppliedThemeSignature = null;
-    private lastResizeSignature: string | null = null;
-    private pendingHandoffToken: string | null = null;
-    private standbyHandoffToken: string | null = null;
-    private standbyHandoffRequest: Promise<string | null> | null = null;
-
-    constructor(container: HTMLElement, context: PaneContext) {
-        this.container = container;
-        this.ownerDocument = container.ownerDocument || document;
-        this.ownerWindow = (this.ownerDocument.defaultView || window) as Window & typeof globalThis;
-        const transferHandoffToken = typeof context?.transferState?.handoffToken === 'string' && context.transferState.handoffToken.trim()
-            ? context.transferState.handoffToken.trim()
-            : null;
-        const popoutHandoffToken = consumePanePopoutTransferToken('terminal_handoff');
-        this.pendingHandoffToken = transferHandoffToken || popoutHandoffToken || null;
-
-        this.termEl = this.ownerDocument.createElement('div');
-        this.termEl.className = 'terminal-pane-content';
-        this.termEl.setAttribute('tabindex', '0');
-        this.termEl.setAttribute('inputmode', 'none');
-
-        this.statusEl = this.ownerDocument.createElement('span');
-        this.statusEl.className = 'terminal-pane-status';
-        this.statusEl.textContent = 'Loading terminal…';
-
-        this.bodyEl = this.ownerDocument.createElement('div');
-        this.bodyEl.className = 'terminal-pane-body';
-        this.bodyEl.style.display = 'flex';
-        this.bodyEl.style.flex = '1 1 auto';
-        this.bodyEl.style.minHeight = '0';
-        this.bodyEl.innerHTML = '<div class="terminal-placeholder">Bootstrapping ghostty-web…</div>';
-
-        this.termEl.append(this.bodyEl);
-        container.appendChild(this.termEl);
-
-        void this.bootstrapGhostty();
-    }
-
-    private setStatus(message: string): void {
-        this.statusEl.textContent = message;
-        this.termEl.dataset.connectionStatus = message;
-        this.termEl.setAttribute('aria-label', `Terminal ${message}`);
-    }
-
-    private getResizeSignature(): string {
-        try {
-            const containerRect = this.container?.getBoundingClientRect?.();
-            const bodyRect = this.bodyEl?.getBoundingClientRect?.();
-            const cWidth = Number.isFinite(containerRect?.width) ? containerRect.width : 0;
-            const cHeight = Number.isFinite(containerRect?.height) ? containerRect.height : 0;
-            const bWidth = Number.isFinite(bodyRect?.width) ? bodyRect.width : 0;
-            const bHeight = Number.isFinite(bodyRect?.height) ? bodyRect.height : 0;
-            return `${Math.round(cWidth)}x${Math.round(cHeight)}:${Math.round(bWidth)}x${Math.round(bHeight)}`;
-        } catch {
-            return "0x0:0x0";
+        return true;
+      }
+      if (isPasteShortcut(event)) {
+        if (typeof this.ownerWindow.navigator?.clipboard?.readText === "function") {
+          void this.ownerWindow.navigator.clipboard.readText().then((text) => {
+            if (!this.disposed && text) terminal.paste?.(text);
+          }).catch((error) => console.debug("[terminal-pane] paste shortcut failed", error));
+          return true;
         }
+      }
+      if (isFindShortcut(event)) {
+        const query = this.ownerWindow.prompt?.("Find in terminal buffer", "");
+        if (query) this.searchAddon?.findNext?.(query);
+        return true;
+      }
+      return undefined;
+    });
+  }
+
+  applyTheme() {
+    if (!this.terminal) return;
+    const theme = buildTerminalTheme(this.ownerWindow, this.ownerDocument);
+    this.terminal.options.theme = theme;
+    this.root.style.backgroundColor = theme.background;
+    this.root.style.color = theme.foreground;
+    try { this.terminal.refresh?.(0, this.terminal.rows - 1); } catch {}
+    this.scheduleResize(true);
+  }
+
+  installThemeSync() {
+    const sync = () => this.ownerWindow.requestAnimationFrame(() => this.applyTheme());
+    this.themeChangeListener = sync;
+    this.ownerWindow.addEventListener("piclaw-theme-change", sync);
+    this.mediaQuery = this.ownerWindow.matchMedia?.("(prefers-color-scheme: dark)");
+    this.mediaQueryListener = sync;
+    if (this.mediaQuery?.addEventListener) this.mediaQuery.addEventListener("change", sync);
+    else if (this.mediaQuery?.addListener) this.mediaQuery.addListener(sync);
+    this.themeObserver = typeof MutationObserver !== "undefined" ? new MutationObserver(sync) : null;
+    this.themeObserver?.observe(this.ownerDocument.documentElement, { attributes: true, attributeFilter: ["class", "data-theme", "style"] });
+    if (this.ownerDocument.body) this.themeObserver?.observe(this.ownerDocument.body, { attributes: true, attributeFilter: ["class", "data-theme"] });
+    sync();
+  }
+
+  installResizeSync() {
+    this.resizeListener = () => this.scheduleResize();
+    this.ownerWindow.addEventListener("resize", this.resizeListener);
+    this.ownerWindow.addEventListener("dock-resize", this.resizeListener);
+    if (typeof ResizeObserver !== "undefined") {
+      this.resizeObserver = new ResizeObserver(() => this.scheduleResize());
+      this.resizeObserver.observe(this.container);
+      this.resizeObserver.observe(this.root);
+      this.resizeObserver.observe(this.body);
     }
+  }
 
-    private syncHostLayout(): void {
-        const host = this.bodyEl.querySelector('.terminal-live-host');
-        if (!(host instanceof HTMLElement)) return;
+  scheduleResize(force = false) {
+    if (this.disposed) return;
+    if (this.resizeFrame) this.ownerWindow.cancelAnimationFrame(this.resizeFrame);
+    this.resizeFrame = this.ownerWindow.requestAnimationFrame(() => {
+      this.resizeFrame = 0;
+      this.resize(force);
+    });
+  }
 
-        host.style.display = 'flex';
-        host.style.flex = '1 1 auto';
-        host.style.width = '100%';
-        host.style.height = '100%';
-        host.style.minWidth = '0';
-        host.style.minHeight = '0';
-        host.style.overflow = 'hidden';
-
-        // Do NOT set width/height/flex on the canvas — ghostty manages its own
-        // pixel-accurate canvas sizing via terminal.resize(). Overriding with
-        // CSS percentage values creates a resize feedback loop that freezes the UI.
-        const canvas = host.querySelector('canvas');
-        if (canvas instanceof HTMLElement) {
-            canvas.style.display = 'block';
-        }
+  queueResizeRetries(delays = [24, 72, 160, 320, 640]) {
+    for (const delay of delays) {
+      this.ownerWindow.setTimeout(() => {
+        if (!this.disposed) this.scheduleResize(true);
+      }, delay);
     }
+  }
 
-    private queueResizeRetries(delays: number[] = [32, 96, 180, 320, 520, 900]): void {
-        if (this.disposed || !this.ownerWindow) return;
-        this.clearResizeRetries();
-        for (const delay of delays) {
-            const timer = this.ownerWindow.setTimeout(() => {
-                this.resizeRetryTimers.delete(timer);
-                if (this.disposed) return;
-                this.scheduleResize(true);
-            }, delay);
-            this.resizeRetryTimers.add(timer);
-        }
-    }
+  resize(_force = false) {
+    if (!this.terminal) return;
+    try { this.fitAddon?.fit?.(); } catch (error) { console.debug("[terminal-pane] fit failed", error); }
+    this.sendResize();
+  }
 
-    private clearResizeRetries(): void {
-        if (!this.ownerWindow || this.resizeRetryTimers.size === 0) return;
-        for (const timer of Array.from(this.resizeRetryTimers)) {
-            try {
-                this.ownerWindow.clearTimeout(timer);
-            } catch (error) {
-                console.debug('[terminal-pane] Ignoring timeout clear failure during resize retry drain.', error, { timer });
-            }
-        }
-        this.resizeRetryTimers.clear();
-    }
+  sendResize() {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN || !this.terminal) return;
+    const cols = this.terminal.cols;
+    const rows = this.terminal.rows;
+    if (cols > 0 && rows > 0) this.socket.send(JSON.stringify({ type: "resize", cols, rows }));
+  }
 
-    private scheduleResize(force = false): void {
+  async ensureStandbyHandoffToken(force = false) {
+    if (this.disposed) return null;
+    if (!force && this.standbyHandoffToken) return this.standbyHandoffToken;
+    if (this.standbyHandoffRequest) return await this.standbyHandoffRequest;
+    this.standbyHandoffRequest = requestTerminalHandoff()
+      .then((token) => {
+        if (token && !this.disposed) this.standbyHandoffToken = token;
+        return token || null;
+      })
+      .catch((error) => {
+        console.warn("[terminal-pane] failed to prepare handoff token", error);
+        return null;
+      })
+      .finally(() => { this.standbyHandoffRequest = null; });
+    return await this.standbyHandoffRequest;
+  }
+
+  consumeStandbyHandoffToken() {
+    const token = this.standbyHandoffToken || null;
+    this.standbyHandoffToken = null;
+    return token;
+  }
+
+  installTerminalSocketBridge() {
+    const terminal = this.terminal;
+    if (!terminal || this.inputDisposable || this.resizeDisposable) return;
+    this.inputDisposable = terminal.onData((data) => {
+      const socket = this.socket;
+      if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "input", data }));
+    });
+    this.resizeDisposable = terminal.onResize(({ cols, rows }) => {
+      const socket = this.socket;
+      if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "resize", cols, rows }));
+    });
+  }
+
+  clearHeartbeat() {
+    if (!this.heartbeatTimer) return;
+    this.ownerWindow.clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = null;
+  }
+
+  startHeartbeat() {
+    this.clearHeartbeat();
+    this.heartbeatTimer = this.ownerWindow.setInterval(() => {
+      if (this.disposed || this.terminalExited) return;
+      const socket = this.socket;
+      if (socket?.readyState !== WebSocket.OPEN) return;
+      try {
+        socket.send(JSON.stringify({ type: "ping", ts: Date.now() }));
+      } catch (error) {
+        console.debug("[terminal-pane] heartbeat send failed", error);
+      }
+    }, TERMINAL_HEARTBEAT_MS);
+  }
+
+  clearReconnectTimer() {
+    if (!this.reconnectTimer) return;
+    this.ownerWindow.clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+  }
+
+  scheduleReconnect(reason = "socket close") {
+    if (this.disposed || this.terminalExited) return;
+    this.clearHeartbeat();
+    this.clearReconnectTimer();
+    const index = Math.min(this.reconnectAttempt, TERMINAL_RECONNECT_DELAYS_MS.length - 1);
+    const delay = TERMINAL_RECONNECT_DELAYS_MS[index];
+    this.reconnectAttempt += 1;
+    this.setStatus(`Reconnecting…`);
+    this.reconnectTimer = this.ownerWindow.setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.disposed || this.terminalExited) return;
+      console.info("[terminal-pane] reconnecting terminal websocket", { reason, attempt: this.reconnectAttempt });
+      void this.connectBackend({ reconnect: true });
+    }, delay);
+  }
+
+  async connectBackend(options = {}) {
+    const terminal = this.terminal;
+    if (!terminal) return;
+    this.installTerminalSocketBridge();
+    try {
+      const clientToken = getOrCreateAnonymousTerminalClientToken(this.ownerWindow);
+      const session = await fetchTerminalSession(clientToken);
+      if (this.disposed) return;
+      if (!session?.enabled) {
+        terminal.write(`Terminal backend unavailable: ${session?.error || "disabled"}\r\n`);
+        this.setStatus("Unavailable");
+        return;
+      }
+
+      const handoffToken = this.pendingHandoffToken || null;
+      const socket = new WebSocket(buildTerminalWebSocketUrl(session.ws_path || "/terminal/ws", handoffToken, clientToken, this.ownerWindow));
+      this.socket = socket;
+      this.manualSocketClose = false;
+      this.setStatus(handoffToken ? "Transferring…" : options.reconnect ? "Reconnecting…" : "Connecting…");
+
+      socket.addEventListener("open", () => {
         if (this.disposed) return;
-
-        const signature = this.getResizeSignature();
-        if (!force && this.lastResizeSignature === signature) {
-            return;
-        }
-
-        if (this.resizeFrame) {
-            cancelAnimationFrame(this.resizeFrame);
-        }
-        this.resizeFrame = requestAnimationFrame(() => {
-            this.resizeFrame = 0;
-            this.lastResizeSignature = this.getResizeSignature();
-            this.resize();
-        });
-    }
-
-    private async bootstrapGhostty(): Promise<void> {
-        try {
-            const mod = await loadGhosttyWeb();
-            await ensureTerminalFontsReady();
-            if (this.disposed) return;
-
-            this.bodyEl.innerHTML = '';
-            const terminalHost = this.ownerDocument.createElement('div');
-            terminalHost.className = 'terminal-live-host';
-            terminalHost.style.display = 'flex';
-            terminalHost.style.flex = '1 1 auto';
-            terminalHost.style.width = '100%';
-            terminalHost.style.height = '100%';
-            terminalHost.style.minWidth = '0';
-            terminalHost.style.minHeight = '0';
-            terminalHost.setAttribute('inputmode', 'none');
-            this.bodyEl.appendChild(terminalHost);
-
-            const terminal = new mod.Terminal({
-                cols: 120,
-                rows: 30,
-                cursorBlink: true,
-                fontFamily: TERMINAL_FONT_FAMILY,
-                fontSize: 13,
-                theme: buildTerminalTheme(this.ownerWindow, this.ownerDocument),
-            });
-
-            let fitAddon = null;
-            if (typeof mod.FitAddon === 'function') {
-                fitAddon = new mod.FitAddon();
-                terminal.loadAddon?.(fitAddon);
-            }
-
-            blurActiveElementBeforeTerminalFocus(this.ownerDocument);
-            await terminal.open(terminalHost);
-            (terminalHost as any).__terminal = terminal;
-            resetTerminalImeState(terminal, terminalHost);
-            this.syncHostLayout();
-            terminal.loadFonts?.();
-            fitAddon?.observeResize?.();
-
-            this.terminal = terminal;
-            this.fitAddon = fitAddon;
-            this.installClipboardShortcutBridge();
-            this.installThemeSync();
-            this.installResizeSync();
-            this.scheduleResize(true);
-            this.queueResizeRetries([32, 96, 180, 320]);
-
-            await this.connectBackend();
-        } catch (error) {
-            console.error('[terminal-pane] Failed to bootstrap ghostty-web:', error);
-            if (this.disposed) return;
-            this.bodyEl.innerHTML = '<div class="terminal-placeholder">Terminal failed to load. Check vendored assets and backend wiring.</div>';
-            this.setStatus('Load failed');
-        }
-    }
-
-    private installClipboardShortcutBridge(): void {
-        const terminal = this.terminal as any;
-        if (!terminal || typeof terminal.attachCustomKeyEventHandler !== 'function') {
-            return;
-        }
-
-        terminal.attachCustomKeyEventHandler((event: KeyboardEvent) => {
-            if (isTerminalClipboardCopyShortcut(event)) {
-                try {
-                    const copied = terminal.copySelection?.();
-                    if (!copied) {
-                        const selected = typeof terminal.getSelection === 'function' ? String(terminal.getSelection() || '') : '';
-                        if (selected) {
-                            void this.ownerWindow?.navigator?.clipboard?.writeText?.(selected).catch((error: unknown) => {
-                                console.debug('[terminal-pane] Clipboard write fallback failed.', error);
-                            });
-                        }
-                    }
-                } catch (error) {
-                    console.debug('[terminal-pane] Clipboard copy shortcut failed.', error);
-                }
-                return true;
-            }
-
-            if (isTerminalClipboardPasteShortcut(event)) {
-                if (typeof this.ownerWindow?.navigator?.clipboard?.readText !== 'function') {
-                    // Clipboard API unavailable — fall through to ghostty default handling.
-                    return undefined as unknown as boolean;
-                }
-                void readClipboardTextBestEffort(this.ownerWindow?.navigator).then((text) => {
-                    if (typeof text !== 'string' || !text.length || this.disposed) return;
-                    terminal.paste?.(text);
-                });
-                return true;
-            }
-
-            // Fall through to ghostty's default key processing.
-            // ghostty contract: true = handled (preventDefault), false = skip processing,
-            // undefined/other = continue with default terminal handling.
-            return undefined as unknown as boolean;
-        });
-    }
-
-    private applyTheme() {
-        if (!this.terminal) return;
-        const theme = buildTerminalTheme(this.ownerWindow, this.ownerDocument);
-        const themeSignature = JSON.stringify(theme);
-        const themeChanged = this.lastAppliedThemeSignature !== null && this.lastAppliedThemeSignature !== themeSignature;
-        applyTerminalThemeBestEffort({
-            termEl: this.termEl,
-            bodyEl: this.bodyEl,
-            terminal: this.terminal,
-            theme,
-            themeChanged,
-            socket: this.socket,
-            resize: () => this.resize(),
-        });
-        this.lastAppliedThemeSignature = themeSignature;
-    }
-
-    private installThemeSync() {
-        if (!this.ownerWindow || !this.ownerDocument) return;
-        const syncTheme = () => requestAnimationFrame(() => this.applyTheme());
-        syncTheme();
-
-        const onThemeChange = () => syncTheme();
-        this.ownerWindow.addEventListener('piclaw-theme-change', onThemeChange);
-        this.themeChangeListener = onThemeChange;
-
-        const media = this.ownerWindow.matchMedia?.('(prefers-color-scheme: dark)');
-        const onMediaChange = () => syncTheme();
-        if (media?.addEventListener) media.addEventListener('change', onMediaChange);
-        else if (media?.addListener) media.addListener(onMediaChange);
-        this.mediaQuery = media;
-        this.mediaQueryListener = onMediaChange;
-
-        const observer = typeof MutationObserver !== 'undefined'
-            ? new MutationObserver(() => syncTheme())
-            : null;
-        observer?.observe(this.ownerDocument.documentElement, {
-            attributes: true,
-            attributeFilter: ['class', 'data-theme', 'style'],
-        });
-        if (this.ownerDocument.body) {
-            observer?.observe(this.ownerDocument.body, {
-                attributes: true,
-                attributeFilter: ['class', 'data-theme'],
-            });
-        }
-        this.themeObserver = observer;
-    }
-
-    private installResizeSync() {
-        if (!this.ownerWindow) return;
-
-        const onDockResize = () => this.scheduleResize();
-        const onWindowResize = () => this.scheduleResize();
-        this.ownerWindow.addEventListener('dock-resize', onDockResize);
-        this.ownerWindow.addEventListener('resize', onWindowResize);
-        this.dockResizeListener = onDockResize;
-        this.windowResizeListener = onWindowResize;
-
-        if (typeof ResizeObserver !== 'undefined') {
-            const observer = new ResizeObserver(() => {
-                if (this.disposed) return;
-                this.scheduleResize();
-            });
-            observer.observe(this.container);
-            observer.observe(this.termEl);
-            observer.observe(this.bodyEl);
-            this.resizeObserver = observer;
-        }
-    }
-
-    private consumeStandbyHandoffToken(): string | null {
-        const token = this.standbyHandoffToken || null;
-        this.standbyHandoffToken = null;
-        return token;
-    }
-
-    private async ensureStandbyHandoffToken(force = false): Promise<string | null> {
-        if (this.disposed) return null;
-        if (!force && this.standbyHandoffToken) {
-            return this.standbyHandoffToken;
-        }
-        if (this.standbyHandoffRequest) {
-            return await this.standbyHandoffRequest;
-        }
-        this.standbyHandoffRequest = requestTerminalHandoff()
-            .then((token) => {
-                if (!token || this.disposed) {
-                    return null;
-                }
-                this.standbyHandoffToken = token;
-                return token;
-            })
-            .catch((error) => {
-                console.warn('[terminal-pane] Failed to prepare standby handoff token:', error);
-                return null;
-            })
-            .finally(() => {
-                this.standbyHandoffRequest = null;
-            });
-        return await this.standbyHandoffRequest;
-    }
-
-    private async connectBackend() {
-        const terminal = this.terminal;
-        if (!terminal) return;
-
-        try {
-            const session = await fetchTerminalSession();
-            if (this.disposed) return;
-
-            if (!session?.enabled) {
-                terminal.write?.(`Terminal backend unavailable: ${session?.error || 'disabled'}\r\n`);
-                this.setStatus('Unavailable');
-                return;
-            }
-
-            const handoffToken = this.pendingHandoffToken || null;
-            const socket = new WebSocket(buildTerminalWebSocketUrl(session.ws_path || '/terminal/ws', handoffToken));
-            this.socket = socket;
-            this.setStatus(handoffToken ? 'Transferring…' : 'Connecting…');
-
-            terminal.onData?.((data) => {
-                if (socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({ type: 'input', data }));
-                }
-            });
-
-            terminal.onResize?.(({ cols, rows }) => {
-                if (socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({ type: 'resize', cols, rows }));
-                }
-            });
-
-            socket.addEventListener('open', () => {
-                if (this.disposed) return;
-                if (handoffToken && this.pendingHandoffToken === handoffToken) {
-                    this.pendingHandoffToken = null;
-                }
-                void this.ensureStandbyHandoffToken(false);
-                this.setStatus('Connected');
-                this.scheduleResize(true);
-                this.queueResizeRetries([24, 72, 160, 320]);
-            });
-
-            socket.addEventListener('message', (event) => {
-                if (this.disposed) return;
-                let payload = null;
-                try {
-                    payload = JSON.parse(String(event.data));
-                } catch {
-                    payload = { type: 'output', data: String(event.data) };
-                }
-
-                if (payload?.type === 'session') {
-                    const sessionId = typeof payload.session_id === 'string' ? payload.session_id : null;
-                    (terminal as any).__piclawSessionMeta = {
-                        sessionId,
-                        createdAt: typeof payload.created_at === 'string' ? payload.created_at : null,
-                        processPid: typeof payload.process_pid === 'number' ? payload.process_pid : null,
-                    };
-                    if (!this.standbyHandoffToken) {
-                        void this.ensureStandbyHandoffToken(false);
-                    }
-                    return;
-                }
-                if (payload?.type === 'output' && typeof payload.data === 'string') {
-                    terminal.write?.(payload.data);
-                    return;
-                }
-                if (payload?.type === 'exit') {
-                    terminal.write?.(`\r\n[terminal exited]\r\n`);
-                    this.setStatus('Exited');
-                }
-            });
-
-            socket.addEventListener('close', () => {
-                if (this.disposed) return;
-                this.setStatus('Disconnected');
-            });
-
-            socket.addEventListener('error', () => {
-                if (this.disposed) return;
-                this.setStatus('Connection error');
-            });
-        } catch (error) {
-            terminal.write?.(`Terminal backend unavailable: ${error instanceof Error ? error.message : String(error)}\r\n`);
-            this.setStatus('Unavailable');
-        }
-    }
-
-    private sendResize() {
-        if (!this.socket || this.socket.readyState !== WebSocket.OPEN || !this.fitAddon?.proposeDimensions) {
-            return;
-        }
-        const dims = this.fitAddon.proposeDimensions();
-        if (!dims) return;
-        this.socket.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
-    }
-
-    private detachHostListeners(): void {
-        detachTerminalHostListenersBestEffort({
-            ownerWindow: this.ownerWindow,
-            themeChangeListener: this.themeChangeListener,
-            mediaQuery: this.mediaQuery,
-            mediaQueryListener: this.mediaQueryListener,
-            dockResizeListener: this.dockResizeListener,
-            windowResizeListener: this.windowResizeListener,
-            themeObserver: this.themeObserver,
-            resizeObserver: this.resizeObserver,
-        });
-        this.themeChangeListener = null;
-        this.mediaQuery = null;
-        this.mediaQueryListener = null;
-        this.themeObserver = null;
-        this.resizeObserver = null;
-        this.dockResizeListener = null;
-        this.windowResizeListener = null;
-    }
-
-    beforeDetachFromHost(): void {
-        this.setStatus('Moving terminal…');
-    }
-
-    afterAttachToHost(context?: { transferState?: Record<string, unknown> | null }): void {
-        const transferHandoffToken = typeof context?.transferState?.handoffToken === 'string' && context.transferState.handoffToken.trim()
-            ? context.transferState.handoffToken.trim()
-            : null;
-        if (transferHandoffToken) {
-            this.pendingHandoffToken = transferHandoffToken;
-        }
-        this.installThemeSync();
-        this.installResizeSync();
-        if (this.socket?.readyState === WebSocket.OPEN) {
-            this.setStatus('Connected');
-        } else if (this.pendingHandoffToken) {
-            this.setStatus('Transferring…');
-        } else if (this.socket?.readyState === WebSocket.CONNECTING) {
-            this.setStatus('Connecting…');
-        }
+        this.reconnectAttempt = 0;
+        this.clearReconnectTimer();
+        this.startHeartbeat();
+        if (handoffToken && this.pendingHandoffToken === handoffToken) this.pendingHandoffToken = null;
+        void this.ensureStandbyHandoffToken(false);
+        this.setStatus("Connected");
+        terminal.focus();
         this.scheduleResize(true);
-        this.queueResizeRetries([32, 96, 180, 320]);
-        requestAnimationFrame(() => this.focus());
-    }
+        this.queueResizeRetries([24, 72, 160, 320]);
+      });
 
-    moveHost(_container: HTMLElement): boolean {
-        return false;
+      socket.addEventListener("message", (event) => this.handleSocketMessage(event));
+      socket.addEventListener("close", (event) => {
+        if (this.socket !== socket) return;
+        this.socket = null;
+        this.clearHeartbeat();
+        if (this.disposed || this.manualSocketClose || this.terminalExited) return;
+        console.warn("[terminal-pane] terminal websocket closed; scheduling reconnect", { code: event.code, reason: event.reason });
+        this.scheduleReconnect(event.reason || `close ${event.code}`);
+      });
+      socket.addEventListener("error", () => {
+        if (this.disposed || this.terminalExited) return;
+        this.setStatus("Connection error");
+      });
+    } catch (error) {
+      if (options.reconnect) {
+        console.warn("[terminal-pane] reconnect failed", error);
+        this.scheduleReconnect(error instanceof Error ? error.message : String(error));
+        return;
+      }
+      terminal.write(`Terminal backend unavailable: ${error instanceof Error ? error.message : String(error)}\r\n`);
+      this.setStatus("Unavailable");
     }
+  }
 
-    exportHostTransferState(): Record<string, unknown> | null {
-        const handoffToken = this.standbyHandoffToken || this.pendingHandoffToken || null;
-        return handoffToken
-            ? {
-                kind: 'terminal',
-                live: false,
-                handoffToken,
-            }
-            : null;
-    }
+  handleSocketMessage(event) {
+    if (this.disposed || !this.terminal) return;
+    let payload;
+    try { payload = JSON.parse(String(event.data)); }
+    catch { payload = { type: "output", data: String(event.data) }; }
 
-    async preparePopoutTransfer(): Promise<Record<string, string> | null> {
-        let handoffToken = this.consumeStandbyHandoffToken();
-        if (!handoffToken) {
-            await this.ensureStandbyHandoffToken(true);
-            handoffToken = this.consumeStandbyHandoffToken();
-        }
-        if (!handoffToken) return null;
-        this.pendingHandoffToken = handoffToken;
-        return { terminal_handoff: handoffToken };
+    if (payload?.type === "session") {
+      this.terminal.__piclawSessionMeta = {
+        sessionId: typeof payload.session_id === "string" ? payload.session_id : null,
+        createdAt: typeof payload.created_at === "string" ? payload.created_at : null,
+        processPid: typeof payload.process_pid === "number" ? payload.process_pid : null,
+      };
+      void this.ensureStandbyHandoffToken(false);
+      return;
     }
+    if (payload?.type === "output" && typeof payload.data === "string") {
+      this.terminal.write(payload.data);
+      return;
+    }
+    if (payload?.type === "exit") {
+      this.terminalExited = true;
+      this.clearHeartbeat();
+      this.clearReconnectTimer();
+      this.terminal.write("\r\n[terminal exited]\r\n");
+      this.setStatus("Exited");
+    }
+  }
 
-    getContent(): string | undefined {
-        return undefined;
-    }
+  beforeDetachFromHost() {
+    this.setStatus("Moving…");
+  }
 
-    isDirty(): boolean {
-        return false;
-    }
+  afterAttachToHost(context = {}) {
+    const token = typeof context?.transferState?.handoffToken === "string" && context.transferState.handoffToken.trim()
+      ? context.transferState.handoffToken.trim()
+      : null;
+    if (token) this.pendingHandoffToken = token;
+    this.scheduleResize(true);
+    this.queueResizeRetries();
+    this.ownerWindow.requestAnimationFrame(() => this.focus());
+  }
 
-    focus(): void {
-        const terminalHost = this.bodyEl.querySelector('.terminal-live-host') as HTMLElement | null;
-        focusTerminalCleanly({
-            terminal: this.terminal,
-            terminalHost,
-            termEl: this.termEl,
-            ownerDocument: this.ownerDocument,
-        });
-    }
+  moveHost(_container) {
+    return false;
+  }
 
-    resize(): void {
-        resizeTerminalRuntimeBestEffort({
-            syncHostLayout: () => this.syncHostLayout(),
-            terminal: this.terminal,
-            fitAddon: this.fitAddon,
-            sendResize: () => this.sendResize(),
-        });
-    }
+  exportHostTransferState() {
+    const handoffToken = this.standbyHandoffToken || this.pendingHandoffToken || null;
+    return handoffToken ? { kind: "terminal", live: false, handoffToken } : null;
+  }
 
-    dispose(): void {
-        if (this.disposed) return;
-        this.disposed = true;
-        this.standbyHandoffToken = null;
-        this.standbyHandoffRequest = null;
-        this.clearResizeRetries();
-        this.detachHostListeners();
-        this.resizeFrame = disposeTerminalRuntimeBestEffort({
-            resizeFrame: this.resizeFrame,
-            socket: this.socket,
-            fitAddon: this.fitAddon,
-            terminal: this.terminal,
-            termEl: this.termEl,
-        });
+  async preparePopoutTransfer() {
+    let handoffToken = this.consumeStandbyHandoffToken();
+    if (!handoffToken) {
+      await this.ensureStandbyHandoffToken(true);
+      handoffToken = this.consumeStandbyHandoffToken();
     }
+    if (!handoffToken) return null;
+    this.pendingHandoffToken = handoffToken;
+    return { terminal_handoff: handoffToken };
+  }
+
+  getContent() {
+    try { return this.serializeAddon?.serialize?.(); } catch { return undefined; }
+  }
+
+  isDirty() { return false; }
+
+  focus() {
+    try { this.terminal?.focus?.(); } catch { this.root?.focus?.(); }
+  }
+
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    if (this.resizeFrame) this.ownerWindow.cancelAnimationFrame(this.resizeFrame);
+    this.manualSocketClose = true;
+    this.clearHeartbeat();
+    this.clearReconnectTimer();
+    try { this.inputDisposable?.dispose?.(); } catch {}
+    try { this.resizeDisposable?.dispose?.(); } catch {}
+    try { this.socket?.close?.(); } catch {}
+    try { this.resizeObserver?.disconnect?.(); } catch {}
+    try { this.themeObserver?.disconnect?.(); } catch {}
+    if (this.resizeListener) {
+      this.ownerWindow.removeEventListener("resize", this.resizeListener);
+      this.ownerWindow.removeEventListener("dock-resize", this.resizeListener);
+    }
+    if (this.themeChangeListener) this.ownerWindow.removeEventListener("piclaw-theme-change", this.themeChangeListener);
+    if (this.mediaQuery && this.mediaQueryListener) {
+      if (this.mediaQuery.removeEventListener) this.mediaQuery.removeEventListener("change", this.mediaQueryListener);
+      else if (this.mediaQuery.removeListener) this.mediaQuery.removeListener(this.mediaQueryListener);
+    }
+    try { this.rendererAddon?.dispose?.(); } catch {}
+    try { this.fitAddon?.dispose?.(); } catch {}
+    try { this.terminal?.dispose?.(); } catch {}
+    this.root?.remove?.();
+  }
 }
 
-export const terminalPaneExtension: WebPaneExtension = {
-    id: 'terminal',
-    label: 'Terminal',
-    icon: 'terminal',
-    capabilities: ['terminal'] as PaneCapability[],
-    placement: 'dock',
-
-    mount(container: HTMLElement, context: PaneContext): PaneInstance {
-        return new TerminalPaneInstance(container, context);
-    },
+export const terminalPaneExtension = {
+  id: "terminal",
+  label: "Terminal",
+  icon: "terminal",
+  capabilities: ["terminal"],
+  placement: "dock",
+  mount(container, context) {
+    return new TerminalPaneInstance(container, context);
+  },
 };
 
-export const terminalTabPaneExtension: WebPaneExtension = {
-    id: 'terminal-tab',
-    label: 'Terminal',
-    icon: 'terminal',
-    capabilities: ['terminal'] as PaneCapability[],
-    placement: 'tabs',
-
-    canHandle(context: PaneContext): boolean | number {
-        return context?.path === TERMINAL_TAB_PATH ? 10_000 : false;
-    },
-
-    mount(container: HTMLElement, context: PaneContext): PaneInstance {
-        return new TerminalPaneInstance(container, context);
-    },
+export const terminalTabPaneExtension = {
+  id: "terminal-tab",
+  label: "Terminal",
+  icon: "terminal",
+  capabilities: ["terminal"],
+  placement: "tabs",
+  canHandle(context) {
+    return context?.path === TERMINAL_TAB_PATH ? 10_000 : false;
+  },
+  mount(container, context) {
+    return new TerminalPaneInstance(container, context);
+  },
 };
+
+export function isCoreTerminalRenderer() {
+  return true;
+}

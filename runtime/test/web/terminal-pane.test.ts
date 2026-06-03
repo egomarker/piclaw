@@ -7,13 +7,11 @@ import { tryRun } from "../helpers.js";
 
 import {
     buildTerminalTheme,
-    focusTerminalCleanly,
+    buildTerminalWebSocketUrl,
     getOrCreateAnonymousTerminalClientToken,
-    isTerminalClipboardCopyShortcut,
-    isTerminalClipboardPasteShortcut,
-    readClipboardTextBestEffort,
-    relocateTerminalPaneRoot,
-    resetTerminalImeState,
+    isCoreTerminalRenderer,
+    terminalPaneExtension,
+    terminalTabPaneExtension,
 } from '../../web/src/panes/terminal-pane.js';
 
 function parseHexColor(input: string) {
@@ -178,13 +176,7 @@ const imageViewerExt: WebPaneExtension = {
 };
 
 /** Terminal pane (dock) */
-const terminalExt: WebPaneExtension = {
-    id: 'terminal',
-    label: 'Terminal',
-    capabilities: ['terminal'],
-    placement: 'dock',
-    mount: mockMount,
-};
+const terminalExt: WebPaneExtension = terminalPaneExtension as WebPaneExtension;
 
 // --- Tests ---
 
@@ -284,102 +276,19 @@ test('buildTerminalTheme preserves dark theme foregrounds instead of forcing pur
     }
 });
 
-test('relocateTerminalPaneRoot moves the existing terminal shell into a new host container', () => {
-    const root = { id: 'terminal-root' } as any;
-    const children: any[] = [];
-    const host: any = {
-        innerHTML: 'occupied',
-        appendChild: (node: any) => children.push(node),
-    };
-
-    expect(relocateTerminalPaneRoot(root, host)).toBe(true);
-    expect(host.innerHTML).toBe('');
-    expect(children).toEqual([root]);
-    expect(relocateTerminalPaneRoot(root, null as any)).toBe(false);
-});
-
-test('resetTerminalImeState clears ghostty composition state and emits compositionend', () => {
-    const events: string[] = [];
-    const textarea: any = {
-        ownerDocument: {
-            defaultView: {
-                CompositionEvent: class {
-                    type: string;
-                    data: string;
-                    constructor(type: string, init: { data?: string } = {}) {
-                        this.type = type;
-                        this.data = init.data || '';
-                    }
-                },
-            },
-        },
-        dispatchEvent(event: { type: string }) {
-            events.push(event.type);
-            return true;
-        },
-    };
-    const terminal: any = {
-        isComposing: true,
-        pendingKeyAfterComposition: 'a',
-        compositionJustEnded: true,
-        inputElement: textarea,
-    };
-
-    resetTerminalImeState(terminal, null as any);
-
-    expect(events).toEqual(['compositionend']);
-    expect(terminal.isComposing).toBe(false);
-    expect(terminal.pendingKeyAfterComposition).toBeNull();
-    expect(terminal.compositionJustEnded).toBe(false);
-});
-
-test('focusTerminalCleanly blurs previous focus before focusing terminal', () => {
-    const events: string[] = [];
-    const ownerDocument: any = {
-        body: {},
-        documentElement: {},
-        activeElement: { blur: () => events.push('blur') },
-    };
-    const terminal: any = {
-        isComposing: true,
-        focus: () => events.push('focus'),
-    };
-
-    focusTerminalCleanly({ terminal, ownerDocument });
-
-    expect(events).toEqual(['blur', 'focus']);
-    expect(terminal.isComposing).toBe(false);
-});
-
-test('terminal clipboard shortcut detection matches terminal conventions', () => {
-    expect(isTerminalClipboardCopyShortcut({ code: 'KeyC', ctrlKey: true, shiftKey: true })).toBe(true);
-    expect(isTerminalClipboardCopyShortcut({ key: 'c', ctrlKey: true, shiftKey: true })).toBe(true);
-    expect(isTerminalClipboardCopyShortcut({ code: 'KeyC', ctrlKey: true, shiftKey: false })).toBe(false);
-
-    expect(isTerminalClipboardPasteShortcut({ code: 'KeyV', ctrlKey: true, shiftKey: true })).toBe(true);
-    expect(isTerminalClipboardPasteShortcut({ key: 'Insert', shiftKey: true })).toBe(true);
-    expect(isTerminalClipboardPasteShortcut({ code: 'KeyV', ctrlKey: true, shiftKey: false })).toBe(false);
-});
-
-test('readClipboardTextBestEffort gracefully handles missing API and failures', async () => {
-    expect(await readClipboardTextBestEffort(null as any)).toBeNull();
-    expect(await readClipboardTextBestEffort({ clipboard: {} } as any)).toBeNull();
-
-    const failingNavigator = {
-        clipboard: {
-            readText: async () => {
-                throw new Error('denied');
-            },
-        },
+test('buildTerminalWebSocketUrl carries handoff and anonymous client tokens', () => {
+    const runtimeWindow = {
+        location: { protocol: 'https:', host: 'example.test' },
     } as any;
-    expect(await readClipboardTextBestEffort(failingNavigator)).toBeNull();
 
-    const okNavigator = {
-        clipboard: {
-            readText: async () => 'hello',
-        },
-    } as any;
-    expect(await readClipboardTextBestEffort(okNavigator)).toBe('hello');
+    expect(buildTerminalWebSocketUrl('/terminal/ws', 'handoff-1', 'client-1', runtimeWindow))
+        .toBe('wss://example.test/terminal/ws?handoff=handoff-1&client=client-1');
+});
+
+test('core terminal renderer is the xterm implementation, not the optional Ghostty add-on', () => {
+    expect(isCoreTerminalRenderer()).toBe(true);
+    expect(terminalPaneExtension.label).toBe('Terminal');
+    expect(terminalTabPaneExtension.label).toBe('Terminal');
 });
 
 test('getOrCreateAnonymousTerminalClientToken persists a stable client token', () => {
@@ -414,11 +323,8 @@ describe('Terminal pane extension', () => {
         expect(terminalExt.capabilities).toContain('terminal');
     });
 
-    test('mount returns a PaneInstance', () => {
-        const instance = terminalExt.mount(null as any, { mode: 'view' });
-        expect(instance.getContent()).toBeUndefined();
-        expect(instance.isDirty()).toBe(false);
-        instance.dispose();
+    test('exposes a browser mount function', () => {
+        expect(typeof terminalExt.mount).toBe('function');
     });
 });
 

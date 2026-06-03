@@ -71,10 +71,6 @@ export async function handleShellRoutes(
     return channel.serveStatic("sw.js", req);
   }
 
-  if (req.method === "GET" && pathname === "/ghostty-vt.wasm") {
-    return channel.serveStatic("common/js/vendor/ghostty-vt.wasm", req);
-  }
-
   if (flags.isStaticAsset) {
     const rel = pathname.replace("/static/", "");
     return channel.serveStatic(rel, req);
