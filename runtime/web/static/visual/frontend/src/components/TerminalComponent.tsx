@@ -1,13 +1,32 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { init, Terminal, FitAddon } from "ghostty-web";
-import type { ITheme } from "ghostty-web";
+import { Terminal as XtermTerminal } from "../../../../common/js/vendor/xterm/xterm.mjs";
+import { FitAddon as XtermFitAddon } from "../../../../common/js/vendor/xterm/addon-fit.mjs";
 
 import { createLogger } from "../utils/logger";
 const log = createLogger("terminal");
 
+type TerminalTheme = Record<string, string>;
+type TerminalDimensions = { cols: number; rows: number };
+type Disposable = { dispose: () => void };
+
+interface TerminalInstance {
+  open(container: HTMLElement): void;
+  write(data: string): void;
+  resize(cols: number, rows: number): void;
+  loadAddon(addon: unknown): void;
+  onData(callback: (data: string) => void): Disposable;
+  onResize(callback: (dims: TerminalDimensions) => void): Disposable;
+  dispose(): void;
+}
+
+interface FitAddonInstance {
+  fit(): void;
+  proposeDimensions(): TerminalDimensions | undefined;
+  dispose?(): void;
+}
 
 // Catppuccin Mocha theme colors matching theme.ts dark theme
-const CATPPUCCIN_MOCHA_THEME: ITheme = {
+const CATPPUCCIN_MOCHA_THEME: TerminalTheme = {
   foreground: "#cdd6f4",
   background: "#11111b",
   cursor: "#f5e0dc",
@@ -50,47 +69,11 @@ function getTerminalClientId(): string {
   return id;
 }
 
-let wasmInitialized = false;
-let wasmInitPromise: Promise<void> | null = null;
-
-/**
- * Intercept fetch calls for data: WASM URLs and redirect to the vendored file.
- * ghostty-web's bundled init() tries to fetch the WASM as a base64 data: URL,
- * which fails in non-secure contexts. This shim rewrites to the vendored path.
- */
-const GHOSTTY_WASM_PATH = "/static/common/js/vendor/ghostty-vt.wasm";
-const originalFetch = globalThis.fetch;
-
-async function withWasmFetchShim<T>(fn: () => Promise<T>): Promise<T> {
-  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    if (url.startsWith("data:application/wasm")) {
-      return originalFetch(new URL(GHOSTTY_WASM_PATH, window.location.origin).href, init);
-    }
-    return originalFetch(input, init);
-  };
-  try {
-    return await fn();
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-}
-
-async function ensureWasmInit(): Promise<void> {
-  if (wasmInitialized) return;
-  if (!wasmInitPromise) {
-    wasmInitPromise = withWasmFetchShim(() => init()).then(() => {
-      wasmInitialized = true;
-    });
-  }
-  return wasmInitPromise;
-}
-
 type ConnStatus = "connecting" | "connected" | "error" | "retrying";
 
 export function TerminalComponent() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const terminalRef = useRef<Terminal | null>(null);
+  const terminalRef = useRef<TerminalInstance | null>(null);
   const mountedRef = useRef(false);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [connStatus, setConnStatus] = useState<ConnStatus>("connecting");
@@ -98,29 +81,16 @@ export function TerminalComponent() {
 
   useEffect(() => {
     mountedRef.current = true;
-    let terminal: Terminal | null = null;
-    let fitAddon: FitAddon | null = null;
+    let terminal: TerminalInstance | null = null;
+    let fitAddon: FitAddonInstance | null = null;
     let ws: WebSocket | null = null;
+    let resizeObserver: ResizeObserver | null = null;
 
     async function setup() {
       if (!containerRef.current || !mountedRef.current) return;
 
       setConnStatus("connecting");
       setErrorMsg("");
-
-      // Load WASM first
-      try {
-        await ensureWasmInit();
-      } catch (err) {
-        log.error("WASM init failed:", err);
-        if (mountedRef.current) {
-          setConnStatus("error");
-          setErrorMsg("Failed to load terminal engine. Will retry...");
-          scheduleRetry();
-        }
-        return;
-      }
-      if (!mountedRef.current) return;
 
       // Fetch terminal session info — fall back to default path if this fails
       const clientId = getTerminalClientId();
@@ -146,23 +116,24 @@ export function TerminalComponent() {
       }
 
       // Create terminal
-      terminal = new Terminal({
+      const nextTerminal = new XtermTerminal({
         fontFamily: '"JetBrains Mono NF", monospace',
         fontSize: 13,
         theme: CATPPUCCIN_MOCHA_THEME,
         cursorBlink: true,
         cursorStyle: "block",
         scrollback: 5000,
-      });
-
-      terminalRef.current = terminal;
+      }) as TerminalInstance;
+      terminal = nextTerminal;
+      terminalRef.current = nextTerminal;
 
       // Load FitAddon
-      fitAddon = new FitAddon();
-      terminal.loadAddon(fitAddon);
+      const nextFitAddon = new XtermFitAddon() as FitAddonInstance;
+      fitAddon = nextFitAddon;
+      nextTerminal.loadAddon(nextFitAddon);
 
       // Mount terminal to DOM — container needs non-zero dimensions
-      terminal.open(containerRef.current);
+      nextTerminal.open(containerRef.current);
 
       // Wait for fonts to be ready before fitting
       try {
@@ -170,8 +141,17 @@ export function TerminalComponent() {
       } catch (_) { /* ignore */ }
 
       if (!mountedRef.current) return;
-      fitAddon.fit();
-      fitAddon.observeResize();
+      nextFitAddon.fit();
+      resizeObserver = typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => {
+          if (!mountedRef.current || !fitAddon) return;
+          requestAnimationFrame(() => {
+            if (!mountedRef.current || !fitAddon) return;
+            fitAddon.fit();
+          });
+        })
+        : null;
+      resizeObserver?.observe(containerRef.current);
 
       // Connect WebSocket
       const wsUrl = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + wsPath + (wsPath.includes("?") ? "&" : "?") + `client=${clientId}`;
@@ -192,34 +172,35 @@ export function TerminalComponent() {
         setConnStatus("connected");
         setErrorMsg("");
         // Send resize on open after fit
-        const dims = fitAddon!.proposeDimensions();
+        const dims = fitAddon?.proposeDimensions();
         if (dims) {
           ws!.send(JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }));
         }
       });
 
       ws.addEventListener("message", (event: MessageEvent) => {
-        if (!terminal) return;
+        const activeTerminal = terminal;
+        if (!activeTerminal) return;
         try {
           const msg = JSON.parse(event.data as string);
           if (msg.type === "output" && typeof msg.data === "string") {
-            terminal.write(msg.data);
+            activeTerminal.write(msg.data);
           } else if (msg.type === "session") {
             // Session established — optionally resize to server's reported dimensions
             const cols = msg.cols as number | undefined;
             const rows = msg.rows as number | undefined;
             if (cols && rows) {
               // Prefer fit dimensions but accept server's if no container size yet
-              const dims = fitAddon!.proposeDimensions();
+              const dims = fitAddon?.proposeDimensions();
               if (!dims) {
-                terminal.resize(cols, rows);
+                activeTerminal.resize(cols, rows);
               }
             }
           }
         } catch (_) {
           // Binary or non-JSON data — write directly
           if (typeof event.data === "string") {
-            terminal.write(event.data);
+            activeTerminal.write(event.data);
           }
         }
       });
@@ -250,14 +231,14 @@ export function TerminalComponent() {
       });
 
       // Forward keyboard input to WebSocket
-      terminal.onData((data: string) => {
+      nextTerminal.onData((data: string) => {
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: "input", data }));
         }
       });
 
       // Forward resize events to WebSocket
-      terminal.onResize(({ cols, rows }: { cols: number; rows: number }) => {
+      nextTerminal.onResize(({ cols, rows }: { cols: number; rows: number }) => {
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: "resize", cols, rows }));
         }
@@ -288,6 +269,12 @@ export function TerminalComponent() {
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
       if (ws) {
         ws.close();
+      }
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
+      if (fitAddon) {
+        fitAddon.dispose?.();
       }
       if (terminal) {
         terminal.dispose();

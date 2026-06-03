@@ -1,5 +1,10 @@
 /** Ambient type declarations for deferred vendor globals loaded via <script defer>. */
 
+declare module "*.mjs" {
+  export const Terminal: any;
+  export const FitAddon: any;
+}
+
 interface PiclawMarked {
   parse(src: string, options?: { headerIds?: boolean; mangle?: boolean }): string;
 }
