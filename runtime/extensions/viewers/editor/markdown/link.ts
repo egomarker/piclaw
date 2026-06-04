@@ -3,13 +3,26 @@
  *
  * Links: replace markdown syntax with clickable link widget.
  * Images: show inline image widget with optional caption.
+ * Reference links: resolve [text][label], [text][], and [text] from
+ * LinkReference definitions and render them as normal safe link widgets.
  *
  * Lezer structure:
- *   Link  → LinkMark("[") + content + LinkMark("](") + URL + LinkMark(")")
- *   Image → LinkMark("![") + content + LinkMark("](") + URL + LinkMark(")")
+ *   Inline link       → LinkMark("[") + content + LinkMark("](") + URL + LinkMark(")")
+ *   Reference link    → LinkMark("[") + content + LinkMark("]") + LinkLabel("[ref]")
+ *   Shortcut ref link → LinkMark("[") + content + LinkMark("]")
+ *   LinkReference    → LinkLabel("[ref]") + LinkMark(":") + URL + LinkTitle?
+ *   Image            → LinkMark("![") + content + LinkMark("](") + URL + LinkMark(")")
  */
-import { registerDecorator, WidgetType, pushSafeReplace } from './live-preview.js';
+import { syntaxTree } from '#editor-vendor/codemirror';
+import { registerDecorator, Decoration, WidgetType, pushSafeReplace } from './live-preview.js';
 import type { DecorationEntry, SyntaxNode, EditorView } from './live-preview.js';
+
+interface ReferenceLinkTarget {
+    url: string;
+    title: string;
+}
+
+const referenceMapCache = new WeakMap<object, Map<string, ReferenceLinkTarget>>();
 
 export function normalizeLinkHref(raw: string): string | null {
     const value = raw.trim();
@@ -29,6 +42,19 @@ export function normalizeLinkHref(raw: string): string | null {
     }
 }
 
+function stripReferenceLabelBrackets(raw: string): string {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) return trimmed.slice(1, -1);
+    return trimmed;
+}
+
+export function normalizeReferenceLabel(raw: string): string {
+    return stripReferenceLabelBrackets(raw)
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+}
+
 function normalizeLinkTitle(raw: string): string {
     const trimmed = raw.trim();
     if (!trimmed) return '';
@@ -37,6 +63,40 @@ function normalizeLinkTitle(raw: string): string {
         return trimmed.slice(1, -1).trim();
     }
     return trimmed;
+}
+
+function getReferenceLinks(view: EditorView): Map<string, ReferenceLinkTarget> {
+    const doc = view.state.doc;
+    const cached = referenceMapCache.get(doc as unknown as object);
+    if (cached) return cached;
+
+    const references = new Map<string, ReferenceLinkTarget>();
+    syntaxTree(view.state).iterate({
+        enter(nodeRef) {
+            if (nodeRef.type.name !== 'LinkReference') return;
+            const node = nodeRef.node;
+            let labelNode: SyntaxNode | null = null;
+            let urlNode: SyntaxNode | null = null;
+            let titleNode: SyntaxNode | null = null;
+
+            for (let child = node.firstChild; child; child = child.nextSibling) {
+                if (child.type.name === 'LinkLabel' && !labelNode) labelNode = child;
+                else if (child.type.name === 'URL') urlNode = child;
+                else if (child.type.name === 'LinkTitle') titleNode = child;
+            }
+
+            if (!labelNode || !urlNode) return;
+            const label = normalizeReferenceLabel(doc.sliceString(labelNode.from, labelNode.to));
+            if (!label || references.has(label)) return;
+            references.set(label, {
+                url: doc.sliceString(urlNode.from, urlNode.to),
+                title: titleNode ? normalizeLinkTitle(doc.sliceString(titleNode.from, titleNode.to)) : '',
+            });
+        },
+    });
+
+    referenceMapCache.set(doc as unknown as object, references);
+    return references;
 }
 
 class LinkWidget extends WidgetType {
@@ -94,6 +154,21 @@ class LinkWidget extends WidgetType {
     }
 }
 
+function resolveReferenceTarget(node: SyntaxNode, view: EditorView, text: string): ReferenceLinkTarget | null {
+    let labelNode: SyntaxNode | null = null;
+    for (let child = node.firstChild; child; child = child.nextSibling) {
+        if (child.type.name === 'LinkLabel') {
+            labelNode = child;
+            break;
+        }
+    }
+
+    const rawLabel = labelNode ? view.state.doc.sliceString(labelNode.from, labelNode.to) : text;
+    const normalizedLabel = normalizeReferenceLabel(rawLabel === '[]' ? text : rawLabel);
+    if (!normalizedLabel) return null;
+    return getReferenceLinks(view).get(normalizedLabel) || null;
+}
+
 function linkDecorator(node: SyntaxNode, view: EditorView): DecorationEntry[] {
     const marks: SyntaxNode[] = [];
     let urlNode: SyntaxNode | null = null;
@@ -105,24 +180,33 @@ function linkDecorator(node: SyntaxNode, view: EditorView): DecorationEntry[] {
         else if (child.type.name === 'LinkTitle') titleNode = child;
     }
 
-    if (marks.length < 2 || !urlNode) return [];
+    if (marks.length < 2) return [];
 
     const openMark = marks[0];
     const secondMark = marks[1];
-
     const textFrom = openMark.to;
     const textTo = secondMark.from;
     const text = view.state.doc.sliceString(textFrom, textTo);
-    const url = view.state.doc.sliceString(urlNode.from, urlNode.to);
-    const title = titleNode
+    const directUrl = urlNode ? view.state.doc.sliceString(urlNode.from, urlNode.to) : '';
+    const directTitle = titleNode
         ? normalizeLinkTitle(view.state.doc.sliceString(titleNode.from, titleNode.to))
         : '';
+    const resolved = urlNode ? { url: directUrl, title: directTitle } : resolveReferenceTarget(node, view, text);
+    if (!resolved) return [];
 
     const entries: DecorationEntry[] = [];
     pushSafeReplace(entries, view.state.doc, node.from, node.to, {
-        widget: new LinkWidget(text, url, title),
+        widget: new LinkWidget(text, resolved.url, resolved.title),
     });
     return entries;
+}
+
+function linkReferenceDecorator(node: SyntaxNode, _view: EditorView): DecorationEntry[] {
+    return [{
+        from: node.from,
+        to: node.to,
+        decoration: Decoration.mark({ class: 'cm-md-link-reference-def' }),
+    }];
 }
 
 function imageDecorator(node: SyntaxNode, view: EditorView): DecorationEntry[] {
@@ -132,4 +216,5 @@ function imageDecorator(node: SyntaxNode, view: EditorView): DecorationEntry[] {
 }
 
 registerDecorator('Link', linkDecorator);
+registerDecorator('LinkReference', linkReferenceDecorator);
 registerDecorator('Image', imageDecorator);

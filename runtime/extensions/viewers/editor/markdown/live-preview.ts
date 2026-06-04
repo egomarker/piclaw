@@ -215,10 +215,12 @@ function selectionTouchesVisibleRange(view: EditorView, state: Pick<EditorView['
     return false;
 }
 
-const LIVE_PREVIEW_DEBOUNCE_MS = 300;
+const LIVE_PREVIEW_DEBOUNCE_MS = 220;
 const LIVE_PREVIEW_FREEZE_TAIL_MS = 100;
+const LIVE_PREVIEW_RANGE_MARGIN_CHARS = 4000;
 
 export const setLivePreviewFrozen = StateEffect.define<boolean>();
+export const forceLivePreviewRebuild = StateEffect.define<void>();
 
 export const livePreviewFrozenField = StateField.define<boolean>({
     create: () => false,
@@ -239,6 +241,12 @@ function transactionHasFreezeEffect(update: ViewUpdate): boolean {
 function transactionHasTreeGrowthEffect(update: ViewUpdate): boolean {
     return update.transactions.some((transaction) =>
         transaction.effects.some((effect) => effect.is(treeGrowthEffect)),
+    );
+}
+
+function transactionHasForceRebuildEffect(update: ViewUpdate): boolean {
+    return update.transactions.some((transaction) =>
+        transaction.effects.some((effect) => effect.is(forceLivePreviewRebuild)),
     );
 }
 
@@ -375,11 +383,82 @@ function addMidTypingEmphasisEntries(entries: DecorationEntry[], view: EditorVie
     }
 }
 
+interface DecorationBuildRange {
+    from: number;
+    to: number;
+}
+
+function mergeBuildRanges(ranges: DecorationBuildRange[]): DecorationBuildRange[] {
+    if (ranges.length <= 1) return ranges;
+    const sorted = ranges.slice().sort((a, b) => a.from - b.from || a.to - b.to);
+    const merged: DecorationBuildRange[] = [];
+    for (const range of sorted) {
+        const previous = merged[merged.length - 1];
+        if (previous && range.from <= previous.to + 1) {
+            previous.to = Math.max(previous.to, range.to);
+        } else {
+            merged.push({ ...range });
+        }
+    }
+    return merged;
+}
+
+function getLivePreviewVisibleLineRanges(view: EditorView): DecorationBuildRange[] {
+    const doc = view.state.doc;
+    const docLength = doc.length;
+    const visible = view.visibleRanges.length > 0 ? view.visibleRanges : [{ from: 0, to: docLength }];
+    const ranges: DecorationBuildRange[] = visible.map((range) => ({
+        from: doc.lineAt(Math.max(0, Math.min(range.from, docLength))).from,
+        to: doc.lineAt(Math.max(0, Math.min(range.to, docLength))).to,
+    }));
+
+    for (const selection of view.state.selection.ranges) {
+        const anchor = Math.max(0, Math.min(selection.anchor, docLength));
+        const head = Math.max(0, Math.min(selection.head, docLength));
+        const fromLine = doc.lineAt(Math.min(anchor, head));
+        const toLine = doc.lineAt(Math.max(anchor, head));
+        ranges.push({ from: fromLine.from, to: toLine.to });
+    }
+
+    return mergeBuildRanges(ranges);
+}
+
+export function getLivePreviewDecorationRanges(view: EditorView): DecorationBuildRange[] {
+    const doc = view.state.doc;
+    const docLength = doc.length;
+    const visible = view.visibleRanges.length > 0 ? view.visibleRanges : [{ from: 0, to: docLength }];
+    const ranges: DecorationBuildRange[] = visible.map((range) => {
+        const from = Math.max(0, range.from - LIVE_PREVIEW_RANGE_MARGIN_CHARS);
+        const to = Math.min(docLength, range.to + LIVE_PREVIEW_RANGE_MARGIN_CHARS);
+        return {
+            from: doc.lineAt(from).from,
+            to: doc.lineAt(to).to,
+        };
+    });
+
+    // Include selection endpoints even if CM temporarily reports a stale or tiny
+    // visible range during programmatic reveal/focus changes.
+    for (const selection of view.state.selection.ranges) {
+        const anchor = Math.max(0, Math.min(selection.anchor, docLength));
+        const head = Math.max(0, Math.min(selection.head, docLength));
+        const fromLine = doc.lineAt(Math.min(anchor, head));
+        const toLine = doc.lineAt(Math.max(anchor, head));
+        ranges.push({ from: fromLine.from, to: toLine.to });
+    }
+
+    return mergeBuildRanges(ranges);
+}
+
+export function livePreviewRangesCover(cached: DecorationBuildRange[], required: DecorationBuildRange[]): boolean {
+    return required.every((range) => cached.some((cachedRange) => cachedRange.from <= range.from && cachedRange.to >= range.to));
+}
+
 class LivePreviewPlugin {
     decorations: DecorationSet;
     private selectionLineSignature: string;
     private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
     private view: EditorView;
+    private decorationRanges: DecorationBuildRange[] = [];
     private destroyed = false;
 
     constructor(view: EditorView) {
@@ -397,15 +476,20 @@ class LivePreviewPlugin {
         const frozen = update.state.field(livePreviewFrozenField, false);
         const freezeReleased = transactionHasFreezeEffect(update) && !frozen;
         const treeGrew = transactionHasTreeGrowthEffect(update);
+        const forceRebuild = transactionHasForceRebuildEffect(update);
         const selectionIsCollapsed = update.state.selection.ranges.every((range) => range.empty);
         const selectionTouchesViewport = update.selectionSet && (
             selectionTouchesVisibleRange(update.view, update.startState) ||
             selectionTouchesVisibleRange(update.view, update.state)
         );
         const viewportNowShowsSelection = update.viewportChanged && selectionTouchesVisibleRange(update.view, update.state);
+        const viewportRequiresRebuild = update.viewportChanged
+            && !livePreviewRangesCover(this.decorationRanges, getLivePreviewVisibleLineRanges(update.view));
 
         const needsRebuild =
             update.docChanged ||
+            viewportRequiresRebuild ||
+            forceRebuild ||
             treeGrew ||
             freezeReleased ||
             (!frozen && (
@@ -424,14 +508,22 @@ class LivePreviewPlugin {
                 ? normalizeReplaceDecorationSet(mappedDecorations, update.state.doc)
                 : mappedDecorations;
             if (this.rebuildTimer !== null) clearTimeout(this.rebuildTimer);
+            if (forceRebuild) {
+                this.decorations = this.buildDecorations(update.view);
+                return;
+            }
             this.rebuildTimer = setTimeout(() => {
                 this.rebuildTimer = null;
                 if (this.destroyed) return;
-                this.decorations = this.buildDecorations(this.view);
-                // Nudge CM to read the updated decorations via a minimal
-                // requestMeasure — avoids dispatch({ effects: [] }) infinite loop.
-                this.view.requestMeasure();
+                try {
+                    this.view.dispatch({ effects: forceLivePreviewRebuild.of() });
+                } catch (error) {
+                    console.debug('[editor/live-preview] ignored delayed rebuild after view disposal', error);
+                }
             }, LIVE_PREVIEW_DEBOUNCE_MS);
+        } else if (forceRebuild) {
+            if (this.rebuildTimer !== null) { clearTimeout(this.rebuildTimer); this.rebuildTimer = null; }
+            this.decorations = this.buildDecorations(update.view);
         } else {
             // Viewport/selection changes: rebuild immediately (no typing lag)
             if (this.rebuildTimer !== null) { clearTimeout(this.rebuildTimer); this.rebuildTimer = null; }
@@ -450,11 +542,14 @@ class LivePreviewPlugin {
         const doc = view.state.doc;
         const cursorHead = view.state.selection.main.head;
         const cursorLine = doc.lineAt(cursorHead);
+        const buildRanges = getLivePreviewDecorationRanges(view);
+        this.decorationRanges = buildRanges;
 
-        tree.iterate({
-            from: 0,
-            to: doc.length,
-            enter(node) {
+        for (const buildRange of buildRanges) {
+            tree.iterate({
+                from: buildRange.from,
+                to: buildRange.to,
+                enter(node) {
                     const nodeTypeName = node.type.name;
                     const decorator = decorators.get(nodeTypeName);
                     if (!decorator) return;
@@ -497,9 +592,10 @@ class LivePreviewPlugin {
                                 decoration: Decoration.line({ class: 'cm-md-code-raw-line' }),
                             });
                         }
-                }
-            },
-        });
+                    }
+                },
+            });
+        }
 
         addMidTypingEmphasisEntries(entries, view);
 

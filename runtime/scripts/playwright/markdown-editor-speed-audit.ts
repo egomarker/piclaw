@@ -9,6 +9,7 @@ const repoRoot = resolve(runtimeRoot, '..');
 const baselineRoot = join(runtimeRoot, 'generated/cache/markdown-editor-speed-baseline');
 const tmpRoot = join(runtimeRoot, 'generated/cache/markdown-editor-speed-audit');
 const baselineRef = process.env.BASELINE_REF || 'HEAD^';
+const skipBaselineTyping = process.env.SPEED_AUDIT_BASELINE_SKIP_TYPING !== '0';
 
 const viewports = [
   { name: 'desktop', width: 1280, height: 900 },
@@ -409,10 +410,10 @@ async function main() {
   await ensureBaselineWorktree();
   const browser = await chromium.launch({ headless: true });
   try {
-    const baseline = await runSuite(browser, 'baseline-head-parent', baselineRoot, { skipTyping: true });
+    const baseline = await runSuite(browser, 'baseline-head-parent', baselineRoot, { skipTyping: skipBaselineTyping });
     const head = await runSuite(browser, 'atomic-port-head', repoRoot);
     const rows = compare(baseline, head);
-    const output = { baselineRef, headRef: 'working-tree', runs, warmups, stressTables, sourceLength: source.length, baseline, head, comparison: rows };
+    const output = { baselineRef, headRef: 'working-tree', skipBaselineTyping, runs, warmups, stressTables, sourceLength: source.length, baseline, head, comparison: rows };
     const reportPath = process.env.SPEED_AUDIT_REPORT || join(runtimeRoot, 'generated/cache/markdown-editor-speed-audit.json');
     writeFileSync(reportPath, JSON.stringify(output, null, 2));
     console.log(`REPORT ${reportPath}`);

@@ -6,7 +6,10 @@ status: draft
 
 # H1 Heading Fold Target
 
-Intro paragraph with **bold**, _italic_, ~~strike~~, `inline code`, #tag, and [safe link](https://example.com "Example").
+Intro paragraph with **bold**, _italic_, ~~strike~~, `inline code`, #tag, [safe link](https://example.com "Example"), [reference link][ref-link], [collapsed ref][], and [shortcut ref].
+
+- [ ] Top-level unchecked task
+- [x] Top-level checked task
 
 ## H2 Child Heading
 
@@ -31,6 +34,10 @@ export function demo(value: string) {
 | pipe | x \| y | z     |
 
 Footnote reference[^note] and unresolved reference[^missing].
+
+[ref-link]: https://example.com/reference "Reference title"
+[collapsed ref]: https://example.com/collapsed
+[shortcut ref]: https://example.com/shortcut
 
 [^note]: Footnote definition with back-reference.
 

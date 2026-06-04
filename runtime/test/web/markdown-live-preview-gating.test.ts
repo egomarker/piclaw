@@ -16,13 +16,15 @@ import {
   isInsideFencedCodeBeforeLine,
 } from "../../extensions/viewers/editor/markdown/edit-helpers.ts";
 import { parseMarkdownImageSource } from "../../extensions/viewers/editor/markdown/image-block.ts";
-import { normalizeLinkHref } from "../../extensions/viewers/editor/markdown/link.ts";
+import { normalizeLinkHref, normalizeReferenceLabel } from "../../extensions/viewers/editor/markdown/link.ts";
 import { isTableBoundaryPosition } from "../../extensions/viewers/editor/markdown/table-keymap.ts";
 import { shouldSignalTreeGrowth } from "../../extensions/viewers/editor/markdown/tree-progress.ts";
 import {
   findMidTypingEmphasisRanges,
+  getLivePreviewDecorationRanges,
   getSelectionLineSignature,
   livePreviewFrozenField,
+  livePreviewRangesCover,
   pushSafeReplace,
   setLivePreviewFrozen,
   splitRangeByDocumentLines,
@@ -124,6 +126,22 @@ test("live preview freeze field toggles from pointer freeze effects", () => {
   expect(thawed.field(livePreviewFrozenField)).toBe(false);
 });
 
+test("live preview viewport cache covers nearby scroll inside the decoration margin", () => {
+  const doc = Array.from({ length: 1400 }, (_, index) => `line ${index} with **bold** text`).join("\n");
+  const state = EditorState.create({ doc, selection: { anchor: 0 } });
+  const visibleLine = state.doc.line(500);
+  const cachedRanges = getLivePreviewDecorationRanges({
+    state,
+    visibleRanges: [{ from: visibleLine.from, to: visibleLine.to }],
+  } as any);
+
+  const nearbyLine = state.doc.line(520);
+  const farLine = state.doc.line(1200);
+
+  expect(livePreviewRangesCover(cachedRanges, [{ from: nearbyLine.from, to: nearbyLine.to }])).toBe(true);
+  expect(livePreviewRangesCover(cachedRanges, [{ from: farLine.from, to: farLine.to }])).toBe(false);
+});
+
 test("tree progress signals on bounded growth threshold or complete parse", () => {
   expect(shouldSignalTreeGrowth(0, 1024, 10_000)).toBe(false);
   expect(shouldSignalTreeGrowth(0, 8192, 10_000)).toBe(true);
@@ -145,6 +163,12 @@ test("link normalization preserves Piclaw link safety policy", () => {
   expect(normalizeLinkHref('https://example.com/a')).toBe('https://example.com/a');
   expect(normalizeLinkHref('javascript:alert(1)')).toBeNull();
   expect(normalizeLinkHref('data:text/html,hi')).toBeNull();
+});
+
+test("reference link labels follow markdown case/whitespace normalization", () => {
+  expect(normalizeReferenceLabel('[Example Ref]')).toBe('example ref');
+  expect(normalizeReferenceLabel('Example\n\tRef')).toBe('example ref');
+  expect(normalizeReferenceLabel('[]')).toBe('');
 });
 
 test("table boundary helper treats the table as an atomic unit before destructive backspace", () => {

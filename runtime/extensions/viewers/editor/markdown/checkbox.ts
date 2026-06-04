@@ -8,7 +8,7 @@
  *   ListItem → (TaskMarker)? + content
  *   Task contains TaskMarker child
  */
-import { registerDecorator, Decoration, WidgetType } from './live-preview.js';
+import { registerDecorator, Decoration, WidgetType, forceLivePreviewRebuild } from './live-preview.js';
 import type { DecorationEntry, SyntaxNode, EditorView } from './live-preview.js';
 
 class CheckboxWidget extends WidgetType {
@@ -32,6 +32,7 @@ class CheckboxWidget extends WidgetType {
             const newText = this.checked ? '[ ]' : '[x]';
             view.dispatch({
                 changes: { from: this.pos, to: this.pos + 3, insert: newText },
+                effects: forceLivePreviewRebuild.of(),
             });
         });
         return input;

@@ -704,6 +704,11 @@ export const markdownPreviewTheme = EditorView.theme({
         textDecorationStyle: 'dotted',
         cursor: 'not-allowed',
     },
+    '.cm-md-link-reference-def': {
+        color: 'var(--text-secondary, #8a8f98)',
+        opacity: '0.72',
+        fontSize: '0.92em',
+    },
 
     /* ── Images ── */
     '.cm-md-image-wrap': {

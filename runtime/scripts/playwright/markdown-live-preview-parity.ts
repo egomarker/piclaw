@@ -151,6 +151,45 @@ async function runScenario(page: Page, baseUrl: string, scenario: typeof scenari
   assert(await count(page, '.cm-md-heading-fold') >= 1, `${scenario.name}: missing heading fold affordance`);
   assert(await count(page, '.cm-md-callout') >= 1, `${scenario.name}: missing callout decoration`);
   assert(await count(page, '.cm-md-frontmatter-line') >= 1, `${scenario.name}: missing frontmatter decoration`);
+  assert(await count(page, 'input.cm-md-checkbox') >= 2, `${scenario.name}: missing task checkbox widgets`);
+
+  const referenceLinkState = await page.evaluate(() => ({
+    links: Array.from(document.querySelectorAll('a.cm-md-link-widget')).map((anchor: any) => ({
+      text: anchor.textContent,
+      href: anchor.href,
+      title: anchor.title,
+    })),
+    referenceDefs: document.querySelectorAll('.cm-md-link-reference-def').length,
+  }));
+  const linkTexts = referenceLinkState.links.map((link) => link.text);
+  assert(linkTexts.includes('safe link'), `${scenario.name}: missing inline link widget`);
+  assert(linkTexts.includes('reference link'), `${scenario.name}: missing full reference link widget`);
+  assert(linkTexts.includes('collapsed ref'), `${scenario.name}: missing collapsed reference link widget`);
+  assert(linkTexts.includes('shortcut ref'), `${scenario.name}: missing shortcut reference link widget`);
+  assert(referenceLinkState.links.some((link) => link.text === 'reference link' && link.href === 'https://example.com/reference' && link.title === 'Reference title'), `${scenario.name}: reference link did not resolve href/title`);
+  assert(referenceLinkState.referenceDefs >= 3, `${scenario.name}: missing inactive reference definition styling`);
+
+  const checkboxToggle = await page.evaluate(async () => {
+    const wait = () => new Promise((resolve) => setTimeout(resolve, 120));
+    const boxes = Array.from(document.querySelectorAll<HTMLInputElement>('input.cm-md-checkbox'));
+    const checkedBefore = boxes.filter((box) => box.checked).length;
+    const target = boxes.find((box) => box.checked) || boxes[0];
+    if (!target) return { found: false };
+    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    await wait();
+    const afterBoxes = Array.from(document.querySelectorAll<HTMLInputElement>('input.cm-md-checkbox'));
+    return {
+      found: true,
+      doc: (window as any).__piclawMarkdownHarness.doc(),
+      checkedBefore,
+      checkedAfter: afterBoxes.filter((box) => box.checked).length,
+    };
+  });
+  assert(checkboxToggle.found, `${scenario.name}: checkbox toggle target not found`);
+  assert(checkboxToggle.doc.includes('- [ ] Top-level checked task'), `${scenario.name}: checkbox toggle did not update source markdown`);
+  assert(checkboxToggle.checkedAfter < checkboxToggle.checkedBefore, `${scenario.name}: checkbox toggle did not update visible checked state`);
+  await page.evaluate(() => (window as any).__piclawMarkdownHarness.reset());
+  await page.waitForTimeout(160);
 
   const revealSearch = await page.evaluate(async () => {
     const harness = (window as any).__piclawMarkdownHarness;
