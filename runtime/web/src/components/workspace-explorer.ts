@@ -2226,6 +2226,10 @@ export function WorkspaceExplorer({
         onToggleTerminal?.();
     }, [closeHeaderMenu, onToggleTerminal]);
 
+    const handleMenuOpenSettings = useCallback(() => {
+        runMenuAction(() => window.dispatchEvent(new CustomEvent('piclaw:open-settings')));
+    }, [runMenuAction]);
+
     const handleRowMouseDown = useCallback((event) => {
         if (!event || event.button !== 0) return;
         const rowEl = event.currentTarget;
@@ -2408,6 +2412,9 @@ export function WorkspaceExplorer({
                                         ${terminalVisible ? 'Hide terminal dock' : 'Show terminal dock'}
                                     </button>
                                 `}
+
+                                <div class="workspace-menu-separator"></div>
+                                <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuOpenSettings}>Settings</button>
 
                                 ${selectedPath && html`<div class="workspace-menu-separator"></div>`}
                                 ${selectedHasOpenableTab && html`

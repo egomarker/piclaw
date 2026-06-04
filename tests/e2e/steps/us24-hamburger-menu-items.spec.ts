@@ -16,6 +16,19 @@ const HAMBURGER = '.hamburger-menu, [data-testid="hamburger"]';
 const MENU = '.timeline-menu-dropdown, .workspace-menu-dropdown';
 const MENU_ITEM = '.workspace-menu-item';
 
+async function ensureWorkspaceVisible(page: import('@playwright/test').Page) {
+  const explorer = page.locator(sel.workspaceExplorer).first();
+  if (await explorer.isVisible().catch(() => false)) return explorer;
+
+  await page.locator(HAMBURGER).click();
+  await page.waitForSelector(MENU, { timeout: 3000 });
+  const openWorkspace = page.locator(MENU_ITEM, { hasText: /show workspace|open explorer/i }).first();
+  await expect(openWorkspace).toBeVisible({ timeout: 5000 });
+  await openWorkspace.click();
+  await expect(explorer).toBeVisible({ timeout: 5000 });
+  return explorer;
+}
+
 test.describe('US-24: Hamburger Menu Items', () => {
   test('hamburger menu contains New file, Refresh tree, Reindex workspace', async ({ authedPage: page }) => {
     await page.waitForSelector(sel.timeline);
@@ -107,5 +120,23 @@ test.describe('US-24: Hamburger Menu Items', () => {
     }
 
     await page.keyboard.press('Escape');
+  });
+
+  test('workspace header menu exposes Settings and opens the settings dialog', async ({ authedPage: page }) => {
+    await page.waitForSelector(sel.timeline);
+    const explorer = await ensureWorkspaceVisible(page);
+
+    const workspaceMenuButton = explorer.getByRole('button', { name: /workspace actions/i }).first();
+    await expect(workspaceMenuButton).toBeVisible({ timeout: 5000 });
+    await workspaceMenuButton.click();
+
+    const workspaceMenu = explorer.locator('.workspace-menu-dropdown[aria-label="Workspace options"]').first();
+    await expect(workspaceMenu).toBeVisible({ timeout: 3000 });
+
+    const settingsItem = workspaceMenu.locator('.workspace-menu-item', { hasText: /^Settings$/ }).first();
+    await expect(settingsItem).toBeVisible({ timeout: 3000 });
+    await settingsItem.click();
+
+    await expect(page.locator(sel.settingsDialog).first()).toBeVisible({ timeout: 5000 });
   });
 });

@@ -30,13 +30,15 @@ async function getTerminalState(page: import('@playwright/test').Page) {
     const dockHidden = dock?.classList.contains('hidden') || dock?.style.display === 'none';
     const canvas = xterm?.querySelector('canvas');
     const textLayer = xterm?.querySelector('.xterm-rows, .xterm-screen');
+    const outputMirror = xterm?.querySelector('[data-testid="terminal-output"]');
+    const textContent = outputMirror?.textContent || textLayer?.textContent || '';
     return {
       visible: xterm !== null && xterm.offsetParent !== null,
       hasCanvas: canvas !== null,
       hasTextLayer: textLayer !== null,
       dockVisible: dock !== null && !dockHidden,
       dockHeight: dock?.offsetHeight || 0,
-      textContent: textLayer?.textContent?.trim().slice(0, 200) || '',
+      textContent: textContent.trim().slice(-2000),
     };
   });
 }

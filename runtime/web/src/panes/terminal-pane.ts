@@ -55,6 +55,13 @@ function debugTerminalCleanup(label, error) {
   console.debug(`[terminal-pane] ${label} failed`, error);
 }
 
+function stripTerminalControl(text) {
+  return String(text || "")
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\r/g, "\n");
+}
+
 function injectStyles(ownerDocument = document) {
   if (!ownerDocument?.head) return;
   if (!ownerDocument.getElementById(XTERM_CSS_ID)) {
@@ -140,6 +147,16 @@ function injectStyles(ownerDocument = document) {
         color: var(--text-secondary, #8b949e);
         font: 13px/1.5 var(--font-family-ui, system-ui, sans-serif);
         text-align: center;
+      }
+      .terminal-output-mirror {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        clip-path: inset(50%);
+        white-space: pre-wrap;
+        pointer-events: none;
       }
     `;
     ownerDocument.head.appendChild(style);
@@ -452,6 +469,8 @@ class TerminalPaneInstance {
     this.searchAddon = null;
     this.serializeAddon = null;
     this.rendererAddon = null;
+    this.outputMirror = null;
+    this.outputMirrorText = "";
     this.loadedAddons = [];
     this.pendingHandoffToken = typeof context?.transferState?.handoffToken === "string" && context.transferState.handoffToken.trim()
       ? context.transferState.handoffToken.trim()
@@ -513,6 +532,7 @@ class TerminalPaneInstance {
       this.host.className = "terminal-host";
       this.body.appendChild(this.host);
       terminal.open(this.host);
+      this.installOutputMirror();
       this.installPostOpenAddons(runtime);
       this.installClipboardAndSearchShortcuts();
       this.installResizeSync();
@@ -580,6 +600,24 @@ class TerminalPaneInstance {
     // JSON control frames rather than a raw PTY byte stream. Keep it vendored and
     // import-validated with the rest of the xterm family.
     this.attachAddonModule = runtime.attach;
+  }
+
+  installOutputMirror() {
+    if (!this.host || this.outputMirror) return;
+    const mirror = this.ownerDocument.createElement("pre");
+    mirror.className = "terminal-output-mirror";
+    mirror.setAttribute("data-testid", "terminal-output");
+    mirror.setAttribute("aria-hidden", "true");
+    this.outputMirror = mirror;
+    const textLayer = this.host.querySelector?.(".xterm-screen") || this.host.querySelector?.(".xterm") || this.host;
+    textLayer.insertBefore(mirror, textLayer.firstChild);
+  }
+
+  appendOutputMirror(data) {
+    if (!this.outputMirror) return;
+    const next = `${this.outputMirrorText}${stripTerminalControl(data)}`;
+    this.outputMirrorText = next.length > 65_536 ? next.slice(-65_536) : next;
+    this.outputMirror.textContent = this.outputMirrorText;
   }
 
   installPostOpenAddons(runtime) {
@@ -652,6 +690,15 @@ class TerminalPaneInstance {
     this.terminal.options.theme = theme;
     this.root.style.backgroundColor = theme.background;
     this.root.style.color = theme.foreground;
+    if (this.body) this.body.style.backgroundColor = theme.background;
+    if (this.host) {
+      this.host.style.backgroundColor = theme.background;
+      const xtermElement = this.host.querySelector?.(".xterm");
+      if (xtermElement) {
+        xtermElement.style.backgroundColor = theme.background;
+        xtermElement.style.color = theme.foreground;
+      }
+    }
     try { this.terminal.refresh?.(0, this.terminal.rows - 1); } catch (error) { debugTerminalCleanup("terminal refresh", error); }
     this.scheduleResize(true);
   }
@@ -863,6 +910,7 @@ class TerminalPaneInstance {
       return;
     }
     if (payload?.type === "output" && typeof payload.data === "string") {
+      this.appendOutputMirror(payload.data);
       this.terminal.write(payload.data);
       return;
     }
@@ -870,6 +918,7 @@ class TerminalPaneInstance {
       this.terminalExited = true;
       this.clearHeartbeat();
       this.clearReconnectTimer();
+      this.appendOutputMirror("\r\n[terminal exited]\r\n");
       this.terminal.write("\r\n[terminal exited]\r\n");
       this.setStatus("Exited");
     }
