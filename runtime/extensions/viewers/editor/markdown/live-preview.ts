@@ -215,8 +215,9 @@ function selectionTouchesVisibleRange(view: EditorView, state: Pick<EditorView['
     return false;
 }
 
-const LIVE_PREVIEW_DEBOUNCE_MS = 300;
+const LIVE_PREVIEW_DEBOUNCE_MS = 220;
 const LIVE_PREVIEW_FREEZE_TAIL_MS = 100;
+const LIVE_PREVIEW_RANGE_MARGIN_CHARS = 4000;
 
 export const setLivePreviewFrozen = StateEffect.define<boolean>();
 export const forceLivePreviewRebuild = StateEffect.define<void>();
@@ -382,6 +383,52 @@ function addMidTypingEmphasisEntries(entries: DecorationEntry[], view: EditorVie
     }
 }
 
+interface DecorationBuildRange {
+    from: number;
+    to: number;
+}
+
+function mergeBuildRanges(ranges: DecorationBuildRange[]): DecorationBuildRange[] {
+    if (ranges.length <= 1) return ranges;
+    const sorted = ranges.slice().sort((a, b) => a.from - b.from || a.to - b.to);
+    const merged: DecorationBuildRange[] = [];
+    for (const range of sorted) {
+        const previous = merged[merged.length - 1];
+        if (previous && range.from <= previous.to + 1) {
+            previous.to = Math.max(previous.to, range.to);
+        } else {
+            merged.push({ ...range });
+        }
+    }
+    return merged;
+}
+
+export function getLivePreviewDecorationRanges(view: EditorView): DecorationBuildRange[] {
+    const doc = view.state.doc;
+    const docLength = doc.length;
+    const visible = view.visibleRanges.length > 0 ? view.visibleRanges : [{ from: 0, to: docLength }];
+    const ranges: DecorationBuildRange[] = visible.map((range) => {
+        const from = Math.max(0, range.from - LIVE_PREVIEW_RANGE_MARGIN_CHARS);
+        const to = Math.min(docLength, range.to + LIVE_PREVIEW_RANGE_MARGIN_CHARS);
+        return {
+            from: doc.lineAt(from).from,
+            to: doc.lineAt(to).to,
+        };
+    });
+
+    // Include selection endpoints even if CM temporarily reports a stale or tiny
+    // visible range during programmatic reveal/focus changes.
+    for (const selection of view.state.selection.ranges) {
+        const anchor = Math.max(0, Math.min(selection.anchor, docLength));
+        const head = Math.max(0, Math.min(selection.head, docLength));
+        const fromLine = doc.lineAt(Math.min(anchor, head));
+        const toLine = doc.lineAt(Math.max(anchor, head));
+        ranges.push({ from: fromLine.from, to: toLine.to });
+    }
+
+    return mergeBuildRanges(ranges);
+}
+
 class LivePreviewPlugin {
     decorations: DecorationSet;
     private selectionLineSignature: string;
@@ -414,6 +461,7 @@ class LivePreviewPlugin {
 
         const needsRebuild =
             update.docChanged ||
+            update.viewportChanged ||
             forceRebuild ||
             treeGrew ||
             freezeReleased ||
@@ -468,10 +516,11 @@ class LivePreviewPlugin {
         const cursorHead = view.state.selection.main.head;
         const cursorLine = doc.lineAt(cursorHead);
 
-        tree.iterate({
-            from: 0,
-            to: doc.length,
-            enter(node) {
+        for (const buildRange of getLivePreviewDecorationRanges(view)) {
+            tree.iterate({
+                from: buildRange.from,
+                to: buildRange.to,
+                enter(node) {
                     const nodeTypeName = node.type.name;
                     const decorator = decorators.get(nodeTypeName);
                     if (!decorator) return;
@@ -514,9 +563,10 @@ class LivePreviewPlugin {
                                 decoration: Decoration.line({ class: 'cm-md-code-raw-line' }),
                             });
                         }
-                }
-            },
-        });
+                    }
+                },
+            });
+        }
 
         addMidTypingEmphasisEntries(entries, view);
 
