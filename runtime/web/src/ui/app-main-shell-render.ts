@@ -334,8 +334,6 @@ export function renderMainShell(options: MainShellRenderOptions): any {
           onOpenEditor=${openEditor}
           onOpenTerminalTab=${openTerminalTab}
           onOpenVncTab=${openVncTab}
-          onToggleTerminal=${hasDockPanes ? toggleDock : undefined}
-          terminalVisible=${Boolean(hasDockPanes && dockVisible)}
         />
         <button
           class=${`workspace-toggle-tab${workspaceOpen ? ' open' : ' closed'}`}
@@ -451,20 +449,16 @@ export function renderMainShell(options: MainShellRenderOptions): any {
         openEditor=${openEditor}
         onOpenTerminalTab=${openTerminalTab}
         onOpenVncTab=${openVncTab}
-        onToggleTerminal=${hasDockPanes ? toggleDock : undefined}
-        terminalVisible=${Boolean(hasDockPanes && dockVisible)}
       />
       <${TimelineQuickActions}
         activeChatAgents=${activeChatAgents}
         currentChatJid=${currentChatJid}
         workspaceOpen=${workspaceOpen}
         chatOnlyMode=${chatOnlyMode}
-        terminalVisible=${Boolean(hasDockPanes && dockVisible)}
         onSwitchChat=${handleBranchPickerChange}
         onToggleWorkspace=${toggleWorkspace}
         onOpenTerminalTab=${openTerminalTab}
         onOpenVncTab=${openVncTab}
-        onToggleTerminalDock=${hasDockPanes ? toggleDock : undefined}
         onPrefillCompose=${requestComposePrefill}
       />
       <div class="container">

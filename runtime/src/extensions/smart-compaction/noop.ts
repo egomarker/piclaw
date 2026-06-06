@@ -20,6 +20,7 @@ import {
   serializeToolCompact,
   type SourceMessage,
 } from "./messages.js";
+import { formatSmartCompactionStatus } from "./context.js";
 import type { TopicShiftSignal } from "./selective-prompt.js";
 
 // ---------------------------------------------------------------------------
@@ -61,7 +62,7 @@ export function tryNoOpCompaction(
     hasKeptUserContext: boolean;
     hasTurnPrefixHumanUser: boolean;
   },
-  ctx: { ui: { setWorkingMessage?: (msg?: string) => void } },
+  ctx: { ui: { setStatus?: (key: string, text: string | undefined) => void } },
 ): { compaction: CompactionResult } | null {
   const { previousSummary, fileOps } = preparation;
 
@@ -93,8 +94,12 @@ export function tryNoOpCompaction(
     const delta = buildMechanicalDelta(llmMessages, modifiedFiles, readFiles);
     const summary = appendDeltaToSummary(previousSummary, delta, fileOps);
 
-    ctx.ui.setWorkingMessage?.(
-      `Smart compaction: reused summary for split-turn continuation (${llmMessages.length} tool msgs)…`,
+    ctx.ui.setStatus?.(
+      "smart_compaction",
+      formatSmartCompactionStatus(
+        `Smart compaction: reused summary for split-turn continuation (${llmMessages.length} tool msgs)…`,
+        92,
+      ),
     );
 
     return {
@@ -115,8 +120,12 @@ export function tryNoOpCompaction(
   ) {
     const summary = updateFileLists(previousSummary, fileOps);
 
-    ctx.ui.setWorkingMessage?.(
-      `Smart compaction: reused summary for minimal-content compaction (${userTotalChars} user chars)…`,
+    ctx.ui.setStatus?.(
+      "smart_compaction",
+      formatSmartCompactionStatus(
+        `Smart compaction: reused summary for minimal-content compaction (${userTotalChars} user chars)…`,
+        92,
+      ),
     );
 
     return {

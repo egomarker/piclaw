@@ -171,11 +171,11 @@ export function parseDreamPromptToken(prompt: string): { matched: boolean; mode:
 
 export function hasOutstandingDreamConsolidation(recentDays: number): boolean {
   const backlog = inspectDailyNoteSummaryBacklog({ recentDays });
-  return backlog.unsummarised > 0 || backlog.partial > 0 || backlog.missing_watermark > 0;
+  return backlog.unsummarised > 0 || backlog.partial > 0 || backlog.missing_watermark > 0 || backlog.missing > 0;
 }
 
 function hasDailyNoteBacklog(backlog: ReturnType<typeof inspectDailyNoteSummaryBacklog>): boolean {
-  return backlog.unsummarised > 0 || backlog.partial > 0 || backlog.missing_watermark > 0;
+  return backlog.unsummarised > 0 || backlog.partial > 0 || backlog.missing_watermark > 0 || backlog.missing > 0;
 }
 
 function formatDailyNoteBacklogSummary(backlog: ReturnType<typeof inspectDailyNoteSummaryBacklog>): string {
@@ -184,6 +184,7 @@ function formatDailyNoteBacklogSummary(backlog: ReturnType<typeof inspectDailyNo
     backlog.unsummarised > 0 ? `${backlog.unsummarised} unsummarised` : null,
     backlog.partial > 0 ? `${backlog.partial} partial` : null,
     backlog.missing_watermark > 0 ? `${backlog.missing_watermark} missing watermark` : null,
+    backlog.missing > 0 ? `${backlog.missing} missing daily note${backlog.missing === 1 ? "" : "s"}` : null,
   ].filter(Boolean).join(", ");
   return `- Unresolved daily-note backlog: ${parts} (${backlog.dates.join(", ")})`;
 }

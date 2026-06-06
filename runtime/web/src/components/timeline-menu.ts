@@ -22,8 +22,6 @@ export function TimelineMenu({
     openEditor,
     onOpenTerminalTab,
     onOpenVncTab,
-    onToggleTerminal,
-    terminalVisible,
 }) {
     const [open, setOpen] = useState(false);
     const [pwaDisplayScalePercent, setPwaDisplayScalePercent] = useState(() => readStoredPwaDisplayScalePercent());
@@ -187,10 +185,9 @@ export function TimelineMenu({
                     ${chatOnlyMode ? 'Exit chat-only mode' : 'Chat-only mode'}
                 </button>
 
-                ${(onOpenTerminalTab || onOpenVncTab || onToggleTerminal) && html`<div class="workspace-menu-separator"></div>`}
+                ${(onOpenTerminalTab || onOpenVncTab) && html`<div class="workspace-menu-separator"></div>`}
                 ${onOpenTerminalTab && html`<button class="workspace-menu-item" role="menuitem" onClick=${() => run(onOpenTerminalTab)}>Open terminal in tab</button>`}
                 ${onOpenVncTab && html`<button class="workspace-menu-item" role="menuitem" onClick=${() => run(onOpenVncTab)}>Open VNC in tab</button>`}
-                ${onToggleTerminal && html`<button class="workspace-menu-item" role="menuitem" disabled=${!workspaceOpen} onClick=${() => run(onToggleTerminal)}>${terminalVisible ? 'Hide terminal dock' : 'Show terminal dock'}</button>`}
 
                 <div class="workspace-menu-separator"></div>
                 <button class="workspace-menu-item" role="menuitem" disabled=${!workspaceOpen} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'new-file' } })))}>New file</button>

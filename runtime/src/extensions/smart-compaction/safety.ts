@@ -5,12 +5,16 @@
  * ../smart-compaction.ts.
  */
 
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import {
   BUDGET_SAFETY_MARGIN,
   MAX_COMPACTION_OUTPUT_TOKENS,
   MAX_KEEP_RECENT_FRACTION,
   MIN_COMPACTION_OUTPUT_TOKENS,
   PROGRESSIVE_FALLBACK_CONTEXT_WINDOW,
+  type CompactionReasoningEffort,
+  type CompactionReasoningPhase,
+  getConfiguredCompactionReasoningEffort,
 } from "./config.js";
 import { applyTokenEstimateSafetyMultiplier, getEffectiveContextWindow, getSystemPromptOverheadTokens } from "../../utils/context-window-budget.js";
 import { estimateCompactionPromptTokens, estimateTokensFromChars, getModelContextWindow } from "./context.js";
@@ -57,14 +61,49 @@ export function estimatePostCompactionFit(summary: string, keepRecentTokens: num
   };
 }
 
-export function getCompactionReasoningReserveTokens(model: unknown): number {
+const COMPACTION_REASONING_ORDER: CompactionReasoningEffort[] = ["minimal", "low", "medium", "high"];
+
+function compactionReasoningRank(effort: CompactionReasoningEffort): number {
+  return COMPACTION_REASONING_ORDER.indexOf(effort);
+}
+
+function getContextCappedCompactionReasoningEffort(model: unknown): CompactionReasoningEffort {
+  const contextWindow = getModelContextWindow(model) ?? PROGRESSIVE_FALLBACK_CONTEXT_WINDOW;
+  if (contextWindow <= 32_000) return "minimal";
+  if (contextWindow <= 64_000) return "low";
+  if (contextWindow <= 128_000) return "medium";
+  return "high";
+}
+
+function getSupportedCompactionReasoningEfforts(model: unknown): CompactionReasoningEffort[] {
   const anyModel = model as { reasoning?: unknown } | null | undefined;
-  if (!anyModel?.reasoning) return 0;
+  if (!anyModel?.reasoning) return [];
+  try {
+    const supported = getSupportedThinkingLevels(anyModel as any);
+    return supported
+      .filter((level): level is CompactionReasoningEffort => COMPACTION_REASONING_ORDER.includes(level as CompactionReasoningEffort));
+  } catch {
+    return [];
+  }
+}
+
+export function getCompactionReasoningReserveTokens(model: unknown): number {
+  if (getSupportedCompactionReasoningEfforts(model).length === 0) return 0;
   const contextWindow = getModelContextWindow(model) ?? PROGRESSIVE_FALLBACK_CONTEXT_WINDOW;
   if (contextWindow <= 64_000) return 512;
   if (contextWindow <= 128_000) return 1_024;
   if (contextWindow <= 256_000) return 2_048;
   return 4_096;
+}
+
+export function getCompactionModelContextWindow(model: unknown): number {
+  return getModelContextWindow(model) ?? PROGRESSIVE_FALLBACK_CONTEXT_WINDOW;
+}
+
+export function getCompactionRetryPromptTokenTarget(model: unknown, fraction = 0.65): number {
+  const contextWindow = getCompactionModelContextWindow(model);
+  const effectiveWindow = getEffectiveContextWindow(contextWindow, getSystemPromptOverheadTokens());
+  return Math.max(MIN_COMPACTION_OUTPUT_TOKENS, Math.floor(effectiveWindow * fraction));
 }
 
 export function getSafeCompactionMaxTokens(model: unknown, promptText: string, requestedMaxTokens: number): {
@@ -95,12 +134,27 @@ export function getSafeCompactionMaxTokens(model: unknown, promptText: string, r
   };
 }
 
-export function getCompactionReasoningEffort(model: unknown): "minimal" | "low" | "medium" | "high" {
-  const contextWindow = getModelContextWindow(model) ?? PROGRESSIVE_FALLBACK_CONTEXT_WINDOW;
-  if (contextWindow <= 64_000) return "minimal";
-  if (contextWindow <= 128_000) return "low";
-  if (contextWindow <= 256_000) return "medium";
-  return "high";
+export function getCompactionReasoningEffort(
+  model: unknown,
+  phase: CompactionReasoningPhase = "selective",
+): CompactionReasoningEffort | undefined {
+  const supported = getSupportedCompactionReasoningEfforts(model);
+  if (supported.length === 0) return undefined;
+
+  const configured = getConfiguredCompactionReasoningEffort(phase);
+  const contextCap = getContextCappedCompactionReasoningEffort(model);
+  const cappedTarget = COMPACTION_REASONING_ORDER[
+    Math.min(compactionReasoningRank(configured), compactionReasoningRank(contextCap))
+  ];
+  const cappedRank = compactionReasoningRank(cappedTarget);
+  const supportedAtOrBelowTarget = supported
+    .filter((level) => compactionReasoningRank(level) <= cappedRank)
+    .sort((a, b) => compactionReasoningRank(b) - compactionReasoningRank(a));
+  if (supportedAtOrBelowTarget[0]) return supportedAtOrBelowTarget[0];
+
+  return supported
+    .slice()
+    .sort((a, b) => compactionReasoningRank(a) - compactionReasoningRank(b))[0];
 }
 
 export interface ProgressiveCompactionBudget {

@@ -17,6 +17,10 @@ test('normalizeTimelineQuickActionsSettingsData dedupes configured ids and comma
   });
 });
 
+test('workspace quick-action catalog does not expose the terminal dock toggle', () => {
+  expect(WORKSPACE_QUICK_ACTIONS_CATALOG.map((entry) => entry.id)).not.toContain('toggle-terminal-dock');
+});
+
 test('buildTimelineQuickActionItems keeps pinned ordering agents then workspace then slash commands', () => {
   const items = buildTimelineQuickActionItems({
     agents: [

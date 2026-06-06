@@ -81,6 +81,79 @@ test("refreshDailyNotesFromMessages adds a visible incomplete warning to new uns
   }
 });
 
+test("inspectDailyNoteSummaryBacklog reports message days with missing daily note files", async () => {
+  const base = makeTempWorkspace("piclaw-daily-notes-missing-backlog-");
+  try {
+    const day = isoDateDaysAgo(2);
+    const userTs = `${day}T10:00:00.000Z`;
+    const script = `
+      import { initDatabase, storeMessage } from ${JSON.stringify(DB_MODULE)};
+      import { inspectDailyNoteSummaryBacklog } from ${JSON.stringify(DAILY_NOTES_MODULE)};
+      initDatabase();
+      storeMessage({
+        id: 'user-1',
+        chat_jid: 'web:default',
+        sender: 'user',
+        sender_name: 'You',
+        content: 'missing day should be backfilled',
+        timestamp: '${userTs}',
+        is_bot_message: false,
+      });
+      console.log(JSON.stringify(inspectDailyNoteSummaryBacklog({ recentDays: 7 })));
+    `;
+    const proc = Bun.spawnSync([process.execPath, "-e", script], { env: makeEnv(base), stdout: "pipe", stderr: "pipe" });
+    expect(proc.exitCode, proc.stderr.toString()).toBe(0);
+    const result = JSON.parse(proc.stdout.toString().trim().split("\n").pop()!);
+    expect(result).toMatchObject({ unsummarised: 0, partial: 0, missing_watermark: 0, missing: 1, dates: [day] });
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("refreshDailyNotesFromMessages materializes all missing past days in the requested window", async () => {
+  const base = makeTempWorkspace("piclaw-daily-notes-missing-refresh-");
+  try {
+    const olderDay = isoDateDaysAgo(3);
+    const newerDay = isoDateDaysAgo(1);
+    const olderTs = `${olderDay}T10:00:00.000Z`;
+    const newerTs = `${newerDay}T10:00:00.000Z`;
+    const script = `
+      import { initDatabase, storeMessage } from ${JSON.stringify(DB_MODULE)};
+      import { refreshDailyNotesFromMessages } from ${JSON.stringify(DAILY_NOTES_MODULE)};
+      initDatabase();
+      storeMessage({
+        id: 'older-user',
+        chat_jid: 'web:default',
+        sender: 'user',
+        sender_name: 'You',
+        content: 'older missing day',
+        timestamp: '${olderTs}',
+        is_bot_message: false,
+      });
+      storeMessage({
+        id: 'newer-user',
+        chat_jid: 'web:default',
+        sender: 'user',
+        sender_name: 'You',
+        content: 'newer missing day',
+        timestamp: '${newerTs}',
+        is_bot_message: false,
+      });
+      const out = refreshDailyNotesFromMessages({ chatJid: '*', days: 7 });
+      console.log(JSON.stringify({ created: out.created, days: out.days }));
+    `;
+    const proc = Bun.spawnSync([process.execPath, "-e", script], { env: makeEnv(base), stdout: "pipe", stderr: "pipe" });
+    expect(proc.exitCode, proc.stderr.toString()).toBe(0);
+    const result = JSON.parse(proc.stdout.toString().trim().split("\n").pop()!);
+    expect(result.created).toBe(2);
+    expect(result.days).toEqual([olderDay, newerDay]);
+    expect(existsSync(join(base, "notes", "daily", `${olderDay}.md`))).toBe(true);
+    expect(existsSync(join(base, "notes", "daily", `${newerDay}.md`))).toBe(true);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("inspectDailyNoteSummaryBacklog reports unfinished seeded notes", async () => {
   const base = makeTempWorkspace("piclaw-daily-notes-backlog-");
   try {

@@ -3,6 +3,7 @@ import { resolve } from "path";
 
 import { WORKSPACE_DIR } from "../core/config.js";
 import { getDb } from "../db.js";
+import { createLogger, debugSuppressedError } from "../utils/logger.js";
 
 export const DAILY_NOTES_DIR = resolve(WORKSPACE_DIR, "notes/daily");
 const SUMMARY_MARKER = "<!-- NEEDS_SUMMARY -->";
@@ -10,6 +11,7 @@ const SUMMARY_UPDATE_MARKER = "<!-- NEEDS_SUMMARY_UPDATE -->";
 const INCOMPLETE_WARNING_TITLE = "> ⚠ **Incomplete daily note**";
 const DREAM_CUES_START = "<!-- DREAM_CUES";
 const DREAM_CUES_END = "DREAM_CUES -->";
+const log = createLogger("agent-memory.daily-notes");
 
 interface FrontMatter {
   fields: Record<string, string>;
@@ -40,6 +42,7 @@ export interface DailyNoteSummaryBacklog {
   unsummarised: number;
   partial: number;
   missing_watermark: number;
+  missing: number;
   dates: string[];
 }
 
@@ -266,42 +269,67 @@ function resolveScope(chatJid: string): { clause: string; params: string[]; mode
 export function inspectDailyNoteSummaryBacklog(options?: { recentDays?: number }): DailyNoteSummaryBacklog {
   const recentDays = Math.max(1, Math.floor(Number(options?.recentDays) || 7));
   const dailyNotesDir = resolve(process.env.PICLAW_WORKSPACE || WORKSPACE_DIR, "notes/daily");
-  if (!existsSync(dailyNotesDir)) {
-    return { unsummarised: 0, partial: 0, missing_watermark: 0, dates: [] };
-  }
-
   const cutoff = new Date(Date.now() - recentDays * 86400000).toISOString().slice(0, 10);
+  const today = todayStr();
   let unsummarised = 0;
   let partial = 0;
   let missing_watermark = 0;
-  const dates: string[] = [];
+  let missing = 0;
+  const dates = new Set<string>();
+  const existingDates = new Set<string>();
 
-  for (const file of readdirSync(dailyNotesDir).filter((entry) => /^\d{4}-\d{2}-\d{2}\.md$/.test(entry)).sort()) {
-    const date = file.slice(0, 10);
-    if (date < cutoff) continue;
-    const content = readFileSync(resolve(dailyNotesDir, file), 'utf8');
-    const { fields, body } = splitFrontMatter(content);
-    const summary = extractSummary(body);
-    const summarisedUntil = (fields.summarised_until || '').trim();
-    const needsSummaryUpdate = body.includes(SUMMARY_UPDATE_MARKER);
+  if (existsSync(dailyNotesDir)) {
+    for (const file of readdirSync(dailyNotesDir).filter((entry) => /^\d{4}-\d{2}-\d{2}\.md$/.test(entry)).sort()) {
+      const date = file.slice(0, 10);
+      existingDates.add(date);
+      if (date < cutoff) continue;
+      const content = readFileSync(resolve(dailyNotesDir, file), 'utf8');
+      const { fields, body } = splitFrontMatter(content);
+      const summary = extractSummary(body);
+      const summarisedUntil = (fields.summarised_until || '').trim();
+      const needsSummaryUpdate = body.includes(SUMMARY_UPDATE_MARKER);
 
-    if (!summary) {
-      unsummarised += 1;
-      dates.push(date);
-      continue;
-    }
-    if (!summarisedUntil) {
-      missing_watermark += 1;
-      dates.push(date);
-      continue;
-    }
-    if (needsSummaryUpdate) {
-      partial += 1;
-      dates.push(date);
+      if (!summary) {
+        unsummarised += 1;
+        dates.add(date);
+        continue;
+      }
+      if (!summarisedUntil) {
+        missing_watermark += 1;
+        dates.add(date);
+        continue;
+      }
+      if (needsSummaryUpdate) {
+        partial += 1;
+        dates.add(date);
+      }
     }
   }
 
-  return { unsummarised, partial, missing_watermark, dates };
+  try {
+    const db = getDb();
+    const rows = db.query<{ day: string }, [string, string]>(
+      `SELECT DISTINCT substr(timestamp, 1, 10) AS day
+       FROM messages
+       WHERE chat_jid NOT LIKE 'dream:%'
+         AND timestamp >= ?
+         AND substr(timestamp, 1, 10) < ?
+       ORDER BY day ASC`
+    ).all(`${cutoff}T00:00:00.000Z`, today);
+    for (const row of rows) {
+      if (!existingDates.has(row.day)) {
+        missing += 1;
+        dates.add(row.day);
+      }
+    }
+  } catch (error) {
+    debugSuppressedError(log, "Failed to inspect message days while checking daily-note backlog.", error, {
+      operation: "daily_notes.inspect_backlog.message_days",
+      recentDays,
+    });
+  }
+
+  return { unsummarised, partial, missing_watermark, missing, dates: [...dates].sort() };
 }
 
 export function refreshDailyNotesFromMessages(options?: { days?: number; chatJid?: string; force?: boolean }): RefreshDailyNotesResult {

@@ -9,6 +9,7 @@ import { sel } from '../support/selectors';
 // - 14753253e: Fix disabled state for all items based on workspace state
 // - 34f171a62: Grey out items that don't work in chat-only mode
 // - 75aff0c5c: Hide terminal dock toggle when editor is not open
+// - current: Terminal dock menu item moved to the active editor tab context menu only
 // - 2a7410726: Terminal/VNC tab items always enabled, dock only needs workspace open
 // - a5df7f332: Terminal/VNC tab items active whenever not in chat-only mode
 
@@ -86,22 +87,14 @@ test.describe('US-24: Hamburger Menu Items', () => {
     await page.keyboard.press('Escape');
   });
 
-  test('terminal dock toggle hidden when editor not open', async ({ authedPage: page }) => {
+  test('terminal dock toggle is not shown in the hamburger workspace menu', async ({ authedPage: page }) => {
     await page.waitForSelector(sel.timeline);
 
     await page.locator(HAMBURGER).click();
     await page.waitForSelector(MENU, { timeout: 3000 });
 
-    const editorOpen = await page.locator(sel.editorPane).isVisible().catch(() => false);
     const menuText = await page.locator(MENU).textContent() || '';
-
-    if (!editorOpen) {
-      // Terminal dock toggle should not appear without editor
-      expect(menuText).not.toMatch(/[Ss]how terminal dock|[Hh]ide terminal dock/);
-    } else {
-      // Should appear when editor is open
-      expect(menuText).toMatch(/terminal dock/i);
-    }
+    expect(menuText).not.toMatch(/[Ss]how terminal dock|[Hh]ide terminal dock/);
 
     await page.keyboard.press('Escape');
   });

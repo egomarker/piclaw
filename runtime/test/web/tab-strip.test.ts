@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 
 import { getStandaloneTabUrl } from '../../web/src/components/tab-strip.js';
 import {
@@ -18,6 +19,12 @@ test('getStandaloneTabUrl honors addon-provided standalone routes', () => {
 
   expect(getStandaloneTabUrl('/workspace/foo.example', { hasPopOutTab: true })).toBeNull();
   expect(getStandaloneTabUrl('/workspace/foo.example', { hasPopOutTab: false })).toBe('/example-addon/view?path=%2Fworkspace%2Ffoo.example');
+});
+
+test('terminal dock menu item is only exposed from the active tab context menu', () => {
+  const source = readFileSync(new URL('../../web/src/components/tab-strip.ts', import.meta.url), 'utf8');
+  expect(source).toContain("onToggleDock && contextMenu.id === activeId");
+  expect(source).toContain("${dockVisible ? 'Hide terminal dock' : 'Show terminal dock'}");
 });
 
 test('getStandaloneTabUrl still resolves standalone viewer routes for non-addon files', () => {

@@ -294,6 +294,12 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
                 <button onClick=${() => { onTogglePin?.(contextMenu.id); setContextMenu(null); }}>
                     ${contextMenuTab?.pinned ? 'Unpin' : 'Pin'}
                 </button>
+                ${onToggleDock && contextMenu.id === activeId && html`
+                    <button onClick=${() => {
+                        onToggleDock();
+                        setContextMenu(null);
+                    }}>${dockVisible ? 'Hide terminal dock' : 'Show terminal dock'}</button>
+                `}
                 ${contextMenuCanEditSource && onEditSource && html`
                     <button onClick=${() => {
                         onEditSource(contextMenu.id);

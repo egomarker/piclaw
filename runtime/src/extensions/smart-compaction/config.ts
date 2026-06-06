@@ -16,6 +16,46 @@ export function parsePositiveEnvInt(name: string): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+export type CompactionReasoningEffort = "minimal" | "low" | "medium" | "high";
+
+export type CompactionReasoningPhase =
+  | "selective"
+  | "progressive_chunk"
+  | "progressive_merge"
+  | "progressive_final"
+  | "progressive_compress";
+
+const COMPACTION_REASONING_EFFORTS = new Set<CompactionReasoningEffort>(["minimal", "low", "medium", "high"]);
+
+const COMPACTION_REASONING_PHASE_ENV: Record<CompactionReasoningPhase, string> = {
+  selective: "PICLAW_SMART_COMPACTION_SELECTIVE_REASONING",
+  progressive_chunk: "PICLAW_PROGRESSIVE_CHUNK_REASONING",
+  progressive_merge: "PICLAW_PROGRESSIVE_MERGE_REASONING",
+  progressive_final: "PICLAW_PROGRESSIVE_FINAL_REASONING",
+  progressive_compress: "PICLAW_PROGRESSIVE_COMPRESS_REASONING",
+};
+
+const DEFAULT_COMPACTION_REASONING_BY_PHASE: Record<CompactionReasoningPhase, CompactionReasoningEffort> = {
+  selective: "medium",
+  progressive_chunk: "low",
+  progressive_merge: "medium",
+  progressive_final: "high",
+  progressive_compress: "low",
+};
+
+export function parseCompactionReasoningEffort(value: unknown): CompactionReasoningEffort | null {
+  const normalized = String(value || "").trim().toLowerCase();
+  return COMPACTION_REASONING_EFFORTS.has(normalized as CompactionReasoningEffort)
+    ? normalized as CompactionReasoningEffort
+    : null;
+}
+
+export function getConfiguredCompactionReasoningEffort(phase: CompactionReasoningPhase): CompactionReasoningEffort {
+  return parseCompactionReasoningEffort(process.env[COMPACTION_REASONING_PHASE_ENV[phase]])
+    ?? parseCompactionReasoningEffort(process.env.PICLAW_SMART_COMPACTION_REASONING)
+    ?? DEFAULT_COMPACTION_REASONING_BY_PHASE[phase];
+}
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------

@@ -82,12 +82,6 @@ function buildWorkspaceCommands(options) {
     });
     if (typeof options.onOpenTerminalTab === 'function') add('open-terminal-tab');
     if (typeof options.onOpenVncTab === 'function') add('open-vnc-tab');
-    if (typeof options.onToggleTerminalDock === 'function') {
-        add('toggle-terminal-dock', {
-            label: options.terminalVisible ? 'Hide terminal dock' : 'Show terminal dock',
-            description: options.terminalVisible ? 'Hide the terminal dock.' : 'Show the terminal dock.',
-        });
-    }
     add('open-settings');
     return commands;
 }
@@ -133,12 +127,10 @@ export function TimelineQuickActions({
     currentChatJid = 'web:default',
     workspaceOpen = false,
     chatOnlyMode = false,
-    terminalVisible = false,
     onSwitchChat,
     onToggleWorkspace,
     onOpenTerminalTab,
     onOpenVncTab,
-    onToggleTerminalDock,
     onPrefillCompose,
 }) {
     const [open, setOpen] = useState(false);
@@ -181,11 +173,9 @@ export function TimelineQuickActions({
     const workspaceCommands = useMemo(() => buildWorkspaceCommands({
         workspaceOpen,
         chatOnlyMode,
-        terminalVisible,
         onOpenTerminalTab,
         onOpenVncTab,
-        onToggleTerminalDock,
-    }), [chatOnlyMode, onOpenTerminalTab, onOpenVncTab, onToggleTerminalDock, terminalVisible, workspaceOpen]);
+    }), [chatOnlyMode, onOpenTerminalTab, onOpenVncTab, workspaceOpen]);
 
     const items = useMemo(() => buildTimelineQuickActionItems({
         agents: activeChatAgents,
@@ -281,7 +271,6 @@ export function TimelineQuickActions({
                         if (current.commandId === 'toggle-chat-only') toggleChatOnlyMode(chatOnlyMode);
                         if (current.commandId === 'open-terminal-tab') onOpenTerminalTab?.();
                         if (current.commandId === 'open-vnc-tab') onOpenVncTab?.();
-                        if (current.commandId === 'toggle-terminal-dock') onToggleTerminalDock?.();
                         if (current.commandId === 'open-settings') window.dispatchEvent(new CustomEvent('piclaw:open-settings'));
                     } else if (current.kind === 'slash' && current.commandName) {
                         onPrefillCompose?.(current.commandName);
@@ -305,7 +294,7 @@ export function TimelineQuickActions({
             window.removeEventListener('keydown', onKeyDown, true);
             document.removeEventListener('pointerdown', onPointerDown, true);
         };
-    }, [chatOnlyMode, highlightIndex, items, onOpenTerminalTab, onOpenVncTab, onPrefillCompose, onSwitchChat, onToggleTerminalDock, onToggleWorkspace, open]);
+    }, [chatOnlyMode, highlightIndex, items, onOpenTerminalTab, onOpenVncTab, onPrefillCompose, onSwitchChat, onToggleWorkspace, open]);
 
     useEffect(() => {
         const handleSettingsSaved = (event) => {
@@ -371,7 +360,6 @@ export function TimelineQuickActions({
                                         if (item.kind === 'workspace' && item.commandId === 'toggle-chat-only') toggleChatOnlyMode(chatOnlyMode);
                                         if (item.kind === 'workspace' && item.commandId === 'open-terminal-tab') onOpenTerminalTab?.();
                                         if (item.kind === 'workspace' && item.commandId === 'open-vnc-tab') onOpenVncTab?.();
-                                        if (item.kind === 'workspace' && item.commandId === 'toggle-terminal-dock') onToggleTerminalDock?.();
                                         if (item.kind === 'workspace' && item.commandId === 'open-settings') window.dispatchEvent(new CustomEvent('piclaw:open-settings'));
                                         if (item.kind === 'slash' && item.commandName) onPrefillCompose?.(item.commandName);
                                         setOpen(false);

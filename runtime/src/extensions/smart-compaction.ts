@@ -17,12 +17,12 @@ import { recordCompactionCancellationReason } from "../agent-pool/compaction-can
 
 import { getCompactionRuntimeConfig } from "../core/config.js";
 import { FULL_PASS_FALLBACK_MAX_PROMPT_TOKENS, MIN_COMPACTION_OUTPUT_TOKENS, MIN_SUMMARY_CHARS, PROGRESSIVE_FALLBACK_CONTEXT_WINDOW, SELECTIVE_THRESHOLD, SMART_COMPACTION_PROGRESS_INTERVAL_MS, SYSTEM_PROMPT_OVERHEAD_TOKENS } from "./smart-compaction/config.js";
-import { estimateCompactionPromptTokens, estimateTokensFromChars, getContextWindowEstimate, publishContextEstimate } from "./smart-compaction/context.js";
+import { estimateCompactionPromptTokens, estimateSmartCompactionCompletionPercent, estimateTokensFromChars, formatSmartCompactionStatus, getContextWindowEstimate, publishContextEstimate } from "./smart-compaction/context.js";
 import { compressFilePaths, fileListsFromOps } from "./smart-compaction/files.js";
 import { convertMessagesWithMetadata, type SourceMessage } from "./smart-compaction/messages.js";
 import { appendFileLists, buildTurnPrefixSummary, extractKeptMessagesSummary, tryNoOpCompaction } from "./smart-compaction/noop.js";
-import { buildProgressiveCompactionChunks, buildTrimmedProgressiveMergeRetryPrompt, getProgressiveCompactionBudget, runProgressiveCompaction } from "./smart-compaction/progressive.js";
-import { clampKeepRecentTokens, estimatePostCompactionFit, getCompactionReasoningEffort, getSafeCompactionMaxTokens } from "./smart-compaction/safety.js";
+import { buildProgressiveCompactionChunks, buildTrimmedProgressiveMergeRetryPrompt, getProgressiveCompactionBudget, runProgressiveCompaction, type ProgressiveCompactionProgress } from "./smart-compaction/progressive.js";
+import { clampKeepRecentTokens, estimatePostCompactionFit, getCompactionReasoningEffort, getCompactionRetryPromptTokenTarget, getSafeCompactionMaxTokens } from "./smart-compaction/safety.js";
 import { buildSelectivePrompt, detectRecentTopicShift, SYSTEM_PROMPT } from "./smart-compaction/selective-prompt.js";
 import { streamComplete, type CompactionStreamFn } from "./smart-compaction/stream-complete.js";
 import { sanitizeContextPruneCompactionMessages } from "./context-prune/pruner.js";
@@ -34,6 +34,8 @@ export {
   buildTrimmedProgressiveMergeRetryPrompt,
   clampKeepRecentTokens,
   estimatePostCompactionFit,
+  getCompactionReasoningEffort,
+  getCompactionRetryPromptTokenTarget,
   getProgressiveCompactionBudget,
   getSafeCompactionMaxTokens,
 };
@@ -75,6 +77,43 @@ function makeResilientCtx<T extends { ui: Record<string, unknown> }>(ctx: T): Re
 function cancelCompactionWithReason(ctx: { sessionManager?: unknown }, message: string): { cancel: true } {
   recordCompactionCancellationReason(ctx.sessionManager, message);
   return { cancel: true };
+}
+
+function resolveCompactionModel(ctx: { model?: unknown }): unknown {
+  // Future dedicated compaction-model selection should be wired here. Keeping a
+  // single resolver ensures compaction prompt budgets, safe output caps, retry
+  // trimming, auth, reasoning, and the actual LLM call all use the same model.
+  return ctx.model;
+}
+
+function publishCompactionStatus(ctx: { ui: { setStatus?: (key: string, text: string | undefined) => void } }, message?: string, completionPercent?: number | null): void {
+  ctx.ui.setStatus?.("smart_compaction", message ? formatSmartCompactionStatus(message, completionPercent) : undefined);
+}
+
+function estimateProgressiveProgressCompletion(progress?: ProgressiveCompactionProgress): number {
+  if (progress?.phase === "progressive_chunk" && progress.chunkIndex && progress.totalChunks) {
+    return 30 + Math.round(((progress.chunkIndex - 0.5) / Math.max(1, progress.totalChunks)) * 40);
+  }
+  if (progress?.phase === "progressive_merge") return 78;
+  if (progress?.phase === "progressive_compress") return 90;
+  if (progress?.phase === "progressive_final") return 94;
+  return estimateSmartCompactionCompletionPercent(progress?.phase ?? "progressive_streaming");
+}
+
+function formatProgressiveProgressMessage(progress?: ProgressiveCompactionProgress): string {
+  if (progress?.phase === "progressive_chunk" && progress.chunkIndex && progress.totalChunks) {
+    return `Smart compaction: summarizing chunk ${progress.chunkIndex}/${progress.totalChunks}…`;
+  }
+  if (progress?.phase === "progressive_merge" && progress.mergePass && progress.batchIndex) {
+    return `Smart compaction: merging summaries pass ${progress.mergePass}, batch ${progress.batchIndex}…`;
+  }
+  if (progress?.phase === "progressive_compress" && progress.compressPass) {
+    return `Smart compaction: compressing final summary (${progress.compressPass}/3)…`;
+  }
+  if (progress?.phase === "progressive_final") {
+    return "Smart compaction: final progressive merge still running…";
+  }
+  return "Smart compaction: progressive summary still running…";
 }
 
 function estimateEntryTokens(entry: any): number {
@@ -308,12 +347,18 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
     } = preparation;
 
     let finalContextTokens: number | null = null;
+    let lastContextEstimateTokens: number | null = tokensBefore;
+    const publishContextStage = (tokens: number | null | undefined, phase: string, completionPercent?: number | null) => {
+      if (typeof tokens === "number" && Number.isFinite(tokens) && tokens >= 0) {
+        lastContextEstimateTokens = tokens;
+      }
+      publishContextEstimate(ctx, lastContextEstimateTokens, phase, { completionPercent });
+    };
 
     if (messagesToSummarize.length === 0) return;
 
-    ctx.ui.setWorkingIndicator({ frames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], intervalMs: 90 });
-    ctx.ui.setWorkingMessage(`Smart compaction: scanning ${messagesToSummarize.length} messages…`);
-    publishContextEstimate(ctx, tokensBefore, "scanning");
+    publishCompactionStatus(ctx, `Smart compaction: scanning ${messagesToSummarize.length} messages…`, estimateSmartCompactionCompletionPercent("scanning"));
+    publishContextStage(tokensBefore, "scanning");
 
     try {
       // Capture the signal reference from the event. The upstream
@@ -323,12 +368,17 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
       // instead of falling through — which would crash upstream when it accesses
       // the already-cleared controller.
       const abortSignal = signal;
+      const publishCompactionStage = (message: string, phase: string, tokens?: number | null, completionPercent = estimateSmartCompactionCompletionPercent(phase)) => {
+        publishCompactionStatus(ctx, message, completionPercent);
+        publishContextStage(tokens, phase, completionPercent);
+      };
       let lastProgressUiAt = 0;
-      const setThrottledProgressMessage = (message: string) => {
+      const setThrottledProgressMessage = (message: string, phase: string, completionPercent = estimateSmartCompactionCompletionPercent(phase)) => {
+        publishContextStage(null, phase, completionPercent);
         const now = Date.now();
         if (now - lastProgressUiAt < SMART_COMPACTION_PROGRESS_INTERVAL_MS) return;
         lastProgressUiAt = now;
-        ctx.ui.setWorkingMessage(message);
+        publishCompactionStatus(ctx, message, completionPercent);
       };
 
       // ── Compute topic-shift signal once for all downstream paths ──────
@@ -409,6 +459,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
         ctx,
       );
       if (noOpResult) {
+        publishContextStage(tokensBefore, "noop_reused");
         const postFit = estimatePostCompactionFit(noOpResult.compaction.summary, configuredKeepRecent, contextWindow);
         if (!postFit.fits || configuredKeepRecent > safeKeepRecent) {
           try {
@@ -426,7 +477,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
               );
             }
             finalContextTokens = adjusted.estimatedTotal;
-            publishContextEstimate(ctx, adjusted.estimatedTotal, "completed_noop_adjusted");
+            publishCompactionStage("Smart compaction: reused summary with adjusted kept context…", "completed_noop_adjusted", adjusted.estimatedTotal);
             return {
               compaction: {
                 ...noOpResult.compaction,
@@ -437,12 +488,12 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
             log.debug(
               `No-op compaction: post-compaction estimate ${postFit.estimatedTotal} tokens is unsafe for ${contextWindow} context (configured kept ${configuredKeepRecent}t, safe kept ${safeKeepRecent}t, margin ${postFit.margin}t). Falling through to LLM compaction.`,
             );
-            publishContextEstimate(ctx, postFit.estimatedTotal, "noop_unsafe");
+            publishCompactionStage("Smart compaction: no-op estimate unsafe; extracting signal…", "noop_unsafe", postFit.estimatedTotal);
             // Don't return the no-op — fall through to LLM-based compaction
           }
         } else {
           finalContextTokens = postFit.estimatedTotal;
-          publishContextEstimate(ctx, postFit.estimatedTotal, "completed_noop");
+          publishCompactionStage("Smart compaction: reused existing summary…", "completed_noop", postFit.estimatedTotal);
           return noOpResult;
         }
       }
@@ -459,7 +510,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
       );
       const fullPassFallbackAllowed = fullPassPromptEstimate + MIN_COMPACTION_OUTPUT_TOKENS <= conservativeFullPassLimit && !targetContext.targetContextWindow;
       if (messagesForCompaction.length < SELECTIVE_THRESHOLD && fullPassFallbackAllowed) {
-        publishContextEstimate(ctx, tokensBefore, "builtin_fallback");
+        publishCompactionStage("Smart compaction: using built-in compaction fallback…", "builtin_fallback", tokensBefore);
         return;
       }
 
@@ -470,8 +521,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
           );
       }
 
-      ctx.ui.setWorkingMessage(`Smart compaction: extracting signal from ${messagesForCompaction.length} messages…`);
-      publishContextEstimate(ctx, tokensBefore, "extracting");
+      publishCompactionStage(`Smart compaction: extracting signal from ${messagesForCompaction.length} messages…`, "extracting", tokensBefore);
       log.debug(
         `Smart compaction: ${messagesForCompaction.length} msgs → selective extraction`,
           );
@@ -488,25 +538,27 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
       log.debug(
         `Prompt: ${Math.round(promptText.length / 1000)}k chars / ~${Math.round(promptTokens / 1000)}k tokens (vs ~${Math.round(tokensBefore / 1000)}k tokens full)`,
           );
-      publishContextEstimate(ctx, promptTokens, "summarizing_prompt");
+      publishCompactionStage("Smart compaction: preparing selective summary prompt…", "summarizing_prompt", promptTokens);
 
-      // Model — use the session's own model (already session-scoped)
-      const model = ctx.model;
-      if (!model) {
+      // Compaction model — currently the session model, resolved through one
+      // seam so a future dedicated compaction model can be inserted without
+      // accidentally mixing model-specific budgets.
+      const compactionModel = resolveCompactionModel(ctx) as any;
+      if (!compactionModel) {
         log.debug("No model available for smart compaction");
         return;
       }
-      const auth = await resolveModelRequestAuth(ctx.modelRegistry as any, model);
+      const auth = await resolveModelRequestAuth(ctx.modelRegistry as any, compactionModel);
       if (!auth.ok) {
         log.debug("Compaction model is not configured in Pi Agent settings (run `pi /login`)");
         return;
       }
 
-      const budget = getProgressiveCompactionBudget(model, targetContext.targetContextWindow);
+      const budget = getProgressiveCompactionBudget(compactionModel);
       const promptTooLargeForSinglePass = promptTokens + MIN_COMPACTION_OUTPUT_TOKENS > budget.contextWindow;
       if (budget.forceProgressive || promptText.length > budget.promptBudgetChars || promptTooLargeForSinglePass) {
         try {
-          ctx.ui.setWorkingMessage("Smart compaction: progressive iterative mode…");
+          publishCompactionStage("Smart compaction: progressive iterative mode…", "progressive_iterative", promptTokens);
           log.debug(
             `Progressive compaction enabled: prompt ${Math.round(promptText.length / 1000)}k chars / ~${Math.round(promptTokens / 1000)}k tokens exceeds safe single-pass budget (${Math.round(budget.promptBudgetChars / 1000)}k chars, ${budget.contextWindow.toLocaleString()} context)`,
           );
@@ -514,7 +566,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
             llmMessages,
             humanUserIndexes,
             sourceIndexesByLlmIndex,
-            model,
+            model: compactionModel,
             auth,
             settings,
             previousSummary,
@@ -527,10 +579,14 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
             ctx,
             timeoutMs: getCompactionRuntimeConfig().timeoutMs,
             startedAt: compactionStartedAt,
-            publishEstimate: (tokens, phase) => publishContextEstimate(ctx, tokens, phase),
+            publishEstimate: (tokens, phase, completionPercent) => publishContextStage(tokens, phase, completionPercent),
             streamFn: options.streamFn,
-            onProgress: () => {
-              setThrottledProgressMessage("Smart compaction: progressive summary still running…");
+            onProgress: (_generatedChars, progress) => {
+              setThrottledProgressMessage(
+                formatProgressiveProgressMessage(progress),
+                progress?.phase ?? "progressive_streaming",
+                estimateProgressiveProgressCompletion(progress),
+              );
             },
           });
           const fullSummary = progressiveResult.summary.includes("<read-files>") || progressiveResult.summary.includes("<modified-files>")
@@ -585,7 +641,13 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
           }
 
           finalContextTokens = estimatedTotal;
-          publishContextEstimate(ctx, estimatedTotal, progressiveResult.complete ? "completed_progressive" : "completed_progressive_partial");
+          publishCompactionStage(
+            progressiveResult.complete
+              ? "Smart compaction: completed progressive summary…"
+              : "Smart compaction: completed partial progressive summary…",
+            progressiveResult.complete ? "completed_progressive" : "completed_progressive_partial",
+            estimatedTotal,
+          );
           if (adjusted && progressiveResult.complete) {
             log.debug(
               `Progressive compaction adjusted kept window for ${contextWindow} context (firstKept ${firstKeptEntryId} → ${finalFirstKeptEntryId}, estimated ${estimatedTotal}t, margin ${margin}t).`,
@@ -607,7 +669,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
             return cancelCompactionWithReason(ctx, msg);
           }
           log.debug(`Progressive compaction error: ${msg}; falling back to built-in compaction`);
-          publishContextEstimate(ctx, tokensBefore, "progressive_builtin_fallback");
+          publishCompactionStage("Smart compaction: progressive path failed; using built-in fallback…", "progressive_builtin_fallback", tokensBefore);
           return;
         }
       }
@@ -619,49 +681,48 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
 
       try {
         const runCompletion = async (prompt: string) => {
-          const safeOutput = getSafeCompactionMaxTokens(model, prompt, requestedMaxTokens);
+          const safeOutput = getSafeCompactionMaxTokens(compactionModel, prompt, requestedMaxTokens);
           return await streamComplete({
-            model,
+            model: compactionModel,
             systemPrompt: SYSTEM_PROMPT,
             userPrompt: prompt,
             maxTokens: safeOutput.maxTokens,
             signal: abortSignal,
             apiKey: authForCompletion.apiKey,
             headers: authForCompletion.headers,
-            reasoning: (model as any).reasoning ? getCompactionReasoningEffort(model) : undefined,
+            reasoning: (compactionModel as any).reasoning ? getCompactionReasoningEffort(compactionModel, "selective") : undefined,
             streamFn: options.streamFn,
             onProgress: () => {
-              setThrottledProgressMessage("Smart compaction: generating summary still running…");
+              setThrottledProgressMessage("Smart compaction: generating summary still running…", "generating_summary_streaming");
             },
           });
         };
 
-        ctx.ui.setWorkingMessage("Smart compaction: generating selective summary…");
-        publishContextEstimate(ctx, estimateCompactionPromptTokens(activePromptText), "generating_summary");
+        publishCompactionStage("Smart compaction: generating selective summary…", "generating_summary", estimateCompactionPromptTokens(activePromptText));
         let response;
         try {
           response = await runCompletion(activePromptText);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           const trimmedPrompt = isCompactionInputOverflow(msg)
-            ? buildTrimmedCompactionRetryPrompt(activePromptText, Math.floor(getProgressiveCompactionBudget(model, targetContext.targetContextWindow).contextWindow * 0.65))
+            ? buildTrimmedCompactionRetryPrompt(activePromptText, getCompactionRetryPromptTokenTarget(compactionModel))
             : null;
           if (!trimmedPrompt || abortSignal.aborted) throw err;
           activePromptText = trimmedPrompt;
           log.debug(`Smart compaction input overflow; retrying with trimmed prompt (~${Math.round(estimateCompactionPromptTokens(activePromptText) / 1000)}k tokens).`);
-          publishContextEstimate(ctx, estimateCompactionPromptTokens(activePromptText), "generating_summary_trimmed_retry");
+          publishCompactionStage("Smart compaction: retrying with trimmed summary prompt…", "generating_summary_trimmed_retry", estimateCompactionPromptTokens(activePromptText));
           response = await runCompletion(activePromptText);
         }
 
         if (response.stopReason === "error") {
           const errorMessage = (response as any).errorMessage || "unknown";
           const trimmedPrompt = isCompactionInputOverflow(errorMessage)
-            ? buildTrimmedCompactionRetryPrompt(activePromptText, Math.floor(getProgressiveCompactionBudget(model, targetContext.targetContextWindow).contextWindow * 0.65))
+            ? buildTrimmedCompactionRetryPrompt(activePromptText, getCompactionRetryPromptTokenTarget(compactionModel))
             : null;
           if (trimmedPrompt && trimmedPrompt !== activePromptText && !abortSignal.aborted) {
             activePromptText = trimmedPrompt;
             log.debug(`Smart compaction LLM overflow response; retrying with trimmed prompt (~${Math.round(estimateCompactionPromptTokens(activePromptText) / 1000)}k tokens).`);
-            publishContextEstimate(ctx, estimateCompactionPromptTokens(activePromptText), "generating_summary_trimmed_retry");
+            publishCompactionStage("Smart compaction: retrying with trimmed summary prompt…", "generating_summary_trimmed_retry", estimateCompactionPromptTokens(activePromptText));
             response = await runCompletion(activePromptText);
           }
         }
@@ -723,11 +784,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
           branchEntries,
         });
         finalContextTokens = adjustedFit.estimatedTotal;
-        publishContextEstimate(
-          ctx,
-          adjustedFit.estimatedTotal,
-          "completed_selective",
-        );
+        publishCompactionStage("Smart compaction: completed selective summary…", "completed_selective", adjustedFit.estimatedTotal);
 
         if (adjustedFit.adjusted) {
           log.debug(
@@ -761,9 +818,8 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
       // after compaction completes, fails, or is cancelled. On success, repeat
       // the post-compaction estimate; on fallthrough/cancel/error, keep the
       // pre-compaction estimate because no extension compaction was applied.
-      publishContextEstimate(ctx, finalContextTokens ?? tokensBefore, "compaction_done");
-      ctx.ui.setWorkingMessage(undefined);
-      ctx.ui.setWorkingIndicator({ frames: [] });
+      publishContextStage(finalContextTokens ?? tokensBefore, "compaction_done");
+      publishCompactionStatus(ctx, undefined);
     }
   });
   };

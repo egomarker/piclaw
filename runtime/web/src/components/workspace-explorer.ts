@@ -618,8 +618,6 @@ export function WorkspaceExplorer({
     onOpenEditor,
     onOpenTerminalTab,
     onOpenVncTab,
-    onToggleTerminal,
-    terminalVisible = false,
 }) {
     const [tree,          setTree]          = useState(null);
     const [expanded,      setExpanded]      = useState(new Set(['.']));
@@ -2221,11 +2219,6 @@ export function WorkspaceExplorer({
         onOpenVncTab?.();
     }, [closeHeaderMenu, onOpenVncTab]);
 
-    const handleMenuToggleTerminal = useCallback(() => {
-        closeHeaderMenu();
-        onToggleTerminal?.();
-    }, [closeHeaderMenu, onToggleTerminal]);
-
     const handleMenuOpenSettings = useCallback(() => {
         runMenuAction(() => window.dispatchEvent(new CustomEvent('piclaw:open-settings')));
     }, [runMenuAction]);
@@ -2396,7 +2389,7 @@ export function WorkspaceExplorer({
                                     </div>
                                 </div>
 
-                                ${(onOpenTerminalTab || onOpenVncTab || onToggleTerminal) && html`<div class="workspace-menu-separator"></div>`}
+                                ${(onOpenTerminalTab || onOpenVncTab) && html`<div class="workspace-menu-separator"></div>`}
                                 ${onOpenTerminalTab && html`
                                     <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuOpenTerminalTab}>
                                         Open terminal in tab
@@ -2407,12 +2400,6 @@ export function WorkspaceExplorer({
                                         Open VNC in tab
                                     </button>
                                 `}
-                                ${onToggleTerminal && html`
-                                    <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuToggleTerminal}>
-                                        ${terminalVisible ? 'Hide terminal dock' : 'Show terminal dock'}
-                                    </button>
-                                `}
-
                                 <div class="workspace-menu-separator"></div>
                                 <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuOpenSettings}>Settings</button>
 

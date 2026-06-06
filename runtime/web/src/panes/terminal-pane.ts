@@ -119,6 +119,26 @@ function injectStyles(ownerDocument = document) {
       .terminal-pane-xterm .xterm-screen {
         background: transparent !important;
       }
+      .terminal-pane-xterm .xterm-viewport {
+        scrollbar-color: color-mix(in srgb, var(--terminal-foreground, var(--text-secondary, #8b949e)) 36%, transparent) var(--terminal-background, var(--bg-primary, #0d1117));
+        scrollbar-width: thin;
+      }
+      .terminal-pane-xterm .xterm-viewport::-webkit-scrollbar {
+        width: 2px;
+        height: 2px;
+        background: var(--terminal-background, var(--bg-primary, #0d1117));
+      }
+      .terminal-pane-xterm .xterm-viewport::-webkit-scrollbar-track,
+      .terminal-pane-xterm .xterm-viewport::-webkit-scrollbar-corner {
+        background: var(--terminal-background, var(--bg-primary, #0d1117));
+      }
+      .terminal-pane-xterm .xterm-viewport::-webkit-scrollbar-thumb {
+        background: color-mix(in srgb, var(--terminal-foreground, var(--text-secondary, #8b949e)) 36%, transparent);
+        border: 0;
+      }
+      .terminal-pane-xterm .xterm-decoration-overview-ruler {
+        background: var(--terminal-background, var(--bg-primary, #0d1117));
+      }
       .terminal-pane-xterm .terminal-status {
         position: absolute;
         top: 8px;
@@ -688,6 +708,8 @@ class TerminalPaneInstance {
     if (!this.terminal) return;
     const theme = buildTerminalTheme(this.ownerWindow, this.ownerDocument);
     this.terminal.options.theme = theme;
+    this.root.style.setProperty("--terminal-background", theme.background);
+    this.root.style.setProperty("--terminal-foreground", theme.foreground);
     this.root.style.backgroundColor = theme.background;
     this.root.style.color = theme.foreground;
     if (this.body) this.body.style.backgroundColor = theme.background;

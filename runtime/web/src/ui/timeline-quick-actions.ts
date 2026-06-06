@@ -71,12 +71,6 @@ export const WORKSPACE_QUICK_ACTIONS_CATALOG: TimelineQuickActionWorkspaceComman
     keywords: ['vnc', 'remote', 'desktop', 'tab'],
   },
   {
-    id: 'toggle-terminal-dock',
-    label: 'Toggle terminal dock',
-    description: 'Show or hide the terminal dock.',
-    keywords: ['terminal', 'dock', 'shell'],
-  },
-  {
     id: 'open-settings',
     label: 'Settings',
     description: 'Open the settings dialog.',

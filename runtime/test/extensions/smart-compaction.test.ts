@@ -166,6 +166,8 @@ import {
   buildTrimmedProgressiveMergeRetryPrompt,
   clampKeepRecentTokens,
   estimatePostCompactionFit,
+  getCompactionReasoningEffort,
+  getCompactionRetryPromptTokenTarget,
   getProgressiveCompactionBudget,
   getSafeCompactionMaxTokens,
   createSmartCompactionExtension,
@@ -220,6 +222,16 @@ describe("smart-compaction", () => {
 
   it("registers the session_before_compact handler", () => {
     expect(handler).toBeTypeOf("function");
+  });
+
+  it("maps compaction reasoning targets to model support and context capacity", () => {
+    expect(getCompactionReasoningEffort({ provider: "test", id: "plain", reasoning: false, contextWindow: 512_000 }, "progressive_final")).toBeUndefined();
+    expect(getCompactionReasoningEffort({ provider: "test", id: "tiny", reasoning: true, contextWindow: 24_000 }, "progressive_final")).toBe("minimal");
+    expect(getCompactionReasoningEffort({ provider: "test", id: "medium", reasoning: true, contextWindow: 128_000 }, "progressive_final")).toBe("medium");
+    expect(getCompactionReasoningEffort({ provider: "test", id: "large", reasoning: true, contextWindow: 512_000 }, "progressive_chunk")).toBe("low");
+    expect(getCompactionReasoningEffort({ provider: "test", id: "large", reasoning: true, contextWindow: 512_000 }, "progressive_final")).toBe("high");
+    expect(getCompactionReasoningEffort({ provider: "test", id: "no-high", reasoning: true, contextWindow: 512_000, thinkingLevelMap: { high: null } }, "progressive_final")).toBe("medium");
+    expect(getCompactionReasoningEffort({ provider: "test", id: "no-supported-effort", reasoning: true, contextWindow: 512_000, thinkingLevelMap: { minimal: null, low: null, medium: null, high: null } }, "progressive_final")).toBeUndefined();
   });
 
   it("trims progressive merge retry prompts by preserving rules and recent summaries", () => {
@@ -285,7 +297,7 @@ describe("smart-compaction", () => {
     });
 
     const prep = makePreparation(60);
-    const ctx = makeCtx();
+    const ctx = makeCtx({ model: { provider: "test", id: "test-model", reasoning: true, contextWindow: 128000 } });
     const result = await handler!(
       {
         preparation: prep,
@@ -296,16 +308,20 @@ describe("smart-compaction", () => {
     );
 
     expect(completeSimple).toHaveBeenCalledTimes(1);
+    expect((completeSimple as any).mock.calls[0][2].reasoning).toBe("medium");
     expect(result).toBeDefined();
     expect(result.compaction).toBeDefined();
     expect(result.compaction.summary).toContain("Test goal");
     expect(result.compaction.firstKeptEntryId).toBe("kept-entry-1");
     expect(result.compaction.tokensBefore).toBe(6000);
 
-    // Should use standard working-status feedback without notification/message panes.
+    // Should use core Pi status feedback without notification/message panes or custom working UI.
     expect(ctx.ui.notify).not.toHaveBeenCalled();
-    expect(ctx.ui.setWorkingMessage).toHaveBeenCalledWith(
-      expect.stringContaining("Smart compaction: generating selective summary"),
+    expect(ctx.ui.setWorkingMessage).not.toHaveBeenCalled();
+    expect(ctx.ui.setWorkingIndicator).not.toHaveBeenCalled();
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+      "smart_compaction",
+      expect.stringMatching(/^Smart compaction: \d+% — .*generating selective summary/),
     );
     expect(ctx.ui.setStatus).toHaveBeenCalledWith(
       "context_usage",
@@ -314,8 +330,11 @@ describe("smart-compaction", () => {
     const contextStatusPayloads = ctx.ui.setStatus.mock.calls
       .filter(([key]: [string]) => key === "context_usage")
       .map(([, text]: [string, string]) => JSON.parse(text));
+    const smartCompactionStatusMessages = ctx.ui.setStatus.mock.calls
+      .filter(([key, text]: [string, string | undefined]) => key === "smart_compaction" && typeof text === "string");
+    expect(contextStatusPayloads.length).toBeGreaterThanOrEqual(smartCompactionStatusMessages.length);
     expect(contextStatusPayloads.map((payload: any) => payload.phase)).toEqual(
-      expect.arrayContaining(["scanning", "generating_summary", "completed_selective"]),
+      expect.arrayContaining(["scanning", "extracting", "summarizing_prompt", "generating_summary", "completed_selective"]),
     );
     expect(contextStatusPayloads[0]).toMatchObject({
       tokens: 6000,
@@ -323,12 +342,16 @@ describe("smart-compaction", () => {
       estimated: true,
       source: "smart_compaction",
       phase: "scanning",
+      completionPercent: 2,
+      completionEstimated: true,
     });
     const completed = contextStatusPayloads.find((payload: any) => payload.phase === "completed_selective");
     expect(completed?.tokens).toBeGreaterThan(6000);
+    expect(completed).toMatchObject({ completionPercent: 100, completionEstimated: true });
     expect(contextStatusPayloads.at(-1)).toMatchObject({
       phase: "compaction_done",
       tokens: completed?.tokens,
+      completionPercent: 100,
     });
   });
 
@@ -769,6 +792,19 @@ describe("smart-compaction", () => {
       expect(budget.promptBudgetChars).toBeLessThanOrEqual(51_000);
     });
 
+    it("computes compaction sizing limits from the compaction model", () => {
+      const smallModel = { contextWindow: 16_000 };
+      const largeModel = { contextWindow: 128_000 };
+      const smallBudget = getProgressiveCompactionBudget(smallModel);
+      const largeBudget = getProgressiveCompactionBudget(largeModel);
+
+      expect(largeBudget.chunkBudgetChars).toBeGreaterThan(smallBudget.chunkBudgetChars);
+      expect(largeBudget.mergeBudgetChars).toBeGreaterThan(smallBudget.mergeBudgetChars);
+      expect(getCompactionRetryPromptTokenTarget(largeModel)).toBeGreaterThan(getCompactionRetryPromptTokenTarget(smallModel));
+      expect(() => getSafeCompactionMaxTokens(smallModel, "x".repeat(120_000), 16_000)).toThrow(/exceeds safe model budget/);
+      expect(getSafeCompactionMaxTokens(largeModel, "x".repeat(120_000), 16_000).maxTokens).toBeGreaterThan(0);
+    });
+
     it("splits deterministic chunks in order without dropping key continuity facts", () => {
       const messages = Array.from({ length: 12 }, (_, i) => userMsg(`fact-${String(i).padStart(2, "0")} ${"x".repeat(180)}`));
       const chunks = buildProgressiveCompactionChunks(messages as any, 500, new Set(messages.map((_, i) => i)));
@@ -807,7 +843,7 @@ describe("smart-compaction", () => {
         };
       });
 
-      const ctx = makeCtx({ model: { provider: "test", id: "small-context", contextWindow: 16_000, reasoning: false } });
+      const ctx = makeCtx({ model: { provider: "test", id: "small-context", contextWindow: 16_000, reasoning: true } });
       const result = await handler!(
         {
           preparation: makePreparation(longMessages.length, {
@@ -832,8 +868,31 @@ describe("smart-compaction", () => {
       const prompts = (completeSimple as any).mock.calls.map((call: any[]) => call[1].messages[0].content[0].text as string);
       expect(prompts.filter((prompt: string) => prompt.includes("deterministic chunk")).length).toBeGreaterThan(1);
       expect(prompts.at(-1)).toContain("Ordered Intermediate Summaries");
+      const calls = (completeSimple as any).mock.calls;
+      const chunkCallOptions = calls
+        .filter((call: any[]) => (call[1].messages[0].content[0].text as string).includes("deterministic chunk"))
+        .map((call: any[]) => call[2]);
+      expect(chunkCallOptions.length).toBeGreaterThan(1);
+      expect(chunkCallOptions.every((options: any) => options.reasoning === "minimal")).toBe(true);
+      expect(calls.at(-1)[2].reasoning).toBe("minimal");
       expect(ctx.ui.notify).not.toHaveBeenCalled();
-      expect(ctx.ui.setWorkingMessage).toHaveBeenCalledWith(expect.stringContaining("Smart compaction:"));
+      expect(ctx.ui.setWorkingMessage).not.toHaveBeenCalled();
+      expect(ctx.ui.setWorkingIndicator).not.toHaveBeenCalled();
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith("smart_compaction", expect.stringContaining("Smart compaction:"));
+      const progressiveContextPayloads = ctx.ui.setStatus.mock.calls
+        .filter(([key]: [string]) => key === "context_usage")
+        .map(([, text]: [string, string]) => JSON.parse(text));
+      const progressiveStatusMessages = ctx.ui.setStatus.mock.calls
+        .filter(([key, text]: [string, string | undefined]) => key === "smart_compaction" && typeof text === "string");
+      expect(progressiveContextPayloads.length).toBeGreaterThanOrEqual(progressiveStatusMessages.length);
+      const progressiveContextPhases = progressiveContextPayloads.map((payload: any) => payload.phase);
+      expect(progressiveContextPhases).toEqual(expect.arrayContaining([
+        "progressive_iterative",
+        "progressive_chunking",
+        "merge_final",
+        "completed_progressive",
+      ]));
+      expect(progressiveContextPhases.some((phase: string) => phase.startsWith("progressive_chunk_"))).toBe(true);
     });
 
     it("summarizes progressive chunks with bounded parallelism before the ordered final merge", async () => {
@@ -888,6 +947,7 @@ describe("smart-compaction", () => {
         const finalPromptIndex = prompts.findIndex((prompt: string) => prompt.includes("Ordered Intermediate Summaries"));
         expect(finalPromptIndex).toBeGreaterThan(0);
         expect(prompts.slice(0, finalPromptIndex).every((prompt: string) => prompt.includes("deterministic chunk"))).toBe(true);
+        expect((completeSimple as any).mock.calls.every((call: any[]) => !("reasoning" in call[2]))).toBe(true);
       } finally {
         if (previousPromptChars === undefined) delete process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS;
         else process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS = previousPromptChars;
@@ -1055,7 +1115,9 @@ describe("smart-compaction", () => {
       expect(result).toEqual({ cancel: true });
       expect(consumeCompactionCancellationReason(ctx)).toContain("Progressive compaction");
       expect((completeSimple as any).mock.calls.length).toBeLessThan(25);
-      expect(ctx.ui.setWorkingMessage).toHaveBeenCalledWith(expect.stringContaining("progressive iterative mode"));
+      expect(ctx.ui.setWorkingMessage).not.toHaveBeenCalled();
+      expect(ctx.ui.setWorkingIndicator).not.toHaveBeenCalled();
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith("smart_compaction", expect.stringContaining("progressive iterative mode"));
     });
 
     it("keeps unsummarized messages verbatim when progressive chunking exhausts time after partial progress", async () => {
@@ -1350,9 +1412,12 @@ describe("smart-compaction", () => {
       expect(result.compaction.summary).toContain("split-turn"); // mechanical delta
       expect(result.compaction.summary).toContain("<modified-files>"); // file lists updated
 
-      // Should use working-status feedback without notification/message panes.
+      // Should use core Pi status feedback without notification/message panes or custom working UI.
       expect(ctx.ui.notify).not.toHaveBeenCalled();
-      expect(ctx.ui.setWorkingMessage).toHaveBeenCalledWith(
+      expect(ctx.ui.setWorkingMessage).not.toHaveBeenCalled();
+      expect(ctx.ui.setWorkingIndicator).not.toHaveBeenCalled();
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+        "smart_compaction",
         expect.stringContaining("split-turn continuation"),
       );
     });
@@ -1403,7 +1468,10 @@ describe("smart-compaction", () => {
       expect(result.compaction.summary).toContain("Explore codebase");
 
       expect(ctx.ui.notify).not.toHaveBeenCalled();
-      expect(ctx.ui.setWorkingMessage).toHaveBeenCalledWith(
+      expect(ctx.ui.setWorkingMessage).not.toHaveBeenCalled();
+      expect(ctx.ui.setWorkingIndicator).not.toHaveBeenCalled();
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+        "smart_compaction",
         expect.stringContaining("minimal-content compaction"),
       );
     });
