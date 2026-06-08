@@ -195,6 +195,33 @@ describe("core config", () => {
     });
   });
 
+  test("mid-turn tool execution hard ceiling defaults, overrides, and clamps", () => {
+    const workspace = createTempWorkspace("piclaw-config-");
+    try {
+      const defaults = loadConfigInSubprocess(workspace, ["call:getMidTurnToolExecutionHardCeiling"], {
+        env: { PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING: undefined },
+      });
+      expect(defaults["call:getMidTurnToolExecutionHardCeiling"]).toBe(48);
+
+      const overridden = loadConfigInSubprocess(workspace, ["call:getMidTurnToolExecutionHardCeiling"], {
+        env: { PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING: "96" },
+      });
+      expect(overridden["call:getMidTurnToolExecutionHardCeiling"]).toBe(96);
+
+      const invalid = loadConfigInSubprocess(workspace, ["call:getMidTurnToolExecutionHardCeiling"], {
+        env: { PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING: "not-a-number" },
+      });
+      expect(invalid["call:getMidTurnToolExecutionHardCeiling"]).toBe(48);
+
+      const capped = loadConfigInSubprocess(workspace, ["call:getMidTurnToolExecutionHardCeiling"], {
+        env: { PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING: "9999" },
+      });
+      expect(capped["call:getMidTurnToolExecutionHardCeiling"]).toBe(512);
+    } finally {
+      workspace.cleanup();
+    }
+  });
+
   test("mutable general-setting setters persist and apply immediately", async () => {
     await withFreshConfig({}, async ({ workspace, config }) => {
       config.setSessionStorageConfig({ maxSizeMb: 48, autoRotate: false });

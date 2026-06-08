@@ -242,6 +242,8 @@ That means most users should prefer `/login` over setting raw provider env vars 
 | `PICLAW_USER_AVATAR_BACKGROUND` | _(empty)_ | CSS background colour for the user avatar circle |
 | `PICLAW_SESSION_MAX_SIZE_MB` | `32` | Session file size threshold (MB) for auto-rotation warnings and pre-prompt rotation |
 | `PICLAW_SESSION_AUTO_ROTATE` | `1` | Automatically rotate oversized session files before the next prompt |
+| `PICLAW_TURN_MAX_TOOL_USE_MESSAGES` | `64` | Per-turn assistant tool-use message budget before soft-stop/recovery handling |
+| `PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING` | `48` | Last-resort executed-tool ceiling inside one prompt attempt before aborting for compaction; values above `512` are clamped |
 | `PICLAW_WHATSAPP_PHONE` | _(empty)_ | Alias for `WHATSAPP_PHONE` |
 | `PICLAW_TOOL_OUTPUT_RETENTION_MS` | `14400000` (4 h) | Milliseconds to retain stored tool outputs (preferred; overrides `_DAYS`) |
 | `PICLAW_TOOL_OUTPUT_RETENTION_DAYS` | _(legacy)_ | Days to retain stored tool outputs (deprecated; use `_MS`) |
@@ -269,6 +271,7 @@ That means most users should prefer `/login` over setting raw provider env vars 
 
 Notes:
 
+- `PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING` is separate from `PICLAW_TURN_MAX_TOOL_USE_MESSAGES`: the former counts executed tools inside one prompt attempt as a safety abort, while the latter is the visible per-turn tool-use budget.
 - Tool output retention now defaults to **4 hours** (`PICLAW_TOOL_OUTPUT_RETENTION_MS`). The legacy `PICLAW_TOOL_OUTPUT_RETENTION_DAYS` is still accepted but superseded.
 - Tool-result compaction now supports both a global gate (`PICLAW_TOOL_RESULT_COMPACTION_ENABLED`) and per-tool allowlisting (`PICLAW_TOOL_RESULT_COMPACTION_TOOLS`).
 - Semantic summaries are enabled by default for compacted tool results; if generation fails or times out (`PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS`), Piclaw falls back to preview-based summaries.

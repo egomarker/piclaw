@@ -22,7 +22,7 @@ import {
   type RecoveryClassifier,
   type RecoveryStrategy,
 } from "./automatic-recovery.js";
-import { getAgentRuntimeConfig, getSessionStorageConfig, getToolUseMessageBudget } from "../core/config.js";
+import { getAgentRuntimeConfig, getMidTurnToolExecutionHardCeiling, getSessionStorageConfig, getToolUseMessageBudget } from "../core/config.js";
 import { detectChannel } from "../router.js";
 import { pruneOrphanToolResults } from "./orphan-tool-results.js";
 import { writeAgentLog } from "./logging.js";
@@ -96,12 +96,11 @@ const DEFAULT_RECOVERY_LOOP_GUARD_WINDOW_MS = 10 * 60 * 1000;
 const MAX_RECOVERY_LOOP_GUARD_CHATS = 512;
 
 /**
- * Hard ceiling on tool executions within a single prompt attempt before
- * forcing an abort for compaction.  Acts as last-resort safety net when
- * the token estimator underestimates mid-turn context growth from large
- * tool results (e.g. many file reads).
+ * Default hard ceiling on tool executions within a single prompt attempt before
+ * forcing an abort for compaction. The effective value is runtime-configurable
+ * via getMidTurnToolExecutionHardCeiling().
  */
-const MID_TURN_TOOL_EXECUTION_HARD_CEILING = 48;
+const DEFAULT_MID_TURN_TOOL_EXECUTION_HARD_CEILING = 48;
 
 /** Approximate bytes-per-token ratio for projecting tool-result size onto context tokens. */
 const TOOL_RESULT_BYTES_PER_TOKEN = 4;
@@ -690,6 +689,7 @@ async function runPromptAttempt(
   const sessionEntryBaseline = snapshotSessionEntryCount(session);
   const toolUseMessageBudget = getToolUseMessageBudget();
   const toolUseSoftStopThreshold = resolveToolBudgetSoftStopThreshold(toolUseMessageBudget);
+  const midTurnToolExecutionHardCeiling = getMidTurnToolExecutionHardCeiling();
   let toolUseSoftStopRequested = false;
   let toolUseSoftStopApplied = false;
   let softStopSavedToolNames: string[] | null = null;
@@ -848,14 +848,16 @@ async function runPromptAttempt(
 
       // Hard ceiling: if we've executed too many tool calls this turn, the token
       // estimator is likely stale and we should abort for compaction regardless.
-      if (toolExecutionCount >= MID_TURN_TOOL_EXECUTION_HARD_CEILING) {
+      if (toolExecutionCount >= midTurnToolExecutionHardCeiling) {
         sawCompactionIntent = true;
         midTurnContextAbortRequested = true;
-        options.onWarn?.("Mid-turn tool execution hard ceiling reached; aborting for compaction", {
+        options.onWarn?.("Configured mid-turn tool execution hard ceiling reached; aborting for compaction", {
           operation: "run_agent.mid_turn_tool_ceiling",
+          reason: "mid_turn_tool_execution_hard_ceiling",
           chatJid,
           toolExecutionCount,
-          ceiling: MID_TURN_TOOL_EXECUTION_HARD_CEILING,
+          ceiling: midTurnToolExecutionHardCeiling,
+          defaultCeiling: DEFAULT_MID_TURN_TOOL_EXECUTION_HARD_CEILING,
           midTurnToolResultAccumulatedBytes,
           projectedAdditionalTokens: Math.ceil(midTurnToolResultAccumulatedBytes / TOOL_RESULT_BYTES_PER_TOKEN),
           toolName: typeof toolName === "string" ? toolName : null,

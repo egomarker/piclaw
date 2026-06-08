@@ -94,6 +94,7 @@ const envConfig = readEnvFile([
   "PICLAW_SESSION_MAX_SIZE_MB",
   "PICLAW_SESSION_AUTO_ROTATE",
   "PICLAW_TURN_MAX_TOOL_USE_MESSAGES",
+  "PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING",
   "PICLAW_PROGRESS_WATCHDOG_ENABLED",
   "PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS",
   "PICLAW_AUTO_COMPACTION_SCOPE",
@@ -889,6 +890,11 @@ const configTurnMaxToolUseMessages = pickNumber(piclawConfig, [
   "tool_use_budget",
   "PICLAW_TURN_MAX_TOOL_USE_MESSAGES",
 ]);
+const configMidTurnToolExecutionHardCeiling = pickNumber(piclawConfig, [
+  "midTurnToolExecutionHardCeiling",
+  "mid_turn_tool_execution_hard_ceiling",
+  "PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING",
+]);
 const configCompactionTimeoutMs = pickNumber(compactionConfig, [
   "timeoutMs",
   "timeout_ms",
@@ -1457,6 +1463,27 @@ export function setToolResultCompactionEnabled(enabled: boolean): boolean {
 
 export function getToolUseMessageBudget(): number {
   return TOOL_USE_MESSAGE_BUDGET;
+}
+
+const DEFAULT_MID_TURN_TOOL_EXECUTION_HARD_CEILING = 48;
+const MAX_MID_TURN_TOOL_EXECUTION_HARD_CEILING = 512;
+
+function normalizeMidTurnToolExecutionHardCeiling(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_MID_TURN_TOOL_EXECUTION_HARD_CEILING;
+  return Math.min(MAX_MID_TURN_TOOL_EXECUTION_HARD_CEILING, Math.max(1, Math.round(parsed)));
+}
+
+/** Return the hard ceiling for executed tools inside one prompt attempt. */
+export function getMidTurnToolExecutionHardCeiling(): number {
+  const envValue = pickNumber({
+    PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING:
+      process.env.PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING
+        ?? envConfig.PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING,
+  }, ["PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING"]);
+  return normalizeMidTurnToolExecutionHardCeiling(
+    envValue ?? configMidTurnToolExecutionHardCeiling ?? DEFAULT_MID_TURN_TOOL_EXECUTION_HARD_CEILING,
+  );
 }
 
 /** Persist and apply the tool-use budget so subsequent turns use it immediately. */
