@@ -17,8 +17,8 @@
  *   - agent-pool.ts may call readToolOutputFile() to fetch full content.
  */
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
-import { join } from "path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { basename, dirname, join, resolve } from "path";
 import { DATA_DIR } from "./core/config.js";
 import { createUuid } from "./utils/ids.js";
 import { createLogger, debugSuppressedError } from "./utils/logger.js";
@@ -28,14 +28,23 @@ import {
   getToolOutputById,
   deleteToolOutputsBefore,
   searchToolOutputSnippets,
+  getDb,
   type ToolOutputRecord,
 } from "./db.js";
 import { buildPreviewLines } from "./utils/preview.js";
+import {
+  DEFAULT_LOG_RETENTION_CAP_MS,
+  cleanupEmptyParentDirs,
+  clampLogRetentionMs,
+  getDateShardedPath,
+} from "./utils/log-layout.js";
 
 /** Directory where tool output log files are stored on disk. */
-const TOOL_OUTPUT_DIR = join(DATA_DIR, "tool-output");
+function getToolOutputDir(): string {
+  return join(resolve(process.env.PICLAW_DATA || DATA_DIR), "tool-output");
+}
 const log = createLogger("tool-output");
-const DEFAULT_TOOL_OUTPUT_RETENTION_MS = 4 * 60 * 60 * 1000;
+const DEFAULT_TOOL_OUTPUT_RETENTION_MS = DEFAULT_LOG_RETENTION_CAP_MS;
 const DEFAULT_TOOL_OUTPUT_CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
 /** Default chunk size (characters) for FTS indexing. */
 const DEFAULT_CHUNK_SIZE = 4000;
@@ -44,7 +53,12 @@ const DEFAULT_CHUNK_SIZE = 4000;
  * Convert a retention interval in milliseconds to an ISO cutoff timestamp.
  */
 function buildToolOutputCutoff(maxAgeMs: number): string {
-  return new Date(Date.now() - maxAgeMs).toISOString();
+  const retentionMs = clampLogRetentionMs(maxAgeMs, DEFAULT_TOOL_OUTPUT_RETENTION_MS);
+  return new Date(Date.now() - retentionMs).toISOString();
+}
+
+function buildToolOutputPath(id: string, createdAt: string): string {
+  return getDateShardedPath(getToolOutputDir(), `${id}.log`, createdAt);
 }
 
 /** Options for saveToolOutput(). */
@@ -142,10 +156,10 @@ export function chunkText(text: string, chunkSize = DEFAULT_CHUNK_SIZE): string[
  * index content chunks in FTS5. Returns a summary result.
  */
 export function saveToolOutput(text: string, options: ToolOutputSaveOptions = {}): ToolOutputSaveResult {
-  mkdirSync(TOOL_OUTPUT_DIR, { recursive: true });
   const id = options.id ?? createUuid("out");
   const createdAt = options.createdAt ?? new Date().toISOString();
-  const path = join(TOOL_OUTPUT_DIR, `${id}.log`);
+  const path = buildToolOutputPath(id, createdAt);
+  mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, text ?? "", "utf8");
 
   const sizeBytes = Buffer.byteLength(text ?? "", "utf8");
@@ -185,6 +199,130 @@ export function searchToolOutput(handle: string, query: string, limit = 5): stri
   return searchToolOutputSnippets(handle, trimmed, limit);
 }
 
+function listRegisteredToolOutputPaths(): Set<string> {
+  try {
+    const rows = getDb().prepare("SELECT path FROM tool_outputs WHERE path IS NOT NULL").all() as Array<{ path: string | null }>;
+    return new Set(rows.map((row) => row.path).filter((path): path is string => Boolean(path)).map((path) => resolve(path)));
+  } catch (error) {
+    debugSuppressedError(log, "Failed to list registered tool-output paths during filesystem pruning.", error, {
+      operation: "tool_output.prune.list_registered_paths",
+    });
+    return new Set();
+  }
+}
+
+/** Remove unreferenced tool-output log files older than the retention window. */
+export function pruneToolOutputFiles(maxAgeMs = DEFAULT_TOOL_OUTPUT_RETENTION_MS): number {
+  const toolOutputDir = getToolOutputDir();
+  if (!existsSync(toolOutputDir)) return 0;
+  const retentionMs = clampLogRetentionMs(maxAgeMs, DEFAULT_TOOL_OUTPUT_RETENTION_MS);
+  const cutoffMs = Date.now() - retentionMs;
+  const registeredPaths = listRegisteredToolOutputPaths();
+  let removed = 0;
+
+  const visit = (dir: string): void => {
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch (error) {
+      debugSuppressedError(log, "Failed to read a tool-output directory during pruning.", error, {
+        operation: "tool_output.prune_files.read_dir",
+        dir,
+      });
+      return;
+    }
+
+    for (const entry of entries) {
+      const path = join(dir, entry);
+      let stat;
+      try {
+        stat = statSync(path);
+      } catch {
+        continue;
+      }
+
+      if (stat.isDirectory()) {
+        visit(path);
+        cleanupEmptyParentDirs(toolOutputDir, path);
+        continue;
+      }
+      if (!stat.isFile() || !entry.endsWith(".log")) continue;
+      if (stat.mtimeMs >= cutoffMs || registeredPaths.has(resolve(path))) continue;
+
+      try {
+        unlinkSync(path);
+        removed += 1;
+        cleanupEmptyParentDirs(toolOutputDir, dirname(path));
+      } catch (error) {
+        debugSuppressedError(log, "Failed to unlink an orphaned tool-output file during pruning.", error, {
+          operation: "tool_output.prune_files.unlink",
+          path,
+        });
+      }
+    }
+  };
+
+  visit(toolOutputDir);
+  return removed;
+}
+
+/**
+ * Move legacy flat tool-output files into date shards and update DB paths.
+ * Existing flat DB paths remain readable if migration cannot move a file.
+ */
+export function migrateFlatToolOutputsToDateShards(): number {
+  const toolOutputDir = getToolOutputDir();
+  mkdirSync(toolOutputDir, { recursive: true });
+  const root = resolve(toolOutputDir);
+  let rows: ToolOutputRecord[];
+  try {
+    rows = getDb().prepare("SELECT * FROM tool_outputs WHERE path IS NOT NULL").all() as ToolOutputRecord[];
+  } catch (error) {
+    debugSuppressedError(log, "Failed to list tool-output records for path migration.", error, {
+      operation: "tool_output.migrate_flat_paths.list",
+    });
+    return 0;
+  }
+
+  const db = getDb();
+  const updatePath = db.prepare("UPDATE tool_outputs SET path = ? WHERE id = ?");
+  const updatePathTransaction = db.transaction((nextPath: string, id: string) => {
+    updatePath.run(nextPath, id);
+  });
+  let migrated = 0;
+
+  for (const row of rows) {
+    if (!row.path) continue;
+    const currentPath = resolve(row.path);
+    const expectedName = `${row.id}.log`;
+    if (dirname(currentPath) !== root || basename(currentPath) !== expectedName) continue;
+
+    const nextPath = buildToolOutputPath(row.id, row.created_at);
+    if (resolve(nextPath) === currentPath) continue;
+
+    try {
+      mkdirSync(dirname(nextPath), { recursive: true });
+      if (!existsSync(nextPath)) {
+        if (!existsSync(currentPath)) continue;
+        renameSync(currentPath, nextPath);
+      } else if (existsSync(currentPath)) {
+        unlinkSync(currentPath);
+      }
+      updatePathTransaction(nextPath, row.id);
+      migrated += 1;
+    } catch (error) {
+      debugSuppressedError(log, "Failed to migrate a flat tool-output path into the date-sharded layout.", error, {
+        operation: "tool_output.migrate_flat_paths.move",
+        id: row.id,
+        currentPath,
+        nextPath,
+      });
+    }
+  }
+
+  return migrated;
+}
+
 /**
  * Delete tool outputs older than `maxAgeMs`. Removes both the DB records
  * and the on-disk log files. Returns the number of records pruned.
@@ -196,6 +334,7 @@ export function pruneToolOutputs(maxAgeMs = DEFAULT_TOOL_OUTPUT_RETENTION_MS): n
     if (row.path && existsSync(row.path)) {
       try {
         unlinkSync(row.path);
+        cleanupEmptyParentDirs(getToolOutputDir(), dirname(row.path));
       } catch (err) {
         debugSuppressedError(log, "Failed to unlink a pruned tool-output file; it may already be gone.", err, {
           operation: "tool_output.prune.unlink",
@@ -205,6 +344,7 @@ export function pruneToolOutputs(maxAgeMs = DEFAULT_TOOL_OUTPUT_RETENTION_MS): n
       }
     }
   }
+  pruneToolOutputFiles(maxAgeMs);
   return rows.length;
 }
 
@@ -221,6 +361,7 @@ export function startToolOutputCleanup(
 ): void {
   if (cleanupStarted) return;
   cleanupStarted = true;
+  migrateFlatToolOutputsToDateShards();
   // Run an initial prune immediately, then on a recurring interval.
   pruneToolOutputs(maxAgeMs);
   setInterval(() => pruneToolOutputs(maxAgeMs), intervalMs).unref();

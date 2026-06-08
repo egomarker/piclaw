@@ -26,6 +26,7 @@ import { readEnvFile } from "./env.js";
 import { readJsonConfig, writeJsonConfig } from "./config-store.js";
 import { createLogger } from "../utils/logger.js";
 import { getConfiguredLogLevel, parseLogLevel } from "../utils/log-level.js";
+import { DAY_MS, DEFAULT_LOG_RETENTION_CAP_MS, clampLogRetentionMs } from "../utils/log-layout.js";
 
 // ---------------------------------------------------------------------------
 // CLI argument parsing helpers.
@@ -117,6 +118,12 @@ const envConfig = readEnvFile([
   "PICLAW_SCOPED_MODELS_ONLY",
   "PICLAW_LOG_LEVEL",
   "LOG_LEVEL",
+  "PICLAW_AGENT_LOG_RETENTION_MS",
+  "PICLAW_AGENT_LOG_RETENTION_DAYS",
+  "PICLAW_AGENT_LOG_CLEANUP_INTERVAL_MS",
+  "PICLAW_TOOL_OUTPUT_RETENTION_MS",
+  "PICLAW_TOOL_OUTPUT_RETENTION_DAYS",
+  "PICLAW_TOOL_OUTPUT_CLEANUP_INTERVAL_MS",
 ]);
 
 import { pickString, pickNumber, pickBoolean, pickStringArray } from "./config-helpers.js";
@@ -1996,30 +2003,72 @@ export function setWebTotpSecret(secret: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Tool output retention settings – used by db/tool-outputs.ts.
+// Log retention settings.
 // ---------------------------------------------------------------------------
 
-/** Typed tool-output retention settings grouped for runtime startup wiring. */
-export interface ToolOutputConfig {
+export interface RetentionCleanupConfig {
   retentionMs: number;
   cleanupIntervalMs: number;
 }
 
-const DEFAULT_TOOL_OUTPUT_RETENTION_MS = 4 * 60 * 60 * 1000;
-const DEFAULT_TOOL_OUTPUT_CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
-const legacyToolOutputRetentionDays = parseInt(process.env.PICLAW_TOOL_OUTPUT_RETENTION_DAYS || "", 10);
-const toolOutputRetentionMs = parseInt(process.env.PICLAW_TOOL_OUTPUT_RETENTION_MS || "", 10);
+function parsePositiveInteger(value: string | undefined): number | undefined {
+  const parsed = Number.parseInt(String(value || "").trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
 
-/** Grouped tool-output retention settings. */
+function parseRetentionMs(msValue: string | undefined, daysValue: string | undefined): number | undefined {
+  const explicitMs = parsePositiveInteger(msValue);
+  if (explicitMs !== undefined) return explicitMs;
+  const explicitDays = parsePositiveInteger(daysValue);
+  return explicitDays !== undefined ? explicitDays * DAY_MS : undefined;
+}
+
+function parseCleanupIntervalMs(value: string | undefined, fallback: number): number {
+  return parsePositiveInteger(value) ?? fallback;
+}
+
+const DEFAULT_RETENTION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+
+/** Typed agent-run-log retention settings grouped for runtime startup wiring. */
+export type AgentLogConfig = RetentionCleanupConfig;
+
+/** Grouped agent-run-log retention settings. Defaults/caps retention at 30 days. */
+export const AGENT_LOG_CONFIG = Object.freeze<AgentLogConfig>({
+  retentionMs: clampLogRetentionMs(
+    parseRetentionMs(
+      process.env.PICLAW_AGENT_LOG_RETENTION_MS ?? envConfig.PICLAW_AGENT_LOG_RETENTION_MS,
+      process.env.PICLAW_AGENT_LOG_RETENTION_DAYS ?? envConfig.PICLAW_AGENT_LOG_RETENTION_DAYS,
+    ),
+    DEFAULT_LOG_RETENTION_CAP_MS,
+  ),
+  cleanupIntervalMs: parseCleanupIntervalMs(
+    process.env.PICLAW_AGENT_LOG_CLEANUP_INTERVAL_MS ?? envConfig.PICLAW_AGENT_LOG_CLEANUP_INTERVAL_MS,
+    DEFAULT_RETENTION_CLEANUP_INTERVAL_MS,
+  ),
+});
+
+/** Return the grouped agent-run-log retention settings for startup wiring and tests. */
+export function getAgentLogConfig(): Readonly<AgentLogConfig> {
+  return AGENT_LOG_CONFIG;
+}
+
+/** Typed tool-output retention settings grouped for runtime startup wiring. */
+export type ToolOutputConfig = RetentionCleanupConfig;
+
+const DEFAULT_TOOL_OUTPUT_CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
+
+/** Grouped tool-output retention settings. Defaults/caps retention at 30 days. */
 export const TOOL_OUTPUT_CONFIG = Object.freeze<ToolOutputConfig>({
-  retentionMs: Number.isFinite(toolOutputRetentionMs) && toolOutputRetentionMs > 0
-    ? toolOutputRetentionMs
-    : Number.isFinite(legacyToolOutputRetentionDays) && legacyToolOutputRetentionDays > 0
-      ? legacyToolOutputRetentionDays * 24 * 60 * 60 * 1000
-      : DEFAULT_TOOL_OUTPUT_RETENTION_MS,
-  cleanupIntervalMs: parseInt(
-    process.env.PICLAW_TOOL_OUTPUT_CLEANUP_INTERVAL_MS || String(DEFAULT_TOOL_OUTPUT_CLEANUP_INTERVAL_MS),
-    10
+  retentionMs: clampLogRetentionMs(
+    parseRetentionMs(
+      process.env.PICLAW_TOOL_OUTPUT_RETENTION_MS ?? envConfig.PICLAW_TOOL_OUTPUT_RETENTION_MS,
+      process.env.PICLAW_TOOL_OUTPUT_RETENTION_DAYS ?? envConfig.PICLAW_TOOL_OUTPUT_RETENTION_DAYS,
+    ),
+    DEFAULT_LOG_RETENTION_CAP_MS,
+  ),
+  cleanupIntervalMs: parseCleanupIntervalMs(
+    process.env.PICLAW_TOOL_OUTPUT_CLEANUP_INTERVAL_MS ?? envConfig.PICLAW_TOOL_OUTPUT_CLEANUP_INTERVAL_MS,
+    DEFAULT_TOOL_OUTPUT_CLEANUP_INTERVAL_MS,
   ),
 });
 
@@ -2029,12 +2078,6 @@ export function getToolOutputConfig(): Readonly<ToolOutputConfig> {
 }
 
 // ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
-
-
-
-
 // ---------------------------------------------------------------------------
 // Pushover notification channel settings.
 // ---------------------------------------------------------------------------

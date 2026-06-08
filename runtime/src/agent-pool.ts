@@ -33,7 +33,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import { type AgentControlCommand, type AgentControlResult } from "./agent-control/index.js";
-import { SESSIONS_DIR, WORKSPACE_DIR } from "./core/config.js";
+import { SESSIONS_DIR, WORKSPACE_DIR, getAgentLogConfig } from "./core/config.js";
 import { getChatChannel, getChatJid } from "./core/chat-context.js";
 import { registerChannelDetector } from "./router.js";
 import { createTrackedBashOperations } from "./tools/tracked-bash.js";
@@ -81,6 +81,7 @@ import { setSshToolHandlers } from "./extensions/ssh.js";
 import { applyLiveSshConfig, clearLiveSshConfig, hasLiveChatSshConnection, hasLiveChatSshSession, resolveSshCoreConfigFromChatConfig } from "./extensions/ssh-core.js";
 import { getKeychainEntry } from "./secure/keychain.js";
 import { addLogSink, createLogger, removeLogSink } from "./utils/logger.js";
+import { startAgentLogCleanup } from "./agent-pool/logging.js";
 
 const log = createLogger("agent-pool");
 
@@ -288,6 +289,8 @@ export class AgentPool {
     try { migrateProxmoxPortainerToKv(); } catch (e) { void e; /* migration is best-effort */ }
     mkdirSync(SESSIONS_DIR, { recursive: true });
     mkdirSync(this.logsDir, { recursive: true });
+    const agentLogConfig = getAgentLogConfig();
+    startAgentLogCleanup(this.logsDir, agentLogConfig.retentionMs, agentLogConfig.cleanupIntervalMs);
     this.cleanupTimer = setInterval(
       () => this.evictIdle(),
       this.config.cleanupIntervalMs,
