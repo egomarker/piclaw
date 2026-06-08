@@ -1,6 +1,9 @@
 import { expect, test } from 'bun:test';
 
 import {
+  hasRenderableContextUsage,
+  haveSameContextUsage,
+  normalizeContextUsage,
   refreshAutoresearchStatusForChat,
   refreshContextUsageForChat,
   refreshCurrentView,
@@ -9,6 +12,64 @@ import {
 } from '../../web/src/ui/app-status-refresh-orchestration.js';
 
 type QueueRow = { row_id: string | number; content?: string };
+
+test('normalizeContextUsage preserves prompt cache-hit telemetry', () => {
+  expect(normalizeContextUsage({
+    tokens: null,
+    contextWindow: null,
+    percent: null,
+    cacheUsage: {
+      latest: {
+        inputTokens: '1000',
+        outputTokens: 300,
+        cacheReadTokens: 3000,
+        cacheWriteTokens: 1000,
+        totalTokens: 5300,
+        costTotal: 0.012,
+        runs: 1,
+        cacheHitRate: 60,
+        provider: 'anthropic',
+        runAt: '2026-06-08T12:00:00.000Z',
+      },
+    },
+  })).toEqual({
+    tokens: null,
+    contextWindow: null,
+    percent: null,
+    cacheUsage: {
+      latest: {
+        inputTokens: 1000,
+        outputTokens: 300,
+        cacheReadTokens: 3000,
+        cacheWriteTokens: 1000,
+        totalTokens: 5300,
+        costTotal: 0.012,
+        runs: 1,
+        cacheHitRate: 60,
+        model: null,
+        responseModel: null,
+        provider: 'anthropic',
+        api: null,
+        turns: null,
+        runAt: '2026-06-08T12:00:00.000Z',
+      },
+      totals: null,
+    },
+  });
+  expect(hasRenderableContextUsage({ tokens: null, contextWindow: null, percent: null })).toBe(false);
+  expect(hasRenderableContextUsage({ tokens: null, contextWindow: null, percent: null, cacheUsage: { latest: { cacheHitRate: 50 } } })).toBe(true);
+});
+
+test('haveSameContextUsage includes cache telemetry in equality checks', () => {
+  expect(haveSameContextUsage(
+    { tokens: 100, contextWindow: 1000, percent: 10, cacheUsage: { latest: { cacheHitRate: 50 } } },
+    { tokens: 100, contextWindow: 1000, percent: 10, cacheUsage: { latest: { cacheHitRate: 50 } } },
+  )).toBe(true);
+  expect(haveSameContextUsage(
+    { tokens: 100, contextWindow: 1000, percent: 10, cacheUsage: { latest: { cacheHitRate: 50 } } },
+    { tokens: 100, contextWindow: 1000, percent: 10, cacheUsage: { latest: { cacheHitRate: 60 } } },
+  )).toBe(false);
+});
 
 test('refreshQueueStateForChat keeps only newest non-dismissed queue rows', async () => {
   const queueRefreshGenRef = { current: 0 };
@@ -173,7 +234,51 @@ test('refreshContextUsageForChat updates state when API returns real data', asyn
     },
   });
 
-  expect(contextState).toEqual({ tokens: 8000, contextWindow: 128000, percent: 6.25 });
+  expect(contextState).toEqual({ tokens: 8000, contextWindow: 128000, percent: 6.25, cacheUsage: null });
+});
+
+test('refreshContextUsageForChat updates state when API returns cache-only telemetry', async () => {
+  const activeChatJidRef = { current: 'chat:alpha' };
+  let contextState: any = { tokens: 5000, contextWindow: 128000, percent: 3.9 };
+
+  await refreshContextUsageForChat({
+    currentChatJid: 'chat:alpha',
+    activeChatJidRef,
+    getAgentContext: async () => ({
+      tokens: null,
+      contextWindow: null,
+      percent: null,
+      cacheUsage: { latest: { cacheHitRate: 87.3, cacheReadTokens: 873, inputTokens: 100, cacheWriteTokens: 27 } },
+    }),
+    setContextUsage: (next) => {
+      contextState = typeof next === 'function' ? next(contextState) : next;
+    },
+  });
+
+  expect(contextState).toEqual({
+    tokens: null,
+    contextWindow: null,
+    percent: null,
+    cacheUsage: {
+      latest: {
+        inputTokens: 100,
+        outputTokens: null,
+        cacheReadTokens: 873,
+        cacheWriteTokens: 27,
+        totalTokens: null,
+        costTotal: null,
+        runs: null,
+        cacheHitRate: 87.3,
+        model: null,
+        responseModel: null,
+        provider: null,
+        api: null,
+        turns: null,
+        runAt: null,
+      },
+      totals: null,
+    },
+  });
 });
 
 test('refreshAutoresearchStatusForChat updates panels and clears autoresearch pending actions', async () => {

@@ -16,6 +16,7 @@ function createContext(overrides: Partial<AgentStatusContext> = {}): AgentStatus
     recoverStaleInflightRun: () => false,
     getBuffer: () => undefined,
     getContextUsageForChat: async () => null,
+    getTokenUsageForChat: () => null,
     getAvailableModels: async () => ({ models: [] }),
     getProviderReadyCompletedForInstance: () => false,
     ...overrides,
@@ -125,7 +126,73 @@ describe("web agent status helpers", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get("Server-Timing")).toContain("agent_context;dur=");
-    expect(await res.json()).toEqual({ tokens: null, contextWindow: null, percent: null });
+    expect(await res.json()).toEqual({ tokens: null, contextWindow: null, percent: null, cacheUsage: null });
+  });
+
+  test("handleAgentContextRequest includes prompt cache-hit telemetry", async () => {
+    const req = new Request("https://example.com/agent/context?chat_jid=web:usage");
+    const res = await handleAgentContextRequest(req, createContext({
+      getContextUsageForChat: async () => ({ tokens: 5000, contextWindow: 100000, percent: 5 }),
+      getTokenUsageForChat: () => ({
+        latest: {
+          input_tokens: 1000,
+          output_tokens: 300,
+          cache_read_tokens: 3000,
+          cache_write_tokens: 1000,
+          total_tokens: 5300,
+          cost_total: 0.012,
+          runs: 1,
+          model: "claude-sonnet",
+          response_model: "claude-sonnet-4",
+          provider: "anthropic",
+          run_at: "2026-06-08T12:00:00.000Z",
+        },
+        totals: {
+          input_tokens: 2000,
+          output_tokens: 600,
+          cache_read_tokens: 6000,
+          cache_write_tokens: 2000,
+          total_tokens: 10600,
+          cost_total: 0.024,
+          runs: 2,
+        },
+      }),
+    }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      tokens: 5000,
+      contextWindow: 100000,
+      percent: 5,
+      cacheUsage: {
+        latest: {
+          inputTokens: 1000,
+          outputTokens: 300,
+          cacheReadTokens: 3000,
+          cacheWriteTokens: 1000,
+          totalTokens: 5300,
+          costTotal: 0.012,
+          runs: 1,
+          cacheHitRate: 60,
+          model: "claude-sonnet",
+          responseModel: "claude-sonnet-4",
+          provider: "anthropic",
+          api: null,
+          turns: null,
+          runAt: "2026-06-08T12:00:00.000Z",
+        },
+        totals: {
+          inputTokens: 2000,
+          outputTokens: 600,
+          cacheReadTokens: 6000,
+          cacheWriteTokens: 2000,
+          totalTokens: 10600,
+          costTotal: 0.024,
+          runs: 2,
+          cacheHitRate: 60,
+        },
+      },
+    });
   });
 
   test("handleAgentModelsRequest returns payload from model provider", async () => {

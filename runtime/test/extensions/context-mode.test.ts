@@ -596,10 +596,11 @@ describe("context-mode integration", () => {
       PICLAW_TOOL_OUTPUT_STORE_BYTES: "8",
       PICLAW_TOOL_OUTPUT_STORE_LINES: "2",
     }), async () => {
-      const config = await importFresh<typeof import("../src/core/config.js")>("../src/core/config.js");
-      const blockedDir = join(config.DATA_DIR, "tool-output");
-      mkdirSync(blockedDir, { recursive: true });
-      chmodSync(blockedDir, 0o500);
+      const blockedDir = join(process.env.PICLAW_DATA!, "tool-output");
+      const now = new Date();
+      const blockedShardDir = join(blockedDir, now.toISOString().slice(0, 7), now.toISOString().slice(8, 10));
+      mkdirSync(blockedShardDir, { recursive: true });
+      chmodSync(blockedShardDir, 0o500);
 
       try {
         const db = await importFresh<typeof import("../src/db.js")>("../src/db.js");
@@ -622,7 +623,7 @@ describe("context-mode integration", () => {
 
         expect(result).toBeUndefined();
       } finally {
-        chmodSync(blockedDir, 0o700);
+        chmodSync(blockedShardDir, 0o700);
       }
     });
   });

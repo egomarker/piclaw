@@ -783,6 +783,10 @@ function AgentPanel({ title, type, text, expanded, elapsed = 0, onToggle, onDism
 
 const OUTPUT_MAX_LINES = 3;
 
+function trimToolOutputForDisplay(text: string): string {
+  return String(text || "").replace(/[\s\u00a0]+$/u, "");
+}
+
 interface OutputPanelProps {
   text: string;
   expanded: boolean;
@@ -808,7 +812,7 @@ function OutputPanel({ text, expanded, toolName, startedAt, gitBranch, onToggle,
         onDismiss={onDismiss}
       />
       <CollapsibleContent
-        text={text}
+        text={trimToolOutputForDisplay(text)}
         maxLines={OUTPUT_MAX_LINES}
         direction="tail"
         expanded={expanded}

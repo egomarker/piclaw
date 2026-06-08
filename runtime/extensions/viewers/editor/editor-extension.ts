@@ -57,7 +57,7 @@ import {
     githubDark,
     MergeView,
 } from '#editor-vendor/codemirror';
-import { getWorkspaceBranch, getWorkspaceFile, getWorkspaceFileStat, updateWorkspaceFile } from '../../../web/src/api.js';
+import { getWorkspaceBranch, getWorkspaceFile, getWorkspaceFileStat, updateWorkspaceFile, uploadWorkspaceFile } from '../../../web/src/api.js';
 import { createFileConflictMonitor, type FileConflictMonitor } from '../../../web/src/panes/file-conflict-monitor.js';
 import type { WebPaneExtension, PaneContext, PaneInstance, PaneCapability, PaneHostAttachContext, PaneHostDetachContext } from '../../../web/src/panes/pane-types.js';
 import { frontmatterExtension } from './markdown/frontmatter.js';
@@ -75,6 +75,13 @@ import {
     revealText as revealEditorText,
     searchRevealExtension,
 } from './search-reveal.js';
+import {
+    buildMarkdownImageText,
+    buildPastedImageFilename,
+    getPastedImageExtension,
+    getPastedImageFiles,
+    getWorkspaceDirectoryForEditorPath,
+} from './paste-image.js';
 
 // ── Constants ───────────────────────────────────────────────────
 
@@ -637,6 +644,9 @@ export class StandaloneEditorInstance implements PaneInstance {
                 indentWithTab,
                 { key: 'Mod-s', run: () => { this.handleSave(); return true; } },
             ]),
+            ...(this.isMarkdownFile() ? [EditorView.domEventHandlers({
+                paste: (event: ClipboardEvent) => this.handlePaste(event),
+            })] : []),
             EditorView.updateListener.of((update: any) => {
                 if (update.docChanged) {
                     this.checkDirty();
@@ -961,6 +971,69 @@ export class StandaloneEditorInstance implements PaneInstance {
         this.baselineView?.dispatch({
             effects: this.baselineWhitespaceCompartment.reconfigure(this.showWhitespace ? highlightWhitespace() : []),
         });
+    }
+
+    // ── Paste images ────────────────────────────────────────────
+
+    private handlePaste(event: ClipboardEvent): boolean {
+        if (!this.view || !this.isMarkdownFile()) return false;
+        const files = getPastedImageFiles(event.clipboardData);
+        if (!files.length) return false;
+        event.preventDefault();
+        event.stopPropagation();
+        void this.insertPastedImages(files);
+        return true;
+    }
+
+    private createPastedImageSuffix(index: number, attempt: number): string {
+        const random = this.ownerWindow.crypto?.randomUUID?.().replace(/-/g, '').slice(0, 8)
+            || `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+        const prefix = index > 0 || attempt > 0 ? `${index + 1}-${attempt + 1}-` : '';
+        return `${prefix}${random}`;
+    }
+
+    private isFileExistsUploadError(error: unknown): boolean {
+        const err = error as { status?: number; code?: string; message?: string } | null;
+        return err?.status === 409 || err?.code === 'file_exists' || /already exists/i.test(err?.message || '');
+    }
+
+    private async uploadPastedImage(file: File, index: number): Promise<string> {
+        const targetDir = getWorkspaceDirectoryForEditorPath(this.path);
+        const extension = getPastedImageExtension(file) || 'png';
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+            const filename = buildPastedImageFilename(this.path, file, {
+                suffix: this.createPastedImageSuffix(index, attempt),
+            });
+            const uploadFile = new File([file], filename, { type: file.type || `image/${extension}` });
+            try {
+                const result = await uploadWorkspaceFile(uploadFile, targetDir, { overwrite: false });
+                return typeof result?.name === 'string' && result.name ? result.name : filename;
+            } catch (error) {
+                if (attempt < 4 && this.isFileExistsUploadError(error)) continue;
+                throw error;
+            }
+        }
+        throw new Error('Could not choose an unused image filename');
+    }
+
+    private async insertPastedImages(files: File[]): Promise<void> {
+        if (!files.length) return;
+        this.updateStatusText(`Uploading pasted image${files.length === 1 ? '' : 's'}…`);
+        try {
+            const markdown: string[] = [];
+            for (let index = 0; index < files.length; index += 1) {
+                const filename = await this.uploadPastedImage(files[index], index);
+                markdown.push(buildMarkdownImageText(filename));
+            }
+            if (!this.view || this.disposed) return;
+            this.view.dispatch(this.view.state.replaceSelection(markdown.join('\n')));
+            this.view.focus();
+            this.updateStatusText(`Pasted image${files.length === 1 ? '' : 's'} inserted`);
+        } catch (error: any) {
+            if (!this.disposed) {
+                this.updateStatusText(`Image paste failed: ${error?.message || 'Upload failed'}`);
+            }
+        }
     }
 
     // ── Theme ───────────────────────────────────────────────────

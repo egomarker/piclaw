@@ -53,6 +53,15 @@ function createRuntime(session: any, retrySettings?: { enabled?: boolean; maxRet
 
 const tempLogsDirs: string[] = [];
 
+function findAgentLogFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return findAgentLogFiles(path);
+    if (entry.isFile() && entry.name.startsWith("agent-") && entry.name.endsWith(".log")) return [path];
+    return [];
+  });
+}
+
 function createTestLogsDir(): string {
   const logsDir = mkdtempSync(join(tmpdir(), "piclaw-run-agent-logs-"));
   tempLogsDirs.push(logsDir);
@@ -1926,9 +1935,9 @@ test("runAgentPrompt writes recovery diagnostics into the agent log", async () =
     expect(result.status).toBe("success");
     const logFile = tempLogsDirs.find((entry) => entry === logsDir);
     expect(logFile).toBe(logsDir);
-    const logName = readdirSync(logsDir).find((entry: string) => entry.startsWith("agent-") && entry.endsWith(".log"));
-    expect(logName).toBeTruthy();
-    const content = readFileSync(join(logsDir, logName!), "utf8");
+    const logFiles = findAgentLogFiles(logsDir);
+    expect(logFiles.length).toBeGreaterThan(0);
+    const content = readFileSync(logFiles.sort().slice(-1)[0], "utf8");
     expect(content).toContain("RecoveryAttemptsUsed: 1");
     expect(content).toContain("RecoveryRecovered: true");
     expect(content).toContain("RecoveryDiagnostics:");
@@ -2214,6 +2223,77 @@ test("runAgentPrompt preserves tool-budget root cause when recovery retry emits 
     expect(session.compactCalls).toBe(1);
   } finally {
     setToolUseMessageBudget(previousToolUseBudget);
+    restoreEnv();
+  }
+});
+
+test("runAgentPrompt uses the configured mid-turn tool execution hard ceiling", async () => {
+  initDatabase();
+  const restoreEnv = setEnv({ PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING: "2" });
+
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    sessionManager = { getLeafId: () => "leaf-mid-turn-ceiling" };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    abortCalls = 0;
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => {
+        this.listeners = this.listeners.filter((entry) => entry !== listener);
+      };
+    }
+    async prompt() {
+      for (const listener of this.listeners) {
+        for (let i = 1; i <= 2; i += 1) {
+          listener({ type: "tool_execution_start", toolCallId: `tool-${i}`, toolName: "read", args: { path: `/tmp/${i}` } });
+          listener({
+            type: "tool_execution_end",
+            toolCallId: `tool-${i}`,
+            toolName: "read",
+            isError: false,
+            durationMs: 1,
+            result: { content: [{ type: "text", text: `result ${i}` }] },
+          });
+        }
+        listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "done after configured ceiling" } });
+        listener({ type: "message_end", message: createAssistantMessage("done after configured ceiling") });
+      }
+    }
+    async compact() {}
+    async abort() {
+      this.abortCalls += 1;
+    }
+  }
+
+  try {
+    const session = new StubSession();
+    const warnings: Array<Record<string, unknown>> = [];
+    const result = await runAgentPrompt("hello", "web:default", { timeoutMs: 0 }, {
+      getOrCreateRuntime: async () => createRuntime(session) as any,
+      turnCoordinator: new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} }),
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+      onWarn: (_message, details) => warnings.push(details),
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.result).toBe("done after configured ceiling");
+    expect(session.abortCalls).toBe(1);
+    expect(warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        operation: "run_agent.mid_turn_tool_ceiling",
+        reason: "mid_turn_tool_execution_hard_ceiling",
+        ceiling: 2,
+        defaultCeiling: 48,
+        toolExecutionCount: 2,
+      }),
+    ]));
+  } finally {
     restoreEnv();
   }
 });

@@ -165,6 +165,8 @@ import {
   buildTrimmedCompactionRetryPrompt,
   buildTrimmedProgressiveMergeRetryPrompt,
   clampKeepRecentTokens,
+  formatProgressCount,
+  formatProgressRange,
   estimatePostCompactionFit,
   getCompactionReasoningEffort,
   getCompactionRetryPromptTokenTarget,
@@ -222,6 +224,12 @@ describe("smart-compaction", () => {
 
   it("registers the session_before_compact handler", () => {
     expect(handler).toBeTypeOf("function");
+  });
+
+  it("formats visible progress counts as x/y (x of y)", () => {
+    expect(formatProgressCount(3, 7)).toBe("3/7 (3 of 7)");
+    expect(formatProgressRange(2, 5, 9)).toBe("2-5/9 (2-5 of 9)");
+    expect(formatProgressRange(4, 4, 9)).toBe("4/9 (4 of 9)");
   });
 
   it("maps compaction reasoning targets to model support and context capacity", () => {
@@ -332,26 +340,29 @@ describe("smart-compaction", () => {
       .map(([, text]: [string, string]) => JSON.parse(text));
     const smartCompactionStatusMessages = ctx.ui.setStatus.mock.calls
       .filter(([key, text]: [string, string | undefined]) => key === "smart_compaction" && typeof text === "string");
-    expect(contextStatusPayloads.length).toBeGreaterThanOrEqual(smartCompactionStatusMessages.length);
-    expect(contextStatusPayloads.map((payload: any) => payload.phase)).toEqual(
-      expect.arrayContaining(["scanning", "extracting", "summarizing_prompt", "generating_summary", "completed_selective"]),
+    expect(smartCompactionStatusMessages.length).toBeGreaterThan(contextStatusPayloads.length);
+    expect(smartCompactionStatusMessages.map(([, text]: [string, string]) => text)).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^Smart compaction: \d+% — .*extracting signal/),
+        expect.stringMatching(/^Smart compaction: \d+% — .*generating selective summary/),
+        expect.stringMatching(/^Smart compaction: 100% — .*completed selective summary/),
+      ]),
     );
+    expect(contextStatusPayloads.map((payload: any) => payload.phase)).toEqual(["before_compaction", "after_compaction"]);
     expect(contextStatusPayloads[0]).toMatchObject({
       tokens: 6000,
       contextWindow: 128000,
       estimated: true,
       source: "smart_compaction",
-      phase: "scanning",
-      completionPercent: 2,
+      phase: "before_compaction",
+      completionPercent: 0,
       completionEstimated: true,
     });
-    const completed = contextStatusPayloads.find((payload: any) => payload.phase === "completed_selective");
-    expect(completed?.tokens).toBeGreaterThan(6000);
-    expect(completed).toMatchObject({ completionPercent: 100, completionEstimated: true });
-    expect(contextStatusPayloads.at(-1)).toMatchObject({
-      phase: "compaction_done",
-      tokens: completed?.tokens,
+    expect(contextStatusPayloads[1]?.tokens).toBeGreaterThan(6000);
+    expect(contextStatusPayloads[1]).toMatchObject({
+      phase: "after_compaction",
       completionPercent: 100,
+      completionEstimated: true,
     });
   });
 
@@ -884,15 +895,17 @@ describe("smart-compaction", () => {
         .map(([, text]: [string, string]) => JSON.parse(text));
       const progressiveStatusMessages = ctx.ui.setStatus.mock.calls
         .filter(([key, text]: [string, string | undefined]) => key === "smart_compaction" && typeof text === "string");
-      expect(progressiveContextPayloads.length).toBeGreaterThanOrEqual(progressiveStatusMessages.length);
+      expect(progressiveStatusMessages.length).toBeGreaterThan(progressiveContextPayloads.length);
       const progressiveContextPhases = progressiveContextPayloads.map((payload: any) => payload.phase);
-      expect(progressiveContextPhases).toEqual(expect.arrayContaining([
-        "progressive_iterative",
-        "progressive_chunking",
-        "merge_final",
-        "completed_progressive",
+      expect(progressiveContextPhases).toEqual(["before_compaction", "after_compaction"]);
+      expect(progressiveContextPayloads[0]).toMatchObject({ tokens: 90_000, phase: "before_compaction" });
+      expect(progressiveContextPayloads[1]).toMatchObject({ phase: "after_compaction", completionPercent: 100 });
+      expect(progressiveContextPayloads[1].tokens).toBeLessThan(90_000);
+      expect(progressiveStatusMessages.map(([, text]: [string, string]) => text)).toEqual(expect.arrayContaining([
+        expect.stringMatching(/^Smart compaction: \d+% — .*progressive iterative mode/),
+        expect.stringMatching(/^Smart compaction: \d+% — .*messages → \d+ chunks/),
+        expect.stringMatching(/^Smart compaction: 100% — .*completed progressive summary/),
       ]));
-      expect(progressiveContextPhases.some((phase: string) => phase.startsWith("progressive_chunk_"))).toBe(true);
     });
 
     it("summarizes progressive chunks with bounded parallelism before the ordered final merge", async () => {

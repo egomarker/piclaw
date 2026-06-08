@@ -15,6 +15,15 @@ import { createTempWorkspace, getTestWorkspace, importFresh, setEnv } from "../h
 
 let restoreEnv: (() => void) | null = null;
 
+function findAgentLogFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return findAgentLogFiles(path);
+    if (entry.isFile() && entry.name.startsWith("agent-") && entry.name.endsWith(".log")) return [path];
+    return [];
+  });
+}
+
 function createRuntime(session: any, overrides: Partial<AgentSessionRuntime> = {}): AgentSessionRuntime {
   return {
     session,
@@ -92,10 +101,10 @@ test("agent pool aggregates streamed text and writes logs", async () => {
   expect(process.env.PICLAW_CHAT_JID).toBeUndefined();
 
   const logsDir = (pool as any).logsDir || join(process.env.PICLAW_WORKSPACE || ws.workspace, "logs");
-  const logFiles = readdirSync(logsDir).filter((f) => f.startsWith("agent-") && f.endsWith(".log"));
+  const logFiles = findAgentLogFiles(logsDir);
   expect(logFiles.length).toBeGreaterThan(0);
   const latest = logFiles.sort().slice(-1)[0];
-  const content = readFileSync(join(logsDir, latest), "utf8");
+  const content = readFileSync(latest, "utf8");
   expect(content).toContain("Hello world");
 });
 

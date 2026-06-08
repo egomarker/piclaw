@@ -44,6 +44,16 @@ export function resolveStatusPanelWidgetEventContext(
   };
 }
 
+function normalizeExtensionIndicatorFrame(frame: unknown): string | null {
+  if (typeof frame !== 'string') return null;
+  if (!frame) return null;
+  // Extension working indicators must remain plain text frames so the same
+  // payload can render in the web UI and Pi TUI.  Reject markup-like frames;
+  // frontend-owned busy states use CSS/SVG spinners instead.
+  if (/<\s*\/?\s*[a-z][^>]*>/i.test(frame)) return null;
+  return frame;
+}
+
 export function resolveExtensionUiWorkingIndicator(
   eventType: string | null | undefined,
   payload: Record<string, unknown> | null | undefined,
@@ -58,7 +68,9 @@ export function resolveExtensionUiWorkingIndicator(
     };
   }
 
-  const frames = payload.frames.filter((frame): frame is string => typeof frame === 'string');
+  const frames = payload.frames
+    .map(normalizeExtensionIndicatorFrame)
+    .filter((frame): frame is string => typeof frame === 'string');
   const intervalRaw = payload.interval_ms ?? payload.intervalMs;
   const intervalMs = typeof intervalRaw === 'number' && Number.isFinite(intervalRaw) && intervalRaw > 0
     ? intervalRaw

@@ -105,6 +105,21 @@ test('resolveExtensionUiWorkingIndicator maps default, hidden, and custom indica
     intervalMs: 120,
   });
 
+  expect(resolveExtensionUiWorkingIndicator('extension_ui_working_indicator', {
+    frames: ['<svg><circle /></svg>', '⠋', '<span>busy</span>', '·'],
+    intervalMs: 120,
+  })).toEqual({
+    mode: 'custom',
+    frames: ['⠋', '·'],
+    intervalMs: 120,
+  });
+
+  expect(resolveExtensionUiWorkingIndicator('extension_ui_working_indicator', { frames: ['<svg><circle /></svg>'], intervalMs: 120 })).toEqual({
+    mode: 'hidden',
+    frames: [],
+    intervalMs: 120,
+  });
+
   expect(resolveExtensionUiWorkingIndicator('extension_ui_status', { frames: ['x'] })).toBeUndefined();
 });
 

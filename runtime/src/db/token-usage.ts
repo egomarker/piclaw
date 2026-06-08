@@ -24,6 +24,21 @@ export interface TokenUsageTotalsSummary {
   runs: number;
 }
 
+/** Latest token/cost record for a chat, including cache-hit telemetry. */
+export interface LatestTokenUsageSummary extends TokenUsageTotalsSummary {
+  output_tokens: number;
+  cost_input: number;
+  cost_output: number;
+  cost_cache_read: number;
+  cost_cache_write: number;
+  model: string | null;
+  response_model: string | null;
+  provider: string | null;
+  api: string | null;
+  turns: number | null;
+  run_at: string | null;
+}
+
 /** Aggregated token/cost totals grouped by provider for a chat. */
 export interface TokenUsageByProviderSummary extends TokenUsageTotalsSummary {
   provider: string | null;
@@ -156,6 +171,37 @@ export function getTokenUsageTotals(chatJid: string): TokenUsageTotalsSummary {
     cost_total: 0,
     runs: 0,
   };
+}
+
+/** Return the most recent token-usage row for a chat, if any. */
+export function getLatestTokenUsage(chatJid: string): LatestTokenUsageSummary | null {
+  const db = getDb();
+  const row = db.prepare(
+    `SELECT
+      input_tokens,
+      output_tokens,
+      cache_read_tokens,
+      cache_write_tokens,
+      total_tokens,
+      cost_input,
+      cost_output,
+      cost_cache_read,
+      cost_cache_write,
+      cost_total,
+      model,
+      response_model,
+      provider,
+      api,
+      turns,
+      run_at,
+      1 AS runs
+     FROM token_usage
+     WHERE chat_jid = ?
+     ORDER BY run_at DESC, id DESC
+     LIMIT 1`
+  ).get(chatJid) as LatestTokenUsageSummary | undefined;
+
+  return row ?? null;
 }
 
 /** Return per-provider token and cost totals for a chat, sorted by total tokens. */

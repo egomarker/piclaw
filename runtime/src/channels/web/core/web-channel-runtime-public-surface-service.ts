@@ -74,11 +74,23 @@ function isClearedWorkingState(state: ExtensionWorkingStateSnapshot): boolean {
   return !state.message && state.visible === true && (!state.indicator || indicatorMode === "hidden");
 }
 
+function normalizeExtensionIndicatorFrame(frame: unknown): string | null {
+  if (typeof frame !== "string") return null;
+  if (!frame) return null;
+  // Extension-supplied working indicators are a cross-surface contract shared
+  // with Pi TUI, so frames must be plain text.  Markup/SVG spinners belong to
+  // frontend-owned busy states, not ctx.ui.setWorkingIndicator payloads.
+  if (/<\s*\/?\s*[a-z][^>]*>/i.test(frame)) return null;
+  return frame;
+}
+
 function resolveWorkingIndicatorSnapshot(payload: Record<string, unknown>): Record<string, unknown> {
   if (!Array.isArray(payload.frames)) {
     return { mode: "default", frames: [], intervalMs: null };
   }
-  const frames = payload.frames.filter((frame): frame is string => typeof frame === "string");
+  const frames = payload.frames
+    .map(normalizeExtensionIndicatorFrame)
+    .filter((frame): frame is string => typeof frame === "string");
   const intervalRaw = payload.interval_ms ?? payload.intervalMs;
   const intervalMs = typeof intervalRaw === "number" && Number.isFinite(intervalRaw) && intervalRaw > 0
     ? intervalRaw

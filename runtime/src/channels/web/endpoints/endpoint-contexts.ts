@@ -5,7 +5,7 @@
 import type { AgentPool } from "../../../agent-pool.js";
 import type { InteractionRow } from "../../../db.js";
 import type { WebAgentBufferEntry } from "../agent/agent-buffers.js";
-import type { AgentStatusContext } from "../agent/agent-status.js";
+import type { AgentStatusContext, AgentTokenUsageContext } from "../agent/agent-status.js";
 import type { ContentEndpointsContext } from "./content-endpoints.js";
 import type { AgentsEndpointContext, AvatarEndpointContext } from "./identity-endpoints.js";
 import type { PostMutationsContext } from "../post-mutations.js";
@@ -56,6 +56,7 @@ export interface AgentStatusContextDeps extends JsonLike {
   getContextUsageForChat(
     chatJid: string
   ): Promise<{ tokens: number | null; contextWindow: number; percent: number | null } | null>;
+  getTokenUsageForChat(chatJid: string): AgentTokenUsageContext | null;
   getAvailableModels(chatJid: string): Promise<unknown>;
   getProviderReadyCompletedForInstance(): boolean;
 }
@@ -70,6 +71,7 @@ export function createAgentStatusContext(deps: AgentStatusContextDeps): AgentSta
     recoverStaleInflightRun: deps.recoverStaleInflightRun,
     getBuffer: deps.getBuffer,
     getContextUsageForChat: deps.getContextUsageForChat,
+    getTokenUsageForChat: deps.getTokenUsageForChat,
     getAvailableModels: deps.getAvailableModels,
     getProviderReadyCompletedForInstance: deps.getProviderReadyCompletedForInstance,
   };

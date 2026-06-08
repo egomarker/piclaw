@@ -476,6 +476,37 @@ test('AgentStatus labels tool output as Output and shows the tail while collapse
   render(null, host);
 });
 
+test('AgentStatus preserves leading tool-output blanks and trims only trailing blanks for display', async () => {
+  const fakeDocument = new FakeDocument();
+  installStatusDomStubs(fakeDocument);
+
+  const { AgentStatus } = await importFresh<typeof import('../../web/src/components/status.ts')>('../web/src/components/status.ts');
+  const { h, render } = await import('../../web/src/vendor/preact-htm.js');
+
+  const host = fakeDocument.createElement('div');
+  fakeDocument.body.appendChild(host);
+  const output = '\n\n  indented output\nplain output\n\n  \t  ';
+
+  render(h(AgentStatus, {
+    status: {
+      type: 'tool_status',
+      title: 'bash',
+      status: 'Streaming output...',
+      output_preview: output,
+      output_total_lines: output.split('\n').length,
+    },
+  }), host);
+
+  const body = findElements(host, (node) => getAttr(node, 'data-panel-key') === 'tool-output')[0];
+  expect(body).toBeDefined();
+  const htmlOutput = collectInnerHtml(body).join('\n');
+  expect(htmlOutput).toContain('<br><br>  indented output');
+  expect(htmlOutput).toContain('plain output');
+  expect(htmlOutput).not.toContain('plain output<br><br>');
+
+  render(null, host);
+});
+
 test('AgentStatus keeps short tool-output collapsed height without a hidden more-lines row', async () => {
   const fakeDocument = new FakeDocument();
   installStatusDomStubs(fakeDocument);

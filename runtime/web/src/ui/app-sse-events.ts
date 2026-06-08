@@ -44,6 +44,7 @@ import {
 } from './app-sse-event-routing.js';
 import { isAppChatActivationRecent } from './app-refresh-coordination.js';
 import {
+  hasRenderableContextUsage,
   haveSameContextUsage,
   normalizeContextUsage,
   persistContextUsage,
@@ -330,7 +331,7 @@ export function handleAppSseEvent(
     }
 
     const liveContextUsage = normalizeContextUsage(data.context_usage);
-    if (liveContextUsage && liveContextUsage.percent != null) {
+    if (hasRenderableContextUsage(liveContextUsage)) {
       setContextUsage((prev) => haveSameContextUsage(prev, liveContextUsage) ? prev : liveContextUsage);
       persistContextUsage(currentChatJid, liveContextUsage);
     }
@@ -521,7 +522,7 @@ export function handleAppSseEvent(
       .then((contextPayload) => {
         if (activeChatJidRef.current !== targetChatJid) return;
         const nextContextUsage = normalizeContextUsage(contextPayload);
-        if (nextContextUsage && nextContextUsage.percent != null) {
+        if (hasRenderableContextUsage(nextContextUsage)) {
           setContextUsage((prev) => haveSameContextUsage(prev, nextContextUsage) ? prev : nextContextUsage);
           persistContextUsage(targetChatJid, nextContextUsage);
         }
@@ -565,7 +566,7 @@ export function handleAppSseEvent(
     if (!isCurrentChatEvent) return;
 
     const extensionContextUsage = resolveExtensionUiContextUsage(eventType, data);
-    if (extensionContextUsage && extensionContextUsage.percent != null) {
+    if (hasRenderableContextUsage(extensionContextUsage)) {
       setContextUsage((prev) => haveSameContextUsage(prev, extensionContextUsage) ? prev : extensionContextUsage);
     }
 

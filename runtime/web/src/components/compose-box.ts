@@ -388,6 +388,66 @@ function formatK(n) {
     return String(n);
 }
 
+function finiteNumber(value) {
+    if (value == null) return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+}
+
+function tokenUsageCacheHitRate(record) {
+    if (!record || typeof record !== 'object') return null;
+    const explicit = finiteNumber(record.cacheHitRate);
+    if (explicit != null) return explicit;
+    const input = finiteNumber(record.inputTokens) ?? 0;
+    const cacheRead = finiteNumber(record.cacheReadTokens) ?? 0;
+    const cacheWrite = finiteNumber(record.cacheWriteTokens) ?? 0;
+    const denominator = input + cacheRead + cacheWrite;
+    if (denominator <= 0 || cacheRead <= 0) return null;
+    return (cacheRead / denominator) * 100;
+}
+
+function formatCacheHitRate(rate) {
+    const numeric = finiteNumber(rate);
+    if (numeric == null) return null;
+    return `${Math.max(0, Math.min(100, numeric)).toFixed(1)}%`;
+}
+
+function formatTokenUsagePart(label, value) {
+    const numeric = finiteNumber(value);
+    return numeric != null ? `${label} ${formatK(numeric)}` : null;
+}
+
+export function resolveComposeCacheHitMeta(contextUsage) {
+    const cacheUsage = contextUsage && typeof contextUsage === 'object' ? contextUsage.cacheUsage : null;
+    if (!cacheUsage || typeof cacheUsage !== 'object') return null;
+    const latest = cacheUsage.latest && typeof cacheUsage.latest === 'object' ? cacheUsage.latest : null;
+    const totals = cacheUsage.totals && typeof cacheUsage.totals === 'object' ? cacheUsage.totals : null;
+    const source = latest || totals;
+    const cacheHitRate = tokenUsageCacheHitRate(source);
+    const formattedRate = formatCacheHitRate(cacheHitRate);
+    if (!formattedRate) return null;
+
+    const latestParts = latest ? [
+        formatTokenUsagePart('in', latest.inputTokens),
+        formatTokenUsagePart('out', latest.outputTokens),
+        formatTokenUsagePart('cache-r', latest.cacheReadTokens),
+        formatTokenUsagePart('cache-w', latest.cacheWriteTokens),
+    ].filter(Boolean).join(', ') : '';
+    const totalRuns = finiteNumber(totals?.runs);
+    const totalRate = totals ? formatCacheHitRate(tokenUsageCacheHitRate(totals)) : null;
+    const titleParts = [
+        `Prompt cache hit: ${formattedRate}${latest ? ' latest run' : ''}`,
+        latestParts || null,
+        totalRate ? `Session total: ${totalRate}${totalRuns != null ? ` across ${totalRuns} run${totalRuns === 1 ? '' : 's'}` : ''}` : null,
+    ].filter(Boolean);
+
+    return {
+        label: `CH${formattedRate}`,
+        title: titleParts.join(' • '),
+        cacheHitRate,
+    };
+}
+
 const MODEL_PICKER_CONTEXT_OVERHEAD_TOKENS = 4000;
 const MODEL_PICKER_TOKEN_ESTIMATE_SAFETY_MULTIPLIER = 1.1;
 
@@ -1297,17 +1357,20 @@ export function ComposeBox({
     const modelHintSuffix = supportsThinking && thinkingLevel ? ` (${thinkingLevel})` : '';
     const modelThinkingLabel = modelHintSuffix.trim() ? `${thinkingLevel}` : '';
     const routedModelStatus = resolveComposeRoutedModelStatus(activeModel, agentModelsPayload);
+    const cacheHitMeta = resolveComposeCacheHitMeta(contextUsage);
     const modelUsageLabel = typeof modelUsage?.hint_short === 'string' ? modelUsage.hint_short.trim() : '';
     const modelUsageSectionLabel = [
         modelThinkingLabel || null,
         routedModelStatus?.label || null,
         modelUsageLabel || null,
+        cacheHitMeta?.label || null,
     ].filter(Boolean).join(' • ');
     const modelUsageTitleParts = [
         activeModel ? `Current model: ${modelHintLabel}${modelHintSuffix}` : null,
         routedModelStatus?.title || null,
         modelUsage?.plan ? `Plan: ${modelUsage.plan}` : null,
         modelUsageLabel || null,
+        cacheHitMeta?.title || null,
         modelUsage?.primary?.reset_description || null,
         modelUsage?.secondary?.reset_description || null,
     ].filter(Boolean);
@@ -1316,7 +1379,7 @@ export function ComposeBox({
         : (modelUsageTitleParts.join(' • ') || (showModelPickerHint
             ? 'Select a model (tap to open model picker)'
             : `Current model: ${modelHintLabel}${modelHintSuffix} (tap to open model picker)`));
-    const showComposeMetaRow = !searchMode && (showModelPickerHint || (contextUsage && contextUsage.percent != null));
+    const showComposeMetaRow = !searchMode && (showModelPickerHint || cacheHitMeta || (contextUsage && contextUsage.percent != null));
 
     const emitModelState = (payload) => {
         if (!payload || typeof payload !== 'object') return;
@@ -3307,19 +3370,21 @@ export function ComposeBox({
                     `}
                     ${showComposeMetaRow && html`
                     <div class="compose-meta-row">
-                        ${showModelPickerHint && html`
+                        ${(showModelPickerHint || cacheHitMeta) && html`
                             <div class="compose-model-meta">
-                                <button
-                                    ref=${modelHintRef}
-                                    type="button"
-                                    class="compose-model-hint compose-model-hint-btn"
-                                    title=${modelHintTitle}
-                                    aria-label="Open model picker"
-                                    onClick=${toggleModelPopup}
-                                    disabled=${switchingModel}
-                                >
-                                    ${switchingModel ? 'Switching…' : modelHintLabel}
-                                </button>
+                                ${showModelPickerHint && html`
+                                    <button
+                                        ref=${modelHintRef}
+                                        type="button"
+                                        class="compose-model-hint compose-model-hint-btn"
+                                        title=${modelHintTitle}
+                                        aria-label="Open model picker"
+                                        onClick=${toggleModelPopup}
+                                        disabled=${switchingModel}
+                                    >
+                                        ${switchingModel ? 'Switching…' : modelHintLabel}
+                                    </button>
+                                `}
                                 <div class="compose-model-meta-subline">
                                     ${!switchingModel && modelUsageSectionLabel && html`
                                         <span class="compose-model-usage-hint" title=${modelHintTitle}>

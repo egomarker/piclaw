@@ -361,6 +361,7 @@ export function AgentStatus({ status, draft, plan, thought, pendingRequest, inte
     const PREVIEW_MAX_CHARS_PER_LINE = 160;
 
     const stripInternalTags = (value) => String(value || '').replace(/<\/?internal>/gi, '');
+    const trimToolOutputForDisplay = (value) => String(value || '').replace(/[\s\u00a0]+$/u, '');
 
     const countSoftLines = (line) => {
         if (!line) return 1;
@@ -600,7 +601,9 @@ export function AgentStatus({ status, draft, plan, thought, pendingRequest, inte
         const rawSourceText = fullText || text || '';
         const sourceText = panelKey === 'thought' || panelKey === 'draft'
             ? stripInternalTags(rawSourceText)
-            : rawSourceText;
+            : panelKey === 'tool-output'
+                ? trimToolOutputForDisplay(rawSourceText)
+                : rawSourceText;
         const isCollapsible = typeof maxLines === 'number';
         const collapseFromTail = panelKey === 'tool-output';
         const truncated = isCollapsible

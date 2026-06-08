@@ -16,6 +16,30 @@ function interaction(id: number): InteractionRow {
 }
 
 describe("web channel runtime public surface service", () => {
+  test("stores only plain text extension working-indicator frames", () => {
+    const service = createWebChannelRuntimePublicSurfaceService({
+      runtimeFollowupFacade: {} as any,
+      messageProcessingStorageService: {} as any,
+      sessionBroadcast: {
+        sse: {},
+        uiBridge: {},
+        broadcastEvent: () => undefined,
+      } as any,
+    });
+
+    service.broadcastEvent("extension_ui_working_indicator", {
+      chat_jid: "web:test",
+      frames: ["<svg><circle /></svg>", "⠋", "<span>busy</span>", "·"],
+      interval_ms: 80,
+    });
+
+    expect(service.getExtensionWorkingState("web:test")).toEqual({
+      message: null,
+      indicator: { mode: "custom", frames: ["⠋", "·"], intervalMs: 80 },
+      visible: true,
+    });
+  });
+
   test("delegates runtime/session/storage surfaces to the extracted collaborators", async () => {
     const calls: string[] = [];
     const sse = { kind: "sse-hub" };

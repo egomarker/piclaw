@@ -2,7 +2,7 @@
  * channels/web/channel-endpoint-context-factory.ts – Builds endpoint contexts for WebChannel handlers.
  */
 
-import { getDb, replaceMessageContent } from "../../../db.js";
+import { getDb, getLatestTokenUsage, getTokenUsageTotals, replaceMessageContent } from "../../../db.js";
 import { resolveAvatarUrl } from "../media/avatar-service.js";
 import type { WebChannelLike } from "../core/web-channel-contracts.js";
 import type { AuthEndpointsContext } from "../auth/auth-endpoints.js";
@@ -15,7 +15,7 @@ import {
   createUiEndpointsContext,
 } from "./endpoint-contexts.js";
 import { isProviderReadyOobeCompletedForInstance } from "../oobe-instance-state.js";
-import type { AgentStatusContext } from "../agent/agent-status.js";
+import type { AgentStatusContext, AgentTokenUsageContext } from "../agent/agent-status.js";
 import type { ContentEndpointsContext } from "./content-endpoints.js";
 import type { AgentsEndpointContext, AvatarEndpointContext } from "./identity-endpoints.js";
 import type { PostMutationsContext } from "../post-mutations.js";
@@ -59,6 +59,19 @@ export interface WebChannelEndpointFactoryOptions {
 }
 
 /** Lazily built endpoint contexts consumed by WebChannel handlers. */
+function getTokenUsageForChat(chatJid: string): AgentTokenUsageContext | null {
+  try {
+    const latest = getLatestTokenUsage(chatJid);
+    const totals = getTokenUsageTotals(chatJid);
+    return latest || totals.runs > 0 ? { latest, totals } : null;
+  } catch (error) {
+    if (error instanceof Error && (error.message === "Database not initialized" || error.message.includes("closed database"))) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export interface WebChannelEndpointContexts {
   postMutations(): PostMutationsContext;
   agentStatus(): AgentStatusContext;
@@ -108,6 +121,7 @@ export function createWebChannelEndpointContexts(
           recoverStaleInflightRun: (chatJid, recoveryOptions) => channel.recoverStaleInflightRun(chatJid, recoveryOptions),
           getBuffer: (turnId, panel) => channel.getBuffer(turnId, panel),
           getContextUsageForChat: (chatJid) => channel.agentPool.getContextUsageForChat(chatJid) ?? channel.getContextUsage(chatJid),
+          getTokenUsageForChat,
           getAvailableModels: (chatJid) => channel.agentPool.getAvailableModels(chatJid),
           getProviderReadyCompletedForInstance: () => isProviderReadyOobeCompletedForInstance(),
         });

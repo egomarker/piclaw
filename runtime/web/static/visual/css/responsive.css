@@ -129,6 +129,7 @@
         white-space: nowrap;
     }
 
+
     .compose-actions {
         margin-left: auto;
         flex-shrink: 0;
@@ -215,6 +216,7 @@
         line-height: 1.2;
         white-space: nowrap;
     }
+
 
     .compose-actions {
         margin-left: auto;

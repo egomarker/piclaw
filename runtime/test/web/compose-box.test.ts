@@ -10,6 +10,7 @@ import {
   getModelPickerContextLimit,
   getModelPickerOptionSearchLabel,
   normalizeModelPickerOptions,
+  resolveComposeCacheHitMeta,
   resolveComposeExtensionWorkingDisplay,
   resolveComposeModelPickerState,
   resolveComposeRoutedModelStatus,
@@ -87,6 +88,59 @@ test('normalizeModelPickerOptions falls back to legacy string labels', () => {
       reasoning: false,
     },
   ]);
+});
+
+test('resolveComposeCacheHitMeta formats latest prompt cache-hit telemetry', () => {
+  expect(resolveComposeCacheHitMeta({
+    cacheUsage: {
+      latest: {
+        inputTokens: 1000,
+        outputTokens: 300,
+        cacheReadTokens: 3000,
+        cacheWriteTokens: 1000,
+        totalTokens: 5300,
+        cacheHitRate: 60,
+        runs: 1,
+      },
+      totals: {
+        inputTokens: 2000,
+        outputTokens: 600,
+        cacheReadTokens: 6000,
+        cacheWriteTokens: 2000,
+        totalTokens: 10600,
+        cacheHitRate: 60,
+        runs: 2,
+      },
+    },
+  })).toEqual({
+    label: 'CH60.0%',
+    title: 'Prompt cache hit: 60.0% latest run • in 1K, out 300, cache-r 3K, cache-w 1K • Session total: 60.0% across 2 runs',
+    cacheHitRate: 60,
+  });
+});
+
+test('resolveComposeCacheHitMeta computes cache-hit telemetry when the API omits a rate', () => {
+  expect(resolveComposeCacheHitMeta({
+    cacheUsage: {
+      latest: {
+        inputTokens: 1000,
+        outputTokens: 100,
+        cacheReadTokens: 7000,
+        cacheWriteTokens: 2000,
+      },
+    },
+  })?.label).toBe('CH70.0%');
+});
+
+test('resolveComposeCacheHitMeta ignores missing or zero cache-read telemetry', () => {
+  expect(resolveComposeCacheHitMeta(null)).toBeNull();
+  expect(resolveComposeCacheHitMeta({ cacheUsage: { latest: { inputTokens: 1000, cacheReadTokens: 0, cacheWriteTokens: 1000 } } })).toBeNull();
+});
+
+test('compose cache-hit label renders inline with model usage metadata', () => {
+  const source = readFileSync(join(import.meta.dir, '../../web/src/components/compose-box.ts'), 'utf8');
+  expect(source).toContain('cacheHitMeta?.label || null');
+  expect(source).not.toContain('compose-cache-hit-chip');
 });
 
 test('slash autocomplete includes all canonical control commands', () => {

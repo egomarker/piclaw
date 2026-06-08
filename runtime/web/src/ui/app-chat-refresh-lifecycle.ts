@@ -8,6 +8,7 @@ import {
   updateUserProfileFromEvent,
 } from './app-auth-bootstrap.js';
 import {
+  hasRenderableContextUsage,
   haveSameContextUsage,
   normalizeContextUsage,
   persistContextUsage,
@@ -249,7 +250,7 @@ export function useChatRefreshLifecycle(options: UseChatRefreshLifecycleOptions)
           applyModelState(modelPayload);
 
           const contextPayload = normalizeContextUsage(contextPayloadRaw);
-          if (contextPayload && contextPayload.percent != null) {
+          if (hasRenderableContextUsage(contextPayload)) {
             setContextUsage((prev) => haveSameContextUsage(prev, contextPayload) ? prev : contextPayload);
             persistContextUsage(targetChatJid, contextPayload);
           }

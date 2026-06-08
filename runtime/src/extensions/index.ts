@@ -23,6 +23,7 @@
  *   - envTools: env for persistent workspace-scoped environment variables.
  *   - contextPrune: context_prune/context_tree_query for recoverable tool-result pruning.
  *   - providerRequestSanitizer: defensive provider payload cleanup before HTTP requests.
+ *   - githubCopilotDynamicModels: Piclaw-private GitHub Copilot live /models catalog merge.
  *
  * Note: bun_run, keychain, ssh, proxmox, and portainer now live as packaged
  * runtime extensions under runtime/extensions/integrations/* and are loaded via
@@ -59,6 +60,7 @@ import { providerRequestSanitizer } from "./provider-request-sanitizer.js";
 import { postCompactionPrune } from "./post-compaction-prune.js";
 import { contextPrune } from "./context-prune.js";
 import { mcpTimeoutPatch } from "./mcp-timeout-patch.js";
+import { githubCopilotDynamicModels } from "./github-copilot-dynamic-models.js";
 
 /** Build the built-in extension factory list used for session creation. */
 export function createBuiltinExtensionFactories(options?: {
@@ -93,6 +95,7 @@ export function createBuiltinExtensionFactories(options?: {
     postCompactionPrune,
     contextPrune,
     mcpTimeoutPatch,
+    githubCopilotDynamicModels,
   ];
 }
 

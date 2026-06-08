@@ -14,16 +14,57 @@ type StateSetter<T> = (next: T | ((prev: T) => T)) => void;
 
 const CONTEXT_STORAGE_PREFIX = 'piclaw:ctx:';
 
+function finiteOrNull(value: unknown): number | null {
+  if (value == null) return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function normalizeTokenUsageRecord(payload: unknown): Record<string, unknown> | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const data = payload as Record<string, unknown>;
+  return {
+    inputTokens: finiteOrNull(data.inputTokens),
+    outputTokens: finiteOrNull(data.outputTokens),
+    cacheReadTokens: finiteOrNull(data.cacheReadTokens),
+    cacheWriteTokens: finiteOrNull(data.cacheWriteTokens),
+    totalTokens: finiteOrNull(data.totalTokens),
+    costTotal: finiteOrNull(data.costTotal),
+    runs: finiteOrNull(data.runs),
+    cacheHitRate: finiteOrNull(data.cacheHitRate),
+    model: stringOrNull(data.model),
+    responseModel: stringOrNull(data.responseModel),
+    provider: stringOrNull(data.provider),
+    api: stringOrNull(data.api),
+    turns: finiteOrNull(data.turns),
+    runAt: stringOrNull(data.runAt),
+  };
+}
+
+function normalizeCacheUsage(payload: unknown): Record<string, unknown> | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const data = payload as Record<string, unknown>;
+  const latest = normalizeTokenUsageRecord(data.latest);
+  const totals = normalizeTokenUsageRecord(data.totals);
+  return latest || totals ? { latest, totals } : null;
+}
+
 export function normalizeContextUsage(payload: unknown): Record<string, unknown> | null {
   if (!payload || typeof payload !== 'object') return null;
   const data = payload as Record<string, unknown>;
-  const tokens = data.tokens == null ? null : Number(data.tokens);
-  const contextWindow = data.contextWindow == null ? null : Number(data.contextWindow);
-  const percent = data.percent == null ? null : Number(data.percent);
+  const tokens = finiteOrNull(data.tokens);
+  const contextWindow = finiteOrNull(data.contextWindow);
+  const percent = finiteOrNull(data.percent);
+  const cacheUsage = normalizeCacheUsage(data.cacheUsage);
   return {
-    tokens: Number.isFinite(tokens) ? tokens : null,
-    contextWindow: Number.isFinite(contextWindow) ? contextWindow : null,
-    percent: Number.isFinite(percent) ? percent : null,
+    tokens,
+    contextWindow,
+    percent,
+    cacheUsage,
   };
 }
 
@@ -34,13 +75,19 @@ export function haveSameContextUsage(a: unknown, b: unknown): boolean {
   if (!left || !right) return false;
   return left.tokens === right.tokens
     && left.contextWindow === right.contextWindow
-    && left.percent === right.percent;
+    && left.percent === right.percent
+    && JSON.stringify(left.cacheUsage ?? null) === JSON.stringify(right.cacheUsage ?? null);
+}
+
+export function hasRenderableContextUsage(payload: unknown): boolean {
+  const normalized = normalizeContextUsage(payload);
+  return Boolean(normalized && (normalized.percent != null || normalized.cacheUsage != null));
 }
 
 export function persistContextUsage(chatJid: string, payload: unknown): void {
   if (!chatJid || !payload || typeof payload !== 'object') return;
   const data = payload as Record<string, unknown>;
-  if (data.percent == null) return;
+  if (data.percent == null && data.cacheUsage == null) return;
   try {
     setLocalStorageItem(CONTEXT_STORAGE_PREFIX + chatJid, JSON.stringify(payload));
   } catch (error) {
@@ -136,11 +183,11 @@ export async function refreshContextUsageForChat(options: RefreshContextUsageFor
   try {
     const contextPayload = normalizeContextUsage(await getAgentContext(targetChatJid));
     if (activeChatJidRef.current !== targetChatJid) return;
-    // Only update state when the server returns meaningful context data.
-    // After a reload or for inactive chats, the API returns
-    // { tokens: null, contextWindow: null, percent: null } which would
-    // overwrite the cached localStorage value restored on chat switch.
-    if (contextPayload && contextPayload.percent != null) {
+    // Only update state when the server returns meaningful context/cache data.
+    // After a reload or for inactive chats, the API may return empty context
+    // metrics; keep restored localStorage values unless token cache telemetry
+    // is available.
+    if (hasRenderableContextUsage(contextPayload)) {
       setContextUsage((prev: unknown) => haveSameContextUsage(prev, contextPayload) ? prev : contextPayload);
       persistContextUsage(targetChatJid, contextPayload);
     }
