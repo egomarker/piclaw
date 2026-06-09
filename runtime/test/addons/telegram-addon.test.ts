@@ -294,6 +294,59 @@ test("telegram runtime omits missing optional location fields", async () => {
   });
 });
 
+test("telegram runtime location messages force prompt in mention mode", async () => {
+  restoreEnv = setEnv({
+    PICLAW_TELEGRAM_ENABLED: "false",
+    PICLAW_TELEGRAM_BOT_TOKEN: undefined,
+  });
+
+  const runtime = await importFresh<typeof import("../../../addons/telegram/runtime/index.ts")>("../../../addons/telegram/runtime/index.ts", import.meta.url);
+  const forcePrompt = runtime.shouldForcePromptForInboundMessage({
+    enabled: true,
+    botToken: "1234:abcdef",
+    pollingTimeoutSeconds: 45,
+    allowedChatIds: ["123456"],
+    triggerMode: "mention_or_command",
+    unauthorizedMode: "ignore",
+    lastUpdateId: 0,
+  }, {
+    message_id: 3,
+    date: 0,
+    chat: { id: 123456, type: "private" },
+    location: {
+      latitude: 52.1,
+      longitude: 30.2,
+    },
+  } as any, "Location:\nlatitude: 52.1\nlongitude: 30.2", null);
+
+  expect(forcePrompt).toBe(true);
+});
+
+test("telegram runtime non-location messages still respect mention mode", async () => {
+  restoreEnv = setEnv({
+    PICLAW_TELEGRAM_ENABLED: "false",
+    PICLAW_TELEGRAM_BOT_TOKEN: undefined,
+  });
+
+  const runtime = await importFresh<typeof import("../../../addons/telegram/runtime/index.ts")>("../../../addons/telegram/runtime/index.ts", import.meta.url);
+  const forcePrompt = runtime.shouldForcePromptForInboundMessage({
+    enabled: true,
+    botToken: "1234:abcdef",
+    pollingTimeoutSeconds: 45,
+    allowedChatIds: ["123456"],
+    triggerMode: "mention_or_command",
+    unauthorizedMode: "ignore",
+    lastUpdateId: 0,
+  }, {
+    message_id: 4,
+    date: 0,
+    chat: { id: 123456, type: "private" },
+    text: "plain hello",
+  } as any, "plain hello", null);
+
+  expect(forcePrompt).toBe(false);
+});
+
 test("telegram runtime entry is safe to import while disabled", async () => {
   restoreEnv = setEnv({
     PICLAW_TELEGRAM_ENABLED: "false",

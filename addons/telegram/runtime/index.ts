@@ -275,6 +275,16 @@ function shouldForcePrompt(
   return false;
 }
 
+export function shouldForcePromptForInboundMessage(
+  config: TelegramConfig,
+  message: TelegramMessage,
+  content: string,
+  botUser: TelegramUser | null,
+): boolean {
+  if (message.location) return true;
+  return shouldForcePrompt(config, content, botUser);
+}
+
 function isAuthorizedChat(config: TelegramConfig, message: TelegramMessage): boolean {
   const chatId = String(message.chat.id);
   return message.chat.type === "private"
@@ -409,7 +419,7 @@ async function startTelegramRuntime(): Promise<void> {
         contentBlocks: payload.contentBlocks,
         chatName: buildChatName(message),
         enqueue: true,
-        forcePrompt: shouldForcePrompt(config, payload.content, botUser),
+        forcePrompt: shouldForcePromptForInboundMessage(config, message, payload.content, botUser),
       });
 
       updateTelegramRuntimeState({
