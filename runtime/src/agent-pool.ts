@@ -530,6 +530,10 @@ export class AgentPool {
     this.runtimeFacade.registerModelProvider(providerName, config);
   }
 
+  getModelRegistry(): ModelRegistry {
+    return this.modelRegistry;
+  }
+
   resolveModelInput(input: string): { model?: string; error?: string } {
     return this.runtimeFacade.resolveModelInput(input);
   }

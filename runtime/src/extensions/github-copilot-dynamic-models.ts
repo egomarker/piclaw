@@ -379,6 +379,59 @@ async function refreshGitHubCopilotDynamicModels(ctx: GitHubCopilotDynamicModels
   });
 }
 
+/**
+ * Boot-time eager refresh: register dynamic Copilot models immediately at startup
+ * so they appear in the model picker without waiting for the first prompt.
+ *
+ * This uses the global model registry directly (no session context needed).
+ */
+export async function refreshGitHubCopilotDynamicModelsAtBoot(agentPool: {
+  hasProviderModels(provider: string): boolean;
+  registerModelProvider(providerName: string, config: ProviderConfig): void;
+  getModelRegistry(): unknown;
+}): Promise<void> {
+  if (DISABLED) return;
+
+  const registry = agentPool.getModelRegistry() as GitHubCopilotDynamicModelsContext["modelRegistry"];
+  const existingModels = registry.getAll().filter((model) => model.provider === PROVIDER && model.id);
+  if (existingModels.length === 0) return;
+
+  const seedModel = existingModels.find((model) => model.id === "gpt-5.5")
+    ?? existingModels.find((model) => model.id.startsWith("gpt"))
+    ?? existingModels[0];
+  const auth = await registry.getApiKeyAndHeaders(seedModel);
+  if (!auth.ok || !auth.apiKey) {
+    log.debug("Skipping boot-time GitHub Copilot dynamic model refresh because provider auth is unavailable.", {
+      operation: "github_copilot_dynamic_models.boot_auth_unavailable",
+    });
+    return;
+  }
+
+  const providerBaseUrl = seedModel.baseUrl || DEFAULT_BASE_URL;
+  const liveModels = await fetchGitHubCopilotLiveModels({
+    baseUrl: providerBaseUrl,
+    apiKey: auth.apiKey,
+    headers: auth.headers,
+  });
+  const providerModels = mergeGitHubCopilotDynamicModels(existingModels as Model<Api>[], liveModels);
+  const addedCount = providerModels.filter((model) => !existingModels.some((existing) => existing.id === model.id)).length;
+
+  if (providerModels.length === 0) return;
+  agentPool.registerModelProvider(PROVIDER, {
+    name: "GitHub Copilot",
+    baseUrl: providerBaseUrl,
+    headers: COPILOT_HEADERS,
+    models: providerModels,
+  });
+
+  log.info("Registered GitHub Copilot dynamic models at boot from live /models catalog.", {
+    operation: "github_copilot_dynamic_models.boot_register",
+    liveCount: liveModels.length,
+    registeredCount: providerModels.length,
+    addedCount,
+  });
+}
+
 export const githubCopilotDynamicModels = (pi: ExtensionAPI): void => {
   if (DISABLED) return;
 

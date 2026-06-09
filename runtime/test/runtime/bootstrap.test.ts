@@ -46,6 +46,7 @@ describe("runtime bootstrap", () => {
       signalRegistrar: { on: () => {} },
       initializeRuntimeEnvironment: () => events.push("init-runtime-env"),
       registerOptionalProviders: () => events.push("register-providers"),
+      registerGitHubCopilotDynamicModelsAtBoot: () => events.push("register-copilot-dynamic"),
       startWebChannel: async () => {
         events.push("start-web");
         return web;
@@ -90,6 +91,7 @@ describe("runtime bootstrap", () => {
     expect(events).toEqual([
       "init-runtime-env",
       "register-providers",
+      "register-copilot-dynamic",
       "log-banner",
       "start-web",
       "start-pushover",
