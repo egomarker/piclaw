@@ -36,6 +36,15 @@ export interface TelegramDocument {
   file_size?: number;
 }
 
+export interface TelegramLocation {
+  latitude: number;
+  longitude: number;
+  horizontal_accuracy?: number;
+  live_period?: number;
+  heading?: number;
+  proximity_alert_radius?: number;
+}
+
 export interface TelegramMessage {
   message_id: number;
   date: number;
@@ -45,6 +54,7 @@ export interface TelegramMessage {
   chat: TelegramChat;
   photo?: TelegramPhotoSize[];
   document?: TelegramDocument;
+  location?: TelegramLocation;
   sticker?: unknown;
   voice?: unknown;
   video?: unknown;

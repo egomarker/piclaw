@@ -242,6 +242,58 @@ test("telegram channel sends SVGs as documents and PNGs as photos", async () => 
   ]);
 });
 
+test("telegram runtime converts location-only messages into plain text", async () => {
+  restoreEnv = setEnv({
+    PICLAW_TELEGRAM_ENABLED: "false",
+    PICLAW_TELEGRAM_BOT_TOKEN: undefined,
+  });
+
+  const runtime = await importFresh<typeof import("../../../addons/telegram/runtime/index.ts")>("../../../addons/telegram/runtime/index.ts", import.meta.url);
+  const payload = await runtime.buildInboundPayload({} as TelegramBotApi, {
+    message_id: 1,
+    date: 0,
+    chat: { id: 123456, type: "private" },
+    location: {
+      latitude: 52.1234567,
+      longitude: 30.1234567,
+      horizontal_accuracy: 15,
+      live_period: 900,
+      heading: 140,
+      proximity_alert_radius: 50,
+    },
+  } as any);
+
+  expect(payload).toEqual({
+    content: "Location:\nlatitude: 52.1234567\nlongitude: 30.1234567\nhorizontal_accuracy: 15\nlive_period: 900\nheading: 140\nproximity_alert_radius: 50",
+    mediaIds: [],
+    contentBlocks: [],
+  });
+});
+
+test("telegram runtime omits missing optional location fields", async () => {
+  restoreEnv = setEnv({
+    PICLAW_TELEGRAM_ENABLED: "false",
+    PICLAW_TELEGRAM_BOT_TOKEN: undefined,
+  });
+
+  const runtime = await importFresh<typeof import("../../../addons/telegram/runtime/index.ts")>("../../../addons/telegram/runtime/index.ts", import.meta.url);
+  const payload = await runtime.buildInboundPayload({} as TelegramBotApi, {
+    message_id: 2,
+    date: 0,
+    chat: { id: 123456, type: "private" },
+    location: {
+      latitude: 52.1,
+      longitude: 30.2,
+    },
+  } as any);
+
+  expect(payload).toEqual({
+    content: "Location:\nlatitude: 52.1\nlongitude: 30.2",
+    mediaIds: [],
+    contentBlocks: [],
+  });
+});
+
 test("telegram runtime entry is safe to import while disabled", async () => {
   restoreEnv = setEnv({
     PICLAW_TELEGRAM_ENABLED: "false",

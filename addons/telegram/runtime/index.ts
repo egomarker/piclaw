@@ -16,6 +16,7 @@ import {
   type TelegramBinaryAttachment,
   type TelegramBotApi,
   type TelegramDocument,
+  type TelegramLocation,
   type TelegramMessage,
   type TelegramPhotoSize,
   type TelegramUpdate,
@@ -115,6 +116,26 @@ function buildAttachmentContentBlock(
   };
 }
 
+export function formatTelegramLocationText(location: TelegramLocation): string {
+  const lines = ["Location:"];
+  const fields: Array<[string, number | undefined]> = [
+    ["latitude", location.latitude],
+    ["longitude", location.longitude],
+    ["horizontal_accuracy", location.horizontal_accuracy],
+    ["live_period", location.live_period],
+    ["heading", location.heading],
+    ["proximity_alert_radius", location.proximity_alert_radius],
+  ];
+
+  for (const [field, value] of fields) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      lines.push(`${field}: ${value}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 async function downloadTelegramFile(
   api: TelegramBotApi,
   fileId: string,
@@ -174,7 +195,7 @@ async function importDocumentAttachment(
   };
 }
 
-async function buildInboundPayload(
+export async function buildInboundPayload(
   api: TelegramBotApi,
   message: TelegramMessage,
 ): Promise<{
@@ -186,6 +207,10 @@ async function buildInboundPayload(
   const summaries: string[] = [];
   const mediaIds: number[] = [];
   const contentBlocks: Array<Record<string, unknown>> = [];
+
+  if (message.location) {
+    summaries.push(formatTelegramLocationText(message.location));
+  }
 
   if (Array.isArray(message.photo) && message.photo.length > 0) {
     try {
