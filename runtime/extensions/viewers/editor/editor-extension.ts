@@ -82,6 +82,10 @@ import {
     getPastedImageFiles,
     getWorkspaceDirectoryForEditorPath,
 } from './paste-image.js';
+import {
+    dispatchEditorFileReferenceRequest,
+    normalizeEditorFileReferencePath,
+} from '../../../web/src/ui/editor-file-reference.js';
 
 // ── Constants ───────────────────────────────────────────────────
 
@@ -472,15 +476,23 @@ export class StandaloneEditorInstance implements PaneInstance {
         saveBtn.addEventListener('click', () => this.handleSave());
         this._saveBtn = saveBtn;
 
+        const referenceBtn = this.ownerDocument.createElement('button');
+        referenceBtn.className = 'editor-status-button editor-reference-btn';
+        referenceBtn.textContent = 'Reference';
+        referenceBtn.addEventListener('click', () => this.handleReferenceFile());
+        this._referenceBtn = referenceBtn;
+
         actionsDiv.appendChild(wsBtn);
         actionsDiv.appendChild(lpBtn);
         actionsDiv.appendChild(vimBtn);
         actionsDiv.appendChild(saveBtn);
+        actionsDiv.appendChild(referenceBtn);
         row.appendChild(meta);
         row.appendChild(actionsDiv);
 
         this.updateLivePreviewControlState();
         this.updateWhitespaceControlState();
+        this.updateReferenceButton();
         return row;
     }
     private _branchHint: HTMLElement | null = null;
@@ -490,6 +502,7 @@ export class StandaloneEditorInstance implements PaneInstance {
     private _lpBtn: HTMLButtonElement | null = null;
     private _vimBtn: HTMLButtonElement | null = null;
     private _saveBtn: HTMLButtonElement | null = null;
+    private _referenceBtn: HTMLButtonElement | null = null;
     private branchRequestToken = 0;
 
     // ── File I/O ────────────────────────────────────────────────
@@ -1152,6 +1165,30 @@ export class StandaloneEditorInstance implements PaneInstance {
         this._saveBtn.title = this.dirty ? 'Save changes' : 'No changes to save';
     }
 
+    private updateReferenceButton(): void {
+        if (!this._referenceBtn) return;
+        const path = normalizeEditorFileReferencePath(this.path);
+        this._referenceBtn.disabled = !path;
+        this._referenceBtn.title = path
+            ? `Insert file reference into chat: ${path}`
+            : 'No file path to reference';
+        this._referenceBtn.setAttribute('aria-label', path
+            ? `Insert file reference into chat: ${path}`
+            : 'Insert file reference into chat');
+    }
+
+    private handleReferenceFile(): void {
+        const path = normalizeEditorFileReferencePath(this.path);
+        if (!path) {
+            this.updateStatusText('No file path to reference');
+            return;
+        }
+        const dispatched = dispatchEditorFileReferenceRequest(path, this.ownerWindow);
+        this.updateStatusText(dispatched
+            ? `Added ${path.split('/').pop() || path} to chat references`
+            : 'Could not add file reference to chat');
+    }
+
     private async refreshBranchHint(): Promise<void> {
         const token = ++this.branchRequestToken;
         const path = this.path || '';
@@ -1354,6 +1391,7 @@ export class StandaloneEditorInstance implements PaneInstance {
         this.updateWhitespaceControlState();
         this.updateGutterWidth();
         this.updateSaveButton();
+        this.updateReferenceButton();
         this.updateStatusText(this.dirty ? 'Unsaved changes' : 'All changes saved');
         requestAnimationFrame(() => this.focus());
     }
@@ -1429,6 +1467,7 @@ export class StandaloneEditorInstance implements PaneInstance {
         }
         this.updateLivePreviewControlState();
         this.updateWhitespaceControlState();
+        this.updateReferenceButton();
         void this.refreshBranchHint();
     }
 
