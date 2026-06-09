@@ -301,8 +301,10 @@ export async function purgeArchivedBranch(options: PurgeArchivedBranchOptions): 
   if (!normalized || typeof purgeChatBranch !== 'function') return false;
 
   const branch = currentChatBranches.find((item) => item?.chat_jid === normalized) || null;
-  const isArchived = Boolean(branch?.archived_at);
-  if (!isArchived) {
+  // If we can find the branch locally and it's NOT archived, block early.
+  // If not found locally (e.g. list doesn't include archived entries), proceed
+  // and let the server-side validation reject non-archived targets.
+  if (branch && !branch.archived_at) {
     showIntentToast?.('Could not delete branch', 'Only archived sessions can be permanently deleted.', 'warning', 4500);
     return false;
   }
