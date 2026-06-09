@@ -237,7 +237,7 @@ test('refreshContextUsageForChat updates state when API returns real data', asyn
   expect(contextState).toEqual({ tokens: 8000, contextWindow: 128000, percent: 6.25, cacheUsage: null });
 });
 
-test('refreshContextUsageForChat updates state when API returns cache-only telemetry', async () => {
+test('refreshContextUsageForChat merges cache-only telemetry into existing context metrics', async () => {
   const activeChatJidRef = { current: 'chat:alpha' };
   let contextState: any = { tokens: 5000, contextWindow: 128000, percent: 3.9 };
 
@@ -256,9 +256,9 @@ test('refreshContextUsageForChat updates state when API returns cache-only telem
   });
 
   expect(contextState).toEqual({
-    tokens: null,
-    contextWindow: null,
-    percent: null,
+    tokens: 5000,
+    contextWindow: 128000,
+    percent: 3.9,
     cacheUsage: {
       latest: {
         inputTokens: 100,
@@ -278,6 +278,51 @@ test('refreshContextUsageForChat updates state when API returns cache-only telem
       },
       totals: null,
     },
+  });
+});
+
+test('refreshContextUsageForChat preserves cache telemetry when context metrics update', async () => {
+  const activeChatJidRef = { current: 'chat:alpha' };
+  const cacheUsage = {
+    latest: {
+      inputTokens: 100,
+      outputTokens: null,
+      cacheReadTokens: 873,
+      cacheWriteTokens: 27,
+      totalTokens: null,
+      costTotal: null,
+      runs: null,
+      cacheHitRate: 87.3,
+      model: null,
+      responseModel: null,
+      provider: null,
+      api: null,
+      turns: null,
+      runAt: null,
+    },
+    totals: null,
+  };
+  let contextState: any = {
+    tokens: 5000,
+    contextWindow: 128000,
+    percent: 3.9,
+    cacheUsage,
+  };
+
+  await refreshContextUsageForChat({
+    currentChatJid: 'chat:alpha',
+    activeChatJidRef,
+    getAgentContext: async () => ({ tokens: 8000, contextWindow: 128000, percent: 6.25 }),
+    setContextUsage: (next) => {
+      contextState = typeof next === 'function' ? next(contextState) : next;
+    },
+  });
+
+  expect(contextState).toEqual({
+    tokens: 8000,
+    contextWindow: 128000,
+    percent: 6.25,
+    cacheUsage,
   });
 });
 

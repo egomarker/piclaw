@@ -53,16 +53,17 @@ describe("github-copilot dynamic models extension", () => {
     setGitHubCopilotDynamicModelsFetchForTests(null);
   });
 
-  test("filters live model IDs to github-copilot gpt/claude/mai prefixes only", () => {
+  test("filters live model IDs to chat-capable non-embedding model IDs", () => {
     expect(shouldImportGitHubCopilotLiveModelId("gpt-5.5")).toBe(true);
     expect(shouldImportGitHubCopilotLiveModelId("claude-opus-4.7-high")).toBe(true);
     expect(shouldImportGitHubCopilotLiveModelId("mai-code-1-flash-internal")).toBe(true);
-    expect(shouldImportGitHubCopilotLiveModelId("gemini-3.5-flash")).toBe(false);
+    expect(shouldImportGitHubCopilotLiveModelId("gemini-3.5-flash")).toBe(true);
+    expect(shouldImportGitHubCopilotLiveModelId("grok-code-fast-1")).toBe(true);
     expect(shouldImportGitHubCopilotLiveModelId("text-embedding-3-small")).toBe(false);
     expect(shouldImportGitHubCopilotLiveModelId("trajectory-compaction")).toBe(false);
   });
 
-  test("merges live github-copilot gpt/claude/mai models while preserving static provider entries", () => {
+  test("merges live github-copilot chat models while preserving static provider entries", () => {
     const existing = [
       makeModel({ id: "gpt-5.5" }),
       makeModel({ id: "gpt-4.1", name: "GPT-4.1", api: "openai-completions" as any, reasoning: false, contextWindow: 128000, maxTokens: 16384 }),
@@ -77,6 +78,7 @@ describe("github-copilot dynamic models extension", () => {
       }),
       makeLiveModel("mai-code-1-flash-internal"),
       makeLiveModel("gemini-3.5-flash"),
+      makeLiveModel("grok-code-fast-1"),
       makeLiveModel("trajectory-compaction"),
     ]);
 
@@ -86,6 +88,7 @@ describe("github-copilot dynamic models extension", () => {
     expect(ids).toContain("gemini-3.5-flash");
     expect(ids).toContain("claude-opus-4.7-high");
     expect(ids).toContain("mai-code-1-flash-internal");
+    expect(ids).toContain("grok-code-fast-1");
     expect(ids).not.toContain("trajectory-compaction");
 
     const claude = merged.find((model) => model.id === "claude-opus-4.7-high")!;
@@ -154,6 +157,7 @@ describe("github-copilot dynamic models extension", () => {
       data: [
         makeLiveModel("claude-opus-4.6-1m", { supported_endpoints: ["/v1/messages"] }),
         makeLiveModel("mai-code-1-flash-internal"),
+        makeLiveModel("gemini-3.5-flash"),
         makeLiveModel("text-embedding-3-small"),
       ],
     }), { status: 200 })) as typeof fetch);
@@ -175,6 +179,7 @@ describe("github-copilot dynamic models extension", () => {
     expect(registrations[0].name).toBe("github-copilot");
     expect(registrations[0].config.models.map((model: any) => model.id)).toEqual([
       "claude-opus-4.6-1m",
+      "gemini-3.5-flash",
       "gpt-5.5",
       "mai-code-1-flash-internal",
     ]);

@@ -46,6 +46,7 @@ import { isAppChatActivationRecent } from './app-refresh-coordination.js';
 import {
   hasRenderableContextUsage,
   haveSameContextUsage,
+  mergeContextUsage,
   normalizeContextUsage,
   persistContextUsage,
 } from './app-status-refresh-orchestration.js';
@@ -332,8 +333,12 @@ export function handleAppSseEvent(
 
     const liveContextUsage = normalizeContextUsage(data.context_usage);
     if (hasRenderableContextUsage(liveContextUsage)) {
-      setContextUsage((prev) => haveSameContextUsage(prev, liveContextUsage) ? prev : liveContextUsage);
-      persistContextUsage(currentChatJid, liveContextUsage);
+      setContextUsage((prev) => {
+        const merged = mergeContextUsage(prev, liveContextUsage);
+        if (!hasRenderableContextUsage(merged) || haveSameContextUsage(prev, merged)) return prev;
+        persistContextUsage(currentChatJid, merged);
+        return merged;
+      });
     }
     if (data.type === 'context_usage') {
       return;
@@ -523,8 +528,12 @@ export function handleAppSseEvent(
         if (activeChatJidRef.current !== targetChatJid) return;
         const nextContextUsage = normalizeContextUsage(contextPayload);
         if (hasRenderableContextUsage(nextContextUsage)) {
-          setContextUsage((prev) => haveSameContextUsage(prev, nextContextUsage) ? prev : nextContextUsage);
-          persistContextUsage(targetChatJid, nextContextUsage);
+          setContextUsage((prev) => {
+            const merged = mergeContextUsage(prev, nextContextUsage);
+            if (!hasRenderableContextUsage(merged) || haveSameContextUsage(prev, merged)) return prev;
+            persistContextUsage(targetChatJid, merged);
+            return merged;
+          });
         }
       })
       .catch(() => {
@@ -567,7 +576,10 @@ export function handleAppSseEvent(
 
     const extensionContextUsage = resolveExtensionUiContextUsage(eventType, data);
     if (hasRenderableContextUsage(extensionContextUsage)) {
-      setContextUsage((prev) => haveSameContextUsage(prev, extensionContextUsage) ? prev : extensionContextUsage);
+      setContextUsage((prev) => {
+        const merged = mergeContextUsage(prev, extensionContextUsage);
+        return !hasRenderableContextUsage(merged) || haveSameContextUsage(prev, merged) ? prev : merged;
+      });
     }
 
     setExtensionWorkingState((previous) => {
