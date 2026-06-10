@@ -125,9 +125,20 @@ export class TelegramBotApi {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload || {}),
     });
-    const json = await response.json() as TelegramApiEnvelope<T>;
-    if (!response.ok || !json.ok || json.result === undefined) {
-      throw new Error(`Telegram ${method} failed: ${json.description || response.statusText || response.status}`);
+    const raw = await response.text();
+    let json: TelegramApiEnvelope<T> | null = null;
+    if (raw) {
+      try {
+        json = JSON.parse(raw) as TelegramApiEnvelope<T>;
+      } catch {
+        if (!response.ok) {
+          throw new Error(`Telegram ${method} failed: ${raw.trim() || response.statusText || response.status}`);
+        }
+        throw new Error(`Telegram ${method} returned invalid JSON.`);
+      }
+    }
+    if (!response.ok || !json?.ok || json.result === undefined) {
+      throw new Error(`Telegram ${method} failed: ${json?.description || raw.trim() || response.statusText || response.status}`);
     }
     return json.result;
   }
@@ -207,9 +218,20 @@ export class TelegramBotApi {
       method: "POST",
       body,
     });
-    const json = await response.json() as TelegramApiEnvelope<unknown>;
-    if (!response.ok || !json.ok) {
-      throw new Error(`Telegram ${method} failed: ${json.description || response.statusText || response.status}`);
+    const raw = await response.text();
+    let json: TelegramApiEnvelope<unknown> | null = null;
+    if (raw) {
+      try {
+        json = JSON.parse(raw) as TelegramApiEnvelope<unknown>;
+      } catch {
+        if (!response.ok) {
+          throw new Error(`Telegram ${method} failed: ${raw.trim() || response.statusText || response.status}`);
+        }
+        throw new Error(`Telegram ${method} returned invalid JSON.`);
+      }
+    }
+    if (!response.ok || !json?.ok) {
+      throw new Error(`Telegram ${method} failed: ${json?.description || raw.trim() || response.statusText || response.status}`);
     }
   }
 
@@ -398,24 +420,42 @@ export class TelegramChannel {
 
   constructor(private readonly options: TelegramChannelOptions) {}
 
+  private async markConnected(): Promise<void> {
+    if (this.connected) return;
+    this.connected = true;
+    if (this.botUser) {
+      await this.options.onConnected?.(this.botUser);
+    }
+  }
+
+  private async markDisconnected(error?: unknown): Promise<void> {
+    const shouldNotify = this.connected || error !== undefined;
+    this.connected = false;
+    if (shouldNotify) {
+      await this.options.onDisconnected?.(error);
+    }
+  }
+
   async connect(): Promise<void> {
     if (this.connected) return;
     this.api = new TelegramBotApi(this.options.botToken);
     this.lastUpdateId = Math.max(0, Math.trunc(this.options.getLastUpdateId?.() || 0));
     this.botUser = await this.api.getMe();
-    this.connected = true;
     this.stopped = false;
-    await this.options.onConnected?.(this.botUser);
-    this.pollingPromise = this.pollLoop();
+    await this.markConnected();
+    this.pollingPromise = this.pollLoop().catch(async (error) => {
+      await this.markDisconnected(error);
+    });
   }
 
   async disconnect(): Promise<void> {
     this.stopped = true;
-    this.connected = false;
     const pending = this.pollingPromise;
     this.pollingPromise = null;
     await pending?.catch(() => undefined);
-    await this.options.onDisconnected?.();
+    this.api = null;
+    this.botUser = null;
+    await this.markDisconnected();
   }
 
   isConnected(): boolean {
@@ -504,22 +544,24 @@ export class TelegramChannel {
     let reconnectAttempts = 0;
     while (!this.stopped && this.api) {
       try {
-        const updates = await this.api.getUpdates({
+        const api = this.api;
+        const updates = await api.getUpdates({
           offset: this.lastUpdateId > 0 ? this.lastUpdateId + 1 : undefined,
           timeout: resolveTelegramLongPollTimeoutSeconds(this.options.pollingTimeoutSeconds),
           allowed_updates: ["message"],
         });
 
         reconnectAttempts = 0;
+        await this.markConnected();
         for (const update of updates) {
           this.setLastUpdateId(update.update_id);
-          await this.options.onUpdate(update, this.api);
+          await this.options.onUpdate(update, api);
         }
       } catch (error) {
         if (this.stopped) return;
-        await this.options.onDisconnected?.(error);
+        await this.markDisconnected(error);
         if (!isRecoverableTelegramNetworkError(error)) {
-          throw error;
+          return;
         }
         reconnectAttempts += 1;
         const delayMs = Math.min(30_000, 1_000 * 2 ** Math.min(reconnectAttempts, 5));

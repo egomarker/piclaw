@@ -7,6 +7,7 @@ import {
   isTelegramDirectChatId,
   parseTelegramChatJid,
 } from "../../../addons/telegram/telegram-targets.ts";
+import { isRecoverableTelegramNetworkError } from "../../../addons/telegram/telegram-network-errors.ts";
 import { TelegramBotApi, TelegramChannel } from "../../../addons/telegram/telegram.ts";
 import { importFresh, setEnv } from "../helpers.js";
 
@@ -51,6 +52,14 @@ test("telegram config reads env overrides", () => {
   expect(maskTelegramBotToken("1234567890")).toBe("1234…7890");
 });
 
+test("telegram network classifier treats transient Telegram upstream failures as recoverable", () => {
+  expect(isRecoverableTelegramNetworkError(new Error("Telegram getUpdates failed: Bad Gateway"))).toBe(true);
+  expect(isRecoverableTelegramNetworkError(new Error("Telegram getMe failed: Gateway Timeout"))).toBe(true);
+  expect(isRecoverableTelegramNetworkError(new Error("Telegram getUpdates failed: Service Unavailable"))).toBe(true);
+  expect(isRecoverableTelegramNetworkError(new Error("Telegram getUpdates failed: 429"))).toBe(true);
+  expect(isRecoverableTelegramNetworkError(new Error("Telegram getUpdates failed: Forbidden"))).toBe(false);
+});
+
 test("telegram api sendMessage uses Markdown parse mode", async () => {
   const requests: Array<Record<string, unknown>> = [];
   globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -71,6 +80,18 @@ test("telegram api sendMessage uses Markdown parse mode", async () => {
       parse_mode: "Markdown",
     }),
   ]);
+});
+
+test("telegram api surfaces plain-text upstream errors", async () => {
+  globalThis.fetch = (async () => {
+    return new Response("Bad Gateway", {
+      status: 502,
+      headers: { "Content-Type": "text/plain" },
+    });
+  }) as typeof fetch;
+
+  const api = new TelegramBotApi("test-token");
+  await expect(api.getUpdates({})).rejects.toThrow("Bad Gateway");
 });
 
 test("telegram api sendMessage falls back to plain text when Markdown parsing fails", async () => {
@@ -240,6 +261,30 @@ test("telegram channel sends SVGs as documents and PNGs as photos", async () => 
     "document:chart.svg",
     "photo:chart.png",
   ]);
+});
+
+test("telegram pollLoop stops without rejecting on nonrecoverable errors", async () => {
+  const disconnects: string[] = [];
+  const channel = new TelegramChannel({
+    botToken: "test",
+    onUpdate: async () => {},
+    onDisconnected: async (error) => {
+      disconnects.push(String((error as { message?: unknown })?.message || error));
+    },
+  }) as any;
+
+  channel.api = {
+    getUpdates: async () => {
+      throw new Error("Telegram getUpdates failed: Forbidden");
+    },
+  };
+  channel.botUser = { id: 1, is_bot: true, username: "bot" };
+  channel.connected = true;
+  channel.stopped = false;
+
+  await expect(channel.pollLoop()).resolves.toBeUndefined();
+  expect(channel.connected).toBe(false);
+  expect(disconnects[0]).toContain("Forbidden");
 });
 
 test("telegram runtime converts location-only messages into plain text", async () => {

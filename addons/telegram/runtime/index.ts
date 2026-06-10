@@ -22,9 +22,11 @@ import {
   type TelegramUpdate,
   type TelegramUser,
 } from "../telegram.ts";
+import { isRecoverableTelegramNetworkError } from "../telegram-network-errors.ts";
 
 type TelegramRuntimeController = {
   started: boolean;
+  starting: boolean;
   channel: TelegramChannel | null;
   transportCleanup: (() => void) | null;
 };
@@ -39,6 +41,7 @@ function getController(): TelegramRuntimeController {
   }
   const created: TelegramRuntimeController = {
     started: false,
+    starting: false,
     channel: null,
     transportCleanup: null,
   };
@@ -332,136 +335,181 @@ async function buildOutboundAttachments(options: {
 
 async function startTelegramRuntime(): Promise<void> {
   const controller = getController();
-  if (controller.started) return;
-  controller.started = true;
+  if (controller.started || controller.starting) return;
+  controller.starting = true;
 
-  ensureTelegramChannelDetectorRegistered();
-  const config = loadTelegramConfig();
-  if (!config.enabled) {
-    updateTelegramRuntimeState({ connected: false, lastError: null });
-    log("info", "Telegram runtime not started because it is disabled.");
-    return;
-  }
-  if (!normalizeText(config.botToken)) {
-    updateTelegramRuntimeState({ connected: false, lastError: "Telegram bot token is not configured." });
-    log("warn", "Telegram runtime not started because no bot token is configured.");
-    return;
-  }
+  let createdChannel: TelegramChannel | null = null;
+  let transportCleanup: (() => void) | null = null;
 
-  const interop = getTelegramRuntimeInterop();
-  if (!interop?.postMessage || !interop.registerChannelTransport) {
-    throw new Error("Telegram runtime interop is unavailable.");
-  }
+  try {
+    ensureTelegramChannelDetectorRegistered();
+    const config = loadTelegramConfig();
+    if (!config.enabled) {
+      updateTelegramRuntimeState({ connected: false, lastError: null });
+      log("info", "Telegram runtime not started because it is disabled.");
+      return;
+    }
+    if (!normalizeText(config.botToken)) {
+      updateTelegramRuntimeState({ connected: false, lastError: "Telegram bot token is not configured." });
+      log("warn", "Telegram runtime not started because no bot token is configured.");
+      return;
+    }
 
-  const channel = new TelegramChannel({
-    botToken: config.botToken,
-    pollingTimeoutSeconds: config.pollingTimeoutSeconds,
-    getLastUpdateId: () => config.lastUpdateId,
-    setLastUpdateId: (updateId) => {
-      config.lastUpdateId = updateId;
-      saveTelegramLastUpdateId(updateId);
-    },
-    onConnected: async (me) => {
-      updateTelegramRuntimeState({
-        connected: true,
-        botId: me.id,
-        botUsername: normalizeText(me.username) || null,
-        lastError: null,
-        lastEventAt: new Date().toISOString(),
-      });
-      log("info", "Telegram runtime connected.", { botId: me.id, username: me.username || null });
-    },
-    onDisconnected: async (error) => {
-      updateTelegramRuntimeState({
-        connected: false,
-        lastError: error ? String((error as { message?: unknown })?.message || error) : null,
-        lastEventAt: new Date().toISOString(),
-      });
-      if (error) {
-        log("warn", "Telegram runtime disconnected.", { err: error });
-      }
-    },
-    onUpdate: async (update: TelegramUpdate, api: TelegramBotApi) => {
-      const message = update.message ?? update.edited_message;
-      if (!message) return;
+    const interop = getTelegramRuntimeInterop();
+    if (!interop?.postMessage || !interop.registerChannelTransport) {
+      throw new Error("Telegram runtime interop is unavailable.");
+    }
 
-      const botUser = channel.getBotUser();
-      if (message.from?.is_bot || (botUser && message.from?.id === botUser.id)) {
-        return;
-      }
-
-      if (message.chat.type !== "private" || !isTelegramDirectChatId(String(message.chat.id))) {
-        return;
-      }
-
-      if (!isAuthorizedChat(config, message)) {
-        if (config.unauthorizedMode === "reply_not_authorized") {
-          await api.sendMessage(String(message.chat.id), UNAUTHORIZED_TEXT).catch((error) => {
-            log("warn", "Failed to send unauthorized Telegram reply", { err: error, chatId: message.chat.id });
-          });
+    const channel = new TelegramChannel({
+      botToken: config.botToken,
+      pollingTimeoutSeconds: config.pollingTimeoutSeconds,
+      getLastUpdateId: () => config.lastUpdateId,
+      setLastUpdateId: (updateId) => {
+        config.lastUpdateId = updateId;
+        saveTelegramLastUpdateId(updateId);
+      },
+      onConnected: async (me) => {
+        updateTelegramRuntimeState({
+          connected: true,
+          botId: me.id,
+          botUsername: normalizeText(me.username) || null,
+          lastError: null,
+          lastEventAt: new Date().toISOString(),
+        });
+        log("info", "Telegram runtime connected.", { botId: me.id, username: me.username || null });
+      },
+      onDisconnected: async (error) => {
+        updateTelegramRuntimeState({
+          connected: false,
+          lastError: error ? String((error as { message?: unknown })?.message || error) : null,
+          lastEventAt: new Date().toISOString(),
+        });
+        if (error) {
+          log("warn", "Telegram runtime disconnected.", { err: error });
         }
-        return;
-      }
+      },
+      onUpdate: async (update: TelegramUpdate, api: TelegramBotApi) => {
+        const message = update.message ?? update.edited_message;
+        if (!message) return;
 
-      const payload = await buildInboundPayload(api, message);
-      const chatJid = buildTelegramChatJid(message.chat.id);
-      const senderId = String(message.from?.id || message.chat.id);
-      const senderName = buildUserDisplayName(message.from, senderId);
-      const timestamp = new Date((message.date || Math.floor(Date.now() / 1000)) * 1000).toISOString();
+        const botUser = channel.getBotUser();
+        if (message.from?.is_bot || (botUser && message.from?.id === botUser.id)) {
+          return;
+        }
 
-      await interop.postMessage(chatJid, payload.content, {
-        source: "telegram",
-        messageId: `telegram:${message.chat.id}:${message.message_id}`,
-        sender: senderId,
-        senderName,
-        timestamp,
-        mediaIds: payload.mediaIds,
-        contentBlocks: payload.contentBlocks,
-        chatName: buildChatName(message),
-        enqueue: true,
-        forcePrompt: shouldForcePromptForInboundMessage(config, message, payload.content, botUser),
-      });
+        if (message.chat.type !== "private" || !isTelegramDirectChatId(String(message.chat.id))) {
+          return;
+        }
 
-      updateTelegramRuntimeState({
-        connected: true,
-        lastError: null,
-        lastEventAt: new Date().toISOString(),
-      });
-    },
-  });
+        if (!isAuthorizedChat(config, message)) {
+          if (config.unauthorizedMode === "reply_not_authorized") {
+            await api.sendMessage(String(message.chat.id), UNAUTHORIZED_TEXT).catch((error) => {
+              log("warn", "Failed to send unauthorized Telegram reply", { err: error, chatId: message.chat.id });
+            });
+          }
+          return;
+        }
 
-  await channel.connect();
-  controller.channel = channel;
-  controller.transportCleanup = interop.registerChannelTransport("telegram", {
-    sendMessage: async (chatJid, text, options) => {
-      const attachments = await buildOutboundAttachments(options);
-      await channel.sendMessage(chatJid, text, { attachments });
-      updateTelegramRuntimeState({
-        connected: channel.isConnected(),
-        lastError: null,
-        lastEventAt: new Date().toISOString(),
-      });
-    },
-    setTyping: async (chatJid, isTyping) => {
-      await channel.setTyping(chatJid, isTyping);
-    },
-    createProgressMessage: async (chatJid, initialText, options) => {
-      return await channel.createProgressMessage(chatJid, initialText, {
-        replyToExternalMessageId: typeof options?.replyToExternalMessageId === "string"
-          ? options.replyToExternalMessageId
-          : null,
-      });
-    },
-  });
+        const payload = await buildInboundPayload(api, message);
+        const chatJid = buildTelegramChatJid(message.chat.id);
+        const senderId = String(message.from?.id || message.chat.id);
+        const senderName = buildUserDisplayName(message.from, senderId);
+        const timestamp = new Date((message.date || Math.floor(Date.now() / 1000)) * 1000).toISOString();
+
+        await interop.postMessage(chatJid, payload.content, {
+          source: "telegram",
+          messageId: `telegram:${message.chat.id}:${message.message_id}`,
+          sender: senderId,
+          senderName,
+          timestamp,
+          mediaIds: payload.mediaIds,
+          contentBlocks: payload.contentBlocks,
+          chatName: buildChatName(message),
+          enqueue: true,
+          forcePrompt: shouldForcePromptForInboundMessage(config, message, payload.content, botUser),
+        });
+
+        updateTelegramRuntimeState({
+          connected: true,
+          lastError: null,
+          lastEventAt: new Date().toISOString(),
+        });
+      },
+    });
+
+    createdChannel = channel;
+    await channel.connect();
+    transportCleanup = interop.registerChannelTransport("telegram", {
+      sendMessage: async (chatJid, text, options) => {
+        const attachments = await buildOutboundAttachments(options);
+        await channel.sendMessage(chatJid, text, { attachments });
+        updateTelegramRuntimeState({
+          connected: channel.isConnected(),
+          lastError: null,
+          lastEventAt: new Date().toISOString(),
+        });
+      },
+      setTyping: async (chatJid, isTyping) => {
+        await channel.setTyping(chatJid, isTyping);
+      },
+      createProgressMessage: async (chatJid, initialText, options) => {
+        return await channel.createProgressMessage(chatJid, initialText, {
+          replyToExternalMessageId: typeof options?.replyToExternalMessageId === "string"
+            ? options.replyToExternalMessageId
+            : null,
+        });
+      },
+    });
+
+    controller.channel = channel;
+    controller.transportCleanup = transportCleanup;
+    controller.started = true;
+  } catch (error) {
+    controller.started = false;
+    controller.channel = null;
+    controller.transportCleanup = null;
+    transportCleanup?.();
+    await createdChannel?.disconnect().catch(() => undefined);
+    throw error;
+  } finally {
+    controller.starting = false;
+  }
 }
 
-void startTelegramRuntime().catch((error) => {
+async function bootTelegramRuntime(): Promise<void> {
+  let attempt = 0;
+
+  while (true) {
+    try {
+      await startTelegramRuntime();
+      return;
+    } catch (error) {
+      updateTelegramRuntimeState({
+        connected: false,
+        lastError: String((error as { message?: unknown })?.message || error),
+        lastEventAt: new Date().toISOString(),
+      });
+
+      if (!isRecoverableTelegramNetworkError(error)) {
+        log("error", "Telegram runtime failed to start.", { err: error });
+        return;
+      }
+
+      attempt += 1;
+      const delayMs = Math.min(30_000, 1_000 * 2 ** Math.min(attempt - 1, 5));
+      log("warn", "Telegram runtime startup failed; retrying.", { attempt, delayMs, err: error });
+      await Bun.sleep(delayMs);
+    }
+  }
+}
+
+void bootTelegramRuntime().catch((error) => {
   updateTelegramRuntimeState({
     connected: false,
     lastError: String((error as { message?: unknown })?.message || error),
     lastEventAt: new Date().toISOString(),
   });
-  log("error", "Telegram runtime failed to start.", { err: error });
+  log("error", "Telegram runtime bootstrap failed unexpectedly.", { err: error });
 });
 
 export {};
