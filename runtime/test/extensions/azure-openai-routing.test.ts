@@ -45,6 +45,37 @@ describe("Slice 1: Responses-only routing", () => {
     }
   });
 
+  test("Azure Responses stream payload disables server-side storage", async () => {
+    const providers: Array<{ name: string; config: any }> = [];
+    registerAzureProviders((name, config) => providers.push({ name, config }), "test-token");
+
+    const azureProvider = providers.find(p => p.name === "azure-openai")!;
+    const model = azureProvider.config.models[0];
+    expect(model).toBeTruthy();
+
+    const controller = new AbortController();
+    controller.abort();
+    let payload: any;
+    azureProvider.config.streamSimple(
+      {
+        ...model,
+        provider: "azure-openai",
+        baseUrl: azureProvider.config.baseUrl,
+        headers: {},
+      },
+      { messages: [], tools: [] },
+      {
+        signal: controller.signal,
+        onPayload: (next: unknown) => { payload = next; },
+      },
+    );
+
+    expect(payload).toBeTruthy();
+    expect(payload.store).toBe(false);
+    expect(payload.model).toBe(model.id);
+    expect(payload.stream).toBe(true);
+  });
+
   test("Foundry text models use the completions API, not Responses", () => {
     const providers: Array<{ name: string; config: any }> = [];
     registerAzureProviders((name, config) => providers.push({ name, config }), "test-token");
@@ -93,6 +124,13 @@ describe("Proactive token-budget guard", () => {
   test("gpt-5-4 falls back to a context-aware budget when only default TPM is known", () => {
     expect(getAzureContextInputBudget("gpt-5-4")).toBe(900000);
     expect(getAzureMaxEstimatedInputTokens("gpt-5-4")).toBe(900000);
+  });
+
+  test("gpt-5.5 and deployment-name aliases use the 1.05M Azure context budget", () => {
+    expect(getAzureContextInputBudget("gpt-5.5")).toBe(900000);
+    expect(getAzureContextInputBudget("gpt-5.5-pro")).toBe(900000);
+    expect(getAzureContextInputBudget("gpt-5-5")).toBe(900000);
+    expect(getAzureContextInputBudget("gpt-5-5-pro")).toBe(900000);
   });
 
   test("unknown models fall back to the absolute cap", () => {

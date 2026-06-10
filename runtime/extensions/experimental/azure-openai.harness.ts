@@ -158,6 +158,10 @@ const BASE_MODEL_SPECS: Record<string, { contextWindow?: number; maxTokens?: num
   "gpt-5-3-chat":       { contextWindow: 128000, maxTokens: 16384,  reasoning: true },
   "gpt-5-4":            { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
   "gpt-5-4-pro":        { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
+  "gpt-5-5":            { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
+  "gpt-5-5-pro":        { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
+  "gpt-5.5":            { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
+  "gpt-5.5-pro":        { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
   "gpt-4o":             { contextWindow: 128000, maxTokens: 16384,  reasoning: false },
   "gpt-4o-mini":        { contextWindow: 128000, maxTokens: 16384,  reasoning: false },
   "gpt-4.1":            { contextWindow: 1048576, maxTokens: 32768, reasoning: false },
@@ -1095,6 +1099,7 @@ function streamAzureOpenAIResponses(model: any, context: any, options: any) {
         model: model.id,
         input: messages,
         stream: true,
+        store: false,
       };
 
       // Only include OpenAI-specific params for models that support them
@@ -1350,6 +1355,28 @@ function registerProvider(pi: ExtensionAPI, token: string) {
   registerAzureProviders((name, config) => pi.registerProvider(name, config), token);
 }
 
+type AzureHarnessTimerApi = Pick<typeof globalThis, "setTimeout" | "clearTimeout">;
+let azureHarnessTimerApi: AzureHarnessTimerApi = globalThis;
+let azureHarnessEnsureTokenForTests: (() => Promise<TokenCache>) | null = null;
+let azureHarnessEnsureModelCapsForTests: (() => Promise<void>) | null = null;
+let azureHarnessStaticApiKeyForTests: string | null = null;
+
+export function setAzureHarnessTimerApiForTests(timerApi: AzureHarnessTimerApi | null): void {
+  azureHarnessTimerApi = timerApi ?? globalThis;
+}
+
+export function setAzureHarnessBootstrapHooksForTests(hooks: {
+  timerApi?: AzureHarnessTimerApi;
+  ensureToken?: () => Promise<TokenCache>;
+  ensureModelCaps?: () => Promise<void>;
+  staticApiKey?: string;
+} | null): void {
+  azureHarnessTimerApi = hooks?.timerApi ?? globalThis;
+  azureHarnessEnsureTokenForTests = hooks?.ensureToken ?? null;
+  azureHarnessEnsureModelCapsForTests = hooks?.ensureModelCaps ?? null;
+  azureHarnessStaticApiKeyForTests = hooks && "staticApiKey" in hooks ? hooks.staticApiKey ?? "" : null;
+}
+
 export default function (pi: ExtensionAPI) {
   logExtensionLoaded();
 
@@ -1543,7 +1570,7 @@ export default function (pi: ExtensionAPI) {
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   const clearRefreshTimer = () => {
-    if (timer) clearTimeout(timer);
+    if (timer) azureHarnessTimerApi.clearTimeout(timer);
     timer = null;
   };
 
@@ -1553,20 +1580,21 @@ export default function (pi: ExtensionAPI) {
     const delaySeconds = expiresOnEpoch
       ? Math.max(60, expiresOnEpoch - now - SKEW_SECONDS)
       : 60;
-    timer = setTimeout(() => void refresh(), delaySeconds * 1000);
+    timer = azureHarnessTimerApi.setTimeout(() => void refresh(), delaySeconds * 1000);
   };
 
   const refresh = async () => {
     logExtensionLoaded();
     // In proxy/api-key mode, register once with the static key and don't
     // schedule periodic refreshes — the remote proxy handles MI tokens.
-    if (STATIC_API_KEY) {
-      registerProvider(pi, STATIC_API_KEY);
+    const staticApiKey = azureHarnessStaticApiKeyForTests ?? STATIC_API_KEY;
+    if (staticApiKey) {
+      registerProvider(pi, staticApiKey);
       return;
     }
-    const cache = await ensureToken();
+    const cache = await (azureHarnessEnsureTokenForTests ?? ensureToken)();
     if (cache.accessToken) {
-      await ensureAzureModelCaps();
+      await (azureHarnessEnsureModelCapsForTests ?? ensureAzureModelCaps)();
       registerProvider(pi, cache.accessToken);
     }
     scheduleNext(cache.expiresOnEpoch);

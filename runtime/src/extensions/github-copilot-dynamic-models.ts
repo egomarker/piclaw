@@ -153,6 +153,7 @@ function findTemplate(existing: Model<Api>[], id: string): Model<Api> | undefine
   if (exact) return exact;
 
   const candidates: string[] = [];
+  if (id.startsWith("claude-fable-5")) candidates.push("claude-fable-5");
   if (id.startsWith("claude-opus-4.6")) candidates.push("claude-opus-4.6");
   if (id.startsWith("claude-opus-4.7")) candidates.push("claude-opus-4.7");
   if (id.startsWith("claude-opus-4.8")) candidates.push("claude-opus-4.8");

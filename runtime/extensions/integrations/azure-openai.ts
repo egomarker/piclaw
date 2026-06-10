@@ -323,6 +323,10 @@ const BASE_MODEL_SPECS: Record<string, { contextWindow?: number; maxTokens?: num
   "gpt-5-3-chat":       { contextWindow: 128000, maxTokens: 16384,  reasoning: true },
   "gpt-5-4":            { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
   "gpt-5-4-pro":        { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
+  "gpt-5-5":            { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
+  "gpt-5-5-pro":        { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
+  "gpt-5.5":            { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
+  "gpt-5.5-pro":        { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
   "gpt-4o":             { contextWindow: 128000, maxTokens: 16384,  reasoning: false },
   "gpt-4o-mini":        { contextWindow: 128000, maxTokens: 16384,  reasoning: false },
   "gpt-4.1":            { contextWindow: 1048576, maxTokens: 32768, reasoning: false },
@@ -1131,6 +1135,7 @@ function streamAzureOpenAIResponses(model: any, context: any, options: any) {
         model: model.id,
         input: messages,
         stream: true,
+        store: false,
       };
 
       // prompt_cache_key enables server-side prefix caching — send for all models
@@ -1186,6 +1191,8 @@ function streamAzureOpenAIResponses(model: any, context: any, options: any) {
           params.reasoning = reasoning;
         }
       }
+      options?.onPayload?.(params);
+
       // Delay client creation until attempt time so refreshed tokens and any
       // per-attempt header changes are reflected on retries.
       const createStream = async () => {
@@ -1565,29 +1572,50 @@ export async function executeAzureFluxCommand(
   await mod.executeAzureFluxCommand(pi, input);
 }
 
-export function startAzureProviderBootstrap(register: (name: string, config: any) => void): { stop: () => void; refresh: () => Promise<void> } {
+type AzureBootstrapTimerApi = Pick<typeof globalThis, "setTimeout" | "clearTimeout">;
+type AzureProviderBootstrapOptions = {
+  timerApi?: AzureBootstrapTimerApi;
+  ensureToken?: () => Promise<TokenCache>;
+  ensureModelCaps?: () => Promise<void>;
+  staticApiKey?: string;
+};
+
+function isAzureBootstrapTimerApi(value: unknown): value is AzureBootstrapTimerApi {
+  return Boolean(value)
+    && typeof (value as { setTimeout?: unknown }).setTimeout === "function"
+    && typeof (value as { clearTimeout?: unknown }).clearTimeout === "function";
+}
+
+export function startAzureProviderBootstrap(
+  register: (name: string, config: any) => void,
+  options: AzureBootstrapTimerApi | AzureProviderBootstrapOptions = {},
+): { stop: () => void; refresh: () => Promise<void> } {
+  const timerApi = isAzureBootstrapTimerApi(options) ? options : options.timerApi ?? globalThis;
+  const tokenProvider = isAzureBootstrapTimerApi(options) ? ensureToken : options.ensureToken ?? ensureToken;
+  const modelCapsProvider = isAzureBootstrapTimerApi(options) ? ensureAzureModelCaps : options.ensureModelCaps ?? ensureAzureModelCaps;
+  const staticApiKey = isAzureBootstrapTimerApi(options) ? STATIC_API_KEY : options.staticApiKey ?? STATIC_API_KEY;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
 
   const scheduleNext = (expiresOnEpoch?: number) => {
-    if (timer) clearTimeout(timer);
+    if (timer) timerApi.clearTimeout(timer);
     const now = Math.floor(Date.now() / 1000);
     const delaySeconds = expiresOnEpoch
       ? Math.max(60, expiresOnEpoch - now - SKEW_SECONDS)
       : 60;
-    timer = setTimeout(() => void refresh(), delaySeconds * 1000);
+    timer = timerApi.setTimeout(() => void refresh(), delaySeconds * 1000);
   };
 
   const refresh = async () => {
     if (stopped) return;
     logExtensionLoaded();
-    if (STATIC_API_KEY) {
-      registerAzureProviders(register, STATIC_API_KEY);
+    if (staticApiKey) {
+      registerAzureProviders(register, staticApiKey);
       return;
     }
-    const cache = await ensureToken();
+    const cache = await tokenProvider();
     if (cache.accessToken) {
-      await ensureAzureModelCaps();
+      await modelCapsProvider();
       registerAzureProviders(register, cache.accessToken);
     }
     if (!stopped) scheduleNext(cache.expiresOnEpoch);
@@ -1598,7 +1626,7 @@ export function startAzureProviderBootstrap(register: (name: string, config: any
   return {
     stop: () => {
       stopped = true;
-      if (timer) clearTimeout(timer);
+      if (timer) timerApi.clearTimeout(timer);
     },
     refresh,
   };

@@ -69,6 +69,16 @@ describe("github-copilot dynamic models extension", () => {
       makeModel({ id: "gpt-5.5" }),
       makeModel({ id: "gpt-4.1", name: "GPT-4.1", api: "openai-completions" as any, reasoning: false, contextWindow: 128000, maxTokens: 16384 }),
       makeModel({ id: "gemini-3.5-flash", name: "Gemini 3.5 Flash", api: "openai-completions" as any }),
+      makeModel({
+        id: "claude-fable-5",
+        name: "Claude Fable 5",
+        api: "anthropic-messages" as any,
+        reasoning: true,
+        thinkingLevelMap: { xhigh: "xhigh" } as any,
+        compat: { forceAdaptiveThinking: true } as any,
+        contextWindow: 200000,
+        maxTokens: 4096,
+      }),
       makeModel({ provider: "openai", id: "gpt-5.5" }),
     ];
 
@@ -76,6 +86,10 @@ describe("github-copilot dynamic models extension", () => {
       makeLiveModel("claude-opus-4.7-high", {
         supported_endpoints: ["/v1/messages", "/chat/completions"],
         capabilities: { limits: { max_context_window_tokens: 200000, max_output_tokens: 64000, vision: {} }, supports: {} },
+      }),
+      makeLiveModel("claude-fable-5-xhigh", {
+        supported_endpoints: ["/v1/messages"],
+        capabilities: { limits: { max_context_window_tokens: 200000, max_output_tokens: 4096, vision: {} }, supports: {} },
       }),
       makeLiveModel("mai-code-1-flash-internal"),
       makeLiveModel("gemini-3.5-flash"),
@@ -88,6 +102,7 @@ describe("github-copilot dynamic models extension", () => {
     expect(ids).toContain("gpt-4.1");
     expect(ids).toContain("gemini-3.5-flash");
     expect(ids).toContain("claude-opus-4.7-high");
+    expect(ids).toContain("claude-fable-5-xhigh");
     expect(ids).toContain("mai-code-1-flash-internal");
     expect(ids).toContain("grok-code-fast-1");
     expect(ids).not.toContain("trajectory-compaction");
@@ -97,6 +112,14 @@ describe("github-copilot dynamic models extension", () => {
     expect(claude.reasoning).toBe(true);
     expect(claude.contextWindow).toBe(200000);
     expect(claude.maxTokens).toBe(64000);
+
+    const fable = merged.find((model) => model.id === "claude-fable-5-xhigh")!;
+    expect(fable.api).toBe("anthropic-messages");
+    expect(fable.reasoning).toBe(true);
+    expect(fable.compat).toEqual({ forceAdaptiveThinking: true });
+    expect(fable.thinkingLevelMap).toEqual({ xhigh: "xhigh" });
+    expect(fable.contextWindow).toBe(200000);
+    expect(fable.maxTokens).toBe(4096);
 
     const mai = merged.find((model) => model.id === "mai-code-1-flash-internal")!;
     expect(mai.api).toBe("openai-responses");
