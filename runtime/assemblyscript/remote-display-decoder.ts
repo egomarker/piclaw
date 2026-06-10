@@ -9,7 +9,7 @@
 //     for canvas rendering — zero-copy from WASM linear memory.
 //   - CopyRect operates entirely within WASM memory.
 //
-// Encoding support: Raw (0), CopyRect (1), RRE (2), Hextile (5), ZRLE (16).
+// Encoding support: Raw (0), CopyRect (1), RRE (2), CoRRE (4), Hextile (5), ZRLE (16).
 // Zlib decompression for ZRLE is done on the JS side; WASM receives the
 // already-decompressed tile payload.
 
@@ -96,6 +96,20 @@ function fbSetPixel(x: i32, y: i32, packed: u32): void {
   unchecked(fb[idx + 3] = <u8>((packed >> 24) & 0xff));
 }
 
+@inline
+function fbRectInside(x: i32, y: i32, w: i32, h: i32): bool {
+  if (x < 0 || y < 0 || w < 0 || h < 0) return false;
+  if (x > fbWidth || y > fbHeight) return false;
+  return w <= fbWidth - x && h <= fbHeight - y;
+}
+
+@inline
+function localRectInside(parentW: i32, parentH: i32, x: i32, y: i32, w: i32, h: i32): bool {
+  if (x < 0 || y < 0 || w < 0 || h < 0) return false;
+  if (x > parentW || y > parentH) return false;
+  return w <= parentW - x && h <= parentH - y;
+}
+
 // Fill a rectangle in the framebuffer
 function fbFillRect(x: i32, y: i32, w: i32, h: i32, packed: u32): void {
   for (let row: i32 = 0; row < h; row++) {
@@ -128,6 +142,7 @@ export function processRawRect(
   if (!trueColor) return -1;
   let bpp = bitsPerPixel >> 3;
   if (bpp <= 0) bpp = 1;
+  if (!fbRectInside(x, y, w, h)) return -1;
 
   const src = Uint8Array.wrap(dataBuffer);
   const expected = w * h * bpp;
@@ -150,6 +165,7 @@ export function processCopyRect(
   dstX: i32, dstY: i32, w: i32, h: i32,
   srcX: i32, srcY: i32,
 ): i32 {
+  if (!fbRectInside(dstX, dstY, w, h) || !fbRectInside(srcX, srcY, w, h)) return -1;
   // Need a temporary buffer to avoid overlap issues
   const tmp = new Uint8Array(w * h * 4);
   for (let row: i32 = 0; row < h; row++) {
@@ -169,6 +185,186 @@ export function processCopyRect(
   return 0;
 }
 
+function validateRrePayload(src: Uint8Array, bpp: i32, w: i32, h: i32): bool {
+  if (src.length < 4 + bpp) return false;
+  const subrectCount: i32 = (<i32>unchecked(src[0]) << 24)
+    | (<i32>unchecked(src[1]) << 16)
+    | (<i32>unchecked(src[2]) << 8)
+    | <i32>unchecked(src[3]);
+  if (subrectCount < 0) return false;
+  let cursor: i32 = 4 + bpp;
+  for (let i: i32 = 0; i < subrectCount; i++) {
+    if (src.length < cursor + bpp + 8) return false;
+    cursor += bpp;
+    const sx: i32 = (<i32>unchecked(src[cursor]) << 8) | <i32>unchecked(src[cursor + 1]);
+    const sy: i32 = (<i32>unchecked(src[cursor + 2]) << 8) | <i32>unchecked(src[cursor + 3]);
+    const sw: i32 = (<i32>unchecked(src[cursor + 4]) << 8) | <i32>unchecked(src[cursor + 5]);
+    const sh: i32 = (<i32>unchecked(src[cursor + 6]) << 8) | <i32>unchecked(src[cursor + 7]);
+    cursor += 8;
+    if (!localRectInside(w, h, sx, sy, sw, sh)) return false;
+  }
+  return cursor == src.length;
+}
+
+function validateCoRrePayload(src: Uint8Array, bpp: i32, w: i32, h: i32): bool {
+  if (src.length < 4 + bpp) return false;
+  const subrectCount: i32 = (<i32>unchecked(src[0]) << 24)
+    | (<i32>unchecked(src[1]) << 16)
+    | (<i32>unchecked(src[2]) << 8)
+    | <i32>unchecked(src[3]);
+  if (subrectCount < 0) return false;
+  let cursor: i32 = 4 + bpp;
+  for (let i: i32 = 0; i < subrectCount; i++) {
+    if (src.length < cursor + bpp + 4) return false;
+    cursor += bpp;
+    const sx: i32 = <i32>unchecked(src[cursor++]);
+    const sy: i32 = <i32>unchecked(src[cursor++]);
+    const sw: i32 = <i32>unchecked(src[cursor++]);
+    const sh: i32 = <i32>unchecked(src[cursor++]);
+    if (!localRectInside(w, h, sx, sy, sw, sh)) return false;
+  }
+  return cursor == src.length;
+}
+
+function validateHextilePayload(src: Uint8Array, bpp: i32, w: i32, h: i32): bool {
+  let cursor: i32 = 0;
+  for (let tileY: i32 = 0; tileY < h; tileY += 16) {
+    const tileH = min(16, h - tileY);
+    for (let tileX: i32 = 0; tileX < w; tileX += 16) {
+      const tileW = min(16, w - tileX);
+      if (src.length < cursor + 1) return false;
+      const sub: i32 = <i32>unchecked(src[cursor++]);
+      if (sub & 0x01) {
+        const rawLen = tileW * tileH * bpp;
+        if (src.length < cursor + rawLen) return false;
+        cursor += rawLen;
+        continue;
+      }
+      if (sub & 0x02) {
+        if (src.length < cursor + bpp) return false;
+        cursor += bpp;
+      }
+      if (sub & 0x04) {
+        if (src.length < cursor + bpp) return false;
+        cursor += bpp;
+      }
+      if (sub & 0x08) {
+        if (src.length < cursor + 1) return false;
+        const count: i32 = <i32>unchecked(src[cursor++]);
+        for (let i: i32 = 0; i < count; i++) {
+          if (sub & 0x10) {
+            if (src.length < cursor + bpp) return false;
+            cursor += bpp;
+          }
+          if (src.length < cursor + 2) return false;
+          const xy: i32 = <i32>unchecked(src[cursor++]);
+          const wh: i32 = <i32>unchecked(src[cursor++]);
+          const subX: i32 = xy >> 4;
+          const subY: i32 = xy & 0x0f;
+          const subW: i32 = (wh >> 4) + 1;
+          const subH: i32 = (wh & 0x0f) + 1;
+          if (!localRectInside(tileW, tileH, subX, subY, subW, subH)) return false;
+        }
+      }
+    }
+  }
+  return cursor == src.length;
+}
+
+function validateZrleTileDataPayload(src: Uint8Array, bpp: i32, w: i32, h: i32): bool {
+  let cursor: i32 = 0;
+  for (let tileY: i32 = 0; tileY < h; tileY += 64) {
+    const tileH = min(64, h - tileY);
+    for (let tileX: i32 = 0; tileX < w; tileX += 64) {
+      const tileW = min(64, w - tileX);
+      if (src.length < cursor + 1) return false;
+      const subenc: i32 = <i32>unchecked(src[cursor++]);
+      const paletteSize = subenc & 0x7f;
+      const rle = (subenc & 0x80) != 0;
+      const totalPixels = tileW * tileH;
+
+      if (!rle && paletteSize == 0) {
+        const rawLen = totalPixels * bpp;
+        if (src.length < cursor + rawLen) return false;
+        cursor += rawLen;
+        continue;
+      }
+
+      if (!rle && paletteSize == 1) {
+        if (src.length < cursor + bpp) return false;
+        cursor += bpp;
+        continue;
+      }
+
+      if (!rle && paletteSize > 1 && paletteSize <= 16) {
+        const bitsPerIdx: i32 = paletteSize <= 2 ? 1 : paletteSize <= 4 ? 2 : 4;
+        const rowBytes: i32 = ((tileW * bitsPerIdx + 7) >> 3);
+        const packedLen = rowBytes * tileH;
+        if (src.length < cursor + paletteSize * bpp + packedLen) return false;
+        const packedStart = cursor + paletteSize * bpp;
+        for (let row: i32 = 0; row < tileH; row++) {
+          const rowStart = packedStart + row * rowBytes;
+          for (let col: i32 = 0; col < tileW; col++) {
+            const bitIdx = col * bitsPerIdx;
+            const byteIdx = rowStart + (bitIdx >> 3);
+            const shift = 8 - bitsPerIdx - (bitIdx & 7);
+            const palIdx = (<i32>unchecked(src[byteIdx]) >> shift) & ((1 << bitsPerIdx) - 1);
+            if (palIdx >= paletteSize) return false;
+          }
+        }
+        cursor += paletteSize * bpp + packedLen;
+        continue;
+      }
+
+      if (rle && paletteSize == 0) {
+        let pixels: i32 = 0;
+        while (pixels < totalPixels) {
+          if (src.length < cursor + bpp) return false;
+          cursor += bpp;
+          let runLen: i32 = 1;
+          while (true) {
+            if (src.length < cursor + 1) return false;
+            const val: i32 = <i32>unchecked(src[cursor++]);
+            runLen += val;
+            if (val != 255) break;
+          }
+          if (runLen > totalPixels - pixels) return false;
+          pixels += runLen;
+        }
+        continue;
+      }
+
+      if (rle && paletteSize >= 2) {
+        if (src.length < cursor + paletteSize * bpp) return false;
+        cursor += paletteSize * bpp;
+        let pixels: i32 = 0;
+        while (pixels < totalPixels) {
+          if (src.length < cursor + 1) return false;
+          const idxByte: i32 = <i32>unchecked(src[cursor++]);
+          let palIdx = idxByte;
+          let runLen: i32 = 1;
+          if (idxByte & 0x80) {
+            palIdx = idxByte & 0x7f;
+            while (true) {
+              if (src.length < cursor + 1) return false;
+              const val: i32 = <i32>unchecked(src[cursor++]);
+              runLen += val;
+              if (val != 255) break;
+            }
+          }
+          if (palIdx >= paletteSize) return false;
+          if (runLen > totalPixels - pixels) return false;
+          pixels += runLen;
+        }
+        continue;
+      }
+
+      return false;
+    }
+  }
+  return cursor == src.length;
+}
+
 // ─── Encoding 2: RRE ────────────────────────────────────────────
 
 export function processRreRect(
@@ -181,14 +377,16 @@ export function processRreRect(
   if (!trueColor) return -1;
   let bpp = bitsPerPixel >> 3;
   if (bpp <= 0) bpp = 1;
+  if (!fbRectInside(x, y, w, h)) return -1;
 
   const src = Uint8Array.wrap(dataBuffer);
-  if (src.length < 4 + bpp) return -1;
+  if (!validateRrePayload(src, bpp, w, h)) return -1;
 
   const subrectCount: i32 = (<i32>unchecked(src[0]) << 24)
     | (<i32>unchecked(src[1]) << 16)
     | (<i32>unchecked(src[2]) << 8)
     | <i32>unchecked(src[3]);
+  if (subrectCount < 0) return -1;
 
   let cursor: i32 = 4;
 
@@ -208,10 +406,54 @@ export function processRreRect(
     const sw: i32 = (<i32>unchecked(src[cursor + 4]) << 8) | <i32>unchecked(src[cursor + 5]);
     const sh: i32 = (<i32>unchecked(src[cursor + 6]) << 8) | <i32>unchecked(src[cursor + 7]);
     cursor += 8;
+    if (!localRectInside(w, h, sx, sy, sw, sh)) return -1;
 
     fbFillRect(x + sx, y + sy, sw, sh, fgPacked);
   }
-  return 0;
+  return cursor == src.length ? 0 : -1;
+}
+
+// ─── Encoding 4: CoRRE ───────────────────────────────────────────
+
+export function processCoRreRect(
+  dataBuffer: ArrayBuffer,
+  x: i32, y: i32, w: i32, h: i32,
+  bitsPerPixel: i32, bigEndian: bool, trueColor: bool,
+  rMax: i32, gMax: i32, bMax: i32,
+  rShift: i32, gShift: i32, bShift: i32,
+): i32 {
+  if (!trueColor) return -1;
+  let bpp = bitsPerPixel >> 3;
+  if (bpp <= 0) bpp = 1;
+  if (!fbRectInside(x, y, w, h)) return -1;
+
+  const src = Uint8Array.wrap(dataBuffer);
+  if (!validateCoRrePayload(src, bpp, w, h)) return -1;
+
+  const subrectCount: i32 = (<i32>unchecked(src[0]) << 24)
+    | (<i32>unchecked(src[1]) << 16)
+    | (<i32>unchecked(src[2]) << 8)
+    | <i32>unchecked(src[3]);
+  if (subrectCount < 0) return -1;
+
+  let cursor: i32 = 4;
+  const bgPacked = decodePixel(src, cursor, bpp, bigEndian, rMax, gMax, bMax, rShift, gShift, bShift);
+  cursor += bpp;
+  fbFillRect(x, y, w, h, bgPacked);
+
+  for (let i: i32 = 0; i < subrectCount; i++) {
+    if (src.length < cursor + bpp + 4) return -1;
+    const fgPacked = decodePixel(src, cursor, bpp, bigEndian, rMax, gMax, bMax, rShift, gShift, bShift);
+    cursor += bpp;
+
+    const sx: i32 = <i32>unchecked(src[cursor++]);
+    const sy: i32 = <i32>unchecked(src[cursor++]);
+    const sw: i32 = <i32>unchecked(src[cursor++]);
+    const sh: i32 = <i32>unchecked(src[cursor++]);
+    if (!localRectInside(w, h, sx, sy, sw, sh)) return -1;
+    fbFillRect(x + sx, y + sy, sw, sh, fgPacked);
+  }
+  return cursor == src.length ? 0 : -1;
 }
 
 // ─── Encoding 5: Hextile ────────────────────────────────────────
@@ -226,8 +468,10 @@ export function processHextileRect(
   if (!trueColor) return -1;
   let bpp = bitsPerPixel >> 3;
   if (bpp <= 0) bpp = 1;
+  if (!fbRectInside(x, y, w, h)) return -1;
 
   const src = Uint8Array.wrap(dataBuffer);
+  if (!validateHextilePayload(src, bpp, w, h)) return -1;
   let cursor: i32 = 0;
   let background: u32 = 0xff000000; // black, opaque
   let foreground: u32 = 0xffffffff; // white, opaque
@@ -284,18 +528,23 @@ export function processHextileRect(
           if (src.length < cursor + 2) return -1;
           const xy: i32 = <i32>unchecked(src[cursor++]);
           const wh: i32 = <i32>unchecked(src[cursor++]);
+          const subX: i32 = xy >> 4;
+          const subY: i32 = xy & 0x0f;
+          const subW: i32 = (wh >> 4) + 1;
+          const subH: i32 = (wh & 0x0f) + 1;
+          if (!localRectInside(tileW, tileH, subX, subY, subW, subH)) return -1;
           fbFillRect(
-            x + tileX + (xy >> 4),
-            y + tileY + (xy & 0x0f),
-            (wh >> 4) + 1,
-            (wh & 0x0f) + 1,
+            x + tileX + subX,
+            y + tileY + subY,
+            subW,
+            subH,
             color,
           );
         }
       }
     }
   }
-  return 0;
+  return cursor == src.length ? 0 : -1;
 }
 
 // ─── Encoding 16: ZRLE (decompressed tile data) ─────────────────
@@ -311,8 +560,10 @@ export function processZrleTileData(
   if (!trueColor) return -1;
   let bpp = bitsPerPixel >> 3;
   if (bpp <= 0) bpp = 1;
+  if (!fbRectInside(x, y, w, h)) return -1;
 
   const src = Uint8Array.wrap(decompressedBuffer);
+  if (!validateZrleTileDataPayload(src, bpp, w, h)) return -1;
   let cursor: i32 = 0;
 
   for (let tileY: i32 = 0; tileY < h; tileY += 64) {
@@ -350,7 +601,7 @@ export function processZrleTileData(
       }
 
       // Packed palette (2–16 colours, no RLE)
-      if (!rle && paletteSize > 1) {
+      if (!rle && paletteSize > 1 && paletteSize <= 16) {
         const palette = new StaticArray<u32>(paletteSize);
         for (let i: i32 = 0; i < paletteSize; i++) {
           if (src.length < cursor + bpp) return -1;
@@ -368,6 +619,7 @@ export function processZrleTileData(
             const byteIdx = rowStart + (bitIdx >> 3);
             const shift = 8 - bitsPerIdx - (bitIdx & 7);
             const palIdx = (<i32>unchecked(src[byteIdx]) >> shift) & ((1 << bitsPerIdx) - 1);
+            if (palIdx >= paletteSize) return -1;
             fbSetPixel(x + tileX + col, y + tileY + row, unchecked(palette[palIdx]));
           }
         }
@@ -390,6 +642,7 @@ export function processZrleTileData(
             runLen += val;
             if (val != 255) break;
           }
+          if (runLen > tileW * tileH - (py * tileW + px)) return -1;
           for (let r: i32 = 0; r < runLen; r++) {
             fbSetPixel(x + tileX + px, y + tileY + py, packed);
             px++;
@@ -399,8 +652,8 @@ export function processZrleTileData(
         continue;
       }
 
-      // Palette RLE (palette > 0, RLE flag)
-      if (rle && paletteSize > 0) {
+      // Palette RLE (palette >= 2, RLE flag; subencoding 129 is unused)
+      if (rle && paletteSize >= 2) {
         const palette = new StaticArray<u32>(paletteSize);
         for (let i: i32 = 0; i < paletteSize; i++) {
           if (src.length < cursor + bpp) return -1;
@@ -424,6 +677,8 @@ export function processZrleTileData(
               if (val != 255) break;
             }
           }
+          if (palIdx >= paletteSize) return -1;
+          if (runLen > tileW * tileH - (py * tileW + px)) return -1;
           const packed = unchecked(palette[palIdx]);
           for (let r: i32 = 0; r < runLen; r++) {
             fbSetPixel(x + tileX + px, y + tileY + py, packed);
@@ -437,7 +692,7 @@ export function processZrleTileData(
       return -1; // unknown subencoding
     }
   }
-  return 0;
+  return cursor == src.length ? 0 : -1;
 }
 
 // ─── Legacy standalone decoder (kept for backward compat) ───────

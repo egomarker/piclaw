@@ -1,5 +1,5 @@
 
-import { Unzlib, zlibSync } from 'fflate';
+import { Unzlib } from 'fflate';
 
 import { buildVncPasswordAuthResponse } from './vnc-auth.js';
 
@@ -38,7 +38,7 @@ function normalizeEncodings(encodings): number[] {
         }
     }
     if (values.length > 0) return values;
-    return [5, 2, 1, 0, -223];
+    return [16, 5, 2, 4, 1, 0, -239, -224, -223, -307, -308];
 }
 
 function toUint8Array(chunk) {
@@ -73,26 +73,26 @@ function concatByteChunks(chunks) {
 }
 
 function createZrleInflater() {
+    const chunks: Uint8Array[] = [];
+    const inflator = new Unzlib((chunk) => {
+        chunks.push(new Uint8Array(chunk));
+    }) as Unzlib & { err?: number; msg?: string };
+
     return (compressed) => {
         const payload = toUint8Array(compressed);
+        chunks.length = 0;
         try {
-            const chunks = [];
-            const inflator = new Unzlib((chunk) => {
-                chunks.push(new Uint8Array(chunk));
-            }) as Unzlib & { err?: number; msg?: string };
-            inflator.push(payload, true);
+            // RFB ZRLE uses one continuous zlib stream per connection. Each
+            // framebuffer rectangle carries bytes from that stream; it is not
+            // an independent finished zlib payload.
+            inflator.push(payload, false);
             if (inflator.err) {
                 throw new Error(inflator.msg || 'zlib decompression error');
             }
             return concatByteChunks(chunks);
         } catch (error) {
-            try {
-                const fallback = zlibSync(payload);
-                return fallback instanceof Uint8Array ? fallback : new Uint8Array(fallback);
-            } catch (fallbackError) {
-                const message = fallbackError instanceof Error ? fallbackError.message : 'unexpected EOF';
-                throw new Error(`unexpected EOF: ${message}`);
-            }
+            const message = error instanceof Error ? error.message : 'unexpected EOF';
+            throw new Error(`unexpected EOF: ${message}`);
         }
     };
 }
@@ -256,8 +256,14 @@ function decodePixelToRgba(bytes, offset, pixelFormat) {
     };
 }
 
+function rectInside(width, height, x, y, rectWidth, rectHeight) {
+    return x >= 0 && y >= 0 && rectWidth >= 0 && rectHeight >= 0 && x + rectWidth <= width && y + rectHeight <= height;
+}
+
 function fillRgbaRect(surface, surfaceWidth, x, y, width, height, rgba) {
-    if (!rgba) return;
+    if (!rgba) return false;
+    const surfaceHeight = surfaceWidth > 0 ? Math.floor(surface.length / (surfaceWidth * 4)) : 0;
+    if (!rectInside(surfaceWidth, surfaceHeight, x, y, width, height)) return false;
     for (let row = 0; row < height; row += 1) {
         for (let col = 0; col < width; col += 1) {
             const dst = ((y + row) * surfaceWidth + (x + col)) * 4;
@@ -267,6 +273,7 @@ function fillRgbaRect(surface, surfaceWidth, x, y, width, height, rgba) {
             surface[dst + 3] = rgba[3];
         }
     }
+    return true;
 }
 
 function blitRgbaTile(surface, surfaceWidth, tileX, tileY, tileWidth, tileHeight, tileRgba) {
@@ -289,6 +296,177 @@ function parseZrleRunLength(bytes, offset) {
     return { consumed: cursor - offset, runLength };
 }
 
+function bytesPerPixelForFormat(pixelFormat) {
+    const format = pixelFormat || DEFAULT_CLIENT_PIXEL_FORMAT;
+    return Math.max(1, Math.floor(Number(format.bitsPerPixel || 0) / 8));
+}
+
+export function measureRreRectPayload(bytes, offset = 0, pixelFormat = DEFAULT_CLIENT_PIXEL_FORMAT) {
+    const src = toUint8Array(bytes);
+    const bytesPerPixel = bytesPerPixelForFormat(pixelFormat);
+    if (src.byteLength < offset + 4 + bytesPerPixel) return null;
+    const view = new DataView(src.buffer, src.byteOffset + offset, src.byteLength - offset);
+    const subrectCount = view.getUint32(0, false);
+    const consumed = 4 + bytesPerPixel + subrectCount * (bytesPerPixel + 8);
+    if (src.byteLength < offset + consumed) return null;
+    return { consumed };
+}
+
+export function measureCoRreRectPayload(bytes, offset = 0, pixelFormat = DEFAULT_CLIENT_PIXEL_FORMAT) {
+    const src = toUint8Array(bytes);
+    const bytesPerPixel = bytesPerPixelForFormat(pixelFormat);
+    if (src.byteLength < offset + 4 + bytesPerPixel) return null;
+    const view = new DataView(src.buffer, src.byteOffset + offset, src.byteLength - offset);
+    const subrectCount = view.getUint32(0, false);
+    const consumed = 4 + bytesPerPixel + subrectCount * (bytesPerPixel + 4);
+    if (src.byteLength < offset + consumed) return null;
+    return { consumed };
+}
+
+export function measureHextileRectPayload(bytes, offset = 0, width = 0, height = 0, pixelFormat = DEFAULT_CLIENT_PIXEL_FORMAT) {
+    const src = toUint8Array(bytes);
+    const bytesPerPixel = bytesPerPixelForFormat(pixelFormat);
+    let cursor = offset;
+    for (let tileY = 0; tileY < height; tileY += 16) {
+        const tileHeight = Math.min(16, height - tileY);
+        for (let tileX = 0; tileX < width; tileX += 16) {
+            const tileWidth = Math.min(16, width - tileX);
+            if (src.byteLength < cursor + 1) return null;
+            const subencoding = src[cursor++];
+            if (subencoding & 0x01) {
+                const rawLength = tileWidth * tileHeight * bytesPerPixel;
+                if (src.byteLength < cursor + rawLength) return null;
+                cursor += rawLength;
+                continue;
+            }
+            if (subencoding & 0x02) {
+                if (src.byteLength < cursor + bytesPerPixel) return null;
+                cursor += bytesPerPixel;
+            }
+            if (subencoding & 0x04) {
+                if (src.byteLength < cursor + bytesPerPixel) return null;
+                cursor += bytesPerPixel;
+            }
+            if (subencoding & 0x08) {
+                if (src.byteLength < cursor + 1) return null;
+                const subrectCount = src[cursor++];
+                for (let i = 0; i < subrectCount; i += 1) {
+                    if (subencoding & 0x10) {
+                        if (src.byteLength < cursor + bytesPerPixel) return null;
+                        cursor += bytesPerPixel;
+                    }
+                    if (src.byteLength < cursor + 2) return null;
+                    cursor += 2;
+                }
+            }
+        }
+    }
+    return { consumed: cursor - offset };
+}
+
+export function measureZrleRectPayload(bytes, offset = 0) {
+    const src = toUint8Array(bytes);
+    if (src.byteLength < offset + 4) return null;
+    const compressedLength = new DataView(src.buffer, src.byteOffset + offset, 4).getUint32(0, false);
+    const consumed = 4 + compressedLength;
+    if (src.byteLength < offset + consumed) return null;
+    return {
+        consumed,
+        compressed: src.slice(offset + 4, offset + consumed),
+    };
+}
+
+export function measureZrleTileDataPayload(bytes, width = 0, height = 0, pixelFormat = DEFAULT_CLIENT_PIXEL_FORMAT) {
+    const src = toUint8Array(bytes);
+    const bytesPerPixel = bytesPerPixelForFormat(pixelFormat);
+    let cursor = 0;
+    for (let tileY = 0; tileY < height; tileY += 64) {
+        const tileHeight = Math.min(64, height - tileY);
+        for (let tileX = 0; tileX < width; tileX += 64) {
+            const tileWidth = Math.min(64, width - tileX);
+            if (src.byteLength < cursor + 1) return null;
+            const subencoding = src[cursor++];
+            const paletteSize = subencoding & 0x7f;
+            const runLengthEncoded = (subencoding & 0x80) !== 0;
+
+            if (!runLengthEncoded && paletteSize === 0) {
+                const rawLength = tileWidth * tileHeight * bytesPerPixel;
+                if (src.byteLength < cursor + rawLength) return null;
+                cursor += rawLength;
+                continue;
+            }
+
+            if (!runLengthEncoded && paletteSize === 1) {
+                if (src.byteLength < cursor + bytesPerPixel) return null;
+                cursor += bytesPerPixel;
+                continue;
+            }
+
+            if (!runLengthEncoded && paletteSize > 1 && paletteSize <= 16) {
+                const bitsPerIndex = paletteSize <= 2 ? 1 : paletteSize <= 4 ? 2 : 4;
+                const rowBytes = Math.ceil((tileWidth * bitsPerIndex) / 8);
+                const packedLength = rowBytes * tileHeight;
+                if (src.byteLength < cursor + paletteSize * bytesPerPixel + packedLength) return null;
+                const packedStart = cursor + paletteSize * bytesPerPixel;
+                for (let row = 0; row < tileHeight; row += 1) {
+                    const rowStart = packedStart + row * rowBytes;
+                    for (let col = 0; col < tileWidth; col += 1) {
+                        const bitIndex = col * bitsPerIndex;
+                        const byteIndex = rowStart + (bitIndex >> 3);
+                        const shift = 8 - bitsPerIndex - (bitIndex & 7);
+                        const paletteIndex = (src[byteIndex] >> shift) & ((1 << bitsPerIndex) - 1);
+                        if (paletteIndex >= paletteSize) return null;
+                    }
+                }
+                cursor += paletteSize * bytesPerPixel + packedLength;
+                continue;
+            }
+
+            if (runLengthEncoded && paletteSize === 0) {
+                let pixels = 0;
+                const totalPixels = tileWidth * tileHeight;
+                while (pixels < totalPixels) {
+                    if (src.byteLength < cursor + bytesPerPixel) return null;
+                    cursor += bytesPerPixel;
+                    const run = parseZrleRunLength(src, cursor);
+                    if (!run) return null;
+                    cursor += run.consumed;
+                    if (pixels + run.runLength > totalPixels) return null;
+                    pixels += run.runLength;
+                }
+                continue;
+            }
+
+            if (runLengthEncoded && paletteSize >= 2) {
+                if (src.byteLength < cursor + paletteSize * bytesPerPixel) return null;
+                cursor += paletteSize * bytesPerPixel;
+                let pixels = 0;
+                const totalPixels = tileWidth * tileHeight;
+                while (pixels < totalPixels) {
+                    if (src.byteLength < cursor + 1) return null;
+                    const indexByte = src[cursor++];
+                    let paletteIndex = indexByte;
+                    let runLength = 1;
+                    if (indexByte & 0x80) {
+                        paletteIndex = indexByte & 0x7f;
+                        const run = parseZrleRunLength(src, cursor);
+                        if (!run) return null;
+                        cursor += run.consumed;
+                        runLength = run.runLength;
+                    }
+                    if (paletteIndex >= paletteSize) return null;
+                    if (pixels + runLength > totalPixels) return null;
+                    pixels += runLength;
+                }
+                continue;
+            }
+
+            return null;
+        }
+    }
+    return cursor === src.byteLength ? { consumed: cursor } : null;
+}
+
 function parseZrleRect(bytes, offset, width, height, pixelFormat, decodeRawRect, inflateZrle) {
     const format = pixelFormat || DEFAULT_CLIENT_PIXEL_FORMAT;
     const bytesPerPixel = Math.max(1, Math.floor(Number(format.bitsPerPixel || 0) / 8));
@@ -296,144 +474,143 @@ function parseZrleRect(bytes, offset, width, height, pixelFormat, decodeRawRect,
     const compressedLength = new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0, false);
     if (bytes.byteLength < offset + 4 + compressedLength) return null;
     const compressed = bytes.slice(offset + 4, offset + 4 + compressedLength);
+    const consumed = 4 + compressedLength;
     let decoded;
     try {
         decoded = inflateZrle(compressed);
     } catch {
-        return {
-            consumed: 4 + compressedLength,
-            skipped: true,
-        };
+        return { consumed, skipped: true };
     }
+
+    // The compressed rectangle is complete at this point. If the inflated
+    // tile payload is malformed, consume and skip the rectangle rather than
+    // retaining the bytes as though more network data could fix it.
+    if (!measureZrleTileDataPayload(decoded, width, height, format)) {
+        return { consumed, skipped: true };
+    }
+
     let cursor = 0;
     const rgba = new Uint8ClampedArray(Math.max(0, width || 0) * Math.max(0, height || 0) * 4);
 
-    for (let tileY = 0; tileY < height; tileY += 64) {
-        const tileHeight = Math.min(64, height - tileY);
-        for (let tileX = 0; tileX < width; tileX += 64) {
-            const tileWidth = Math.min(64, width - tileX);
-            if (decoded.byteLength < cursor + 1) return null;
-            const subencoding = decoded[cursor++];
-            const paletteSize = subencoding & 0x7f;
-            const runLengthEncoded = (subencoding & 0x80) !== 0;
+    try {
+        for (let tileY = 0; tileY < height; tileY += 64) {
+            const tileHeight = Math.min(64, height - tileY);
+            for (let tileX = 0; tileX < width; tileX += 64) {
+                const tileWidth = Math.min(64, width - tileX);
+                const subencoding = decoded[cursor++];
+                const paletteSize = subencoding & 0x7f;
+                const runLengthEncoded = (subencoding & 0x80) !== 0;
 
-            if (!runLengthEncoded && paletteSize === 0) {
-                const rawLength = tileWidth * tileHeight * bytesPerPixel;
-                if (decoded.byteLength < cursor + rawLength) return null;
-                const tileRgba = decodeRawRect(decoded.slice(cursor, cursor + rawLength), tileWidth, tileHeight, format);
-                cursor += rawLength;
-                blitRgbaTile(rgba, width, tileX, tileY, tileWidth, tileHeight, tileRgba);
-                continue;
-            }
-
-            if (!runLengthEncoded && paletteSize === 1) {
-                const background = decodePixelToRgba(decoded, cursor, format);
-                if (!background) return null;
-                cursor += background.bytesPerPixel;
-                fillRgbaRect(rgba, width, tileX, tileY, tileWidth, tileHeight, background.rgba);
-                continue;
-            }
-
-            if (!runLengthEncoded && paletteSize > 1 && paletteSize <= 16) {
-                const palette = [];
-                for (let i = 0; i < paletteSize; i += 1) {
-                    const color = decodePixelToRgba(decoded, cursor, format);
-                    if (!color) return null;
-                    cursor += color.bytesPerPixel;
-                    palette.push(color.rgba);
+                if (!runLengthEncoded && paletteSize === 0) {
+                    const rawLength = tileWidth * tileHeight * bytesPerPixel;
+                    const tileRgba = decodeRawRect(decoded.slice(cursor, cursor + rawLength), tileWidth, tileHeight, format);
+                    cursor += rawLength;
+                    blitRgbaTile(rgba, width, tileX, tileY, tileWidth, tileHeight, tileRgba);
+                    continue;
                 }
-                const bitsPerIndex = paletteSize <= 2 ? 1 : paletteSize <= 4 ? 2 : 4;
-                const rowBytes = Math.ceil((tileWidth * bitsPerIndex) / 8);
-                const packedLength = rowBytes * tileHeight;
-                if (decoded.byteLength < cursor + packedLength) return null;
-                for (let row = 0; row < tileHeight; row += 1) {
-                    const rowStart = cursor + row * rowBytes;
-                    for (let col = 0; col < tileWidth; col += 1) {
-                        const bitIndex = col * bitsPerIndex;
-                        const byteIndex = rowStart + (bitIndex >> 3);
-                        const shift = 8 - bitsPerIndex - (bitIndex & 7);
-                        const paletteIndex = (decoded[byteIndex] >> shift) & ((1 << bitsPerIndex) - 1);
-                        fillRgbaRect(rgba, width, tileX + col, tileY + row, 1, 1, palette[paletteIndex]);
+
+                if (!runLengthEncoded && paletteSize === 1) {
+                    const background = decodePixelToRgba(decoded, cursor, format);
+                    if (!background) return { consumed, skipped: true };
+                    cursor += background.bytesPerPixel;
+                    fillRgbaRect(rgba, width, tileX, tileY, tileWidth, tileHeight, background.rgba);
+                    continue;
+                }
+
+                if (!runLengthEncoded && paletteSize > 1 && paletteSize <= 16) {
+                    const palette = [];
+                    for (let i = 0; i < paletteSize; i += 1) {
+                        const color = decodePixelToRgba(decoded, cursor, format);
+                        if (!color) return { consumed, skipped: true };
+                        cursor += color.bytesPerPixel;
+                        palette.push(color.rgba);
                     }
-                }
-                cursor += packedLength;
-                continue;
-            }
-
-            if (runLengthEncoded && paletteSize === 0) {
-                let px = 0;
-                let py = 0;
-                while (py < tileHeight) {
-                    const color = decodePixelToRgba(decoded, cursor, format);
-                    if (!color) return null;
-                    cursor += color.bytesPerPixel;
-                    const run = parseZrleRunLength(decoded, cursor);
-                    if (!run) return null;
-                    cursor += run.consumed;
-                    for (let i = 0; i < run.runLength; i += 1) {
-                        fillRgbaRect(rgba, width, tileX + px, tileY + py, 1, 1, color.rgba);
-                        px += 1;
-                        if (px >= tileWidth) {
-                            px = 0;
-                            py += 1;
-                            if (py >= tileHeight) break;
+                    const bitsPerIndex = paletteSize <= 2 ? 1 : paletteSize <= 4 ? 2 : 4;
+                    const rowBytes = Math.ceil((tileWidth * bitsPerIndex) / 8);
+                    const packedLength = rowBytes * tileHeight;
+                    for (let row = 0; row < tileHeight; row += 1) {
+                        const rowStart = cursor + row * rowBytes;
+                        for (let col = 0; col < tileWidth; col += 1) {
+                            const bitIndex = col * bitsPerIndex;
+                            const byteIndex = rowStart + (bitIndex >> 3);
+                            const shift = 8 - bitsPerIndex - (bitIndex & 7);
+                            const paletteIndex = (decoded[byteIndex] >> shift) & ((1 << bitsPerIndex) - 1);
+                            const color = palette[paletteIndex];
+                            if (!color) return { consumed, skipped: true };
+                            fillRgbaRect(rgba, width, tileX + col, tileY + row, 1, 1, color);
                         }
                     }
+                    cursor += packedLength;
+                    continue;
                 }
-                continue;
-            }
 
-            if (runLengthEncoded && paletteSize > 0) {
-                const palette = [];
-                for (let i = 0; i < paletteSize; i += 1) {
-                    const color = decodePixelToRgba(decoded, cursor, format);
-                    if (!color) return null;
-                    cursor += color.bytesPerPixel;
-                    palette.push(color.rgba);
-                }
-                let px = 0;
-                let py = 0;
-                while (py < tileHeight) {
-                    if (decoded.byteLength < cursor + 1) return null;
-                    const indexByte = decoded[cursor++];
-                    let paletteIndex = indexByte;
-                    let runLength = 1;
-                    if (indexByte & 0x80) {
-                        paletteIndex = indexByte & 0x7f;
+                if (runLengthEncoded && paletteSize === 0) {
+                    let px = 0;
+                    let py = 0;
+                    while (py < tileHeight) {
+                        const color = decodePixelToRgba(decoded, cursor, format);
+                        if (!color) return { consumed, skipped: true };
+                        cursor += color.bytesPerPixel;
                         const run = parseZrleRunLength(decoded, cursor);
-                        if (!run) return null;
+                        if (!run) return { consumed, skipped: true };
                         cursor += run.consumed;
-                        runLength = run.runLength;
-                    }
-                    const color = palette[paletteIndex];
-                    if (!color) return null;
-                    for (let i = 0; i < runLength; i += 1) {
-                        fillRgbaRect(rgba, width, tileX + px, tileY + py, 1, 1, color);
-                        px += 1;
-                        if (px >= tileWidth) {
-                            px = 0;
-                            py += 1;
-                            if (py >= tileHeight) break;
+                        for (let i = 0; i < run.runLength; i += 1) {
+                            fillRgbaRect(rgba, width, tileX + px, tileY + py, 1, 1, color.rgba);
+                            px += 1;
+                            if (px >= tileWidth) {
+                                px = 0;
+                                py += 1;
+                                if (py >= tileHeight) break;
+                            }
                         }
                     }
+                    continue;
                 }
-                continue;
-            }
 
-            // Unknown or unused ZRLE subencoding — cannot decode this tile.
-            // Skip the entire rect rather than blocking the connection.
-            return {
-                consumed: 4 + compressedLength,
-                skipped: true,
-            };
+                if (runLengthEncoded && paletteSize >= 2) {
+                    const palette = [];
+                    for (let i = 0; i < paletteSize; i += 1) {
+                        const color = decodePixelToRgba(decoded, cursor, format);
+                        if (!color) return { consumed, skipped: true };
+                        cursor += color.bytesPerPixel;
+                        palette.push(color.rgba);
+                    }
+                    let px = 0;
+                    let py = 0;
+                    while (py < tileHeight) {
+                        const indexByte = decoded[cursor++];
+                        let paletteIndex = indexByte;
+                        let runLength = 1;
+                        if (indexByte & 0x80) {
+                            paletteIndex = indexByte & 0x7f;
+                            const run = parseZrleRunLength(decoded, cursor);
+                            if (!run) return { consumed, skipped: true };
+                            cursor += run.consumed;
+                            runLength = run.runLength;
+                        }
+                        const color = palette[paletteIndex];
+                        if (!color) return { consumed, skipped: true };
+                        for (let i = 0; i < runLength; i += 1) {
+                            fillRgbaRect(rgba, width, tileX + px, tileY + py, 1, 1, color);
+                            px += 1;
+                            if (px >= tileWidth) {
+                                px = 0;
+                                py += 1;
+                                if (py >= tileHeight) break;
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                return { consumed, skipped: true };
+            }
         }
+    } catch {
+        return { consumed, skipped: true };
     }
 
-    return {
-        consumed: 4 + compressedLength,
-        rgba,
-        decompressed: decoded,
-    };
+    return { consumed, rgba, decompressed: decoded };
 }
 
 function parseRreRect(bytes, offset, width, height, pixelFormat) {
@@ -465,6 +642,7 @@ function parseRreRect(bytes, offset, width, height, pixelFormat) {
         const rectWidth = rectView.getUint16(4, false);
         const rectHeight = rectView.getUint16(6, false);
         cursor += 8;
+        if (!rectInside(width, height, x, y, rectWidth, rectHeight)) return { consumed: totalSize, skipped: true };
         fillRgbaRect(rgba, width, x, y, rectWidth, rectHeight, color.rgba);
     }
 
@@ -474,9 +652,39 @@ function parseRreRect(bytes, offset, width, height, pixelFormat) {
     };
 }
 
+function parseCoRreRect(bytes, offset, width, height, pixelFormat) {
+    const format = pixelFormat || DEFAULT_CLIENT_PIXEL_FORMAT;
+    const bytesPerPixel = Math.max(1, Math.floor(Number(format.bitsPerPixel || 0) / 8));
+    if (bytes.byteLength < offset + 4 + bytesPerPixel) return null;
+    const view = new DataView(bytes.buffer, bytes.byteOffset + offset, bytes.byteLength - offset);
+    const subrects = view.getUint32(0, false);
+    let cursor = offset + 4;
+    const background = decodePixelToRgba(bytes, cursor, format);
+    if (!background) return null;
+    cursor += background.bytesPerPixel;
+    const needed = cursor + subrects * (bytesPerPixel + 4);
+    if (bytes.byteLength < needed) return null;
+    const rgba = new Uint8ClampedArray(Math.max(0, width || 0) * Math.max(0, height || 0) * 4);
+    fillRgbaRect(rgba, width, 0, 0, width, height, background.rgba);
+    for (let i = 0; i < subrects; i += 1) {
+        const color = decodePixelToRgba(bytes, cursor, format);
+        if (!color) return null;
+        cursor += color.bytesPerPixel;
+        const sx = bytes[cursor++];
+        const sy = bytes[cursor++];
+        const sw = bytes[cursor++];
+        const sh = bytes[cursor++];
+        if (!rectInside(width, height, sx, sy, sw, sh)) return { consumed: needed - offset, skipped: true };
+        fillRgbaRect(rgba, width, sx, sy, sw, sh, color.rgba);
+    }
+    return { consumed: cursor - offset, rgba };
+}
+
 function parseHextileRect(bytes, offset, width, height, pixelFormat, decodeRawRect) {
     const format = pixelFormat || DEFAULT_CLIENT_PIXEL_FORMAT;
     const bytesPerPixel = Math.max(1, Math.floor(Number(format.bitsPerPixel || 0) / 8));
+    const measured = measureHextileRectPayload(bytes, offset, width, height, format);
+    if (!measured) return null;
     const rgba = new Uint8ClampedArray(Math.max(0, width || 0) * Math.max(0, height || 0) * 4);
     let cursor = offset;
     let background = [0, 0, 0, 255];
@@ -531,6 +739,9 @@ function parseHextileRect(bytes, offset, width, height, pixelFormat, decodeRawRe
                     const subY = xy & 0x0f;
                     const subWidth = (wh >> 4) + 1;
                     const subHeight = (wh & 0x0f) + 1;
+                    if (!rectInside(tileWidth, tileHeight, subX, subY, subWidth, subHeight)) {
+                        return { consumed: measured.consumed, skipped: true };
+                    }
                     fillRgbaRect(rgba, width, tileX + subX, tileY + subY, subWidth, subHeight, color);
                 }
             }
@@ -776,8 +987,10 @@ export class VncRemoteDisplayProtocol implements RemoteDisplayProtocolAdapter {
                             const raw = this.buffer.slice(offset, offset + dataLength);
                             offset += dataLength;
                             if (usePipeline) {
-                                this.pipeline.processRawRect(raw, x, y, width, height, this.clientPixelFormat);
-                                rects.push({ kind: 'pipeline', x, y, width, height });
+                                const status = this.pipeline.processRawRect(raw, x, y, width, height, this.clientPixelFormat);
+                                if (status === 0 || typeof status === 'undefined') {
+                                    rects.push({ kind: 'pipeline', x, y, width, height });
+                                }
                             } else {
                                 rects.push({
                                     kind: 'rgba',
@@ -790,19 +1003,55 @@ export class VncRemoteDisplayProtocol implements RemoteDisplayProtocolAdapter {
 
                         // ── RRE (2) ──────────────────────────────
                         if (encoding === 2) {
+                            if (usePipeline && typeof this.pipeline.processRreRect === 'function') {
+                                const rre = measureRreRectPayload(this.buffer, offset, this.clientPixelFormat);
+                                if (!rre) {
+                                    incomplete = true;
+                                    break;
+                                }
+                                const rreData = this.buffer.slice(offset, offset + rre.consumed);
+                                const status = this.pipeline.processRreRect(rreData, x, y, width, height, this.clientPixelFormat);
+                                if (status === 0 || typeof status === 'undefined') {
+                                    rects.push({ kind: 'pipeline', x, y, width, height });
+                                }
+                                offset += rre.consumed;
+                                continue;
+                            }
                             const rre = parseRreRect(this.buffer, offset, width, height, this.clientPixelFormat);
                             if (!rre) {
                                 incomplete = true;
                                 break;
                             }
-                            if (usePipeline) {
-                                const rreData = this.buffer.slice(offset, offset + rre.consumed);
-                                this.pipeline.processRreRect(rreData, x, y, width, height, this.clientPixelFormat);
-                                rects.push({ kind: 'pipeline', x, y, width, height });
-                            } else {
-                                rects.push({ kind: 'rgba', x, y, width, height, rgba: rre.rgba });
-                            }
                             offset += rre.consumed;
+                            if (rre.skipped) continue;
+                            rects.push({ kind: 'rgba', x, y, width, height, rgba: rre.rgba });
+                            continue;
+                        }
+
+                        // ── CoRRE (4) ────────────────────────────
+                        if (encoding === 4) {
+                            if (usePipeline && typeof this.pipeline.processCoRreRect === 'function') {
+                                const corre = measureCoRreRectPayload(this.buffer, offset, this.clientPixelFormat);
+                                if (!corre) {
+                                    incomplete = true;
+                                    break;
+                                }
+                                const correData = this.buffer.slice(offset, offset + corre.consumed);
+                                const status = this.pipeline.processCoRreRect(correData, x, y, width, height, this.clientPixelFormat);
+                                if (status === 0 || typeof status === 'undefined') {
+                                    rects.push({ kind: 'pipeline', x, y, width, height });
+                                }
+                                offset += corre.consumed;
+                                continue;
+                            }
+                            const corre = parseCoRreRect(this.buffer, offset, width, height, this.clientPixelFormat);
+                            if (!corre) {
+                                incomplete = true;
+                                break;
+                            }
+                            offset += corre.consumed;
+                            if (corre.skipped) continue;
+                            rects.push({ kind: 'rgba', x, y, width, height, rgba: corre.rgba });
                             continue;
                         }
 
@@ -817,8 +1066,10 @@ export class VncRemoteDisplayProtocol implements RemoteDisplayProtocolAdapter {
                             const srcY = copyView.getUint16(2, false);
                             offset += 4;
                             if (usePipeline) {
-                                this.pipeline.processCopyRect(x, y, width, height, srcX, srcY);
-                                rects.push({ kind: 'pipeline', x, y, width, height });
+                                const status = this.pipeline.processCopyRect(x, y, width, height, srcX, srcY);
+                                if (status === 0 || typeof status === 'undefined') {
+                                    rects.push({ kind: 'pipeline', x, y, width, height });
+                                }
                             } else {
                                 rects.push({ kind: 'copy', x, y, width, height, srcX, srcY });
                             }
@@ -827,6 +1078,28 @@ export class VncRemoteDisplayProtocol implements RemoteDisplayProtocolAdapter {
 
                         // ── ZRLE (16) ────────────────────────────
                         if (encoding === 16) {
+                            if (usePipeline && typeof this.pipeline.processZrleTileData === 'function') {
+                                const zrlePayload = measureZrleRectPayload(this.buffer, offset);
+                                if (!zrlePayload) {
+                                    incomplete = true;
+                                    break;
+                                }
+                                offset += zrlePayload.consumed;
+                                let decompressed;
+                                try {
+                                    decompressed = this.inflateZrle(zrlePayload.compressed);
+                                } catch {
+                                    continue;
+                                }
+                                if (!measureZrleTileDataPayload(decompressed, width, height, this.clientPixelFormat)) {
+                                    continue;
+                                }
+                                const status = this.pipeline.processZrleTileData(decompressed, x, y, width, height, this.clientPixelFormat);
+                                if (status === 0 || typeof status === 'undefined') {
+                                    rects.push({ kind: 'pipeline', x, y, width, height });
+                                }
+                                continue;
+                            }
                             const zrle = parseZrleRect(this.buffer, offset, width, height, this.clientPixelFormat, this.decodeRawRect, this.inflateZrle);
                             if (!zrle) {
                                 incomplete = true;
@@ -834,30 +1107,104 @@ export class VncRemoteDisplayProtocol implements RemoteDisplayProtocolAdapter {
                             }
                             offset += zrle.consumed;
                             if (zrle.skipped) continue;
-                            if (usePipeline && zrle.decompressed) {
-                                this.pipeline.processZrleTileData(zrle.decompressed, x, y, width, height, this.clientPixelFormat);
-                                rects.push({ kind: 'pipeline', x, y, width, height });
-                            } else {
-                                rects.push({ kind: 'rgba', x, y, width, height, rgba: zrle.rgba });
-                            }
+                            rects.push({ kind: 'rgba', x, y, width, height, rgba: zrle.rgba });
                             continue;
                         }
 
                         // ── Hextile (5) ──────────────────────────
                         if (encoding === 5) {
+                            if (usePipeline && typeof this.pipeline.processHextileRect === 'function') {
+                                const hextile = measureHextileRectPayload(this.buffer, offset, width, height, this.clientPixelFormat);
+                                if (!hextile) {
+                                    incomplete = true;
+                                    break;
+                                }
+                                const hextileData = this.buffer.slice(offset, offset + hextile.consumed);
+                                const status = this.pipeline.processHextileRect(hextileData, x, y, width, height, this.clientPixelFormat);
+                                if (status === 0 || typeof status === 'undefined') {
+                                    rects.push({ kind: 'pipeline', x, y, width, height });
+                                }
+                                offset += hextile.consumed;
+                                continue;
+                            }
                             const hextile = parseHextileRect(this.buffer, offset, width, height, this.clientPixelFormat, this.decodeRawRect);
                             if (!hextile) {
                                 incomplete = true;
                                 break;
                             }
-                            if (usePipeline) {
-                                const hextileData = this.buffer.slice(offset, offset + hextile.consumed);
-                                this.pipeline.processHextileRect(hextileData, x, y, width, height, this.clientPixelFormat);
-                                rects.push({ kind: 'pipeline', x, y, width, height });
-                            } else {
-                                rects.push({ kind: 'rgba', x, y, width, height, rgba: hextile.rgba });
-                            }
                             offset += hextile.consumed;
+                            if (hextile.skipped) continue;
+                            rects.push({ kind: 'rgba', x, y, width, height, rgba: hextile.rgba });
+                            continue;
+                        }
+
+                        // ── LastRect (-224) ──────────────────────
+                        if (encoding === -224) {
+                            i = numberOfRectangles;
+                            continue;
+                        }
+
+                        // ── DesktopName (-307) ───────────────────
+                        if (encoding === -307) {
+                            if (this.buffer.byteLength < offset + 4) {
+                                incomplete = true;
+                                break;
+                            }
+                            const nameLength = new DataView(this.buffer.buffer, this.buffer.byteOffset + offset, 4).getUint32(0, false);
+                            if (this.buffer.byteLength < offset + 4 + nameLength) {
+                                incomplete = true;
+                                break;
+                            }
+                            const nameBytes = this.buffer.slice(offset + 4, offset + 4 + nameLength);
+                            this.serverName = bytesToAscii(nameBytes);
+                            rects.push({ kind: 'desktop-name', name: this.serverName });
+                            offset += 4 + nameLength;
+                            continue;
+                        }
+
+                        // ── ExtendedDesktopSize (-308) ────────────
+                        if (encoding === -308) {
+                            if (this.buffer.byteLength < offset + 4) {
+                                incomplete = true;
+                                break;
+                            }
+                            const screenCount = this.buffer[offset];
+                            const payloadLength = 4 + Math.max(0, screenCount) * 16;
+                            if (this.buffer.byteLength < offset + payloadLength) {
+                                incomplete = true;
+                                break;
+                            }
+                            this.framebufferWidth = width;
+                            this.framebufferHeight = height;
+                            if (usePipeline) {
+                                this.pipeline.initFramebuffer(width, height);
+                            }
+                            rects.push({ kind: 'resize', x, y, width, height });
+                            offset += payloadLength;
+                            continue;
+                        }
+
+                        // ── Cursor (-239) ─────────────────────────
+                        if (encoding === -239) {
+                            const bytesPerPixel = Math.max(1, Math.floor(Number(this.clientPixelFormat.bitsPerPixel || 0) / 8));
+                            const pixelLength = width * height * bytesPerPixel;
+                            const maskLength = Math.ceil(width / 8) * height;
+                            if (this.buffer.byteLength < offset + pixelLength + maskLength) {
+                                incomplete = true;
+                                break;
+                            }
+                            const pixelBytes = this.buffer.slice(offset, offset + pixelLength);
+                            const maskBytes = this.buffer.slice(offset + pixelLength, offset + pixelLength + maskLength);
+                            const rgba = this.decodeRawRect(pixelBytes, width, height, this.clientPixelFormat);
+                            for (let cy = 0; cy < height; cy += 1) {
+                                for (let cx = 0; cx < width; cx += 1) {
+                                    const maskByte = maskBytes[cy * Math.ceil(width / 8) + Math.floor(cx / 8)] || 0;
+                                    const visible = (maskByte & (128 >> (cx % 8))) !== 0;
+                                    rgba[(cy * width + cx) * 4 + 3] = visible ? rgba[(cy * width + cx) * 4 + 3] : 0;
+                                }
+                            }
+                            rects.push({ kind: 'cursor', x, y, width, height, rgba });
+                            offset += pixelLength + maskLength;
                             continue;
                         }
 
@@ -871,7 +1218,7 @@ export class VncRemoteDisplayProtocol implements RemoteDisplayProtocolAdapter {
                             rects.push({ kind: 'resize', x, y, width, height });
                             continue;
                         }
-                        throw new Error(`Unsupported VNC rectangle encoding ${encoding}. This viewer currently supports ZRLE, Hextile, RRE, CopyRect, raw rectangles, and DesktopSize only.`);
+                        throw new Error(`Unsupported VNC rectangle encoding ${encoding}. This viewer currently supports ZRLE, Hextile, RRE, CoRRE, CopyRect, Cursor, LastRect, DesktopName, ExtendedDesktopSize, raw rectangles, and DesktopSize only.`);
                     }
                     if (incomplete) break;
                     this.consume(offset);
