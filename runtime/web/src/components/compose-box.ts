@@ -3285,11 +3285,12 @@ export function ComposeBox({
                                                         : `Delete @${chat.agent_name}`}
                                                     onClick=${(e) => {
                                                         e.stopPropagation();
-                                                        setShowSessionPopup(false);
                                                         if (canPurgeArchived) {
                                                             void onPurgeArchivedSession?.(chat.chat_jid);
+                                                            setShowSessionPopup(false);
                                                             return;
                                                         }
+                                                        setShowSessionPopup(false);
                                                         void onDeleteSession(chat.chat_jid);
                                                     }}
                                                 >
