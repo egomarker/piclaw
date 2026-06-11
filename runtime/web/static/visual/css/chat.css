@@ -1113,11 +1113,18 @@
 }
 
 .compose-model-popup-item-delete:hover,
-.compose-model-popup-item-delete:focus-visible {
+.compose-model-popup-item-delete:focus-visible,
+.compose-model-popup-item-delete.confirming {
     opacity: 1;
     color: var(--danger-color);
     background: color-mix(in srgb, var(--danger-color) 10%, transparent);
     border-color: color-mix(in srgb, var(--danger-color) 28%, transparent);
+}
+
+.compose-model-popup-item-delete-confirm {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
 }
 
 .compose-model-popup-actions {

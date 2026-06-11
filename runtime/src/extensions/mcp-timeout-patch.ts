@@ -2,23 +2,28 @@
  * extensions/mcp-timeout-patch.ts – Patches pi-mcp-adapter tool execution
  * with proper timeout and abort signal handling.
  *
- * The upstream pi-mcp-adapter (≤2.8.0) does not forward the abort signal
+ * The upstream pi-mcp-adapter (≤2.9.0) does not forward the abort signal
  * or apply a timeout to MCP callTool() invocations. If a server hangs,
  * the entire agent turn stalls indefinitely. This extension wraps registered
  * MCP tools with a timeout race and signal abort listener.
  *
  * Configurable via PICLAW_MCP_TOOL_TIMEOUT_MS (default: 120000 = 2 minutes).
+ * Set PICLAW_MCP_TOOL_TIMEOUT_MS=0 to disable the wrapper timeout while still
+ * leaving upstream MCP adapter behavior untouched.
  */
 
 import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
 const DEFAULT_MCP_TOOL_TIMEOUT_MS = 120_000; // 2 minutes
 
-function getMcpToolTimeoutMs(): number {
+export function getMcpToolTimeoutMs(): number | null {
   const env = process.env.PICLAW_MCP_TOOL_TIMEOUT_MS;
   if (env) {
-    const parsed = parseInt(env, 10);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    const parsed = Number(env);
+    if (Number.isFinite(parsed)) {
+      if (parsed === 0) return null;
+      if (parsed > 0) return parsed;
+    }
   }
   return DEFAULT_MCP_TOOL_TIMEOUT_MS;
 }
@@ -57,7 +62,7 @@ function withTimeoutAndSignal<T>(
         settle(() => reject(new Error(`MCP tool call aborted: ${label}`)));
       };
       signal.addEventListener("abort", onAbort, { once: true });
-      promise.finally(() => signal.removeEventListener("abort", onAbort));
+      promise.finally(() => signal.removeEventListener("abort", onAbort)).catch(() => undefined);
     }
 
     promise.then(
@@ -87,6 +92,7 @@ function getMcpCallLabel(toolName: string, params: unknown): string {
 
 export const mcpTimeoutPatch: ExtensionFactory = (pi: ExtensionAPI): void => {
   const timeoutMs = getMcpToolTimeoutMs();
+  if (timeoutMs === null) return;
 
   // Patch MCP tools after the MCP adapter has registered them.
   // The MCP adapter registers tools synchronously during its own session_start

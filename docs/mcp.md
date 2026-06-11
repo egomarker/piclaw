@@ -137,7 +137,7 @@ export PICLAW_MCP_TOOL_TIMEOUT_MS=60000  # 1 minute
 
 Set to `0` to disable the timeout (not recommended).
 
-This patch exists because the upstream `pi-mcp-adapter` (≤ 2.8.0) does not forward the SDK abort signal or apply any timeout to its `callTool()` invocations.
+This patch remains in place because the upstream `pi-mcp-adapter` (≤ 2.9.0, audited during the Earendil 0.79.1 bump) does not forward the SDK abort signal or apply any timeout to its `callTool()` invocations.
 
 ## Notes
 

@@ -76,6 +76,9 @@ function buildPipeline() {
     processRreRect(data: Uint8Array, x: number, y: number, w: number, h: number, pf: any) {
       return callProcess("processRreRect", data, x, y, w, h, pf);
     },
+    processCoRreRect(data: Uint8Array, x: number, y: number, w: number, h: number, pf: any) {
+      return callProcess("processCoRreRect", data, x, y, w, h, pf);
+    },
     processHextileRect(data: Uint8Array, x: number, y: number, w: number, h: number, pf: any) {
       return callProcess("processHextileRect", data, x, y, w, h, pf);
     },
@@ -130,6 +133,39 @@ function connectProtocol(options: any = {}) {
   protocol.receive(bytes(1, 1)); // security: None
   protocol.receive(bytes(0, 0, 0, 0)); // auth OK
   return protocol;
+}
+
+function buildZrleUpdate(width: number, height: number, compressed: Uint8Array) {
+  const length = compressed.length;
+  return Uint8Array.from([
+    0, 0, 0, 1,
+    0, 0, 0, 0,
+    (width >>> 8) & 0xff, width & 0xff,
+    (height >>> 8) & 0xff, height & 0xff,
+    0, 0, 0, 16,
+    (length >>> 24) & 0xff,
+    (length >>> 16) & 0xff,
+    (length >>> 8) & 0xff,
+    length & 0xff,
+    ...compressed,
+  ]);
+}
+
+function expectZrlePipelineMatchesJs(tile: Uint8Array, width: number, height: number) {
+  const compressed = zlibSync(tile);
+
+  const jsProto = connectProtocol();
+  jsProto.receive(buildServerInit({ width, height, name: "T" }));
+  const jsResult = jsProto.receive(buildZrleUpdate(width, height, compressed));
+  const jsRgba = Array.from((jsResult.events[0] as any).rects[0].rgba);
+
+  const pipeline = buildPipeline();
+  const wasmProto = connectProtocol({ pipeline });
+  wasmProto.receive(buildServerInit({ width, height, name: "T" }));
+  const wasmResult = wasmProto.receive(buildZrleUpdate(width, height, compressed));
+  const wasmFb = Array.from((wasmResult.events[0] as any).framebuffer);
+
+  expect(wasmFb).toEqual(jsRgba);
 }
 
 // ─── Direct WASM tests ──────────────────────────────────────────
@@ -194,6 +230,55 @@ describe("WASM pipeline – direct API", () => {
     expect(pixelAt(3, 3, 4)).toEqual([0, 0, 255, 255]); // blue bg
   });
 
+  test("processRreRect handles zero subrects at non-zero origin", () => {
+    wasm.initFramebuffer(6, 6);
+    const rre = bytes(
+      0, 0, 0, 0,
+      0x00, 0xff, 0x00, 0x00,
+    );
+    callProcess("processRreRect", rre, 2, 2, 2, 2);
+    expect(pixelAt(0, 0, 6)).toEqual([0, 0, 0, 0]);
+    expect(pixelAt(2, 2, 6)).toEqual([0, 255, 0, 255]);
+    expect(pixelAt(3, 3, 6)).toEqual([0, 255, 0, 255]);
+  });
+
+  test("processCoRreRect fills background and 8-bit subrects", () => {
+    wasm.initFramebuffer(4, 4);
+    // CoRRE payload: 1 subrect, blue background, red foreground subrect at (1,1) 2x2
+    const corre = bytes(
+      0, 0, 0, 1,                   // subrectCount = 1
+      0xff, 0x00, 0x00, 0x00,       // background: blue
+      0x00, 0x00, 0xff, 0x00,       // subrect colour: red
+      1, 1, 2, 2,                   // subrect x=1, y=1, w=2, h=2
+    );
+    callProcess("processCoRreRect", corre, 0, 0, 4, 4);
+    expect(pixelAt(0, 0, 4)).toEqual([0, 0, 255, 255]);
+    expect(pixelAt(1, 1, 4)).toEqual([255, 0, 0, 255]);
+    expect(pixelAt(2, 2, 4)).toEqual([255, 0, 0, 255]);
+    expect(pixelAt(3, 3, 4)).toEqual([0, 0, 255, 255]);
+  });
+
+  test("processCoRreRect handles zero subrects, multiple subrects, and 8-bit coordinate boundaries", () => {
+    wasm.initFramebuffer(256, 256);
+    const blueBackgroundOnly = bytes(
+      0, 0, 0, 0,
+      0xff, 0x00, 0x00, 0x00,
+    );
+    callProcess("processCoRreRect", blueBackgroundOnly, 0, 0, 2, 2);
+    expect(pixelAt(0, 0, 256)).toEqual([0, 0, 255, 255]);
+
+    const corre = bytes(
+      0, 0, 0, 2,
+      0xff, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0xff, 0x00, 1, 1, 2, 2,
+      0x00, 0xff, 0x00, 0x00, 255, 255, 1, 1,
+    );
+    callProcess("processCoRreRect", corre, 0, 0, 256, 256);
+    expect(pixelAt(1, 1, 256)).toEqual([255, 0, 0, 255]);
+    expect(pixelAt(2, 2, 256)).toEqual([255, 0, 0, 255]);
+    expect(pixelAt(255, 255, 256)).toEqual([0, 255, 0, 255]);
+  });
+
   test("processHextileRect handles background + subrect tiles", () => {
     wasm.initFramebuffer(4, 4);
     // Hextile: subencoding 0x0E = bg + fg + subrects
@@ -208,6 +293,23 @@ describe("WASM pipeline – direct API", () => {
     callProcess("processHextileRect", hextile, 0, 0, 4, 4);
     expect(pixelAt(0, 0, 4)).toEqual([0, 0, 255, 255]); // blue bg
     expect(pixelAt(1, 1, 4)).toEqual([255, 0, 0, 255]); // red fg
+  });
+
+  test("processHextileRect carries background and foreground across multiple tiles", () => {
+    wasm.initFramebuffer(17, 1);
+    const hextile = bytes(
+      0x06,
+      0xff, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0xff, 0x00,
+      0x08,
+      0x01,
+      0x00,
+      0x00,
+    );
+    callProcess("processHextileRect", hextile, 0, 0, 17, 1);
+    expect(pixelAt(0, 0, 17)).toEqual([0, 0, 255, 255]);
+    expect(pixelAt(1, 0, 17)).toEqual([0, 0, 255, 255]);
+    expect(pixelAt(16, 0, 17)).toEqual([255, 0, 0, 255]);
   });
 
   test("processZrleTileData handles solid-fill subencoding", () => {
@@ -233,6 +335,110 @@ describe("WASM pipeline – direct API", () => {
     callProcess("processZrleTileData", tile, 0, 0, 2, 1);
     expect(pixelAt(0, 0, 2)).toEqual([255, 0, 0, 255]);
     expect(pixelAt(1, 0, 2)).toEqual([0, 255, 0, 255]);
+  });
+
+  test("processZrleTileData handles packed palette subencoding", () => {
+    wasm.initFramebuffer(2, 2);
+    const tile = bytes(
+      0x02,
+      0x00, 0x00, 0xff, 0x00,       // palette[0]: red
+      0xff, 0x00, 0x00, 0x00,       // palette[1]: blue
+      0x40,                         // row 0: red, blue
+      0x80,                         // row 1: blue, red
+    );
+    callProcess("processZrleTileData", tile, 0, 0, 2, 2);
+    expect(pixelAt(0, 0, 2)).toEqual([255, 0, 0, 255]);
+    expect(pixelAt(1, 0, 2)).toEqual([0, 0, 255, 255]);
+    expect(pixelAt(0, 1, 2)).toEqual([0, 0, 255, 255]);
+    expect(pixelAt(1, 1, 2)).toEqual([255, 0, 0, 255]);
+  });
+
+  test("processZrleTileData handles plain RLE subencoding", () => {
+    wasm.initFramebuffer(3, 1);
+    const tile = bytes(
+      0x80,
+      0x00, 0x00, 0xff, 0x00, 0x01, // red run length 2
+      0xff, 0x00, 0x00, 0x00, 0x00, // blue run length 1
+    );
+    callProcess("processZrleTileData", tile, 0, 0, 3, 1);
+    expect(pixelAt(0, 0, 3)).toEqual([255, 0, 0, 255]);
+    expect(pixelAt(1, 0, 3)).toEqual([255, 0, 0, 255]);
+    expect(pixelAt(2, 0, 3)).toEqual([0, 0, 255, 255]);
+  });
+
+  test("processZrleTileData handles palette RLE subencoding", () => {
+    wasm.initFramebuffer(3, 1);
+    const tile = bytes(
+      0x82,
+      0x00, 0x00, 0xff, 0x00,       // palette[0]: red
+      0xff, 0x00, 0x00, 0x00,       // palette[1]: blue
+      0x80, 0x01,                   // palette[0] run length 2
+      0x01,                         // palette[1] run length 1
+    );
+    callProcess("processZrleTileData", tile, 0, 0, 3, 1);
+    expect(pixelAt(0, 0, 3)).toEqual([255, 0, 0, 255]);
+    expect(pixelAt(1, 0, 3)).toEqual([255, 0, 0, 255]);
+    expect(pixelAt(2, 0, 3)).toEqual([0, 0, 255, 255]);
+  });
+
+  test("processZrleTileData rejects invalid palette subencodings, runs, and trailing bytes", () => {
+    wasm.initFramebuffer(2, 1);
+    expect(callProcess("processZrleTileData", bytes(0x11), 0, 0, 1, 1)).toBe(-1);
+    expect(callProcess("processZrleTileData", bytes(0x81, 0x00, 0x00, 0xff, 0x00, 0x00), 0, 0, 1, 1)).toBe(-1);
+    expect(callProcess("processZrleTileData", bytes(
+      0x03,
+      0x00, 0x00, 0xff, 0x00,
+      0xff, 0x00, 0x00, 0x00,
+      0x00, 0xff, 0x00, 0x00,
+      0xc0,
+    ), 0, 0, 1, 1)).toBe(-1);
+    expect(callProcess("processZrleTileData", bytes(
+      0x82,
+      0x00, 0x00, 0xff, 0x00,
+      0xff, 0x00, 0x00, 0x00,
+      0x02,
+    ), 0, 0, 1, 1)).toBe(-1);
+    expect(callProcess("processZrleTileData", bytes(0x80, 0x00, 0x00, 0xff, 0x00, 0x01), 0, 0, 1, 1)).toBe(-1);
+    expect(callProcess("processZrleTileData", bytes(0x01, 0x00, 0x00, 0xff, 0x00, 0xaa), 0, 0, 1, 1)).toBe(-1);
+  });
+
+  test("encoded rectangle rejects do not partially mutate the framebuffer", () => {
+    wasm.initFramebuffer(2, 2);
+    const initial = Array.from(readFb());
+
+    const rreOutOfBounds = bytes(
+      0, 0, 0, 1,
+      0x00, 0xff, 0x00, 0x00,
+      0x00, 0x00, 0xff, 0x00,
+      0, 1, 0, 1,
+      0, 2, 0, 2,
+    );
+    expect(callProcess("processRreRect", rreOutOfBounds, 0, 0, 2, 2)).toBe(-1);
+    expect(Array.from(readFb())).toEqual(initial);
+
+    const correOutOfBounds = bytes(
+      0, 0, 0, 1,
+      0x00, 0xff, 0x00, 0x00,
+      0x00, 0x00, 0xff, 0x00,
+      1, 1, 2, 2,
+    );
+    expect(callProcess("processCoRreRect", correOutOfBounds, 0, 0, 2, 2)).toBe(-1);
+    expect(Array.from(readFb())).toEqual(initial);
+
+    const hextileOutOfBounds = bytes(
+      0x0e,
+      0x00, 0xff, 0x00, 0x00,
+      0x00, 0x00, 0xff, 0x00,
+      0x01,
+      0x11,
+      0x11,
+    );
+    expect(callProcess("processHextileRect", hextileOutOfBounds, 0, 0, 2, 2)).toBe(-1);
+    expect(Array.from(readFb())).toEqual(initial);
+
+    const zrleOverflow = bytes(0x80, 0x00, 0x00, 0xff, 0x00, 0x04);
+    expect(callProcess("processZrleTileData", zrleOverflow, 0, 0, 2, 2)).toBe(-1);
+    expect(Array.from(readFb())).toEqual(initial);
   });
 });
 
@@ -299,6 +505,39 @@ describe("WASM pipeline – through VncRemoteDisplayProtocol", () => {
     expect(wasmFb).toEqual(jsRgba);
   });
 
+  test("CoRRE encoding through pipeline matches JS output", () => {
+    // JS path
+    const jsProto = connectProtocol();
+    jsProto.receive(buildServerInit({ width: 4, height: 4, name: "T" }));
+    const jsResult = jsProto.receive(bytes(
+      0, 0, 0, 1,
+      0, 0, 0, 0, 0, 4, 0, 4,
+      0, 0, 0, 4,                   // CoRRE
+      0, 0, 0, 1,                   // 1 subrect
+      0xff, 0x00, 0x00, 0x00,       // bg blue
+      0x00, 0x00, 0xff, 0x00,       // fg red
+      1, 1, 2, 2,
+    ));
+    const jsRgba = Array.from((jsResult.events[0] as any).rects[0].rgba);
+
+    // Pipeline path
+    const pipeline = buildPipeline();
+    const wasmProto = connectProtocol({ pipeline });
+    wasmProto.receive(buildServerInit({ width: 4, height: 4, name: "T" }));
+    const wasmResult = wasmProto.receive(bytes(
+      0, 0, 0, 1,
+      0, 0, 0, 0, 0, 4, 0, 4,
+      0, 0, 0, 4,
+      0, 0, 0, 1,
+      0xff, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0xff, 0x00,
+      1, 1, 2, 2,
+    ));
+    const wasmFb = Array.from((wasmResult.events[0] as any).framebuffer);
+
+    expect(wasmFb).toEqual(jsRgba);
+  });
+
   test("CopyRect through pipeline copies within framebuffer", () => {
     const pipeline = buildPipeline();
     const protocol = connectProtocol({ pipeline });
@@ -327,29 +566,63 @@ describe("WASM pipeline – through VncRemoteDisplayProtocol", () => {
     expect(Array.from(fb.slice(dstIdx, dstIdx + 4))).toEqual([255, 0, 0, 255]);
   });
 
-  test("ZRLE solid-fill through pipeline", () => {
+  test("ZRLE solid-fill through pipeline matches JS output", () => {
+    expectZrlePipelineMatchesJs(bytes(
+      0x01,
+      0x00, 0x00, 0xff, 0x00,
+    ), 2, 2);
+  });
+
+  test("ZRLE raw tile through pipeline matches JS output", () => {
+    expectZrlePipelineMatchesJs(bytes(
+      0x00,
+      0x00, 0x00, 0xff, 0x00,
+      0x00, 0xff, 0x00, 0x00,
+    ), 2, 1);
+  });
+
+  test("ZRLE packed palette through pipeline matches JS output", () => {
+    expectZrlePipelineMatchesJs(bytes(
+      0x02,
+      0x00, 0x00, 0xff, 0x00,
+      0xff, 0x00, 0x00, 0x00,
+      0x40,
+      0x80,
+    ), 2, 2);
+  });
+
+  test("ZRLE plain RLE through pipeline matches JS output", () => {
+    expectZrlePipelineMatchesJs(bytes(
+      0x80,
+      0x00, 0x00, 0xff, 0x00, 0x01,
+      0xff, 0x00, 0x00, 0x00, 0x00,
+    ), 3, 1);
+  });
+
+  test("ZRLE palette RLE through pipeline matches JS output", () => {
+    expectZrlePipelineMatchesJs(bytes(
+      0x82,
+      0x00, 0x00, 0xff, 0x00,
+      0xff, 0x00, 0x00, 0x00,
+      0x80, 0x01,
+      0x01,
+    ), 3, 1);
+  });
+
+  test("ZRLE invalid unused subencoding is skipped in JS fallback and pipeline modes", () => {
+    const compressed = zlibSync(bytes(0x11));
+
+    const jsProto = connectProtocol();
+    jsProto.receive(buildServerInit({ width: 1, height: 1, name: "T" }));
+    const jsResult = jsProto.receive(buildZrleUpdate(1, 1, compressed));
+    expect((jsResult.events[0] as any).rects).toEqual([]);
+
     const pipeline = buildPipeline();
-    const protocol = connectProtocol({ pipeline });
-    protocol.receive(buildServerInit({ width: 2, height: 2, name: "T" }));
-
-    const zrleTile = bytes(0x01, 0x00, 0x00, 0xff, 0x00);
-    const compressed = zlibSync(zrleTile);
-    const length = compressed.length;
-
-    const result = protocol.receive(Uint8Array.from([
-      0, 0, 0, 1,
-      0, 0, 0, 0, 0, 2, 0, 2,
-      0, 0, 0, 16,                  // ZRLE
-      (length >>> 24) & 0xff,
-      (length >>> 16) & 0xff,
-      (length >>> 8) & 0xff,
-      length & 0xff,
-      ...compressed,
-    ]));
-
-    const fb = (result.events[0] as any).framebuffer;
-    expect(Array.from(fb.slice(0, 4))).toEqual([255, 0, 0, 255]);
-    expect(Array.from(fb.slice(12, 16))).toEqual([255, 0, 0, 255]);
+    const wasmProto = connectProtocol({ pipeline });
+    wasmProto.receive(buildServerInit({ width: 1, height: 1, name: "T" }));
+    const wasmResult = wasmProto.receive(buildZrleUpdate(1, 1, compressed));
+    expect((wasmResult.events[0] as any).rects).toEqual([]);
+    expect(Array.from((wasmResult.events[0] as any).framebuffer)).toEqual([0, 0, 0, 0]);
   });
 
   test("Hextile through pipeline matches JS output", () => {

@@ -188,10 +188,11 @@ export interface PurgeArchivedBranchActionOptions {
   refreshActiveChatAgents: () => void;
   refreshCurrentChatBranches: () => void;
   showIntentToast: (title: string, detail?: string | null, kind?: string, durationMs?: number) => void;
+  confirm?: (message: string) => boolean;
 }
 
-export async function purgeArchivedBranchAction(options: PurgeArchivedBranchActionOptions): Promise<void> {
-  await purgeArchivedBranch(options);
+export async function purgeArchivedBranchAction(options: PurgeArchivedBranchActionOptions): Promise<boolean> {
+  return await purgeArchivedBranch(options);
 }
 
 export interface RestoreBranchActionOptions {
@@ -716,16 +717,27 @@ export function useBranchPaneLifecycle(options: UseBranchPaneLifecycleOptions) {
     });
   }, [activeChatAgents, chatOnlyMode, currentBranchRecord, currentChatBranches, currentChatJid, navigate, pruneChatBranch, refreshActiveChatAgents, refreshCurrentChatBranches, showIntentToast]);
 
-  const handlePurgeArchivedBranch = useCallback(async (targetChatJid: string) => {
-    await purgeArchivedBranchAction({
+  const handlePurgeArchivedBranch = useCallback(async (targetChatJid: string, options?: { confirmed?: boolean }) => {
+    const target = typeof targetChatJid === 'string' ? targetChatJid.trim() : '';
+    const branchRows = [
+      ...(Array.isArray(activeChatAgents) ? activeChatAgents : []),
+      ...(Array.isArray(currentChatBranches) ? currentChatBranches : []),
+    ];
+    const purged = await purgeArchivedBranchAction({
       targetChatJid,
       purgeChatBranch,
-      currentChatBranches,
+      currentChatBranches: branchRows,
       refreshActiveChatAgents,
       refreshCurrentChatBranches,
       showIntentToast,
+      ...(options?.confirmed ? { confirm: () => true } : {}),
     });
-  }, [currentChatBranches, purgeChatBranch, refreshActiveChatAgents, refreshCurrentChatBranches, showIntentToast]);
+    if (purged && target) {
+      setActiveChatAgents((prev) => Array.isArray(prev) ? prev.filter((chat) => chat?.chat_jid !== target) : prev);
+      setCurrentChatBranches((prev) => Array.isArray(prev) ? prev.filter((chat) => chat?.chat_jid !== target) : prev);
+    }
+    return purged;
+  }, [activeChatAgents, currentChatBranches, purgeChatBranch, refreshActiveChatAgents, refreshCurrentChatBranches, setActiveChatAgents, setCurrentChatBranches, showIntentToast]);
 
   const handleRestoreBranch = useCallback(async (targetChatJid: string) => {
     await restoreBranchAction({

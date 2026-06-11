@@ -16,7 +16,7 @@ import type { RuntimeSignalRegistrar } from "./composition.js";
 import { installAddonRuntimeInterop } from "./addon-interop.js";
 import { registerRuntimeShutdownSignals } from "./composition.js";
 import { startRuntimeLoop, type StartRuntimeLoopDeps } from "./coordinator.js";
-import { registerOptionalProviders } from "./provider-bootstrap.js";
+import { registerGitHubCopilotDynamicModelsAtBoot, registerOptionalProviders } from "./provider-bootstrap.js";
 import { createShutdownHandler, type ShutdownDeps } from "./shutdown.js";
 import { registerShutdownHandler } from "./shutdown-registry.js";
 import {
@@ -82,6 +82,7 @@ export interface RuntimeBootstrapDeps {
   signalRegistrar: RuntimeSignalRegistrar;
   initializeRuntimeEnvironment(state: RuntimeBootstrapState): void;
   registerOptionalProviders(agentPool: RuntimeBootstrapAgentPool): void | Promise<void>;
+  registerGitHubCopilotDynamicModelsAtBoot(agentPool: RuntimeBootstrapAgentPool): void | Promise<void>;
   startWebChannel(queue: RuntimeBootstrapQueue, agentPool: RuntimeBootstrapAgentPool): Promise<RuntimeBootstrapWeb>;
   startOptionalPushoverChannel(): Promise<RuntimeBootstrapPushover | null>;
   createShutdownHandler(deps: ShutdownDeps): (signal: string) => Promise<void>;
@@ -128,6 +129,7 @@ export function createDefaultRuntimeBootstrapDeps(core: RuntimeBootstrapDefaultC
     signalRegistrar: process,
     initializeRuntimeEnvironment: () => initializeRuntimeEnvironment(core.state),
     registerOptionalProviders: () => registerOptionalProviders(core.agentPool),
+    registerGitHubCopilotDynamicModelsAtBoot: () => registerGitHubCopilotDynamicModelsAtBoot(core.agentPool),
     startWebChannel: () => startWebChannel(core.queue, core.agentPool),
     startOptionalPushoverChannel: () => startOptionalPushoverChannel(),
     createShutdownHandler,
@@ -152,6 +154,7 @@ export async function bootstrapRuntime(deps: RuntimeBootstrapDeps): Promise<void
 
   deps.initializeRuntimeEnvironment(state);
   await deps.registerOptionalProviders(agentPool);
+  await deps.registerGitHubCopilotDynamicModelsAtBoot(agentPool);
   deps.log("=== Piclaw - Pi Coding Agent Assistant ===");
 
   const web = await deps.startWebChannel(queue, agentPool);

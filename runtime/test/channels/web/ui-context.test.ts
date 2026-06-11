@@ -100,6 +100,16 @@ describe("ui-context", () => {
     expect(eventTypes).toContain("extension_ui_editor_text");
   });
 
+  test("createUiContext does not expose form prompts until the web form bridge exists", () => {
+    const { channel } = makeChannel();
+    const ui = createUiContext(channel as any, "web:default") as any;
+
+    // pi-mcp-adapter 2.9.0 only enables MCP elicitation when ctx.ui.form exists.
+    // Keep this absent until Piclaw has a real web form renderer/response path,
+    // so MCP servers cannot advertise a prompt mode that Piclaw cannot render.
+    expect(typeof ui.form).toBe("undefined");
+  });
+
   test("createUiContext timeout resolves undefined", async () => {
     const { channel, events, uiBridge } = makeChannel();
     const ui = createUiContext(channel as any, "web:default");

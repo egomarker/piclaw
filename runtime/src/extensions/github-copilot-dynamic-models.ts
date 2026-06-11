@@ -4,9 +4,11 @@
  * Rationale: see web timeline message 36334. Pi's bundled GitHub Copilot provider uses
  * a static generated model catalog, while private Copilot accounts can expose additional
  * models from https://api.individual.githubcopilot.com/models. This extension is intentionally
- * scoped to github-copilot only and only imports live model IDs that start with gpt, claude, or mai.
+ * scoped to github-copilot only and imports chat-capable live model IDs while filtering known
+ * non-chat model IDs such as embeddings and trajectory compaction helpers.
  */
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { getOAuthProvider } from "@earendil-works/pi-ai/oauth";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
@@ -88,8 +90,12 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(stringValue).filter((entry): entry is string => Boolean(entry)) : [];
 }
 
+const NON_CHAT_MODEL_ID = /(?:^|[-_])(embedding|embeddings)(?:[-_]|$)|^text-embedding-|^trajectory-compaction$/i;
+const KNOWN_CHAT_MODEL_ID = /^(gpt|claude|mai|gemini|raptor|grok|xai|o\d|o-)/i;
+
 export function shouldImportGitHubCopilotLiveModelId(id: string): boolean {
-  return /^(gpt|claude|mai)/i.test(id.trim());
+  const normalized = id.trim();
+  return Boolean(normalized) && !NON_CHAT_MODEL_ID.test(normalized);
 }
 
 function getLiveModelId(model: CopilotLiveModel): string | null {
@@ -128,8 +134,18 @@ function liveModelMaxTokens(model: CopilotLiveModel, fallback?: number): number 
     ?? 16384;
 }
 
-function modelKey(model: Pick<Model<Api>, "provider" | "id">): string {
-  return `${model.provider}/${model.id}`;
+function hasLiveChatEndpoint(model: CopilotLiveModel): boolean {
+  const endpoints = liveModelEndpoints(model);
+  return endpoints.some((endpoint) => (
+    endpoint.includes("responses")
+    || endpoint.includes("chat/completions")
+    || endpoint.includes("messages")
+  ));
+}
+
+function shouldImportGitHubCopilotLiveModel(model: CopilotLiveModel, id: string): boolean {
+  return shouldImportGitHubCopilotLiveModelId(id)
+    && (KNOWN_CHAT_MODEL_ID.test(id) || hasLiveChatEndpoint(model));
 }
 
 function findTemplate(existing: Model<Api>[], id: string): Model<Api> | undefined {
@@ -137,6 +153,7 @@ function findTemplate(existing: Model<Api>[], id: string): Model<Api> | undefine
   if (exact) return exact;
 
   const candidates: string[] = [];
+  if (id.startsWith("claude-fable-5")) candidates.push("claude-fable-5");
   if (id.startsWith("claude-opus-4.6")) candidates.push("claude-opus-4.6");
   if (id.startsWith("claude-opus-4.7")) candidates.push("claude-opus-4.7");
   if (id.startsWith("claude-opus-4.8")) candidates.push("claude-opus-4.8");
@@ -149,6 +166,10 @@ function findTemplate(existing: Model<Api>[], id: string): Model<Api> | undefine
   if (id.startsWith("gpt-4")) candidates.push("gpt-4.1");
   if (id.startsWith("gpt-3.5")) candidates.push("gpt-4.1");
   if (id.startsWith("mai")) candidates.push("gpt-5.5", "gpt-5.4");
+  if (id.startsWith("gemini")) candidates.push("gemini-3.5-flash", "gemini-3-flash-preview", "gemini-2.5-pro", "gpt-5.5");
+  if (id.startsWith("raptor")) candidates.push("raptor-mini", "gpt-5.5");
+  if (id.startsWith("grok") || id.startsWith("xai")) candidates.push("gpt-5.5", "gpt-5.4");
+  if (/^o\d|^o-/.test(id)) candidates.push("gpt-5.5", "gpt-5.4");
 
   for (const candidate of candidates) {
     const match = existing.find((model) => model.id === candidate);
@@ -160,7 +181,7 @@ function findTemplate(existing: Model<Api>[], id: string): Model<Api> | undefine
 function inferApi(id: string, model: CopilotLiveModel, template?: Model<Api>): Api {
   const endpoints = liveModelEndpoints(model);
   if (id.startsWith("claude")) return "anthropic-messages" as Api;
-  if (endpoints.includes("/responses") || endpoints.some((endpoint) => endpoint.endsWith(":/responses"))) {
+  if (endpoints.some((endpoint) => endpoint.includes("responses"))) {
     return "openai-responses" as Api;
   }
   if (id.startsWith("gpt-5") || id.startsWith("mai")) return "openai-responses" as Api;
@@ -235,7 +256,7 @@ function liveToProviderModelConfig(
   existing: Model<Api>[],
 ): ProviderModelConfig | null {
   const id = getLiveModelId(live);
-  if (!id || !shouldImportGitHubCopilotLiveModelId(id)) return null;
+  if (!id || !shouldImportGitHubCopilotLiveModel(live, id)) return null;
 
   const template = findTemplate(existing, id);
   const api = inferApi(id, live, template);
@@ -259,7 +280,6 @@ function liveToProviderModelConfig(
 export function mergeGitHubCopilotDynamicModels(
   existingModels: Model<Api>[],
   liveModels: CopilotLiveModel[],
-  providerBaseUrl = DEFAULT_BASE_URL,
 ): ProviderModelConfig[] {
   const existingGithubModels = existingModels.filter((model) => model.provider === PROVIDER && model.id);
   const merged = new Map<string, ProviderModelConfig>();
@@ -321,6 +341,19 @@ function getGithubCopilotModels(ctx: GitHubCopilotDynamicModelsContext): Model<A
   return ctx.modelRegistry.getAll().filter((model) => model.provider === PROVIDER && model.id);
 }
 
+function getGitHubCopilotOAuthProvider(): NonNullable<ProviderConfig["oauth"]> | null {
+  const oauth = getOAuthProvider(PROVIDER) as NonNullable<ProviderConfig["oauth"]> | undefined;
+  if (!oauth || typeof oauth.getApiKey !== "function") {
+    log.warn("Skipping GitHub Copilot dynamic model registration because the upstream OAuth provider is unavailable or incomplete.", {
+      operation: "github_copilot_dynamic_models.oauth_provider_unavailable",
+      hasProvider: Boolean(oauth),
+      hasGetApiKey: typeof oauth?.getApiKey === "function",
+    });
+    return null;
+  }
+  return oauth;
+}
+
 async function refreshGitHubCopilotDynamicModels(ctx: GitHubCopilotDynamicModelsContext, pi: ExtensionAPI): Promise<void> {
   const existingModels = getGithubCopilotModels(ctx);
   if (existingModels.length === 0) return;
@@ -342,19 +375,83 @@ async function refreshGitHubCopilotDynamicModels(ctx: GitHubCopilotDynamicModels
     apiKey: auth.apiKey,
     headers: auth.headers,
   });
-  const providerModels = mergeGitHubCopilotDynamicModels(existingModels, liveModels, providerBaseUrl);
+  const providerModels = mergeGitHubCopilotDynamicModels(existingModels, liveModels);
   const addedCount = providerModels.filter((model) => !existingModels.some((existing) => existing.id === model.id)).length;
 
   if (providerModels.length === 0) return;
+  const oauth = getGitHubCopilotOAuthProvider();
+  if (!oauth) return;
   pi.registerProvider(PROVIDER, {
     name: "GitHub Copilot",
     baseUrl: providerBaseUrl,
     headers: COPILOT_HEADERS,
+    oauth,
     models: providerModels,
   });
 
   log.info("Registered GitHub Copilot dynamic models from live /models catalog.", {
     operation: "github_copilot_dynamic_models.register",
+    liveCount: liveModels.length,
+    registeredCount: providerModels.length,
+    addedCount,
+  });
+}
+
+/**
+ * Boot-time eager refresh: register dynamic Copilot models immediately at startup
+ * so they appear in the model picker without waiting for the first prompt.
+ *
+ * This uses the global model registry directly (no session context needed).
+ */
+export async function refreshGitHubCopilotDynamicModelsAtBoot(agentPool: {
+  hasProviderModels(provider: string): boolean;
+  registerModelProvider(providerName: string, config: ProviderConfig): void;
+  getModelRegistry(): unknown;
+}): Promise<void> {
+  if (DISABLED) return;
+
+  log.info("Starting boot-time GitHub Copilot dynamic model refresh.", {
+    operation: "github_copilot_dynamic_models.boot_start",
+  });
+
+  const registry = agentPool.getModelRegistry() as GitHubCopilotDynamicModelsContext["modelRegistry"];
+  const existingModels = registry.getAll().filter((model) => model.provider === PROVIDER && model.id);
+  if (existingModels.length === 0) return;
+
+  const seedModel = existingModels.find((model) => model.id === "gpt-5.5")
+    ?? existingModels.find((model) => model.id.startsWith("gpt"))
+    ?? existingModels[0];
+  const auth = await registry.getApiKeyAndHeaders(seedModel);
+  if (!auth.ok || !auth.apiKey) {
+    log.info("Skipping boot-time GitHub Copilot dynamic model refresh because provider auth is unavailable.", {
+      operation: "github_copilot_dynamic_models.boot_auth_unavailable",
+      error: (auth as { error?: string }).error ?? null,
+    });
+    return;
+  }
+
+  const providerBaseUrl = seedModel.baseUrl || DEFAULT_BASE_URL;
+  const liveModels = await fetchGitHubCopilotLiveModels({
+    baseUrl: providerBaseUrl,
+    apiKey: auth.apiKey,
+    headers: auth.headers,
+  });
+  const providerModels = mergeGitHubCopilotDynamicModels(existingModels as Model<Api>[], liveModels);
+  const addedCount = providerModels.filter((model) => !existingModels.some((existing) => existing.id === model.id)).length;
+
+  if (providerModels.length === 0) return;
+  const oauth = getGitHubCopilotOAuthProvider();
+  if (!oauth) return;
+  agentPool.registerModelProvider(PROVIDER, {
+    name: "GitHub Copilot",
+    baseUrl: providerBaseUrl,
+    headers: COPILOT_HEADERS,
+    oauth,
+    models: providerModels,
+  });
+
+  log.info("Registered GitHub Copilot dynamic models at boot from live /models catalog.", {
+    operation: "github_copilot_dynamic_models.boot_register",
     liveCount: liveModels.length,
     registeredCount: providerModels.length,
     addedCount,

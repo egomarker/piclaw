@@ -205,7 +205,7 @@ test('purgeArchivedBranch supports archived root sessions and uses irreversible 
 
   const rejected = await purgeArchivedBranch({
     targetChatJid: 'web:active',
-    purgeChatBranch: async () => ({ branch: { chat_jid: 'web:active' } }),
+    purgeChatBranch: async () => { throw new Error('Cannot permanently delete a branch that is not archived: web:active'); },
     currentChatBranches: [{ chat_jid: 'web:active', agent_name: 'active', archived_at: null }],
     refreshActiveChatAgents: async () => {},
     refreshCurrentChatBranches: async () => {},
@@ -218,7 +218,8 @@ test('purgeArchivedBranch supports archived root sessions and uses irreversible 
     },
   });
   expect(rejected).toBe(false);
-  expect(toasts[0]).toEqual(['Could not delete branch', 'Only archived sessions can be permanently deleted.', 'warning', 4500]);
+  expect(confirmations[0]).toContain('Permanently delete @active?');
+  expect(toasts[0]).toEqual(['Could not delete branch', 'Cannot permanently delete a branch that is not archived: web:active', 'warning', 5000]);
 
   toasts.length = 0;
   const deleted = await purgeArchivedBranch({
@@ -237,8 +238,8 @@ test('purgeArchivedBranch supports archived root sessions and uses irreversible 
   });
 
   expect(deleted).toBe(true);
-  expect(confirmations[0]).toContain('Permanently delete @feature?');
-  expect(confirmations[0]).toContain('It cannot be undone.');
+  expect(confirmations[1]).toContain('Permanently delete @feature?');
+  expect(confirmations[1]).toContain('It cannot be undone.');
   expect(toasts[0]).toEqual(['Archived branch deleted', '@feature was permanently deleted.', 'info', 4000]);
 
   toasts.length = 0;

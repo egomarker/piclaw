@@ -4,6 +4,7 @@
 
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { createLogger } from "../utils/logger.js";
+import { refreshGitHubCopilotDynamicModelsAtBoot } from "../extensions/github-copilot-dynamic-models.js";
 
 export type AzureProviderBootstrapHandle = { stop: () => void; refresh: () => Promise<void> };
 export type AzureProviderBootstrapModule = {
@@ -19,6 +20,7 @@ export interface ProviderBootstrapAgentPool {
     providerName: string,
     config: Parameters<ModelRegistry["registerProvider"]>[1]
   ): void;
+  getModelRegistry(): ModelRegistry;
 }
 
 const AZURE_OPENAI_PROVIDER = "azure-openai";
@@ -51,6 +53,18 @@ export async function registerOptionalProviders(agentPool: ProviderBootstrapAgen
     hasAzureOpenAiModels: agentPool.hasProviderModels(AZURE_OPENAI_PROVIDER),
     hasAzureFoundryModels: agentPool.hasProviderModels(AZURE_FOUNDRY_PROVIDER),
   });
+}
+
+/** Eagerly refresh GitHub Copilot dynamic models at startup. */
+export async function registerGitHubCopilotDynamicModelsAtBoot(agentPool: ProviderBootstrapAgentPool): Promise<void> {
+  try {
+    await refreshGitHubCopilotDynamicModelsAtBoot(agentPool as any);
+  } catch (error) {
+    log.warn("Failed to register GitHub Copilot dynamic models at boot; will retry on first session_start.", {
+      operation: "register_optional_providers.github_copilot_boot_failed",
+      err: error,
+    });
+  }
 }
 
 export function setProviderBootstrapLoaderForTests(

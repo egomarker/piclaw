@@ -7,6 +7,10 @@ import {
 } from './app-shell-ref-utils.js';
 import { scrollToTimelineMessage } from './app-timeline-actions.js';
 import { buildChatWindowUrl } from './chat-window.js';
+import {
+  EDITOR_FILE_REFERENCE_REQUEST_EVENT,
+  getEditorFileReferencePathFromEvent,
+} from './editor-file-reference.js';
 
 type StateSetter<T> = (next: T | ((prev: T) => T)) => void;
 
@@ -78,6 +82,20 @@ export function activateComposeMessageRef(options: ActivateComposeMessageRefOpti
     navigate(nextUrl);
   }
 
+  return true;
+}
+
+export function addEditorFileReferenceFromEvent(event: unknown, options: {
+  addFileRef: (path: string) => void;
+  showIntentToast?: (title: string, detail?: string | null, kind?: string, durationMs?: number) => void;
+  focusCompose?: () => void;
+}): boolean {
+  const path = getEditorFileReferencePathFromEvent(event);
+  if (!path) return false;
+
+  options.addFileRef(path);
+  options.showIntentToast?.('Reference added', path, 'info', 1800);
+  options.focusCompose?.();
   return true;
 }
 
@@ -183,6 +201,27 @@ export function useComposeReferenceOrchestration(options: UseComposeReferenceOrc
       setIntentToast((current: any) => (current?.title === title ? null : current));
     }, durationMs);
   }, [clearIntentToast, intentToastTimerRef, setIntentToast]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const focusCompose = () => {
+      const run = () => {
+        const textarea = document.querySelector('.compose-box textarea') as HTMLTextAreaElement | null;
+        textarea?.focus?.();
+      };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+      else setTimeout(run, 0);
+    };
+    const handleEditorFileReference = (event: Event) => {
+      addEditorFileReferenceFromEvent(event, {
+        addFileRef,
+        showIntentToast,
+        focusCompose,
+      });
+    };
+    window.addEventListener(EDITOR_FILE_REFERENCE_REQUEST_EVENT, handleEditorFileReference);
+    return () => window.removeEventListener(EDITOR_FILE_REFERENCE_REQUEST_EVENT, handleEditorFileReference);
+  }, [addFileRef, showIntentToast]);
 
   const openFileFromPillWithMode = useCallback((rawPath: unknown, { autoOpenEditor = false } = {}) => {
     const result = resolveFilePillOpenAction(rawPath, {

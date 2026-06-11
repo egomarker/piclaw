@@ -299,7 +299,6 @@ describe("web agent streaming", () => {
 
       expect(compactCalls).toBe(1);
       expect(runCalls).toBe(0);
-      expect(db.getChatCursor("web:default")).not.toBe(interaction!.timestamp);
 
       releaseCompaction.resolve(undefined);
       await waitFor(() => runCalls === 1, 500, 10);

@@ -226,10 +226,10 @@ describe("smart-compaction", () => {
     expect(handler).toBeTypeOf("function");
   });
 
-  it("formats visible progress counts as x/y (x of y)", () => {
-    expect(formatProgressCount(3, 7)).toBe("3/7 (3 of 7)");
-    expect(formatProgressRange(2, 5, 9)).toBe("2-5/9 (2-5 of 9)");
-    expect(formatProgressRange(4, 4, 9)).toBe("4/9 (4 of 9)");
+  it("formats visible progress counts without duplicate ratio wording", () => {
+    expect(formatProgressCount(3, 7)).toBe("3 of 7");
+    expect(formatProgressRange(2, 5, 9)).toBe("2-5 of 9");
+    expect(formatProgressRange(4, 4, 9)).toBe("4 of 9");
   });
 
   it("maps compaction reasoning targets to model support and context capacity", () => {

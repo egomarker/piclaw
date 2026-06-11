@@ -68,6 +68,18 @@ export function normalizeContextUsage(payload: unknown): Record<string, unknown>
   };
 }
 
+export function mergeContextUsage(previous: unknown, incoming: unknown): Record<string, unknown> | null {
+  const next = normalizeContextUsage(incoming);
+  if (!next) return normalizeContextUsage(previous);
+  const prev = normalizeContextUsage(previous);
+  return {
+    tokens: next.tokens ?? prev?.tokens ?? null,
+    contextWindow: next.contextWindow ?? prev?.contextWindow ?? null,
+    percent: next.percent ?? prev?.percent ?? null,
+    cacheUsage: next.cacheUsage ?? prev?.cacheUsage ?? null,
+  };
+}
+
 export function haveSameContextUsage(a: unknown, b: unknown): boolean {
   const left = normalizeContextUsage(a);
   const right = normalizeContextUsage(b);
@@ -188,8 +200,12 @@ export async function refreshContextUsageForChat(options: RefreshContextUsageFor
     // metrics; keep restored localStorage values unless token cache telemetry
     // is available.
     if (hasRenderableContextUsage(contextPayload)) {
-      setContextUsage((prev: unknown) => haveSameContextUsage(prev, contextPayload) ? prev : contextPayload);
-      persistContextUsage(targetChatJid, contextPayload);
+      setContextUsage((prev: unknown) => {
+        const merged = mergeContextUsage(prev, contextPayload);
+        if (!hasRenderableContextUsage(merged) || haveSameContextUsage(prev, merged)) return prev;
+        persistContextUsage(targetChatJid, merged);
+        return merged;
+      });
     }
   } catch (error) {
     if (activeChatJidRef.current !== targetChatJid) return;

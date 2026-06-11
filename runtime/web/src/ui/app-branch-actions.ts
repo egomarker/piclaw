@@ -301,12 +301,10 @@ export async function purgeArchivedBranch(options: PurgeArchivedBranchOptions): 
   if (!normalized || typeof purgeChatBranch !== 'function') return false;
 
   const branch = currentChatBranches.find((item) => item?.chat_jid === normalized) || null;
-  const isArchived = Boolean(branch?.archived_at);
-  if (!isArchived) {
-    showIntentToast?.('Could not delete branch', 'Only archived sessions can be permanently deleted.', 'warning', 4500);
-    return false;
-  }
-
+  // Do not trust the local branch cache for purge eligibility: the compose
+  // session list can include archived rows while currentChatBranches can be
+  // scoped to non-archived rows. The backend is the source of truth and rejects
+  // non-archived purge attempts.
   const isRootSession = Boolean(branch?.chat_jid && branch.chat_jid === (branch.root_chat_jid || branch.chat_jid));
   const label = `@${branch?.agent_name || normalized}`;
   const targetLabel = isRootSession ? 'session' : 'branch';

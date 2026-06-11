@@ -10,6 +10,7 @@ import {
 import {
   hasRenderableContextUsage,
   haveSameContextUsage,
+  mergeContextUsage,
   normalizeContextUsage,
   persistContextUsage,
   restoreContextUsage,
@@ -251,8 +252,12 @@ export function useChatRefreshLifecycle(options: UseChatRefreshLifecycleOptions)
 
           const contextPayload = normalizeContextUsage(contextPayloadRaw);
           if (hasRenderableContextUsage(contextPayload)) {
-            setContextUsage((prev) => haveSameContextUsage(prev, contextPayload) ? prev : contextPayload);
-            persistContextUsage(targetChatJid, contextPayload);
+            setContextUsage((prev) => {
+              const merged = mergeContextUsage(prev, contextPayload);
+              if (!hasRenderableContextUsage(merged) || haveSameContextUsage(prev, merged)) return prev;
+              persistContextUsage(targetChatJid, merged);
+              return merged;
+            });
           }
         } catch {
           if (activeChatJidRef.current && activeChatJidRef.current !== targetChatJid) return null;

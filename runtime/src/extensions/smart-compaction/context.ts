@@ -81,7 +81,7 @@ export function formatProgressCount(current: number, total: number): string {
   const normalizedCurrent = Math.max(0, Math.trunc(Number(current) || 0));
   const normalizedTotal = Math.max(0, Math.trunc(Number(total) || 0));
   if (normalizedTotal <= 0) return `${normalizedCurrent}`;
-  return `${normalizedCurrent}/${normalizedTotal} (${normalizedCurrent} of ${normalizedTotal})`;
+  return `${normalizedCurrent} of ${normalizedTotal}`;
 }
 
 export function formatProgressRange(start: number, end: number, total: number): string {
@@ -90,7 +90,7 @@ export function formatProgressRange(start: number, end: number, total: number): 
   const normalizedTotal = Math.max(0, Math.trunc(Number(total) || 0));
   if (normalizedStart === normalizedEnd) return formatProgressCount(normalizedStart, normalizedTotal);
   if (normalizedTotal <= 0) return `${normalizedStart}-${normalizedEnd}`;
-  return `${normalizedStart}-${normalizedEnd}/${normalizedTotal} (${normalizedStart}-${normalizedEnd} of ${normalizedTotal})`;
+  return `${normalizedStart}-${normalizedEnd} of ${normalizedTotal}`;
 }
 
 export function formatSmartCompactionStatus(message: string, completionPercent?: number | null): string {

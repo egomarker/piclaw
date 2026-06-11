@@ -9,6 +9,8 @@
  */
 
 import { expect, test, describe, mock } from "bun:test";
+import { readFileSync } from "fs";
+import { join } from "path";
 import "../helpers.js";
 
 // ── Inline types (browser modules can't be imported in bun test) ────
@@ -68,6 +70,18 @@ describe("Editor loader extension contract", () => {
 
     test("capabilities include edit", () => {
         expect(editorExtDef.capabilities).toContain("edit");
+    });
+});
+
+// ── Status footer contract tests ─────────────────────────────────
+
+describe("Editor status footer", () => {
+    test("renders the Reference button after Save using existing footer button styling", () => {
+        const source = readFileSync(join(import.meta.dir, "../../extensions/viewers/editor/editor-extension.ts"), "utf8");
+        expect(source).toContain("referenceBtn.className = 'editor-status-button editor-reference-btn'");
+        expect(source).toContain("referenceBtn.textContent = 'Reference'");
+        expect(source.indexOf("actionsDiv.appendChild(saveBtn);")).toBeGreaterThan(source.indexOf("actionsDiv.appendChild(vimBtn);"));
+        expect(source.indexOf("actionsDiv.appendChild(referenceBtn);")).toBeGreaterThan(source.indexOf("actionsDiv.appendChild(saveBtn);"));
     });
 });
 
