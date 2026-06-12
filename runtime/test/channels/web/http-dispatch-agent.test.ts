@@ -58,6 +58,7 @@ describe("web http agent dispatch", () => {
       handleAgentBranchFork: async () => new Response("branch-fork", { status: 209 }),
       handleAgentBranchRename: async () => new Response("branch-rename", { status: 210 }),
       handleAgentBranchPrune: async () => new Response("branch-prune", { status: 211 }),
+      handleAgentBranchDownload: () => new Response("branch-download", { status: 217 }),
       handleAgentBranchPurge: async () => new Response("branch-purge", { status: 216 }),
       handleAgentBranchRestore: async () => new Response("branch-restore", { status: 212 }),
       handleAgentPeerMessage: async () => new Response("peer-message", { status: 208 }),
@@ -136,6 +137,9 @@ describe("web http agent dispatch", () => {
 
     const branchPruneReq = new Request("https://example.com/agent/branch-prune", { method: "POST" });
     expect((await handleAgentRoutes(channel, branchPruneReq, "/agent/branch-prune", new URL(branchPruneReq.url)))?.status).toBe(211);
+
+    const branchDownloadReq = new Request("https://example.com/agent/branch-download?chat_jid=web%3Aarchived", { method: "GET" });
+    expect((await handleAgentRoutes(channel, branchDownloadReq, "/agent/branch-download", new URL(branchDownloadReq.url)))?.status).toBe(217);
 
     const branchPurgeReq = new Request("https://example.com/agent/branch-purge", { method: "POST" });
     expect((await handleAgentRoutes(channel, branchPurgeReq, "/agent/branch-purge", new URL(branchPurgeReq.url)))?.status).toBe(216);

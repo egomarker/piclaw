@@ -398,6 +398,13 @@ export async function pruneChatBranch(chatJid) {
 }
 
 /**
+ * Build a download URL for an archived chat branch/session JSON export.
+ */
+export function getArchivedChatBranchDownloadUrl(chatJid) {
+    return `/agent/branch-download?chat_jid=${encodeURIComponent(String(chatJid || ''))}`;
+}
+
+/**
  * Permanently delete an already archived chat branch and its durable state.
  */
 export async function purgeChatBranch(chatJid) {

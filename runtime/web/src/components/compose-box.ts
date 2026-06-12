@@ -1,6 +1,6 @@
 import { html, useRef, useState, useEffect, useCallback, useMemo } from '../vendor/preact-htm.js';
 import { findPopupTypeaheadMatch, isPopupTypeaheadKey, resolvePopupTypeaheadMatch, updatePopupTypeaheadBuffer } from '../ui/popup-typeahead.js';
-import { getAgentModels, sendAgentMessage, uploadMedia } from '../api.js';
+import { getAgentModels, getArchivedChatBranchDownloadUrl, sendAgentMessage, uploadMedia } from '../api.js';
 import { getLocalStorageItem, setLocalStorageItem } from '../utils/storage.js';
 import { buildMentionValue, filterMentionAgents, parseMentionAutocompleteQuery } from '../ui/agent-mentions.js';
 import { shouldOpenSessionSwitcherFromBlankCompose, shouldRouteComposeValueToSessionSwitcher } from '../ui/compose-session-switcher.js';
@@ -1572,6 +1572,20 @@ export function ComposeBox({
             console.warn('Failed to restore session:', error);
             requestAnimationFrame(() => textareaRef.current?.focus());
         }
+    };
+
+    const handleDownloadArchivedSession = (chatJid) => {
+        const targetChatJid = typeof chatJid === 'string' ? chatJid.trim() : '';
+        if (!targetChatJid) return;
+        setShowSessionPopup(false);
+        const a = document.createElement('a');
+        a.href = getArchivedChatBranchDownloadUrl(targetChatJid);
+        a.download = '';
+        a.rel = 'noopener';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
     };
 
     const sessionPopupEntries = useMemo(() => {
@@ -3285,6 +3299,24 @@ export function ComposeBox({
                                                     <path d="M12 9v5H2V4h5"/>
                                                 </svg>
                                             </button>
+                                            ${archived && html`
+                                                <button
+                                                    type="button"
+                                                    class="compose-model-popup-item-popout compose-model-popup-item-download"
+                                                    title=${`Download archived session @${chat.agent_name}`}
+                                                    aria-label=${`Download archived session @${chat.agent_name}`}
+                                                    onClick=${(e) => {
+                                                        e.stopPropagation();
+                                                        handleDownloadArchivedSession(chat.chat_jid);
+                                                    }}
+                                                >
+                                                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                                        <path d="M8 2v8"/>
+                                                        <path d="M4.5 6.5 8 10l3.5-3.5"/>
+                                                        <path d="M3 13h10"/>
+                                                    </svg>
+                                                </button>
+                                            `}
                                             ${(canPrune || canPurgeArchived) && html`
                                                 <button
                                                     type="button"

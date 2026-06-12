@@ -1062,7 +1062,8 @@
     height: 12px;
 }
 
-.compose-model-popup-item-row:hover .compose-model-popup-item-popout {
+.compose-model-popup-item-row:hover .compose-model-popup-item-popout,
+.compose-model-popup-item-row.archived .compose-model-popup-item-download {
     display: inline-flex;
 }
 

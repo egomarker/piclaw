@@ -224,6 +224,11 @@ const EXACT_AGENT_ROUTES: ExactAgentRoute[] = [
     handle: (channel, req) => channel.handleAgentBranchPrune(req),
   },
   {
+    method: "GET",
+    path: "/agent/branch-download",
+    handle: (channel, req) => channel.handleAgentBranchDownload(req),
+  },
+  {
     method: "POST",
     path: "/agent/branch-purge",
     handle: (channel, req) => channel.handleAgentBranchPurge(req),
