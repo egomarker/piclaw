@@ -75,9 +75,20 @@ function getContextCappedCompactionReasoningEffort(model: unknown): CompactionRe
   return "high";
 }
 
+function isGitHubCopilotOpus48Model(model: unknown): boolean {
+  const anyModel = model as { provider?: unknown; id?: unknown } | null | undefined;
+  return String(anyModel?.provider || "").toLowerCase() === "github-copilot"
+    && String(anyModel?.id || "").toLowerCase() === "claude-opus-4.8";
+}
+
 function getSupportedCompactionReasoningEfforts(model: unknown): CompactionReasoningEffort[] {
   const anyModel = model as { reasoning?: unknown } | null | undefined;
   if (!anyModel?.reasoning) return [];
+  // GitHub Copilot's Opus 4.8 route advertises reasoning and forces adaptive
+  // thinking, but compaction summaries are background maintenance requests and
+  // have been observed to fail/stall on that path. Avoid sending a reasoning
+  // option for this model so compaction uses the plain summarization stream.
+  if (isGitHubCopilotOpus48Model(model)) return [];
   try {
     const supported = getSupportedThinkingLevels(anyModel as any);
     return supported
