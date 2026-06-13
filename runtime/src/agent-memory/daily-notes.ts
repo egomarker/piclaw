@@ -29,6 +29,17 @@ interface Row {
   day: string;
 }
 
+interface DailyMessageStats {
+  day: string;
+  firstTimestamp: string;
+  lastTimestamp: string;
+  totalMsgs: number;
+  userMsgs: number;
+  botMsgs: number;
+  sessionTrees: number;
+  sessionChats: number;
+}
+
 export interface RefreshDailyNotesResult {
   scope_mode: string;
   scope_anchor: string;
@@ -57,6 +68,40 @@ function formatDateLong(iso: string): string {
 }
 
 function todayStr(): string { return new Date().toISOString().slice(0, 10); }
+
+function windowStartDay(days: number): string {
+  return new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+}
+
+function buildDailyMessageStats(day: string, messages: Row[]): DailyMessageStats {
+  return {
+    day,
+    firstTimestamp: messages[0].timestamp,
+    lastTimestamp: messages[messages.length - 1].timestamp,
+    totalMsgs: messages.length,
+    userMsgs: messages.filter((message) => !message.is_bot_message).length,
+    botMsgs: messages.filter((message) => message.is_bot_message).length,
+    sessionTrees: new Set(messages.map((message) => message.root_chat_jid)).size,
+    sessionChats: new Set(messages.map((message) => message.chat_jid)).size,
+  };
+}
+
+function noteSliceMetadataDrift(
+  fields: Record<string, string>,
+  stats: DailyMessageStats,
+  scope: { mode: string; anchor: string },
+): boolean {
+  return (fields.date || "") !== stats.day
+    || (fields.messages_total || "") !== String(stats.totalMsgs)
+    || (fields.messages_user || "") !== String(stats.userMsgs)
+    || (fields.messages_assistant || "") !== String(stats.botMsgs)
+    || (fields.session_trees || "") !== String(stats.sessionTrees)
+    || (fields.session_chats || "") !== String(stats.sessionChats)
+    || (fields.first_message || "") !== stats.firstTimestamp
+    || (fields.last_message || "") !== stats.lastTimestamp
+    || (fields.scope_mode || "") !== scope.mode
+    || (fields.scope_anchor || "") !== scope.anchor;
+}
 
 function splitFrontMatter(content: string): FrontMatter {
   const match = content.match(/^---\n([\s\S]*?)\n---\n?/);
@@ -266,17 +311,68 @@ function resolveScope(chatJid: string): { clause: string; params: string[]; mode
   return { clause: "m.chat_jid = ?", params: [normalized], mode: "chat-only", anchor: normalized };
 }
 
+function loadDailyMessageStatsSince(cutoffIso: string, scope: { clause: string; params: string[] }): Map<string, DailyMessageStats> {
+  const db = getDb();
+  const rows = db.query<{
+    day: string;
+    first_timestamp: string;
+    last_timestamp: string;
+    total_msgs: number;
+    user_msgs: number;
+    bot_msgs: number;
+    session_trees: number;
+    session_chats: number;
+  }, any[]>(
+    `SELECT substr(m.timestamp, 1, 10) AS day,
+            MIN(m.timestamp) AS first_timestamp,
+            MAX(m.timestamp) AS last_timestamp,
+            COUNT(*) AS total_msgs,
+            SUM(CASE WHEN COALESCE(m.is_bot_message, 0) = 0 THEN 1 ELSE 0 END) AS user_msgs,
+            SUM(CASE WHEN COALESCE(m.is_bot_message, 0) = 1 THEN 1 ELSE 0 END) AS bot_msgs,
+            COUNT(DISTINCT COALESCE(cb.root_chat_jid, m.chat_jid)) AS session_trees,
+            COUNT(DISTINCT m.chat_jid) AS session_chats
+     FROM messages m
+     LEFT JOIN chat_branches cb ON cb.chat_jid = m.chat_jid
+     WHERE ${scope.clause}
+       AND m.timestamp >= ?
+     GROUP BY day
+     ORDER BY day ASC`
+  ).all(...scope.params, cutoffIso);
+
+  return new Map(rows.map((row) => [row.day, {
+    day: row.day,
+    firstTimestamp: row.first_timestamp,
+    lastTimestamp: row.last_timestamp,
+    totalMsgs: row.total_msgs,
+    userMsgs: row.user_msgs,
+    botMsgs: row.bot_msgs,
+    sessionTrees: row.session_trees,
+    sessionChats: row.session_chats,
+  }]));
+}
+
 export function inspectDailyNoteSummaryBacklog(options?: { recentDays?: number }): DailyNoteSummaryBacklog {
   const recentDays = Math.max(1, Math.floor(Number(options?.recentDays) || 7));
   const dailyNotesDir = resolve(process.env.PICLAW_WORKSPACE || WORKSPACE_DIR, "notes/daily");
-  const cutoff = new Date(Date.now() - recentDays * 86400000).toISOString().slice(0, 10);
+  const cutoff = windowStartDay(recentDays);
   const today = todayStr();
+  const allChatsScope = resolveScope("*");
   let unsummarised = 0;
   let partial = 0;
   let missing_watermark = 0;
   let missing = 0;
   const dates = new Set<string>();
   const existingDates = new Set<string>();
+  let statsByDay = new Map<string, DailyMessageStats>();
+
+  try {
+    statsByDay = loadDailyMessageStatsSince(`${cutoff}T00:00:00.000Z`, allChatsScope);
+  } catch (error) {
+    debugSuppressedError(log, "Failed to inspect message days while checking daily-note backlog.", error, {
+      operation: "daily_notes.inspect_backlog.message_days",
+      recentDays,
+    });
+  }
 
   if (existsSync(dailyNotesDir)) {
     for (const file of readdirSync(dailyNotesDir).filter((entry) => /^\d{4}-\d{2}-\d{2}\.md$/.test(entry)).sort()) {
@@ -288,6 +384,10 @@ export function inspectDailyNoteSummaryBacklog(options?: { recentDays?: number }
       const summary = extractSummary(body);
       const summarisedUntil = (fields.summarised_until || '').trim();
       const needsSummaryUpdate = body.includes(SUMMARY_UPDATE_MARKER);
+      const hasIncompleteWarning = body.includes(INCOMPLETE_WARNING_TITLE);
+      const stats = statsByDay.get(date);
+      const metadataDrift = stats ? noteSliceMetadataDrift(fields, stats, allChatsScope) : false;
+      const newerMessagesExist = Boolean(summary && summarisedUntil && stats && stats.lastTimestamp > summarisedUntil);
 
       if (!summary) {
         unsummarised += 1;
@@ -299,34 +399,19 @@ export function inspectDailyNoteSummaryBacklog(options?: { recentDays?: number }
         dates.add(date);
         continue;
       }
-      if (needsSummaryUpdate) {
+      if (needsSummaryUpdate || hasIncompleteWarning || metadataDrift || newerMessagesExist) {
         partial += 1;
         dates.add(date);
       }
     }
   }
 
-  try {
-    const db = getDb();
-    const rows = db.query<{ day: string }, [string, string]>(
-      `SELECT DISTINCT substr(timestamp, 1, 10) AS day
-       FROM messages
-       WHERE chat_jid NOT LIKE 'dream:%'
-         AND timestamp >= ?
-         AND substr(timestamp, 1, 10) < ?
-       ORDER BY day ASC`
-    ).all(`${cutoff}T00:00:00.000Z`, today);
-    for (const row of rows) {
-      if (!existingDates.has(row.day)) {
-        missing += 1;
-        dates.add(row.day);
-      }
+  for (const day of [...statsByDay.keys()].sort()) {
+    if (day >= today) continue;
+    if (!existingDates.has(day)) {
+      missing += 1;
+      dates.add(day);
     }
-  } catch (error) {
-    debugSuppressedError(log, "Failed to inspect message days while checking daily-note backlog.", error, {
-      operation: "daily_notes.inspect_backlog.message_days",
-      recentDays,
-    });
   }
 
   return { unsummarised, partial, missing_watermark, missing, dates: [...dates].sort() };
@@ -342,7 +427,8 @@ export function refreshDailyNotesFromMessages(options?: { days?: number; chatJid
   const db = getDb();
   const scope = resolveScope(chatJid);
   const params: any[] = [...scope.params];
-  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+  const cutoffDay = windowStartDay(days);
+  const cutoffIso = `${cutoffDay}T00:00:00.000Z`;
   const rows = db.query<Row, any[]>(
     `SELECT m.sender_name,
             m.is_bot_message,
@@ -355,7 +441,7 @@ export function refreshDailyNotesFromMessages(options?: { days?: number; chatJid
      LEFT JOIN chat_branches cb ON cb.chat_jid = m.chat_jid
      WHERE ${scope.clause} AND m.timestamp >= ?
      ORDER BY m.timestamp ASC`
-  ).all(...params, cutoff);
+  ).all(...params, cutoffIso);
 
   const dayMap = new Map<string, Row[]>();
   for (const row of rows) {
@@ -372,13 +458,8 @@ export function refreshDailyNotesFromMessages(options?: { days?: number; chatJid
   for (const day of sortedDays) {
     const filePath = `${dailyNotesDir}/${day}.md`;
     const messages = dayMap.get(day)!;
-    const firstTimestamp = messages[0].timestamp;
-    const lastTimestamp = messages[messages.length - 1].timestamp;
-    const totalMsgs = messages.length;
-    const userMsgs = messages.filter((m) => !m.is_bot_message).length;
-    const botMsgs = messages.filter((m) => m.is_bot_message).length;
-    const sessionTrees = new Set(messages.map((m) => m.root_chat_jid)).size;
-    const sessionChats = new Set(messages.map((m) => m.chat_jid)).size;
+    const stats = buildDailyMessageStats(day, messages);
+    const { firstTimestamp, lastTimestamp, totalMsgs, userMsgs, botMsgs, sessionTrees, sessionChats } = stats;
     const isToday = day === today;
 
     if (existsSync(filePath)) {
@@ -391,9 +472,11 @@ export function refreshDailyNotesFromMessages(options?: { days?: number; chatJid
       const hasWm = existingWm.length > 0;
       const needsPartialUpdate = Boolean(summary && hasWm && lastTimestamp > existingWm);
       const needsMigration = !hasFrontMatter || !("date" in fields) || !("summarised_until" in fields);
-      const shouldWrite = isToday || force || needsMigration || needsPartialUpdate;
+      const metadataDrift = noteSliceMetadataDrift(fields, stats, scope);
+      const needsSliceReseed = !summary || !hasWm || needsMigration || metadataDrift;
+      const shouldWrite = isToday || force || needsSliceReseed || needsPartialUpdate;
 
-      if (!isToday && !force && !shouldWrite) {
+      if (!shouldWrite) {
         skipped += 1;
         continue;
       }
@@ -406,7 +489,7 @@ export function refreshDailyNotesFromMessages(options?: { days?: number; chatJid
         ? { lastTimestamp }
         : needsPartialUpdate
           ? { summarisedUntil: existingWm, lastTimestamp, needsSummaryUpdate: true }
-          : !hasWm
+          : needsSliceReseed
             ? { lastTimestamp }
             : null;
       body = upsertIncompleteWarning(body, incompleteState);
@@ -416,7 +499,7 @@ export function refreshDailyNotesFromMessages(options?: { days?: number; chatJid
 
       const nextFields: Record<string, string> = {
         ...fields,
-        date: fields.date || day,
+        date: day,
         summarised_until: existingWm,
         messages_total: String(totalMsgs),
         messages_user: String(userMsgs),

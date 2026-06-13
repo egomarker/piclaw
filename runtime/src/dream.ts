@@ -89,16 +89,7 @@ function isDreamToolAllowed(toolName: string): boolean {
 }
 
 function refreshDailyNotes(_chatJid: string, days: number): boolean {
-  const backlog = inspectDailyNoteSummaryBacklog({ recentDays: days });
-  const oldestBacklogDay = backlog.dates.length > 0 ? backlog.dates.slice().sort()[0] : null;
-  const boundedDays = (() => {
-    if (!oldestBacklogDay) return 1;
-    const diffMs = Date.now() - new Date(`${oldestBacklogDay}T00:00:00Z`).getTime();
-    const spanDays = Math.max(1, Math.floor(diffMs / 86400000) + 1);
-    return Math.max(1, Math.min(days, spanDays));
-  })();
-
-  refreshDailyNotesFromMessages({ chatJid: DREAM_ALL_CHATS_SCOPE_ANCHOR, days: boundedDays });
+  refreshDailyNotesFromMessages({ chatJid: DREAM_ALL_CHATS_SCOPE_ANCHOR, days });
   return true;
 }
 
