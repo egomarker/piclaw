@@ -19,6 +19,7 @@ export {
   renameChatJid,
   archiveChatBranch,
   mergeChatBranchIntoParent,
+  exportArchivedBranchDownloadData,
   previewPermanentDeleteArchivedBranch,
   permanentDeleteArchivedBranch,
   restoreChatBranchIdentity,

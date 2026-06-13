@@ -154,6 +154,10 @@ describe("web channel http surface service", () => {
           calls.push(`branch-prune:${req.method}`);
           return response("branch-prune");
         },
+        handleAgentBranchDownload: (req: Request) => {
+          calls.push(`branch-download:${req.method}:${new URL(req.url).searchParams.get("chat_jid") ?? ""}`);
+          return response("branch-download");
+        },
         handleAgentBranchPurge: async (req: Request) => {
           calls.push(`branch-purge:${req.method}`);
           return response("branch-purge");
@@ -255,6 +259,7 @@ describe("web channel http surface service", () => {
     expect(await (await service.handleAgentBranchFork(postReq)).text()).toBe("branch-fork");
     expect(await (await service.handleAgentBranchRename(postReq)).text()).toBe("branch-rename");
     expect(await (await service.handleAgentBranchPrune(postReq)).text()).toBe("branch-prune");
+    expect(await service.handleAgentBranchDownload(new Request("https://example.test/agent/branch-download?chat_jid=web%3Aarchived", { method: "GET" })).text()).toBe("branch-download");
     expect(await (await service.handleAgentBranchPurge(postReq)).text()).toBe("branch-purge");
     expect(await (await service.handleAgentBranchRestore(postReq)).text()).toBe("branch-restore");
     expect(await (await service.handleAgentRespond(postReq)).text()).toBe("respond");
@@ -301,6 +306,7 @@ describe("web channel http surface service", () => {
       "branch-fork:POST",
       "branch-rename:POST",
       "branch-prune:POST",
+      "branch-download:GET:web:archived",
       "branch-purge:POST",
       "branch-restore:POST",
       "respond:POST",

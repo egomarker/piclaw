@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from '../vendor/preact-htm.js';
+import { useCallback, useEffect, useRef } from '../vendor/preact-htm.js';
 import { createEditorPopoutTransferPayload } from '../panes/editor-popout-transfer.js';
 import { createPaneHostTransferPayload } from '../panes/pane-host-transfer.js';
 import { registerPaneLiveTransfer } from '../panes/pane-live-transfer.js';
@@ -27,6 +27,24 @@ import {
 } from './app-window-actions.js';
 
 type StateSetter<T> = (next: T | ((prev: T) => T)) => void;
+
+function filterRowsByChatJid<T extends { chat_jid?: string | null }>(rows: T[] | undefined | null, target: string): T[] {
+  if (!Array.isArray(rows) || !target) return Array.isArray(rows) ? rows : [];
+  return rows.filter((row) => row?.chat_jid !== target);
+}
+
+function collectRowsByChatJid<T extends { chat_jid?: string | null }>(rows: T[] | undefined | null, target: string): T[] {
+  if (!Array.isArray(rows) || !target) return [];
+  return rows.filter((row) => row?.chat_jid === target);
+}
+
+function restoreMissingRowsByChatJid<T extends { chat_jid?: string | null }>(rows: T[] | undefined | null, removedRows: T[]): T[] {
+  const currentRows = Array.isArray(rows) ? rows : [];
+  if (!removedRows.length) return currentRows;
+  const currentJids = new Set(currentRows.map((row) => row?.chat_jid).filter(Boolean));
+  const missingRows = removedRows.filter((row) => row?.chat_jid && !currentJids.has(row.chat_jid));
+  return missingRows.length ? [...currentRows, ...missingRows] : currentRows;
+}
 
 interface RefBox<T> {
   current: T;
@@ -163,18 +181,19 @@ export interface PruneCurrentBranchActionOptions {
   showIntentToast: (title: string, detail?: string | null, kind?: string, durationMs?: number) => void;
   chatOnlyMode?: boolean;
   navigate: (url: string) => void;
+  confirm?: (message: string) => boolean;
   hasWindow?: boolean;
   baseHref?: string;
 }
 
-export async function pruneCurrentBranchAction(options: PruneCurrentBranchActionOptions): Promise<void> {
+export async function pruneCurrentBranchAction(options: PruneCurrentBranchActionOptions): Promise<boolean> {
   const {
     hasWindow = typeof window !== 'undefined',
     baseHref = hasWindow ? window.location.href : 'http://localhost/',
     ...rest
   } = options;
 
-  await pruneCurrentBranch({
+  return await pruneCurrentBranch({
     hasWindow,
     baseHref,
     ...rest,
@@ -651,6 +670,26 @@ export function useBranchPaneLifecycle(options: UseBranchPaneLifecycleOptions) {
     readStoredNumber,
   } = options;
 
+  const deletingSessionChatJidsRef = useRef(new Set<string>());
+
+  const optimisticallyRemoveSessionRows = useCallback((target: string) => {
+    if (!target || deletingSessionChatJidsRef.current.has(target)) return null;
+    deletingSessionChatJidsRef.current.add(target);
+    const removedActiveRows = collectRowsByChatJid(activeChatAgents, target);
+    const removedBranchRows = collectRowsByChatJid(currentChatBranches, target);
+    setActiveChatAgents((prev) => filterRowsByChatJid(prev, target));
+    setCurrentChatBranches((prev) => filterRowsByChatJid(prev, target));
+    return { removedActiveRows, removedBranchRows };
+  }, [activeChatAgents, currentChatBranches, setActiveChatAgents, setCurrentChatBranches]);
+
+  const finishOptimisticSessionRemoval = useCallback((target: string, succeeded: boolean, snapshot: { removedActiveRows: any[]; removedBranchRows: any[] } | null) => {
+    if (!target) return;
+    deletingSessionChatJidsRef.current.delete(target);
+    if (succeeded || !snapshot) return;
+    setActiveChatAgents((prev) => restoreMissingRowsByChatJid(prev, snapshot.removedActiveRows));
+    setCurrentChatBranches((prev) => restoreMissingRowsByChatJid(prev, snapshot.removedBranchRows));
+  }, [setActiveChatAgents, setCurrentChatBranches]);
+
   const toggleWorkspace = useCallback(() => {
     toggleWorkspaceVisibility(setWorkspaceOpen);
   }, [setWorkspaceOpen]);
@@ -701,21 +740,37 @@ export function useBranchPaneLifecycle(options: UseBranchPaneLifecycleOptions) {
     });
   }, [closeRenameCurrentBranchForm, currentBranchRecord, chatOnlyMode, getFormLock, navigate, openRenameCurrentBranchForm, refreshActiveChatAgents, refreshCurrentChatBranches, renameBranchInFlightRef, renameBranchLockUntilRef, renameChatBranch, setIsRenamingBranch, showIntentToast]);
 
-  const handlePruneCurrentBranch = useCallback(async (targetChatJid: string | null = null) => {
-    await pruneCurrentBranchAction({
-      targetChatJid,
-      currentChatJid,
-      currentBranchRecord,
-      currentChatBranches,
-      activeChatAgents,
-      pruneChatBranch,
-      refreshActiveChatAgents,
-      refreshCurrentChatBranches,
-      showIntentToast,
-      chatOnlyMode,
-      navigate,
-    });
-  }, [activeChatAgents, chatOnlyMode, currentBranchRecord, currentChatBranches, currentChatJid, navigate, pruneChatBranch, refreshActiveChatAgents, refreshCurrentChatBranches, showIntentToast]);
+  const handlePruneCurrentBranch = useCallback(async (targetChatJid: string | null = null, options?: { confirmed?: boolean }) => {
+    const target = typeof targetChatJid === 'string' && targetChatJid.trim()
+      ? targetChatJid.trim()
+      : currentBranchRecord?.chat_jid || currentChatJid;
+    const removalSnapshot = options?.confirmed && target ? optimisticallyRemoveSessionRows(target) : null;
+    if (options?.confirmed && target && !removalSnapshot) return false;
+    let pruned = false;
+    try {
+      pruned = await pruneCurrentBranchAction({
+        targetChatJid,
+        currentChatJid,
+        currentBranchRecord,
+        currentChatBranches,
+        activeChatAgents,
+        pruneChatBranch,
+        refreshActiveChatAgents,
+        refreshCurrentChatBranches,
+        showIntentToast,
+        chatOnlyMode,
+        navigate,
+        ...(options?.confirmed ? { confirm: () => true } : {}),
+      });
+    } finally {
+      finishOptimisticSessionRemoval(target, pruned, removalSnapshot);
+    }
+    if (pruned && target) {
+      setActiveChatAgents((prev) => filterRowsByChatJid(prev, target));
+      setCurrentChatBranches((prev) => filterRowsByChatJid(prev, target));
+    }
+    return pruned;
+  }, [activeChatAgents, chatOnlyMode, currentBranchRecord, currentChatBranches, currentChatJid, finishOptimisticSessionRemoval, navigate, optimisticallyRemoveSessionRows, pruneChatBranch, refreshActiveChatAgents, refreshCurrentChatBranches, setActiveChatAgents, setCurrentChatBranches, showIntentToast]);
 
   const handlePurgeArchivedBranch = useCallback(async (targetChatJid: string, options?: { confirmed?: boolean }) => {
     const target = typeof targetChatJid === 'string' ? targetChatJid.trim() : '';
@@ -723,21 +778,28 @@ export function useBranchPaneLifecycle(options: UseBranchPaneLifecycleOptions) {
       ...(Array.isArray(activeChatAgents) ? activeChatAgents : []),
       ...(Array.isArray(currentChatBranches) ? currentChatBranches : []),
     ];
-    const purged = await purgeArchivedBranchAction({
-      targetChatJid,
-      purgeChatBranch,
-      currentChatBranches: branchRows,
-      refreshActiveChatAgents,
-      refreshCurrentChatBranches,
-      showIntentToast,
-      ...(options?.confirmed ? { confirm: () => true } : {}),
-    });
+    const removalSnapshot = options?.confirmed && target ? optimisticallyRemoveSessionRows(target) : null;
+    if (options?.confirmed && target && !removalSnapshot) return false;
+    let purged = false;
+    try {
+      purged = await purgeArchivedBranchAction({
+        targetChatJid,
+        purgeChatBranch,
+        currentChatBranches: branchRows,
+        refreshActiveChatAgents,
+        refreshCurrentChatBranches,
+        showIntentToast,
+        ...(options?.confirmed ? { confirm: () => true } : {}),
+      });
+    } finally {
+      finishOptimisticSessionRemoval(target, purged, removalSnapshot);
+    }
     if (purged && target) {
-      setActiveChatAgents((prev) => Array.isArray(prev) ? prev.filter((chat) => chat?.chat_jid !== target) : prev);
-      setCurrentChatBranches((prev) => Array.isArray(prev) ? prev.filter((chat) => chat?.chat_jid !== target) : prev);
+      setActiveChatAgents((prev) => filterRowsByChatJid(prev, target));
+      setCurrentChatBranches((prev) => filterRowsByChatJid(prev, target));
     }
     return purged;
-  }, [activeChatAgents, currentChatBranches, purgeChatBranch, refreshActiveChatAgents, refreshCurrentChatBranches, setActiveChatAgents, setCurrentChatBranches, showIntentToast]);
+  }, [activeChatAgents, currentChatBranches, finishOptimisticSessionRemoval, optimisticallyRemoveSessionRows, purgeChatBranch, refreshActiveChatAgents, refreshCurrentChatBranches, setActiveChatAgents, setCurrentChatBranches, showIntentToast]);
 
   const handleRestoreBranch = useCallback(async (targetChatJid: string) => {
     await restoreBranchAction({

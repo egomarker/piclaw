@@ -232,14 +232,18 @@ describe("smart-compaction", () => {
     expect(formatProgressRange(4, 4, 9)).toBe("4 of 9");
   });
 
-  it("maps compaction reasoning targets to model support and context capacity", () => {
+  it("maps compaction reasoning targets to explicit model support and context capacity", () => {
+    const explicitCompactionMap = { minimal: "minimal", low: "low", medium: "medium", high: "high" };
+
     expect(getCompactionReasoningEffort({ provider: "test", id: "plain", reasoning: false, contextWindow: 512_000 }, "progressive_final")).toBeUndefined();
-    expect(getCompactionReasoningEffort({ provider: "test", id: "tiny", reasoning: true, contextWindow: 24_000 }, "progressive_final")).toBe("minimal");
-    expect(getCompactionReasoningEffort({ provider: "test", id: "medium", reasoning: true, contextWindow: 128_000 }, "progressive_final")).toBe("medium");
-    expect(getCompactionReasoningEffort({ provider: "test", id: "large", reasoning: true, contextWindow: 512_000 }, "progressive_chunk")).toBe("low");
-    expect(getCompactionReasoningEffort({ provider: "test", id: "large", reasoning: true, contextWindow: 512_000 }, "progressive_final")).toBe("high");
-    expect(getCompactionReasoningEffort({ provider: "test", id: "no-high", reasoning: true, contextWindow: 512_000, thinkingLevelMap: { high: null } }, "progressive_final")).toBe("medium");
+    expect(getCompactionReasoningEffort({ provider: "test", id: "implicit", reasoning: true, contextWindow: 512_000 }, "progressive_final")).toBeUndefined();
+    expect(getCompactionReasoningEffort({ provider: "test", id: "tiny", reasoning: true, contextWindow: 24_000, thinkingLevelMap: explicitCompactionMap }, "progressive_final")).toBe("minimal");
+    expect(getCompactionReasoningEffort({ provider: "test", id: "medium", reasoning: true, contextWindow: 128_000, thinkingLevelMap: explicitCompactionMap }, "progressive_final")).toBe("medium");
+    expect(getCompactionReasoningEffort({ provider: "test", id: "large", reasoning: true, contextWindow: 512_000, thinkingLevelMap: explicitCompactionMap }, "progressive_chunk")).toBe("low");
+    expect(getCompactionReasoningEffort({ provider: "test", id: "large", reasoning: true, contextWindow: 512_000, thinkingLevelMap: explicitCompactionMap }, "progressive_final")).toBe("high");
+    expect(getCompactionReasoningEffort({ provider: "test", id: "no-high", reasoning: true, contextWindow: 512_000, thinkingLevelMap: { minimal: "minimal", low: "low", medium: "medium", high: null } }, "progressive_final")).toBe("medium");
     expect(getCompactionReasoningEffort({ provider: "test", id: "no-supported-effort", reasoning: true, contextWindow: 512_000, thinkingLevelMap: { minimal: null, low: null, medium: null, high: null } }, "progressive_final")).toBeUndefined();
+    expect(getCompactionReasoningEffort({ provider: "github-copilot", id: "claude-opus-4.8", reasoning: true, contextWindow: 200_000, thinkingLevelMap: { xhigh: "xhigh" } }, "selective")).toBeUndefined();
   });
 
   it("trims progressive merge retry prompts by preserving rules and recent summaries", () => {
@@ -305,7 +309,7 @@ describe("smart-compaction", () => {
     });
 
     const prep = makePreparation(60);
-    const ctx = makeCtx({ model: { provider: "test", id: "test-model", reasoning: true, contextWindow: 128000 } });
+    const ctx = makeCtx({ model: { provider: "test", id: "test-model", reasoning: true, contextWindow: 128000, thinkingLevelMap: { minimal: "minimal", low: "low", medium: "medium", high: "high" } } });
     const result = await handler!(
       {
         preparation: prep,
@@ -364,6 +368,37 @@ describe("smart-compaction", () => {
       completionPercent: 100,
       completionEstimated: true,
     });
+  });
+
+  it("does not request reasoning for GitHub Copilot Opus 4.8 compaction", async () => {
+    const summaryText = "## Goal\nGitHub Opus compaction\n\n## Current Active Topic\n- avoid stalled maintenance reasoning\n\n## Historical / Background Context\n- GitHub Copilot Opus 4.8 advertises reasoning, but compaction should use plain summarization\n\n## Constraints & Preferences\n- preserve continuity\n\n## Progress\n### Done\n- [x] Built selective summary\n\n### In Progress\n- [ ] validate deployment\n\n### Blocked\n- none\n\n## Key Decisions\n- **Compaction transport**: omit reasoning for this model\n\n## Next Steps\n1. continue\n\n## Critical Context\n- context";
+
+    (completeSimple as any).mockResolvedValueOnce({
+      content: [{ type: "text", text: summaryText }],
+      stopReason: "end",
+    });
+
+    const result = await handler!(
+      {
+        preparation: makePreparation(60),
+        branchEntries: [],
+        signal: new AbortController().signal,
+      },
+      makeCtx({
+        model: {
+          provider: "github-copilot",
+          id: "claude-opus-4.8",
+          reasoning: true,
+          thinkingLevelMap: { xhigh: "xhigh" },
+          contextWindow: 200_000,
+        },
+      }),
+    );
+
+    expect(result.compaction.summary).toContain("GitHub Opus compaction");
+    expect(completeSimple).toHaveBeenCalledTimes(1);
+    expect((completeSimple as any).mock.calls[0][0]).toMatchObject({ provider: "github-copilot", id: "claude-opus-4.8" });
+    expect((completeSimple as any).mock.calls[0][2]).not.toHaveProperty("reasoning");
   });
 
   it("sanitizes context-pruned tool history before building the compaction prompt", async () => {
@@ -854,7 +889,7 @@ describe("smart-compaction", () => {
         };
       });
 
-      const ctx = makeCtx({ model: { provider: "test", id: "small-context", contextWindow: 16_000, reasoning: true } });
+      const ctx = makeCtx({ model: { provider: "test", id: "small-context", contextWindow: 16_000, reasoning: true, thinkingLevelMap: { minimal: "minimal", low: "low", medium: "medium", high: "high" } } });
       const result = await handler!(
         {
           preparation: makePreparation(longMessages.length, {

@@ -140,12 +140,15 @@ export function getComposeHistoryStorageKey(chatJid = 'web:default') {
     return `${COMPOSE_HISTORY_STORAGE_KEY}:${encodeURIComponent(normalized)}`;
 }
 
-export function resolveSessionPopupChats(activeChatAgents, currentChatJid = null) {
+export function resolveSessionPopupChats(activeChatAgents, currentChatJid = null, hiddenChatJids = null) {
     const seen = new Set();
+    const hidden = hiddenChatJids instanceof Set
+        ? hiddenChatJids
+        : new Set(Array.isArray(hiddenChatJids) ? hiddenChatJids : []);
     const chats = [];
     for (const chat of Array.isArray(activeChatAgents) ? activeChatAgents : []) {
         const chatJid = typeof chat?.chat_jid === 'string' ? chat.chat_jid.trim() : '';
-        if (!chatJid || seen.has(chatJid)) continue;
+        if (!chatJid || seen.has(chatJid) || hidden.has(chatJid)) continue;
         const agentName = typeof chat?.agent_name === 'string' ? chat.agent_name.trim() : '';
         if (!agentName) continue;
         seen.add(chatJid);
@@ -1148,6 +1151,9 @@ export function ComposeBox({
     const [showModelPopup, setShowModelPopup] = useState(false);
     const [showSessionPopup, setShowSessionPopup] = useState(false);
     const [pendingPurgeChatJid, setPendingPurgeChatJid] = useState(null);
+    const [pendingPruneChatJid, setPendingPruneChatJid] = useState(null);
+    const [hiddenSessionChatJids, setHiddenSessionChatJids] = useState(() => new Set());
+    const deletingSessionChatJidsRef = useRef(new Set());
     const [modelOptions, setModelOptions] = useState([]);
     const [modelPopupIndex, setModelPopupIndex] = useState(0);
     const [sessionPopupIndex, setSessionPopupIndex] = useState(0);
@@ -1167,6 +1173,7 @@ export function ComposeBox({
     const modelPopupRef = useRef(null);
     const modelHintRef = useRef(null);
     const sessionPopupRef = useRef(null);
+    const sessionPopupChatsRef = useRef([]);
     const sessionTriggerRef = useRef(null);
     const footerRef = useRef(null);
     const popupTypeaheadRef = useRef({ value: '', updatedAt: 0 });
@@ -1340,7 +1347,8 @@ export function ComposeBox({
         });
         return parent || null;
     })();
-    const switchableChatAgents = useMemo(() => resolveSessionPopupChats(activeChatAgents, currentChatJid), [activeChatAgents, currentChatJid]);
+    const switchableChatAgents = useMemo(() => resolveSessionPopupChats(activeChatAgents, currentChatJid, hiddenSessionChatJids), [activeChatAgents, currentChatJid, hiddenSessionChatJids]);
+    sessionPopupChatsRef.current = switchableChatAgents;
     const hasSwitchableChatAgents = switchableChatAgents.length > 0;
     const canSwitchSession = hasSwitchableChatAgents && typeof onSwitchChat === 'function';
     const canRestoreSession = hasSwitchableChatAgents && typeof onRestoreSession === 'function';
@@ -1572,6 +1580,95 @@ export function ComposeBox({
             requestAnimationFrame(() => textareaRef.current?.focus());
         }
     };
+
+    const hideSessionRowWhileDeleting = useCallback((chatJid) => {
+        const target = typeof chatJid === 'string' ? chatJid.trim() : '';
+        if (!target || deletingSessionChatJidsRef.current.has(target)) return false;
+        deletingSessionChatJidsRef.current.add(target);
+        setHiddenSessionChatJids((prev) => {
+            const next = new Set(prev instanceof Set ? prev : []);
+            next.add(target);
+            return next;
+        });
+        return true;
+    }, []);
+
+    const finishSessionRowDelete = useCallback((chatJid, succeeded) => {
+        const target = typeof chatJid === 'string' ? chatJid.trim() : '';
+        if (!target) return;
+        deletingSessionChatJidsRef.current.delete(target);
+        if (succeeded) return;
+        setHiddenSessionChatJids((prev) => {
+            const next = new Set(prev instanceof Set ? prev : []);
+            next.delete(target);
+            return next;
+        });
+    }, []);
+
+    const confirmSessionRowDelete = useCallback(async (chat, options = {}) => {
+        const chatJid = typeof chat?.chat_jid === 'string' ? chat.chat_jid.trim() : '';
+        if (!chatJid) return;
+        if (options.canPurgeArchived) {
+            if (!hideSessionRowWhileDeleting(chatJid)) return;
+            setPendingPurgeChatJid(null);
+            let succeeded = false;
+            try {
+                const purged = await onPurgeArchivedSession?.(chatJid, { confirmed: true });
+                succeeded = purged !== false;
+            } catch (error) {
+                console.warn('Failed to purge archived session:', error);
+            }
+            finishSessionRowDelete(chatJid, succeeded);
+            if (succeeded) {
+                setShowSessionPopup(false);
+            }
+            return;
+        }
+        if (options.canPrune) {
+            if (!hideSessionRowWhileDeleting(chatJid)) return;
+            setPendingPruneChatJid(null);
+            let succeeded = false;
+            try {
+                const pruned = await onDeleteSession(chatJid, { confirmed: true });
+                succeeded = pruned !== false;
+            } catch (error) {
+                console.warn('Failed to delete session:', error);
+            }
+            finishSessionRowDelete(chatJid, succeeded);
+            if (succeeded) {
+                setShowSessionPopup(false);
+            }
+        }
+    }, [finishSessionRowDelete, hideSessionRowWhileDeleting, onDeleteSession, onPurgeArchivedSession]);
+
+    useEffect(() => {
+        if (!showSessionPopup) return;
+        const handleConfirmDeletePointer = (event) => {
+            const popup = sessionPopupRef.current;
+            if (!popup) return;
+            const target = event.target;
+            const button = target?.closest?.('button.compose-model-popup-item-delete.confirming[data-chat-jid]');
+            if (!button || !popup.contains(button)) return;
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            event.stopImmediatePropagation?.();
+            const chatJid = typeof button.dataset?.chatJid === 'string' ? button.dataset.chatJid.trim() : '';
+            if (!chatJid) return;
+            const chat = sessionPopupChatsRef.current.find((row) => row?.chat_jid === chatJid) || { chat_jid: chatJid };
+            void confirmSessionRowDelete(chat, {
+                canPurgeArchived: button.dataset?.deleteKind === 'purge',
+                canPrune: button.dataset?.deleteKind === 'prune',
+            });
+        };
+        document.addEventListener('pointerdown', handleConfirmDeletePointer, true);
+        document.addEventListener('mousedown', handleConfirmDeletePointer, true);
+        document.addEventListener('touchstart', handleConfirmDeletePointer, true);
+        return () => {
+            document.removeEventListener('pointerdown', handleConfirmDeletePointer, true);
+            document.removeEventListener('mousedown', handleConfirmDeletePointer, true);
+            document.removeEventListener('touchstart', handleConfirmDeletePointer, true);
+        };
+    }, [confirmSessionRowDelete, showSessionPopup]);
 
     const sessionPopupEntries = useMemo(() => {
         const entries = [];
@@ -2709,7 +2806,10 @@ export function ComposeBox({
     }, [showSessionPopup, showSessionSwitcherButton]);
 
     useEffect(() => {
-        if (!showSessionPopup) setPendingPurgeChatJid(null);
+        if (!showSessionPopup) {
+            setPendingPurgeChatJid(null);
+            setPendingPruneChatJid(null);
+        }
     }, [showSessionPopup]);
 
     useEffect(() => {
@@ -3232,6 +3332,8 @@ export function ComposeBox({
                                     const canPrune = !isRoot && !chat.is_active && !archived && typeof onDeleteSession === 'function';
                                     const canPurgeArchived = archived && canPurgeArchivedSession;
                                     const purgeConfirming = canPurgeArchived && pendingPurgeChatJid === chat.chat_jid;
+                                    const pruneConfirming = canPrune && pendingPruneChatJid === chat.chat_jid;
+                                    const deleteConfirming = purgeConfirming || pruneConfirming;
                                     const label = formatBranchPickerLabel(chat, { currentChatJid });
                                     return html`
                                         <div key=${chat.chat_jid} class=${`compose-model-popup-item-row${archived ? ' archived' : ''}`}>
@@ -3280,44 +3382,60 @@ export function ComposeBox({
                                                 </svg>
                                             </button>
                                             ${(canPrune || canPurgeArchived) && html`
-                                                <button
-                                                    type="button"
-                                                    class=${`compose-model-popup-item-delete${purgeConfirming ? ' confirming' : ''}`}
-                                                    title=${canPurgeArchived
-                                                        ? purgeConfirming
-                                                            ? 'Confirm permanent deletion'
-                                                            : (isRoot ? 'Permanently delete this archived session' : 'Permanently delete this archived branch')
-                                                        : 'Delete this branch'}
-                                                    aria-label=${canPurgeArchived
-                                                        ? purgeConfirming
+                                                ${deleteConfirming
+                                                    ? html`<button
+                                                        key=${`${chat.chat_jid}:delete-confirm`}
+                                                        type="button"
+                                                        class="compose-model-popup-item-delete confirming"
+                                                        data-chat-jid=${chat.chat_jid}
+                                                        data-delete-kind=${canPurgeArchived ? 'purge' : 'prune'}
+                                                        title=${canPurgeArchived ? 'Confirm permanent deletion' : 'Confirm branch deletion'}
+                                                        aria-label=${canPurgeArchived
                                                             ? (isRoot ? `Confirm permanent deletion of archived session @${chat.agent_name}` : `Confirm permanent deletion of archived branch @${chat.agent_name}`)
-                                                            : (isRoot ? `Permanently delete archived session @${chat.agent_name}` : `Permanently delete archived branch @${chat.agent_name}`)
-                                                        : `Delete @${chat.agent_name}`}
-                                                    onClick=${async (e) => {
-                                                        e.stopPropagation();
-                                                        if (canPurgeArchived) {
-                                                            if (!purgeConfirming) {
+                                                            : `Confirm delete @${chat.agent_name}`}
+                                                        onPointerDown=${(e) => {
+                                                            e.preventDefault();
+                                                            e.stopPropagation();
+                                                            void confirmSessionRowDelete(chat, { canPurgeArchived, canPrune });
+                                                        }}
+                                                        onKeyDown=${(e) => {
+                                                            if (e.key !== 'Enter' && e.key !== ' ') return;
+                                                            e.preventDefault();
+                                                            e.stopPropagation();
+                                                            void confirmSessionRowDelete(chat, { canPurgeArchived, canPrune });
+                                                        }}
+                                                    >
+                                                        <span class="compose-model-popup-item-delete-confirm">OK</span>
+                                                    </button>`
+                                                    : html`<button
+                                                        key=${`${chat.chat_jid}:delete-request`}
+                                                        type="button"
+                                                        class="compose-model-popup-item-delete"
+                                                        title=${canPurgeArchived
+                                                            ? (isRoot ? 'Permanently delete this archived session' : 'Permanently delete this archived branch')
+                                                            : 'Delete this branch'}
+                                                        aria-label=${canPurgeArchived
+                                                            ? (isRoot ? `Permanently delete archived session @${chat.agent_name}` : `Permanently delete archived branch @${chat.agent_name}`)
+                                                            : `Delete @${chat.agent_name}`}
+                                                        onClick=${(e) => {
+                                                            e.stopPropagation();
+                                                            if (canPurgeArchived) {
                                                                 setPendingPurgeChatJid(chat.chat_jid);
                                                                 return;
                                                             }
-                                                            const purged = await onPurgeArchivedSession?.(chat.chat_jid, { confirmed: true });
-                                                            if (purged !== false) {
-                                                                setPendingPurgeChatJid(null);
-                                                                setShowSessionPopup(false);
+                                                            if (canPrune) {
+                                                                setPendingPruneChatJid(chat.chat_jid);
+                                                                return;
                                                             }
-                                                            return;
-                                                        }
-                                                        setShowSessionPopup(false);
-                                                        void onDeleteSession(chat.chat_jid);
-                                                    }}
-                                                >
-                                                    ${purgeConfirming
-                                                        ? html`<span class="compose-model-popup-item-delete-confirm">OK</span>`
-                                                        : html`<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                                            setShowSessionPopup(false);
+                                                            void onDeleteSession(chat.chat_jid);
+                                                        }}
+                                                    >
+                                                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                                                             <line x1="18" y1="6" x2="6" y2="18" />
                                                             <line x1="6" y1="6" x2="18" y2="18" />
-                                                        </svg>`}
-                                                </button>
+                                                        </svg>
+                                                    </button>`}
                                             `}
                                         </div>
                                     `;

@@ -8,6 +8,52 @@ afterEach(() => {
   // no-op: test uses whichever workspace path the current config module has cached
 });
 
+const acceptModelChange = async () => ({ status: "success", message: "ok" } as const);
+
+test("runDreamAgentTurn applies an explicit Dream model override to the temporary dream chat", async () => {
+  const config = await import("../src/core/config.js");
+  rmSync(join(config.WORKSPACE_DIR, "notes"), { recursive: true, force: true });
+  rmSync(join(config.DATA_DIR, "dream-backups"), { recursive: true, force: true });
+  rmSync(join(config.DATA_DIR, "workspace-search"), { recursive: true, force: true });
+
+  const db = await import("../src/db.js");
+  db.initDatabase();
+
+  const fixedNow = Date.parse("2026-01-02T03:04:05.000Z");
+  const expectedDreamChatJid = `dream:manual:web_default:${fixedNow}`;
+  const applied: Array<{ chatJid: string; raw: string | undefined }> = [];
+  const runChats: string[] = [];
+
+  const realNow = Date.now;
+  Date.now = () => fixedNow;
+  try {
+    const dream = await importFresh<typeof import("../src/dream.js")>("../src/dream.js");
+    const result = await dream.runDreamAgentTurn({
+      chatJid: "web:default",
+      days: 2,
+      mode: "manual",
+      model: "openai-compatible/glm-5.1",
+      agentPool: {
+        applyControlCommand: async (chatJid: string, command: { raw?: string }) => {
+          applied.push({ chatJid, raw: command.raw });
+          return { status: "success", message: "ok" };
+        },
+        runAgent: async (_prompt: string, chatJid: string) => {
+          runChats.push(chatJid);
+          return { status: "success", result: "Dream complete." };
+        },
+        disposeChatSession: async () => {},
+      } as any,
+    });
+
+    expect(result.skipped).toBe(false);
+    expect(applied).toEqual([{ chatJid: expectedDreamChatJid, raw: "/model openai-compatible/glm-5.1" }]);
+    expect(runChats).toEqual([expectedDreamChatJid]);
+  } finally {
+    Date.now = realNow;
+  }
+});
+
 test("runDreamAgentTurn reaps a stale dream lock and materializes memory files after the model pass", { timeout: 15000 }, async () => {
   const config = await import("../src/core/config.js");
   rmSync(join(config.WORKSPACE_DIR, "notes"), { recursive: true, force: true });
@@ -59,6 +105,7 @@ test("runDreamAgentTurn reaps a stale dream lock and materializes memory files a
       days: 2,
       mode: "auto",
       agentPool: {
+        applyControlCommand: acceptModelChange,
         runAgent: async () => ({ status: "success", result: "AutoDream complete." }),
         disposeChatSession: async () => {},
       } as any,
@@ -135,6 +182,7 @@ test("runDreamAgentTurn records recovery summaries when the model pass succeeds 
     days: 2,
     mode: "auto",
     agentPool: {
+      applyControlCommand: acceptModelChange,
       runAgent: async () => ({
         status: "success",
         result: "AutoDream complete.",
@@ -170,6 +218,7 @@ test("runDreamAgentTurn falls back to deterministic refresh when the model pass 
     days: 2,
     mode: "auto",
     agentPool: {
+      applyControlCommand: acceptModelChange,
       runAgent: async (_prompt: string, _chatJid: string, options?: { timeoutMs?: number }) => {
         capturedTimeoutMs = options?.timeoutMs;
         return {

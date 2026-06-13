@@ -61,6 +61,7 @@ Behavior:
 - Dream work is queued on a dedicated `dream:<chatJid>` lane so it does not block the interactive chat lane
 - a visible agent summary is posted back to the original chat when done
 - default window: last 7 days unless you pass an explicit `/dream <days>`
+- daily-note day boundaries follow the runtime timezone (`TZ` / runtime timing config), not UTC
 
 ### AutoDream
 
@@ -69,6 +70,7 @@ Built-in scheduled task:
 - task id: `builtin-dream-midnight`
 - task kind: `internal`
 - schedule: default cron `0 1 * * *` (01:00 in the runtime timezone)
+- refreshed day slices use that same runtime timezone
 
 Behavior:
 
@@ -139,7 +141,7 @@ Dream now treats memory as layered outputs rather than a mirrored `notes/daily/`
 
 ### Incomplete daily-note recovery cues
 
-When runtime seeds or refreshes an unfinished daily note, it also writes a hidden `DREAM_CUES` comment. Those cues are compact transcript hints derived from the message slice described by front matter (`scope_anchor`, `first_message`, `last_message`, `messages_total`, `session_trees`, `session_chats`). Dream should use them before searching broadly, and may inspect the full bounded slice for small days (`messages_total <= 50`, `session_trees <= 2`) before declaring consolidation unsafe. If a pass still leaves unresolved notes, the run result and logs report the unresolved dates.
+When runtime seeds or refreshes an unfinished daily note, it also writes a hidden `DREAM_CUES` comment. Those cues are compact transcript hints derived from the message slice described by front matter (`scope_anchor`, `first_message`, `last_message`, `messages_total`, `session_trees`, `session_chats`). Dream should use them before searching broadly. For bounded-full-slice days (`bounded_full_slice: yes`), it may inspect the full bounded day slice before declaring consolidation unsafe. Larger or multi-session days now include a compact per-session-tree index plus per-tree snippets (all messages for small trees, otherwise first/last windows per tree), with thresholds and snippet budget configurable via Dream cue env vars. If `cue_global_budget_breached: yes`, the final Dream summary should mention that date's budget breach. If a pass still leaves unresolved notes, the run result and logs report the unresolved dates.
 
 ## Files touched
 

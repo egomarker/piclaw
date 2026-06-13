@@ -48,14 +48,19 @@ Dream must not modify project code, tests, or unrelated config.
 Creates a pre-Dream zip backup, refreshes in-window daily note files from the
 messages database, runs the Dream turn, and posts a summary back to chat.
 Unfinished daily notes are seeded with hidden `DREAM_CUES` based on their
-front-matter transcript slice, and unresolved backlog dates are reported after
-the run if consolidation remains incomplete. Default window: last 7 days.
+front-matter transcript slice. Small bounded days may expose the full slice;
+larger or multi-session days use a per-session-tree cue index plus per-tree
+snippets, and cue thresholds/snippet budgets are Dream env-configurable.
+Unresolved backlog dates are reported after the run if consolidation remains
+incomplete. Default window: last 7 days. Daily-note day boundaries follow the
+runtime timezone (`TZ` / runtime timing config), not UTC.
 
 ### AutoDream
 
 Built-in scheduled task `builtin-dream-midnight` runs nightly at `0 1 * * *` by default.
 That is 01:00 in the runtime timezone (for example, 01:00 Lisbon time when `TZ=Europe/Lisbon`).
-Uses a 2-day window. Runs silently unless you inspect task results.
+Uses a 2-day window, and the day slices it refreshes use that same runtime timezone.
+Runs silently unless you inspect task results.
 Skips when no sessions have occurred since the last consolidation.
 
 ## First-boot bootstrap

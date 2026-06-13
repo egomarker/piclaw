@@ -27,7 +27,7 @@ export function buildDreamPrompt(options?: { mode?: "manual" | "auto"; days?: nu
     "- Load startup memory from `notes/memory/MEMORY.md` and `notes/index.md`.",
     "- Inspect relevant `notes/daily/*.md` and existing `notes/memory/*` files before deciding what matters.",
     "- Treat daily-note front matter as the deterministic transcript contract: `scope_anchor`, `first_message`, `last_message`, `messages_total`, `session_trees`, and `session_chats` define the bounded evidence slice for that note.",
-    "- Unfinished notes may contain hidden `DREAM_CUES` comments. Use those cue terms/snippets first; for small bounded days (`messages_total <= 50` and `session_trees <= 2`), it is acceptable to inspect the full bounded day slice before declaring consolidation unsafe.",
+    "- Unfinished notes may contain hidden `DREAM_CUES` comments. Use those cue terms/snippets first; when `bounded_full_slice: yes`, it is acceptable to inspect the full bounded day slice before declaring consolidation unsafe.",
     "- Open deeper files only when they are needed to resolve uncertainty.",
     "2. Signal:",
     "- Look for new information worth persisting.",
@@ -65,6 +65,7 @@ export function buildDreamPrompt(options?: { mode?: "manual" | "auto"; days?: nu
     "- Keep daily-note front matter truthful, especially `summarised_until`, `first_message`, and `last_message` when you touch a note.",
     "- A day is not done while either summary placeholder marker is still present in its note; only leave a marker if the note truly remains incomplete after your narrow evidence-gathering pass.",
     "- If a day remains incomplete, mention the unresolved date and why in your final Dream summary so runtime post-processing can surface it clearly.",
+    "- If a day's `DREAM_CUES` report `cue_global_budget_breached: yes`, mention that date and budget breach in your final Dream summary.",
     "",
     "Return a brief summary of what changed across Orient, Signal, Consolidate, and Prune and Index, plus whether runtime post-processing succeeded.",
   ].join("\n");

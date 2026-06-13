@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import { resolve } from "path";
 
-import { WORKSPACE_DIR } from "../core/config.js";
+import { WORKSPACE_DIR, getRuntimeTimingConfig } from "../core/config.js";
 import { getDb } from "../db.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
 
@@ -12,6 +12,13 @@ const INCOMPLETE_WARNING_TITLE = "> ⚠ **Incomplete daily note**";
 const DREAM_CUES_START = "<!-- DREAM_CUES";
 const DREAM_CUES_END = "DREAM_CUES -->";
 const log = createLogger("agent-memory.daily-notes");
+const DREAM_DAY_TIMEZONE = process.env.TZ || getRuntimeTimingConfig().timezone || "UTC";
+const DREAM_DAY_PARTS_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: DREAM_DAY_TIMEZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
 
 interface FrontMatter {
   fields: Record<string, string>;
@@ -26,7 +33,17 @@ interface Row {
   timestamp: string;
   chat_jid: string;
   root_chat_jid: string;
+}
+
+interface DailyMessageStats {
   day: string;
+  firstTimestamp: string;
+  lastTimestamp: string;
+  totalMsgs: number;
+  userMsgs: number;
+  botMsgs: number;
+  sessionTrees: number;
+  sessionChats: number;
 }
 
 export interface RefreshDailyNotesResult {
@@ -56,7 +73,61 @@ function formatDateLong(iso: string): string {
   });
 }
 
-function todayStr(): string { return new Date().toISOString().slice(0, 10); }
+function formatRuntimeDay(value: string | number | Date): string {
+  const date = value instanceof Date ? value : new Date(value);
+  const parts = DREAM_DAY_PARTS_FORMATTER.formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  if (!year || !month || !day) return date.toISOString().slice(0, 10);
+  return `${year}-${month}-${day}`;
+}
+
+function shiftDay(day: string, deltaDays: number): string {
+  const [year, month, date] = day.split("-").map((value) => Number.parseInt(value, 10));
+  const shifted = new Date(Date.UTC(year, month - 1, date + deltaDays));
+  return shifted.toISOString().slice(0, 10);
+}
+
+function queryCutoffIsoForDay(day: string): string {
+  return `${shiftDay(day, -1)}T00:00:00.000Z`;
+}
+
+function todayStr(): string { return formatRuntimeDay(Date.now()); }
+
+function windowStartDay(days: number): string {
+  return shiftDay(todayStr(), -days);
+}
+
+function buildDailyMessageStats(day: string, messages: Row[]): DailyMessageStats {
+  return {
+    day,
+    firstTimestamp: messages[0].timestamp,
+    lastTimestamp: messages[messages.length - 1].timestamp,
+    totalMsgs: messages.length,
+    userMsgs: messages.filter((message) => !message.is_bot_message).length,
+    botMsgs: messages.filter((message) => message.is_bot_message).length,
+    sessionTrees: new Set(messages.map((message) => message.root_chat_jid)).size,
+    sessionChats: new Set(messages.map((message) => message.chat_jid)).size,
+  };
+}
+
+function noteSliceMetadataDrift(
+  fields: Record<string, string>,
+  stats: DailyMessageStats,
+  scope: { mode: string; anchor: string },
+): boolean {
+  return (fields.date || "") !== stats.day
+    || (fields.messages_total || "") !== String(stats.totalMsgs)
+    || (fields.messages_user || "") !== String(stats.userMsgs)
+    || (fields.messages_assistant || "") !== String(stats.botMsgs)
+    || (fields.session_trees || "") !== String(stats.sessionTrees)
+    || (fields.session_chats || "") !== String(stats.sessionChats)
+    || (fields.first_message || "") !== stats.firstTimestamp
+    || (fields.last_message || "") !== stats.lastTimestamp
+    || (fields.scope_mode || "") !== scope.mode
+    || (fields.scope_anchor || "") !== scope.anchor;
+}
 
 function splitFrontMatter(content: string): FrontMatter {
   const match = content.match(/^---\n([\s\S]*?)\n---\n?/);
@@ -211,11 +282,98 @@ function buildCueTerms(messages: Row[]): string[] {
     .map(([word]) => word);
 }
 
+interface DreamCueConfig {
+  fullSliceMaxMessages: number;
+  fullSliceMaxSessionTrees: number;
+  smallTreeMaxMessages: number;
+  maxSnippets: number;
+}
+
+interface SessionTreeCuePlan {
+  rootChatJid: string;
+  label: string;
+  chatJids: string[];
+  messages: Row[];
+  selected: Row[];
+  firstTimestamp: string;
+  lastTimestamp: string;
+}
+
+function readPositiveIntEnv(name: string, fallback: number): number {
+  const parsed = Number.parseInt(process.env[name] || "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function getDreamCueConfig(): DreamCueConfig {
+  return {
+    fullSliceMaxMessages: readPositiveIntEnv("PICLAW_DREAM_CUE_FULL_SLICE_MAX_MESSAGES", 50),
+    fullSliceMaxSessionTrees: readPositiveIntEnv("PICLAW_DREAM_CUE_FULL_SLICE_MAX_SESSION_TREES", 2),
+    smallTreeMaxMessages: readPositiveIntEnv("PICLAW_DREAM_CUE_SMALL_TREE_MAX_MESSAGES", 10),
+    maxSnippets: readPositiveIntEnv("PICLAW_DREAM_CUE_MAX_SNIPPETS", 100),
+  };
+}
+
+function selectHeadTailMessages(messages: Row[], edgeCount: number): Row[] {
+  if (messages.length <= edgeCount * 2) return [...messages];
+  const output: Row[] = [];
+  const seen = new Set<number>();
+  for (let index = 0; index < Math.min(edgeCount, messages.length); index += 1) {
+    if (seen.has(index)) continue;
+    seen.add(index);
+    output.push(messages[index]);
+  }
+  for (let index = Math.max(edgeCount, messages.length - edgeCount); index < messages.length; index += 1) {
+    if (seen.has(index)) continue;
+    seen.add(index);
+    output.push(messages[index]);
+  }
+  return output;
+}
+
+function buildSessionTreeLabel(rootChatJid: string, chatJids: string[]): string {
+  const uniqueChatJids = [...new Set(chatJids)];
+  const primaryChatJid = uniqueChatJids[0] || rootChatJid;
+  if (primaryChatJid !== rootChatJid) {
+    return `${primaryChatJid} (root: ${rootChatJid})`;
+  }
+  if (uniqueChatJids.length <= 1) return rootChatJid;
+  const extraChats = uniqueChatJids.length - 1;
+  return `${rootChatJid} (+${extraChats} chat${extraChats === 1 ? "" : "s"})`;
+}
+
+function buildSessionTreeCuePlans(messages: Row[], edgeCount: number, smallTreeMaxMessages: number): SessionTreeCuePlan[] {
+  const treeMap = new Map<string, Row[]>();
+  for (const message of messages) {
+    if (!treeMap.has(message.root_chat_jid)) treeMap.set(message.root_chat_jid, []);
+    treeMap.get(message.root_chat_jid)!.push(message);
+  }
+
+  return [...treeMap.entries()]
+    .map(([rootChatJid, treeMessages]) => {
+      const chatJids = [...new Set(treeMessages.map((message) => message.chat_jid))];
+      return {
+        rootChatJid,
+        label: buildSessionTreeLabel(rootChatJid, chatJids),
+        chatJids,
+        messages: treeMessages,
+        selected: treeMessages.length <= smallTreeMaxMessages
+          ? [...treeMessages]
+          : selectHeadTailMessages(treeMessages, edgeCount),
+        firstTimestamp: treeMessages[0].timestamp,
+        lastTimestamp: treeMessages[treeMessages.length - 1].timestamp,
+      };
+    })
+    .sort((left, right) => left.firstTimestamp.localeCompare(right.firstTimestamp));
+}
+
+function formatCueSnippet(message: Row): string {
+  const role = message.is_bot_message ? "assistant" : "user";
+  return `- ${message.timestamp} ${role} ${cleanCueText(message.sender_name, 40)} [${cleanCueText(message.chat_jid, 80)}]: ${cleanCueText(message.content)}`;
+}
+
 function buildDreamCues(messages: Row[], options: { firstTimestamp: string; lastTimestamp: string; totalMsgs: number; sessionTrees: number; sessionChats: number }): string {
-  const includeFullSlice = options.totalMsgs <= 50 && options.sessionTrees <= 2;
-  const selected = includeFullSlice
-    ? messages
-    : [...messages.slice(0, 5), ...messages.slice(Math.max(5, messages.length - 5))];
+  const config = getDreamCueConfig();
+  const includeFullSlice = options.totalMsgs <= config.fullSliceMaxMessages && options.sessionTrees <= config.fullSliceMaxSessionTrees;
   const lines = [
     DREAM_CUES_START,
     "These cues are hidden recovery hints for Dream. Treat front matter as the transcript contract; use message IDs/timestamps with messages search only if more evidence is needed.",
@@ -224,16 +382,50 @@ function buildDreamCues(messages: Row[], options: { firstTimestamp: string; last
     `session_trees: ${options.sessionTrees}`,
     `session_chats: ${options.sessionChats}`,
     `bounded_full_slice: ${includeFullSlice ? "yes" : "no"}`,
+    `cue_full_slice_thresholds: messages<=${config.fullSliceMaxMessages}, session_trees<=${config.fullSliceMaxSessionTrees}`,
   ];
   const terms = buildCueTerms(messages);
   if (terms.length > 0) lines.push(`cue_terms: ${terms.join(", ")}`);
-  lines.push("message_snippets:");
-  for (const msg of selected) {
-    const role = msg.is_bot_message ? "assistant" : "user";
-    lines.push(`- ${msg.timestamp} ${role} ${cleanCueText(msg.sender_name, 40)} [${cleanCueText(msg.chat_jid, 80)}]: ${cleanCueText(msg.content)}`);
+
+  if (includeFullSlice) {
+    lines.push("message_snippets:");
+    for (const message of messages) {
+      lines.push(formatCueSnippet(message));
+    }
+    lines.push(DREAM_CUES_END);
+    return lines.join("\n");
   }
-  if (!includeFullSlice && selected.length < messages.length) {
-    lines.push(`omitted_middle_messages: ${messages.length - selected.length}`);
+
+  let plans = buildSessionTreeCuePlans(messages, 5, config.smallTreeMaxMessages);
+  const initialSnippetCount = plans.reduce((sum, plan) => sum + plan.selected.length, 0);
+  const budgetFallbackApplied = initialSnippetCount > config.maxSnippets;
+  if (budgetFallbackApplied) {
+    plans = buildSessionTreeCuePlans(messages, 2, config.smallTreeMaxMessages);
+  }
+  const selectedSnippetCount = plans.reduce((sum, plan) => sum + plan.selected.length, 0);
+  const budgetBreached = selectedSnippetCount > config.maxSnippets;
+
+  lines.push(`cue_small_tree_max_messages: ${config.smallTreeMaxMessages}`);
+  lines.push(`cue_global_snippet_budget: ${config.maxSnippets}`);
+  lines.push(`cue_per_tree_large_window: ${budgetFallbackApplied ? "2+2" : "5+5"}`);
+  lines.push(`cue_budget_fallback_applied: ${budgetFallbackApplied ? "yes" : "no"}`);
+  lines.push(`cue_global_budget_breached: ${budgetBreached ? "yes" : "no"}`);
+  if (budgetBreached) {
+    lines.push(`cue_global_budget_breached_note: ${selectedSnippetCount} snippets still exceed the ${config.maxSnippets}-snippet budget after reducing large trees to 2+2. Mention this in the Dream report.`);
+  }
+  lines.push("session_tree_index:");
+  for (const plan of plans) {
+    lines.push(`- ${cleanCueText(plan.label, 120)}: messages=${plan.messages.length}, taken=${plan.selected.length}, chats=${plan.chatJids.length}, slice=${plan.firstTimestamp}..${plan.lastTimestamp}`);
+  }
+  lines.push("message_snippets:");
+  for (const plan of plans) {
+    lines.push(`tree: ${cleanCueText(plan.label, 120)} — took ${plan.selected.length}/${plan.messages.length}`);
+    for (const message of plan.selected) {
+      lines.push(formatCueSnippet(message));
+    }
+  }
+  if (selectedSnippetCount < messages.length) {
+    lines.push(`omitted_middle_messages: ${messages.length - selectedSnippetCount}`);
   }
   lines.push(DREAM_CUES_END);
   return lines.join("\n");
@@ -266,17 +458,93 @@ function resolveScope(chatJid: string): { clause: string; params: string[]; mode
   return { clause: "m.chat_jid = ?", params: [normalized], mode: "chat-only", anchor: normalized };
 }
 
+function loadMessageRowsSince(cutoffIso: string, scope: { clause: string; params: string[] }): Row[] {
+  const db = getDb();
+  return db.query<Row, any[]>(
+    `SELECT m.sender_name,
+            COALESCE(m.is_bot_message, 0) AS is_bot_message,
+            m.content,
+            m.timestamp,
+            m.chat_jid,
+            COALESCE(cb.root_chat_jid, m.chat_jid) AS root_chat_jid
+     FROM messages m
+     LEFT JOIN chat_branches cb ON cb.chat_jid = m.chat_jid
+     WHERE ${scope.clause}
+       AND m.timestamp >= ?
+     ORDER BY m.timestamp ASC`
+  ).all(...scope.params, cutoffIso);
+}
+
+function loadDailyMessageStatsSince(cutoffDay: string, scope: { clause: string; params: string[] }): Map<string, DailyMessageStats> {
+  const rows = loadMessageRowsSince(queryCutoffIsoForDay(cutoffDay), scope);
+  const stats = new Map<string, {
+    firstTimestamp: string;
+    lastTimestamp: string;
+    totalMsgs: number;
+    userMsgs: number;
+    botMsgs: number;
+    sessionTrees: Set<string>;
+    sessionChats: Set<string>;
+  }>();
+
+  for (const row of rows) {
+    const day = formatRuntimeDay(row.timestamp);
+    if (day < cutoffDay) continue;
+    const current = stats.get(day);
+    if (!current) {
+      stats.set(day, {
+        firstTimestamp: row.timestamp,
+        lastTimestamp: row.timestamp,
+        totalMsgs: 1,
+        userMsgs: row.is_bot_message ? 0 : 1,
+        botMsgs: row.is_bot_message ? 1 : 0,
+        sessionTrees: new Set([row.root_chat_jid]),
+        sessionChats: new Set([row.chat_jid]),
+      });
+      continue;
+    }
+    current.lastTimestamp = row.timestamp;
+    current.totalMsgs += 1;
+    if (row.is_bot_message) current.botMsgs += 1;
+    else current.userMsgs += 1;
+    current.sessionTrees.add(row.root_chat_jid);
+    current.sessionChats.add(row.chat_jid);
+  }
+
+  return new Map([...stats.entries()].map(([day, current]) => [day, {
+    day,
+    firstTimestamp: current.firstTimestamp,
+    lastTimestamp: current.lastTimestamp,
+    totalMsgs: current.totalMsgs,
+    userMsgs: current.userMsgs,
+    botMsgs: current.botMsgs,
+    sessionTrees: current.sessionTrees.size,
+    sessionChats: current.sessionChats.size,
+  }]));
+}
+
 export function inspectDailyNoteSummaryBacklog(options?: { recentDays?: number }): DailyNoteSummaryBacklog {
   const recentDays = Math.max(1, Math.floor(Number(options?.recentDays) || 7));
   const dailyNotesDir = resolve(process.env.PICLAW_WORKSPACE || WORKSPACE_DIR, "notes/daily");
-  const cutoff = new Date(Date.now() - recentDays * 86400000).toISOString().slice(0, 10);
+  const cutoff = windowStartDay(recentDays);
   const today = todayStr();
+  const allChatsScope = resolveScope("*");
   let unsummarised = 0;
   let partial = 0;
   let missing_watermark = 0;
   let missing = 0;
   const dates = new Set<string>();
   const existingDates = new Set<string>();
+  let statsByDay = new Map<string, DailyMessageStats>();
+
+  try {
+    statsByDay = loadDailyMessageStatsSince(cutoff, allChatsScope);
+  } catch (error) {
+    debugSuppressedError(log, "Failed to inspect message days while checking daily-note backlog.", error, {
+      operation: "daily_notes.inspect_backlog.message_days",
+      recentDays,
+    });
+  }
 
   if (existsSync(dailyNotesDir)) {
     for (const file of readdirSync(dailyNotesDir).filter((entry) => /^\d{4}-\d{2}-\d{2}\.md$/.test(entry)).sort()) {
@@ -288,6 +556,10 @@ export function inspectDailyNoteSummaryBacklog(options?: { recentDays?: number }
       const summary = extractSummary(body);
       const summarisedUntil = (fields.summarised_until || '').trim();
       const needsSummaryUpdate = body.includes(SUMMARY_UPDATE_MARKER);
+      const hasIncompleteWarning = body.includes(INCOMPLETE_WARNING_TITLE);
+      const stats = statsByDay.get(date);
+      const metadataDrift = stats ? noteSliceMetadataDrift(fields, stats, allChatsScope) : false;
+      const newerMessagesExist = Boolean(summary && summarisedUntil && stats && stats.lastTimestamp > summarisedUntil);
 
       if (!summary) {
         unsummarised += 1;
@@ -299,34 +571,19 @@ export function inspectDailyNoteSummaryBacklog(options?: { recentDays?: number }
         dates.add(date);
         continue;
       }
-      if (needsSummaryUpdate) {
+      if (needsSummaryUpdate || hasIncompleteWarning || metadataDrift || newerMessagesExist) {
         partial += 1;
         dates.add(date);
       }
     }
   }
 
-  try {
-    const db = getDb();
-    const rows = db.query<{ day: string }, [string, string]>(
-      `SELECT DISTINCT substr(timestamp, 1, 10) AS day
-       FROM messages
-       WHERE chat_jid NOT LIKE 'dream:%'
-         AND timestamp >= ?
-         AND substr(timestamp, 1, 10) < ?
-       ORDER BY day ASC`
-    ).all(`${cutoff}T00:00:00.000Z`, today);
-    for (const row of rows) {
-      if (!existingDates.has(row.day)) {
-        missing += 1;
-        dates.add(row.day);
-      }
+  for (const day of [...statsByDay.keys()].sort()) {
+    if (day >= today) continue;
+    if (!existingDates.has(day)) {
+      missing += 1;
+      dates.add(day);
     }
-  } catch (error) {
-    debugSuppressedError(log, "Failed to inspect message days while checking daily-note backlog.", error, {
-      operation: "daily_notes.inspect_backlog.message_days",
-      recentDays,
-    });
   }
 
   return { unsummarised, partial, missing_watermark, missing, dates: [...dates].sort() };
@@ -339,28 +596,16 @@ export function refreshDailyNotesFromMessages(options?: { days?: number; chatJid
 
   const dailyNotesDir = getDailyNotesDir();
   mkdirSync(dailyNotesDir, { recursive: true });
-  const db = getDb();
   const scope = resolveScope(chatJid);
-  const params: any[] = [...scope.params];
-  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
-  const rows = db.query<Row, any[]>(
-    `SELECT m.sender_name,
-            m.is_bot_message,
-            m.content,
-            m.timestamp,
-            m.chat_jid,
-            COALESCE(cb.root_chat_jid, m.chat_jid) AS root_chat_jid,
-            substr(m.timestamp, 1, 10) AS day
-     FROM messages m
-     LEFT JOIN chat_branches cb ON cb.chat_jid = m.chat_jid
-     WHERE ${scope.clause} AND m.timestamp >= ?
-     ORDER BY m.timestamp ASC`
-  ).all(...params, cutoff);
+  const cutoffDay = windowStartDay(days);
+  const rows = loadMessageRowsSince(queryCutoffIsoForDay(cutoffDay), scope);
 
   const dayMap = new Map<string, Row[]>();
   for (const row of rows) {
-    if (!dayMap.has(row.day)) dayMap.set(row.day, []);
-    dayMap.get(row.day)!.push(row);
+    const day = formatRuntimeDay(row.timestamp);
+    if (day < cutoffDay) continue;
+    if (!dayMap.has(day)) dayMap.set(day, []);
+    dayMap.get(day)!.push(row);
   }
 
   const sortedDays = [...dayMap.keys()].sort();
@@ -372,13 +617,8 @@ export function refreshDailyNotesFromMessages(options?: { days?: number; chatJid
   for (const day of sortedDays) {
     const filePath = `${dailyNotesDir}/${day}.md`;
     const messages = dayMap.get(day)!;
-    const firstTimestamp = messages[0].timestamp;
-    const lastTimestamp = messages[messages.length - 1].timestamp;
-    const totalMsgs = messages.length;
-    const userMsgs = messages.filter((m) => !m.is_bot_message).length;
-    const botMsgs = messages.filter((m) => m.is_bot_message).length;
-    const sessionTrees = new Set(messages.map((m) => m.root_chat_jid)).size;
-    const sessionChats = new Set(messages.map((m) => m.chat_jid)).size;
+    const stats = buildDailyMessageStats(day, messages);
+    const { firstTimestamp, lastTimestamp, totalMsgs, userMsgs, botMsgs, sessionTrees, sessionChats } = stats;
     const isToday = day === today;
 
     if (existsSync(filePath)) {
@@ -391,9 +631,11 @@ export function refreshDailyNotesFromMessages(options?: { days?: number; chatJid
       const hasWm = existingWm.length > 0;
       const needsPartialUpdate = Boolean(summary && hasWm && lastTimestamp > existingWm);
       const needsMigration = !hasFrontMatter || !("date" in fields) || !("summarised_until" in fields);
-      const shouldWrite = isToday || force || needsMigration || needsPartialUpdate;
+      const metadataDrift = noteSliceMetadataDrift(fields, stats, scope);
+      const needsSliceReseed = !summary || !hasWm || needsMigration || metadataDrift;
+      const shouldWrite = isToday || force || needsSliceReseed || needsPartialUpdate;
 
-      if (!isToday && !force && !shouldWrite) {
+      if (!shouldWrite) {
         skipped += 1;
         continue;
       }
@@ -406,7 +648,7 @@ export function refreshDailyNotesFromMessages(options?: { days?: number; chatJid
         ? { lastTimestamp }
         : needsPartialUpdate
           ? { summarisedUntil: existingWm, lastTimestamp, needsSummaryUpdate: true }
-          : !hasWm
+          : needsSliceReseed
             ? { lastTimestamp }
             : null;
       body = upsertIncompleteWarning(body, incompleteState);
@@ -416,7 +658,7 @@ export function refreshDailyNotesFromMessages(options?: { days?: number; chatJid
 
       const nextFields: Record<string, string> = {
         ...fields,
-        date: fields.date || day,
+        date: day,
         summarised_until: existingWm,
         messages_total: String(totalMsgs),
         messages_user: String(userMsgs),
