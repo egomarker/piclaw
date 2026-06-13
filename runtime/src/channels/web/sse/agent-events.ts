@@ -12,6 +12,7 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { WebChannelLike } from "../core/web-channel-contracts.js";
 import { buildPreview, createToolTitleTracker, type AgentProfileBuilder } from "../agent/agent-utils.js";
+import { formatProviderError, sanitizeProviderErrorDetail } from "../handlers/provider-error-format.js";
 
 /** Interface for broadcasting agent events to SSE clients. */
 export interface AgentEventEmitter {
@@ -573,17 +574,20 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
           pendingRateLimitTimer = null;
         }
       }
-      const isNetwork = isNetworkError(errorMessage);
+      const providerError = formatProviderError(errorMessage);
+      const isNetwork = providerError?.category === "network" || isNetworkError(errorMessage);
+      const retrySuffix = `retrying (attempt ${e.attempt ?? "?"}/${e.maxAttempts ?? "?"}, ${delaySec}s delay)`;
       const title = isRateLimit
-        ? `${describeRateLimit(errorMessage)} — retrying (attempt ${e.attempt ?? "?"}/${e.maxAttempts ?? "?"}, ${delaySec}s delay)`
+        ? `${describeRateLimit(errorMessage)} — ${retrySuffix}`
         : isNetwork
-          ? `${describeNetworkError(errorMessage)} — retrying (attempt ${e.attempt ?? "?"}/${e.maxAttempts ?? "?"}, ${delaySec}s delay)`
+          ? `${providerError?.title || describeNetworkError(errorMessage)} — ${retrySuffix}`
           : `Retrying after error (attempt ${e.attempt ?? "?"}/${e.maxAttempts ?? "?"}, ${delaySec}s delay)`;
+      const detail = providerError?.detail || sanitizeProviderErrorDetail(errorMessage);
       options.emitter.status({
         ...base,
         type: "intent",
         title,
-        detail: errorMessage || undefined,
+        detail: detail || undefined,
       });
     }
 
@@ -591,15 +595,17 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
       const e = event as { success?: boolean; attempt?: number; finalError?: string };
       if (!e.success) {
         const finalError = e.finalError || "Request failed after retries";
+        const providerError = formatProviderError(finalError);
         const title = isRateLimitError(finalError)
           ? `${describeRateLimit(finalError)} — retry budget exhausted`
-          : isNetworkError(finalError)
-            ? `${describeNetworkError(finalError)} — retry budget exhausted`
-            : finalError;
+          : providerError?.category === "network" || isNetworkError(finalError)
+            ? `${providerError?.title || describeNetworkError(finalError)} — retry budget exhausted`
+            : sanitizeProviderErrorDetail(finalError) || finalError;
         options.emitter.status({
           ...base,
           type: "error",
           title,
+          detail: providerError?.detail || undefined,
         });
       }
     }

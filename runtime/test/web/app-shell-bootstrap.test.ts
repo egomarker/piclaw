@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 
 import { paneRegistry } from '../../web/src/panes/pane-registry.js';
-import { registerAppPaneExtensions } from '../../web/src/ui/app-shell-bootstrap.js';
+import { registerAppPaneExtensions, resolveAppApiSurface } from '../../web/src/ui/app-shell-bootstrap.js';
 
 const registeredByTest = new Set<string>();
 let previousKanbanExtension: any = null;
@@ -26,4 +26,11 @@ test('registerAppPaneExtensions does not register addon-owned kanban/mindmap pan
   expect(paneRegistry.get('editor')).toBeTruthy();
   expect(paneRegistry.get('mindmap-editor')).toBeUndefined();
   expect(paneRegistry.get('kanban-editor')).toBeUndefined();
+});
+
+test('resolveAppApiSurface exposes archived branch purge API', () => {
+  const purgeChatBranch = async () => ({ status: 'ok' });
+  const surface = resolveAppApiSurface({ purgeChatBranch });
+
+  expect(surface.purgeChatBranch).toBe(purgeChatBranch);
 });

@@ -20,6 +20,7 @@ type ControlPlaneServiceStub = {
   handleAgentBranchFork(req: Request): Promise<Response>;
   handleAgentBranchRename(req: Request): Promise<Response>;
   handleAgentBranchPrune(req: Request): Promise<Response>;
+  handleAgentBranchDownload(req: Request): Response;
   handleAgentBranchPurge(req: Request): Promise<Response>;
   handleAgentBranchRestore(req: Request): Promise<Response>;
 };
@@ -72,6 +73,10 @@ describe("WebChannel agent control-plane delegation", () => {
         calls.push(`branch-prune:${req.method}`);
         return response("branch-prune", 213);
       },
+      handleAgentBranchDownload: (req) => {
+        calls.push(`branch-download:${req.method}:${new URL(req.url).searchParams.get("chat_jid") ?? ""}`);
+        return response("branch-download", 217);
+      },
       handleAgentBranchPurge: async (req) => {
         calls.push(`branch-purge:${req.method}`);
         return response("branch-purge", 214);
@@ -104,6 +109,8 @@ describe("WebChannel agent control-plane delegation", () => {
       .toBe(212);
     expect((await fixture.channel.handleAgentBranchPrune(new Request("https://example.com/agent/branch-prune", { method: "POST" }))).status)
       .toBe(213);
+    expect(fixture.channel.handleAgentBranchDownload(new Request("https://example.com/agent/branch-download?chat_jid=web%3Aarchived")).status)
+      .toBe(217);
     expect((await fixture.channel.handleAgentBranchPurge(new Request("https://example.com/agent/branch-purge", { method: "POST" }))).status)
       .toBe(214);
     expect((await fixture.channel.handleAgentBranchRestore(new Request("https://example.com/agent/branch-restore", { method: "POST" }))).status)
@@ -120,6 +127,7 @@ describe("WebChannel agent control-plane delegation", () => {
       "branch-fork:POST",
       "branch-rename:POST",
       "branch-prune:POST",
+      "branch-download:GET:web:archived",
       "branch-purge:POST",
       "branch-restore:POST",
     ]);

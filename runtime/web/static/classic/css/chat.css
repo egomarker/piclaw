@@ -1136,7 +1136,8 @@
     height: 12px;
 }
 
-.compose-model-popup-item-row:hover .compose-model-popup-item-delete {
+.compose-model-popup-item-row:hover .compose-model-popup-item-delete,
+.compose-model-popup-item-row.archived .compose-model-popup-item-delete {
     display: inline-flex;
 }
 

@@ -312,6 +312,34 @@ export interface PermanentDeleteArchivedBranchResult {
   };
 }
 
+export interface ArchivedBranchDownloadData {
+  schema: "piclaw.archived-session.v1";
+  exported_at: string;
+  branch: ChatBranchRecord;
+  chat: Record<string, unknown> | null;
+  messages: Record<string, unknown>[];
+  message_media: Record<string, unknown>[];
+  chat_cursor: Record<string, unknown> | null;
+  token_usage: Record<string, unknown>[];
+  scheduled_tasks: Record<string, unknown>[];
+  task_run_logs: Record<string, unknown>[];
+  configs: {
+    ssh: Record<string, unknown> | null;
+    proxmox: Record<string, unknown> | null;
+    portainer: Record<string, unknown> | null;
+  };
+  extension_kv: Record<string, unknown>[];
+}
+
+function requireArchivedDownloadTarget(chatJid: string): ChatBranchRecord {
+  const normalizedChatJid = String(chatJid || "").trim();
+  if (!normalizedChatJid) throw new Error("chat_jid is required");
+  const branch = getChatBranchByChatJid(normalizedChatJid);
+  if (!branch) throw new Error(`Unknown chat branch: ${normalizedChatJid}`);
+  if (!branch.archived_at) throw new Error(`Cannot download a branch that is not archived: ${normalizedChatJid}`);
+  return branch;
+}
+
 function requireArchivedPurgeTarget(chatJid: string): ChatBranchRecord {
   const normalizedChatJid = String(chatJid || "").trim();
   if (!normalizedChatJid) throw new Error("chat_jid is required");
@@ -365,6 +393,44 @@ function countRows(sql: string, ...params: Array<string | number>): number {
   const db = getDb();
   const row = db.prepare(sql).get(...params) as { count?: number } | undefined;
   return Number(row?.count || 0);
+}
+
+export function exportArchivedBranchDownloadData(chatJid: string): ArchivedBranchDownloadData {
+  const branch = requireArchivedDownloadTarget(chatJid);
+  const db = getDb();
+  const taskIds = getArchivedBranchTaskIds(branch.chat_jid);
+  const taskPlaceholders = taskIds.map(() => "?").join(",");
+  const messages = db.prepare(`SELECT * FROM messages WHERE chat_jid = ? ORDER BY timestamp ASC, rowid ASC`).all(branch.chat_jid) as Record<string, unknown>[];
+  const messageMedia = db.prepare(
+    `SELECT mm.*
+       FROM message_media mm
+       JOIN messages m ON m.rowid = mm.message_rowid
+      WHERE m.chat_jid = ?
+      ORDER BY mm.message_rowid ASC, mm.media_id ASC`
+  ).all(branch.chat_jid) as Record<string, unknown>[];
+
+  return {
+    schema: "piclaw.archived-session.v1",
+    exported_at: new Date().toISOString(),
+    branch,
+    chat: db.prepare(`SELECT * FROM chats WHERE jid = ?`).get(branch.chat_jid) as Record<string, unknown> | null,
+    messages,
+    message_media: messageMedia,
+    chat_cursor: db.prepare(`SELECT * FROM chat_cursors WHERE chat_jid = ?`).get(branch.chat_jid) as Record<string, unknown> | null,
+    token_usage: db.prepare(`SELECT * FROM token_usage WHERE chat_jid = ? ORDER BY run_at ASC, id ASC`).all(branch.chat_jid) as Record<string, unknown>[],
+    scheduled_tasks: taskIds.length > 0
+      ? db.prepare(`SELECT * FROM scheduled_tasks WHERE chat_jid = ? ORDER BY id ASC`).all(branch.chat_jid) as Record<string, unknown>[]
+      : [],
+    task_run_logs: taskIds.length > 0
+      ? db.prepare(`SELECT * FROM task_run_logs WHERE task_id IN (${taskPlaceholders}) ORDER BY run_at ASC, id ASC`).all(...taskIds) as Record<string, unknown>[]
+      : [],
+    configs: {
+      ssh: db.prepare(`SELECT * FROM ssh_configs WHERE chat_jid = ?`).get(branch.chat_jid) as Record<string, unknown> | null,
+      proxmox: db.prepare(`SELECT * FROM proxmox_configs WHERE chat_jid = ?`).get(branch.chat_jid) as Record<string, unknown> | null,
+      portainer: db.prepare(`SELECT * FROM portainer_configs WHERE chat_jid = ?`).get(branch.chat_jid) as Record<string, unknown> | null,
+    },
+    extension_kv: db.prepare(`SELECT * FROM extension_kv WHERE scope = 'chat' AND scope_key = ? ORDER BY extension_id ASC, key ASC`).all(branch.chat_jid) as Record<string, unknown>[],
+  };
 }
 
 export function previewPermanentDeleteArchivedBranch(chatJid: string): ArchivedBranchPurgePreview {

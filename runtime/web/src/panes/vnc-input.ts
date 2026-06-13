@@ -1,6 +1,25 @@
 
+const MAX_VNC_CLIPBOARD_CHARS = 256 * 1024;
+
 function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
+}
+
+export function boundedVncClientClipboardText(text) {
+    const value = String(text || '');
+    return value.length > MAX_VNC_CLIPBOARD_CHARS ? value.slice(0, MAX_VNC_CLIPBOARD_CHARS) : value;
+}
+
+export function encodeVncClientCutText(text) {
+    const payload = new TextEncoder().encode(boundedVncClientClipboardText(text));
+    const buffer = new Uint8Array(8 + payload.length);
+    buffer[0] = 6;
+    buffer[4] = (payload.length >>> 24) & 0xff;
+    buffer[5] = (payload.length >>> 16) & 0xff;
+    buffer[6] = (payload.length >>> 8) & 0xff;
+    buffer[7] = payload.length & 0xff;
+    buffer.set(payload, 8);
+    return buffer;
 }
 
 export function encodeVncPointerEvent(buttonMask, x, y) {
@@ -145,9 +164,11 @@ export function shouldSkipDuplicateVncKeydown(existingKeysym, nextKeysym, repeat
     return Boolean(repeat) || Number(existingKeysym) === Number(nextKeysym);
 }
 
+const MAX_VNC_PASSWORD_CHARS = 8;
+
 export function normalizeVncPassword(value) {
     if (typeof value !== 'string') return null;
-    return value.length > 0 ? value : null;
+    return value.length > 0 ? value.slice(0, MAX_VNC_PASSWORD_CHARS) : null;
 }
 
 export function computeContainedRemoteDisplayScale(availableWidth, availableHeight, framebufferWidth, framebufferHeight) {
@@ -187,6 +208,9 @@ const KEYSYM_BY_KEY = {
     Meta: 0xffeb,
     MetaLeft: 0xffeb,
     MetaRight: 0xffec,
+    OS: 0xffeb,
+    OSLeft: 0xffeb,
+    OSRight: 0xffec,
     Super: 0xffeb,
     Super_L: 0xffeb,
     Super_R: 0xffec,
@@ -200,11 +224,36 @@ const KEYSYM_BY_KEY = {
     ' ': 0x20,
 };
 
-for (let i = 1; i <= 12; i += 1) {
+const KEYSYM_BY_NUMPAD_CODE = {
+    Numpad0: 0xffb0,
+    Numpad1: 0xffb1,
+    Numpad2: 0xffb2,
+    Numpad3: 0xffb3,
+    Numpad4: 0xffb4,
+    Numpad5: 0xffb5,
+    Numpad6: 0xffb6,
+    Numpad7: 0xffb7,
+    Numpad8: 0xffb8,
+    Numpad9: 0xffb9,
+    NumpadDecimal: 0xffae,
+    NumpadDivide: 0xffaf,
+    NumpadMultiply: 0xffaa,
+    NumpadSubtract: 0xffad,
+    NumpadAdd: 0xffab,
+    NumpadEnter: 0xff8d,
+    NumpadEqual: 0xffbd,
+};
+
+for (let i = 1; i <= 24; i += 1) {
     KEYSYM_BY_KEY[`F${i}`] = 0xffbe + (i - 1);
 }
 
 export function resolveVncKeysymFromKeyboardEvent(event) {
+    const numpadLocation = typeof KeyboardEvent !== 'undefined' ? KeyboardEvent.DOM_KEY_LOCATION_NUMPAD : 3;
+    if (event?.location === numpadLocation && event?.code && Object.prototype.hasOwnProperty.call(KEYSYM_BY_NUMPAD_CODE, event.code)) {
+        return KEYSYM_BY_NUMPAD_CODE[event.code];
+    }
+
     const candidates = [event?.key, event?.code];
     for (const candidate of candidates) {
         if (candidate && Object.prototype.hasOwnProperty.call(KEYSYM_BY_KEY, candidate)) {

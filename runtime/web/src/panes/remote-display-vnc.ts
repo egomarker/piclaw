@@ -12,6 +12,17 @@ import type {
 } from './remote-display-protocol.js';
 
 const PROTOCOL = 'vnc';
+const MAX_VNC_CLIPBOARD_CHARS = 256 * 1024;
+const MAX_VNC_DESKTOP_NAME_CHARS = 200;
+
+export function boundedVncDesktopName(text) {
+    return Array.from(String(text || '').trim()).slice(0, MAX_VNC_DESKTOP_NAME_CHARS).join('');
+}
+
+export function boundedVncClipboardText(text) {
+    const value = String(text || '');
+    return value.length > MAX_VNC_CLIPBOARD_CHARS ? value.slice(0, MAX_VNC_CLIPBOARD_CHARS) : value;
+}
 
 function toEncodingValue(value) {
     return Number(value);
@@ -932,7 +943,7 @@ export class VncRemoteDisplayProtocol implements RemoteDisplayProtocolAdapter {
                 this.framebufferWidth = fixedView.getUint16(0, false);
                 this.framebufferHeight = fixedView.getUint16(2, false);
                 this.serverPixelFormat = parsePixelFormat(fixedView, 4);
-                this.serverName = bytesToAscii(this.consume(nameLength));
+                this.serverName = boundedVncDesktopName(bytesToAscii(this.consume(nameLength)));
                 this.state = 'connected';
                 if (this.pipeline) {
                     this.pipeline.initFramebuffer(this.framebufferWidth, this.framebufferHeight);
@@ -1156,7 +1167,7 @@ export class VncRemoteDisplayProtocol implements RemoteDisplayProtocolAdapter {
                                 break;
                             }
                             const nameBytes = this.buffer.slice(offset + 4, offset + 4 + nameLength);
-                            this.serverName = bytesToAscii(nameBytes);
+                            this.serverName = boundedVncDesktopName(bytesToAscii(nameBytes));
                             rects.push({ kind: 'desktop-name', name: this.serverName });
                             offset += 4 + nameLength;
                             continue;
@@ -1251,7 +1262,7 @@ export class VncRemoteDisplayProtocol implements RemoteDisplayProtocolAdapter {
                     const length = view.getUint32(4, false);
                     if (this.buffer.byteLength < 8 + length) break;
                     this.consume(8);
-                    const text = bytesToAscii(this.consume(length));
+                    const text = boundedVncClipboardText(bytesToAscii(this.consume(length)));
                     events.push({ type: 'clipboard', protocol: PROTOCOL, text });
                     progressed = true;
                     continue;

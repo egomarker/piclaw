@@ -158,6 +158,7 @@ async function runInternalTask(task: ScheduledTask, deps: SchedulerDeps): Promis
         chatJid: task.chat_jid,
         days: dreamToken.days,
         mode: "auto",
+        model: task.model,
         agentPool: deps.agentPool,
       });
       return {

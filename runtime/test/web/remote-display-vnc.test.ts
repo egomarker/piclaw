@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { Zlib, zlibSync } from "fflate";
 
 import {
+  boundedVncClipboardText,
+  boundedVncDesktopName,
   measureCoRreRectPayload,
   measureHextileRectPayload,
   measureRreRectPayload,
@@ -149,6 +151,22 @@ describe("VNC encoded rectangle payload measurement", () => {
     expect(measureZrleTileDataPayload(bytes(0x81, 0, 0, 0xff, 0, 0x00), 1, 1)).toBeNull();
     expect(measureZrleTileDataPayload(bytes(0x01, 0, 0, 0xff, 0, 0xaa), 1, 1)).toBeNull();
     expect(measureZrleTileDataPayload(bytes(0x11), 1, 1)).toBeNull();
+  });
+});
+
+describe("VNC text bounds", () => {
+  test("bounds desktop names by Unicode character and trims surrounding whitespace", () => {
+    const longName = `  ${"😀".repeat(210)}  `;
+    const bounded = boundedVncDesktopName(longName);
+    expect(Array.from(bounded)).toHaveLength(200);
+    expect(bounded.startsWith("😀")).toBe(true);
+    expect(bounded.endsWith("😀")).toBe(true);
+  });
+
+  test("bounds remote clipboard text to the Womprat safety limit", () => {
+    const text = "x".repeat(256 * 1024 + 5);
+    expect(boundedVncClipboardText(text)).toHaveLength(256 * 1024);
+    expect(boundedVncClipboardText("short")).toBe("short");
   });
 });
 

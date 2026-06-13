@@ -10,6 +10,7 @@
 import type { AgentPool } from "../../../agent-pool.js";
 import {
   clearInflightMarker,
+  exportArchivedBranchDownloadData,
   getInflightMessageId,
   getInflightRuns,
   getMessageThreadRootIdById,
@@ -657,6 +658,33 @@ export class WebAgentControlPlaneService {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error || "Failed to prune branch.");
       return this.options.json({ error: message || "Failed to prune branch." }, 400);
+    }
+  }
+
+  handleAgentBranchDownload(req: Request): Response {
+    const url = new URL(req.url);
+    const chatJid = this.resolveRequiredChatJid(url.searchParams.get("chat_jid") || undefined);
+    if (!chatJid) {
+      return this.options.json({ error: "Missing chat_jid" }, 400);
+    }
+
+    try {
+      const payload = exportArchivedBranchDownloadData(chatJid);
+      const safeName = String(payload.branch.agent_name || payload.branch.chat_jid || "archived-session")
+        .replace(/[^A-Za-z0-9._-]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 80) || "archived-session";
+      return new Response(`${JSON.stringify(payload, null, 2)}\n`, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Content-Disposition": `attachment; filename="piclaw-archived-session-${safeName}.json"`,
+          "Cache-Control": "no-store",
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "Failed to download archived branch.");
+      return this.options.json({ error: message || "Failed to download archived branch." }, 400);
     }
   }
 

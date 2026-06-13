@@ -179,6 +179,17 @@ test('resolveSessionPopupChats keeps the current session in alphabetical order w
   ]);
 });
 
+test('resolveSessionPopupChats excludes locally hidden sessions after delete confirmation', () => {
+  expect(resolveSessionPopupChats([
+    { chat_jid: 'web:alpha', agent_name: 'Alpha', is_active: true },
+    { chat_jid: 'web:archived', agent_name: 'Archived', archived_at: '2026-04-29T00:00:00Z', is_active: false },
+    { chat_jid: 'web:zeta', agent_name: 'Zeta', is_active: false },
+  ], 'web:alpha', new Set(['web:archived'])).map((chat) => chat.chat_jid)).toEqual([
+    'web:alpha',
+    'web:zeta',
+  ]);
+});
+
 test('isSessionPopupChatEmphasized only highlights active non-archived sessions', () => {
   expect(isSessionPopupChatEmphasized({ is_active: true, archived_at: null })).toBe(true);
   expect(isSessionPopupChatEmphasized({ is_active: true, archived_at: '2026-04-29T00:00:00Z' })).toBe(false);

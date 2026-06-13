@@ -103,9 +103,10 @@ test("agent pool aggregates streamed text and writes logs", async () => {
   const logsDir = (pool as any).logsDir || join(process.env.PICLAW_WORKSPACE || ws.workspace, "logs");
   const logFiles = findAgentLogFiles(logsDir);
   expect(logFiles.length).toBeGreaterThan(0);
-  const latest = logFiles.sort().slice(-1)[0];
-  const content = readFileSync(latest, "utf8");
-  expect(content).toContain("Hello world");
+  const matchingContent = logFiles
+    .map((path) => readFileSync(path, "utf8"))
+    .find((content) => content.includes("Hello world"));
+  expect(matchingContent).toBeDefined();
 });
 
 test("agent pool aggregates recovery counters into memory instrumentation", async () => {

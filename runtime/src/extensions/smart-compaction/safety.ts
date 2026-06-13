@@ -5,7 +5,6 @@
  * ../smart-compaction.ts.
  */
 
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import {
   BUDGET_SAFETY_MARGIN,
   MAX_COMPACTION_OUTPUT_TOKENS,
@@ -76,15 +75,24 @@ function getContextCappedCompactionReasoningEffort(model: unknown): CompactionRe
 }
 
 function getSupportedCompactionReasoningEfforts(model: unknown): CompactionReasoningEffort[] {
-  const anyModel = model as { reasoning?: unknown } | null | undefined;
+  const anyModel = model as { reasoning?: unknown; thinkingLevelMap?: unknown } | null | undefined;
   if (!anyModel?.reasoning) return [];
-  try {
-    const supported = getSupportedThinkingLevels(anyModel as any);
-    return supported
-      .filter((level): level is CompactionReasoningEffort => COMPACTION_REASONING_ORDER.includes(level as CompactionReasoningEffort));
-  } catch {
-    return [];
-  }
+
+  // getSupportedThinkingLevels() intentionally treats missing minimal/low/medium/high
+  // thinkingLevelMap keys as provider defaults for interactive turns. Smart
+  // compaction is a background side-call and must be stricter: do not invent a
+  // compaction reasoning effort from defaults. Only request the side-call efforts
+  // that the model explicitly maps to provider-native values. This keeps
+  // xhigh/max-only Opus-style models on plain summarization instead of accidentally
+  // sending unsupported medium/high reasoning options.
+  const thinkingLevelMap = anyModel.thinkingLevelMap;
+  if (!thinkingLevelMap || typeof thinkingLevelMap !== "object") return [];
+  const map = thinkingLevelMap as Record<string, unknown>;
+  return COMPACTION_REASONING_ORDER.filter((level) => {
+    if (!Object.prototype.hasOwnProperty.call(map, level)) return false;
+    const mapped = map[level];
+    return typeof mapped === "string" ? mapped.trim().length > 0 : mapped !== null && mapped !== undefined;
+  });
 }
 
 export function getCompactionReasoningReserveTokens(model: unknown): number {

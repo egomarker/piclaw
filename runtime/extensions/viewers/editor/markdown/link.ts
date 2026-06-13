@@ -65,6 +65,84 @@ function normalizeLinkTitle(raw: string): string {
     return trimmed;
 }
 
+export type LinkLabelSegment = { type: 'text' | 'code'; text: string };
+
+function pushLinkLabelTextSegment(segments: LinkLabelSegment[], text: string): void {
+    if (!text) return;
+    const previous = segments[segments.length - 1];
+    if (previous?.type === 'text') {
+        previous.text += text;
+        return;
+    }
+    segments.push({ type: 'text', text });
+}
+
+function countBacktickRun(value: string, from: number): number {
+    let count = 0;
+    while (from + count < value.length && value[from + count] === '`') count += 1;
+    return count;
+}
+
+function findClosingBacktickRun(value: string, from: number, length: number): number {
+    for (let index = from; index < value.length; index += 1) {
+        if (value[index] !== '`') continue;
+        const runLength = countBacktickRun(value, index);
+        if (runLength === length) return index;
+        index += Math.max(0, runLength - 1);
+    }
+    return -1;
+}
+
+function normalizeInlineCodeText(raw: string): string {
+    const normalized = String(raw || '').replace(/[\r\n]+/g, ' ');
+    if (/^\s$/.test(normalized)) return normalized;
+    if (/^\s[\s\S]*\s$/.test(normalized) && /\S/.test(normalized.slice(1, -1))) {
+        return normalized.slice(1, -1);
+    }
+    return normalized;
+}
+
+export function parseLinkLabelSegments(raw: string): LinkLabelSegment[] {
+    const value = String(raw || '');
+    const segments: LinkLabelSegment[] = [];
+    let cursor = 0;
+
+    while (cursor < value.length) {
+        const tickIndex = value.indexOf('`', cursor);
+        if (tickIndex < 0) {
+            pushLinkLabelTextSegment(segments, value.slice(cursor));
+            break;
+        }
+        pushLinkLabelTextSegment(segments, value.slice(cursor, tickIndex));
+        const runLength = countBacktickRun(value, tickIndex);
+        const codeStart = tickIndex + runLength;
+        const codeEnd = findClosingBacktickRun(value, codeStart, runLength);
+        if (codeEnd < 0) {
+            pushLinkLabelTextSegment(segments, value.slice(tickIndex, codeStart));
+            cursor = codeStart;
+            continue;
+        }
+        segments.push({ type: 'code', text: normalizeInlineCodeText(value.slice(codeStart, codeEnd)) });
+        cursor = codeEnd + runLength;
+    }
+
+    return segments.length ? segments : [{ type: 'text', text: value }];
+}
+
+export function appendLinkLabelContent(anchor: HTMLElement, raw: string): void {
+    const segments = parseLinkLabelSegments(raw);
+    for (const segment of segments) {
+        if (segment.type === 'code') {
+            const code = document.createElement('code');
+            code.className = 'cm-md-inline-code cm-md-link-label-code';
+            code.textContent = segment.text;
+            anchor.appendChild(code);
+            continue;
+        }
+        anchor.appendChild(document.createTextNode(segment.text));
+    }
+}
+
 function getReferenceLinks(view: EditorView): Map<string, ReferenceLinkTarget> {
     const doc = view.state.doc;
     const cached = referenceMapCache.get(doc as unknown as object);
@@ -114,7 +192,7 @@ class LinkWidget extends WidgetType {
     toDOM(): HTMLElement {
         const anchor = document.createElement('a');
         anchor.className = 'cm-md-link cm-md-link-widget';
-        anchor.textContent = this.text || this.rawUrl;
+        appendLinkLabelContent(anchor, this.text || this.rawUrl);
 
         const href = normalizeLinkHref(this.rawUrl);
         if (href) {

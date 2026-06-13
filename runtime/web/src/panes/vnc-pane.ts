@@ -12,8 +12,10 @@ import { WebSocketRemoteDisplayBoundary } from './remote-display-socket.js';
 import { disposeSocketBoundaryBestEffort, readRandomUuidBestEffort, removeStorageItemBestEffort } from './pane-runtime-safety.js';
 import { loadRemoteDisplayWasmDecoder } from './remote-display-decoder.js';
 import {
+    boundedVncClientClipboardText,
     buildVncWheelPointerEvents,
     computeContainedRemoteDisplayScale,
+    encodeVncClientCutText,
     encodeVncKeyEvent,
     encodeVncPointerEvent,
     hasVncTouchTapSlopBeenExceeded,
@@ -32,6 +34,29 @@ import {
 import { VncRemoteDisplayProtocol } from './remote-display-vnc.js';
 
 export const VNC_TAB_PREFIX = 'piclaw://vnc';
+export const MAX_VNC_FRAMEBUFFER_DIMENSION = 8192;
+export const MAX_VNC_FRAMEBUFFER_PIXELS = 16 * 1024 * 1024;
+export const MAX_VNC_CURSOR_DIMENSION = 256;
+export const MAX_VNC_CURSOR_PIXELS = 256 * 256;
+
+export function isVncFramebufferSizeAllowed(width, height): boolean {
+    const w = Math.max(1, Math.floor(Number(width || 0)));
+    const h = Math.max(1, Math.floor(Number(height || 0)));
+    return w <= MAX_VNC_FRAMEBUFFER_DIMENSION
+        && h <= MAX_VNC_FRAMEBUFFER_DIMENSION
+        && w * h <= MAX_VNC_FRAMEBUFFER_PIXELS;
+}
+
+export function isVncCursorRectAllowed(rect): boolean {
+    const width = Math.floor(Number(rect?.width || 0));
+    const height = Math.floor(Number(rect?.height || 0));
+    return Boolean(rect?.rgba)
+        && width > 0
+        && height > 0
+        && width <= MAX_VNC_CURSOR_DIMENSION
+        && height <= MAX_VNC_CURSOR_DIMENSION
+        && width * height <= MAX_VNC_CURSOR_PIXELS;
+}
 
 export function buildVncTabPath(targetId?: string | null): string {
     const target = String(targetId || '').trim();
@@ -319,6 +344,7 @@ class VncPaneInstance implements PaneInstance {
     private pointerInputAbortController = null;
     private pressedKeysyms = new Map();
     private passwordInputEl = null;
+    private clipboardInputEl = null;
     private authPassword = null;
     private directHostInputEl = null;
     private directPortInputEl = null;
@@ -462,6 +488,7 @@ class VncPaneInstance implements PaneInstance {
         this.displayStageEl = null;
         this.displayScale = null;
         this.passwordInputEl = null;
+        this.clipboardInputEl = null;
         this.directHostInputEl = null;
         this.directPortInputEl = null;
         this.directPasswordInputEl = null;
@@ -587,6 +614,8 @@ class VncPaneInstance implements PaneInstance {
                     <div data-vnc-session-chrome style="padding:6px 8px;border:1px solid var(--border-color);border-radius:8px;background:transparent;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
                         <div data-display-info style="min-width:0;flex:1 1 240px;font-size:12px;color:var(--text-secondary);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Negotiating remote display…</div>
                         <input type="password" data-vnc-password placeholder="Password" autocomplete="current-password" style="width:150px;max-width:100%;padding:6px 8px;border:1px solid var(--border-color);border-radius:6px;background:transparent;color:inherit;" />
+                        <input type="text" data-vnc-clipboard placeholder="Clipboard" autocomplete="off" spellcheck="false" style="width:180px;max-width:100%;padding:6px 8px;border:1px solid var(--border-color);border-radius:6px;background:transparent;color:inherit;" />
+                        <button type="button" data-vnc-send-clipboard="1" ${this.readOnly ? 'disabled' : ''} style="padding:6px 10px;border:1px solid var(--border-color);border-radius:6px;background:transparent;cursor:pointer;color:inherit;">Send clipboard</button>
                         <button type="button" data-vnc-reconnect="1" style="padding:6px 10px;border:1px solid var(--border-color);border-radius:6px;background:transparent;cursor:pointer;color:inherit;">Reconnect</button>
                     </div>
                     <div data-display-stage style="min-height:0;height:100%;border:1px solid var(--border-color);border-radius:8px;background:#0a0a0a;display:flex;align-items:center;justify-content:center;padding:4px;position:relative;overflow:hidden;">
@@ -611,6 +640,13 @@ class VncPaneInstance implements PaneInstance {
                                 <span style="font-size:11px;color:var(--text-secondary);">VNC password</span>
                                 <input type="password" data-vnc-password placeholder="Optional" autocomplete="current-password" style="width:100%;padding:8px 10px;border:1px solid var(--border-color);border-radius:8px;background:transparent;color:inherit;" />
                             </label>
+                            <label style="display:grid;gap:4px;min-width:220px;flex:2 1 260px;">
+                                <span style="font-size:11px;color:var(--text-secondary);">Clipboard</span>
+                                <input type="text" data-vnc-clipboard placeholder="Text to send, or remote clipboard text" autocomplete="off" spellcheck="false" style="width:100%;padding:8px 10px;border:1px solid var(--border-color);border-radius:8px;background:transparent;color:inherit;" />
+                            </label>
+                            <button type="button" data-vnc-send-clipboard="1" ${this.readOnly ? 'disabled' : ''} style="padding:8px 12px;border:1px solid var(--border-color);border-radius:8px;background:transparent;cursor:pointer;color:inherit;">Send clipboard</button>
+                            <button type="button" data-vnc-copy-clipboard="1" style="padding:8px 12px;border:1px solid var(--border-color);border-radius:8px;background:transparent;cursor:pointer;color:inherit;">Copy</button>
+                            <button type="button" data-vnc-paste-clipboard="1" style="padding:8px 12px;border:1px solid var(--border-color);border-radius:8px;background:transparent;cursor:pointer;color:inherit;">Paste</button>
                             <button type="button" data-vnc-reconnect="1" style="padding:8px 12px;border:1px solid var(--border-color);border-radius:8px;background:transparent;cursor:pointer;color:inherit;">Reconnect</button>
                             <button type="button" data-open-target-picker="1" style="padding:8px 12px;border:1px solid var(--border-color);border-radius:8px;background:transparent;cursor:pointer;color:inherit;">Target</button>
                         </div>
@@ -657,6 +693,9 @@ class VncPaneInstance implements PaneInstance {
             void this.connectSocket();
         });
 
+        this.clipboardInputEl = this.bodyEl.querySelector('[data-vnc-clipboard]');
+        this.installVncClipboardControls();
+
         const reconnectBtn = this.bodyEl.querySelector('[data-vnc-reconnect]');
         reconnectBtn?.addEventListener('click', () => {
             this.authPassword = normalizeVncPassword(this.passwordInputEl ? this.passwordInputEl.value : this.authPassword);
@@ -666,6 +705,59 @@ class VncPaneInstance implements PaneInstance {
         pickerBtn?.addEventListener('click', () => {
             this.openTargetTab('', 'VNC');
         });
+    }
+
+    private installVncClipboardControls() {
+        const sendButton = this.bodyEl.querySelector('[data-vnc-send-clipboard]');
+        sendButton?.addEventListener('click', () => this.sendClientClipboardText(this.clipboardInputEl?.value || ''));
+        this.clipboardInputEl?.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            this.sendClientClipboardText(this.clipboardInputEl?.value || '');
+        });
+        this.bodyEl.querySelector('[data-vnc-copy-clipboard]')?.addEventListener('click', async () => {
+            const text = boundedVncClientClipboardText(this.clipboardInputEl?.value || '');
+            if (this.clipboardInputEl && this.clipboardInputEl.value !== text) this.clipboardInputEl.value = text;
+            try {
+                await navigator.clipboard?.writeText?.(text);
+                this.setStatus('Clipboard copied locally.');
+                this.updateDisplayInfo('Clipboard copied locally.');
+            } catch {
+                this.clipboardInputEl?.focus?.();
+                this.clipboardInputEl?.select?.();
+                this.setStatus('Clipboard text selected for copying.');
+                this.updateDisplayInfo('Clipboard text selected for copying.');
+            }
+        });
+        this.bodyEl.querySelector('[data-vnc-paste-clipboard]')?.addEventListener('click', async () => {
+            try {
+                const text = await navigator.clipboard?.readText?.();
+                if (this.clipboardInputEl && typeof text === 'string') {
+                    this.clipboardInputEl.value = boundedVncClientClipboardText(text);
+                }
+                this.setStatus('Local clipboard pasted into VNC clipboard field.');
+                this.updateDisplayInfo('Local clipboard pasted into VNC clipboard field.');
+            } catch {
+                this.clipboardInputEl?.focus?.();
+                this.setStatus('Focus the clipboard field and press Ctrl+V to paste.');
+                this.updateDisplayInfo('Focus the clipboard field and press Ctrl+V to paste.');
+            }
+        });
+    }
+
+    private sendClientClipboardText(text) {
+        if (this.readOnly) return;
+        if (!this.socketBoundary || !this.protocol || this.protocol.state !== 'connected') {
+            this.setStatus('Clipboard can be sent after VNC connects.');
+            this.updateDisplayInfo('Clipboard can be sent after VNC connects.');
+            return;
+        }
+        const boundedText = boundedVncClientClipboardText(text);
+        if (this.clipboardInputEl && this.clipboardInputEl.value !== boundedText) this.clipboardInputEl.value = boundedText;
+        this.socketBoundary.send(encodeVncClientCutText(boundedText));
+        this.setStatus('Clipboard sent to remote.');
+        this.updateDisplayInfo(`Clipboard sent to remote (${boundedText.length} chars).`);
+        this.updateDisplayMeta();
     }
 
     private updateDisplayInfo(message) {
@@ -688,13 +780,18 @@ class VncPaneInstance implements PaneInstance {
 
     private ensureCanvasSize(width, height, options: { reveal?: boolean } = {}) {
         if (!this.canvas || !this.canvasCtx || !width || !height) return;
-        if (this.canvas.width !== width || this.canvas.height !== height) {
-            this.canvas.width = width;
-            this.canvas.height = height;
+        const w = Math.max(1, Math.floor(Number(width || 0)));
+        const h = Math.max(1, Math.floor(Number(height || 0)));
+        if (!isVncFramebufferSizeAllowed(w, h)) {
+            throw new Error(`VNC framebuffer too large: ${w}×${h}`);
+        }
+        if (this.canvas.width !== w || this.canvas.height !== h) {
+            this.canvas.width = w;
+            this.canvas.height = h;
         }
         const reveal = options?.reveal === true;
         this.canvas.style.display = reveal || this.hasRenderedFrame ? 'block' : 'none';
-        this.canvas.style.aspectRatio = `${width} / ${height}`;
+        this.canvas.style.aspectRatio = `${w} / ${h}`;
         if (this.displayPlaceholderEl) {
             this.displayPlaceholderEl.style.display = reveal || this.hasRenderedFrame ? 'none' : '';
         }
@@ -1244,7 +1341,11 @@ class VncPaneInstance implements PaneInstance {
     }
 
     private applyCursorRect(rect) {
-        if (!this.canvas || !rect?.rgba || !rect.width || !rect.height) return;
+        if (!this.canvas) return;
+        if (!isVncCursorRectAllowed(rect)) {
+            this.canvas.style.cursor = 'default';
+            return;
+        }
         const cursorCanvas = document.createElement('canvas');
         cursorCanvas.width = rect.width;
         cursorCanvas.height = rect.height;
@@ -1300,7 +1401,7 @@ class VncPaneInstance implements PaneInstance {
                 return;
             case 'display-init':
                 this.ensureCanvasSize(event.width, event.height);
-                this.setSessionChromeVisible(false);
+                this.setSessionChromeVisible(true);
                 this.setStatus(`Connected to ${this.targetLabel || this.targetId || 'target'} — waiting for first framebuffer update (${event.width}×${event.height}).`);
                 this.updateDisplayInfo(`Connected to ${event.name || this.targetLabel || this.targetId || 'remote display'}. Waiting for first framebuffer update…`);
                 this.updateDisplayMeta('awaiting-frame');
@@ -1373,11 +1474,14 @@ class VncPaneInstance implements PaneInstance {
                     this.scheduleRawFallbackTimeout();
                 }
                 return;
-            case 'clipboard':
+            case 'clipboard': {
+                const text = boundedVncClientClipboardText(event.text || '');
+                if (this.clipboardInputEl) this.clipboardInputEl.value = text;
                 this.setStatus('Remote clipboard updated.');
-                this.updateDisplayInfo(`Clipboard text received (${event.text.length} chars).`);
+                this.updateDisplayInfo(`Clipboard text received (${text.length} chars).`);
                 this.updateDisplayMeta();
                 return;
+            }
             case 'bell':
                 this.setStatus('Remote display bell received.');
                 this.updateDisplayInfo('Remote display bell received.');

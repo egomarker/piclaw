@@ -100,14 +100,20 @@ test("internal Dream flows keep notes/memory/days model-owned and AutoDream stay
   expect(existsSync(join(config.WORKSPACE_DIR, `notes/memory/days/${recentDate}.md`))).toBe(false);
 
   const memoryIndexText = readFileSync(join(config.WORKSPACE_DIR, "notes/memory/MEMORY.md"), "utf8");
-  expect(memoryIndexText).toContain(`[${recentDate}](../daily/${recentDate}.md)`);
+  expect(memoryIndexText).toContain("Complete days: 0");
+  expect(memoryIndexText).toContain("Partial days: 1");
+  expect(memoryIndexText).toContain(`${recentDate} — partial`);
+  expect(memoryIndexText).toContain("No complete daily-note memories yet.");
 
   const currentStateText = readFileSync(join(config.WORKSPACE_DIR, "notes/memory/current-state.md"), "utf8");
   expect(currentStateText).toContain("# Current Dream state");
-  expect(currentStateText).toContain("- Complete days: 1");
+  expect(currentStateText).toContain("- Complete days: 0");
+  expect(currentStateText).toContain("- Partial days: 1");
+  expect(currentStateText).toContain(`${recentDate} — partial`);
 
   const recentContextText = readFileSync(join(config.WORKSPACE_DIR, "notes/memory/recent-context.md"), "utf8");
-  expect(recentContextText).toContain("Infra tooling and memory maintenance landed.");
+  expect(recentContextText).toContain("Partial days");
+  expect(recentContextText).toContain(`${recentDate} — partial`);
 
   writeFileSync(
     join(config.WORKSPACE_DIR, "notes", "memory", "current-state.md"),
@@ -139,7 +145,8 @@ test("internal Dream flows keep notes/memory/days model-owned and AutoDream stay
   const lastResult = db.getTaskById(dream.DREAM_TASK_ID)?.last_result || "";
   expect(lastResult).toContain("AutoDream model consolidation finished");
   expect(lastResult).toContain("Daily notes refreshed before Dream: yes");
-  expect(lastResult).toContain("Memory refreshed after Dream: yes");
+  expect(lastResult).toContain("Unresolved daily-note backlog:");
+  expect(lastResult).toContain("Memory refreshed after Dream:");
   const backupRoot = join(config.DATA_DIR, "dream-backups");
   const backups = readdirSync(backupRoot);
   expect(backups.length).toBeGreaterThanOrEqual(1);

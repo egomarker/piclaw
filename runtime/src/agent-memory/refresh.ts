@@ -12,6 +12,7 @@ export const AGENT_MEMORY_PROJECT_PATH = resolve(AGENT_MEMORY_DIR, "project.md")
 export const AGENT_MEMORY_REFERENCE_PATH = resolve(AGENT_MEMORY_DIR, "reference.md");
 const SUMMARY_MARKER = "<!-- NEEDS_SUMMARY -->";
 const SUMMARY_UPDATE_MARKER = "<!-- NEEDS_SUMMARY_UPDATE -->";
+const INCOMPLETE_WARNING_TITLE = "> ⚠ **Incomplete daily note**";
 const MEMORY_LINE_LIMIT = 200;
 const MEMORY_MAX_BYTES = 25 * 1024;
 const MAX_SIGNAL_ITEMS = 6;
@@ -304,6 +305,12 @@ interface TranscriptRow {
 
 function buildScopeFilter(sidecar: DailyAgentSidecar): { clause: string; params: string[] } {
   const anchor = sidecar.scope_anchor || "web:default";
+  if (sidecar.scope_mode === "all-chats" || anchor === "*") {
+    return {
+      clause: "m.chat_jid NOT LIKE 'dream:%'",
+      params: [],
+    };
+  }
   if (sidecar.scope_mode === "all-web-session-trees" || anchor.startsWith("web:")) {
     return {
       clause: "m.chat_jid LIKE 'web:%'",
@@ -382,12 +389,13 @@ function buildSidecar(notePath: string, content: string): DailyAgentSidecar {
   const summary = extractSummary(body);
   const summaryUpdates = extractSummaryUpdates(body);
   const needsSummaryUpdate = body.includes(SUMMARY_UPDATE_MARKER);
+  const hasIncompleteWarning = body.includes(INCOMPLETE_WARNING_TITLE);
   const summarisedUntil = fields.summarised_until || null;
 
   let state: DailyAgentSidecar["state"] = "complete";
   if (!summary) state = "unsummarised";
   else if (!summarisedUntil) state = "missing_watermark";
-  else if (needsSummaryUpdate) state = "partial";
+  else if (needsSummaryUpdate || hasIncompleteWarning) state = "partial";
 
   return {
     schema_version: 1,

@@ -16,7 +16,12 @@ import {
   isInsideFencedCodeBeforeLine,
 } from "../../extensions/viewers/editor/markdown/edit-helpers.ts";
 import { parseMarkdownImageSource } from "../../extensions/viewers/editor/markdown/image-block.ts";
-import { normalizeLinkHref, normalizeReferenceLabel } from "../../extensions/viewers/editor/markdown/link.ts";
+import {
+  appendLinkLabelContent,
+  normalizeLinkHref,
+  normalizeReferenceLabel,
+  parseLinkLabelSegments,
+} from "../../extensions/viewers/editor/markdown/link.ts";
 import { isTableBoundaryPosition } from "../../extensions/viewers/editor/markdown/table-keymap.ts";
 import { shouldSignalTreeGrowth } from "../../extensions/viewers/editor/markdown/tree-progress.ts";
 import {
@@ -29,6 +34,8 @@ import {
   setLivePreviewFrozen,
   splitRangeByDocumentLines,
 } from "../../extensions/viewers/editor/markdown/live-preview.ts";
+
+const PreviousDocument = globalThis.document;
 
 test("blockquote nodes are not suppressed by generic block cursor gating", () => {
   expect(usesBlockCursorGate("Blockquote")).toBe(false);
@@ -169,6 +176,51 @@ test("reference link labels follow markdown case/whitespace normalization", () =
   expect(normalizeReferenceLabel('[Example Ref]')).toBe('example ref');
   expect(normalizeReferenceLabel('Example\n\tRef')).toBe('example ref');
   expect(normalizeReferenceLabel('[]')).toBe('');
+});
+
+test("link widget labels preserve inline code semantics instead of showing raw backticks", () => {
+  expect(parseLinkLabelSegments('before `this` after')).toEqual([
+    { type: 'text', text: 'before ' },
+    { type: 'code', text: 'this' },
+    { type: 'text', text: ' after' },
+  ]);
+
+  const created: any[] = [];
+  const doc = {
+    createElement(tagName: string) {
+      const element: any = {
+        tagName: tagName.toUpperCase(),
+        className: '',
+        textContent: '',
+        children: [] as any[],
+        appendChild(child: any) {
+          this.children.push(child);
+          return child;
+        },
+      };
+      created.push(element);
+      return element;
+    },
+    createTextNode(text: string) {
+      return { nodeType: 3, textContent: text };
+    },
+  };
+  globalThis.document = doc as any;
+  try {
+    const anchor = doc.createElement('a');
+    appendLinkLabelContent(anchor, '`this`');
+
+    expect(anchor.children).toHaveLength(1);
+    expect(anchor.children[0].tagName).toBe('CODE');
+    expect(anchor.children[0].className).toContain('cm-md-inline-code');
+    expect(anchor.children[0].textContent).toBe('this');
+  } finally {
+    if (PreviousDocument === undefined) {
+      delete globalThis.document;
+    } else {
+      globalThis.document = PreviousDocument;
+    }
+  }
 });
 
 test("table boundary helper treats the table as an atomic unit before destructive backspace", () => {

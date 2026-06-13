@@ -124,6 +124,7 @@ export function resolveAppApiSurface(apiNamespace: Record<string, any> = api): A
     getChatBranches: resolveOptionalApi(apiNamespace, 'getChatBranches', { chats: [] }),
     renameChatBranch: resolveOptionalApi(apiNamespace, 'renameChatBranch', null),
     pruneChatBranch: resolveOptionalApi(apiNamespace, 'pruneChatBranch', null),
+    purgeChatBranch: resolveOptionalApi(apiNamespace, 'purgeChatBranch', null),
     restoreChatBranch: resolveOptionalApi(apiNamespace, 'restoreChatBranch', null),
     getAgentQueueState: resolveOptionalApi(apiNamespace, 'getAgentQueueState', { count: 0 }),
     steerAgentQueueItem: resolveOptionalApi(apiNamespace, 'steerAgentQueueItem', { removed: false, queued: 'steer' }),

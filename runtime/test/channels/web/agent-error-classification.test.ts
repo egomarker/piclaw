@@ -6,7 +6,11 @@
 
 // Import the non-exported functions by re-exporting via a dynamic wrapper
 import { describe, expect, test } from "bun:test";
-import { formatProviderError, parseProviderError } from "../../../src/channels/web/handlers/provider-error-format.js";
+import {
+  formatProviderError,
+  parseProviderError,
+  sanitizeProviderErrorDetail,
+} from "../../../src/channels/web/handlers/provider-error-format.js";
 
 // We test through the module's internal functions by importing the file
 // and accessing the exported formatUserVisibleError indirectly.
@@ -108,8 +112,24 @@ describe("provider error classification", () => {
     const formatted = formatProviderError("Codex error: WebSocket closed 1006 Connection ended");
 
     expect(formatted?.category).toBe("network");
-    expect(formatted?.title).toBe("Codex network error");
+    expect(formatted?.title).toBe("Codex connection closed");
     expect(formatted?.label).toBe("network");
+    expect(formatted?.detail).toContain("Retry the message");
+  });
+
+  test("sanitizes Bun fetch verbose hints from provider socket disconnects", () => {
+    const raw = "The socket connection was closed unexpectedly. For more information, pass verbose: true in the second argument to fetch()";
+
+    expect(sanitizeProviderErrorDetail(raw)).toBe("The socket connection was closed unexpectedly.");
+
+    const formatted = formatProviderError(raw);
+    expect(formatted?.category).toBe("network");
+    expect(formatted?.title).toBe("Provider connection closed");
+    expect(formatted?.label).toBe("network");
+    expect(formatted?.severity).toBe("error");
+    expect(formatted?.detail).toContain("The socket connection was closed unexpectedly.");
+    expect(formatted?.detail).toContain("Retry the message");
+    expect(formatted?.detail).not.toContain("verbose: true");
   });
 
   test("classifies plain model-not-supported outage text for display", () => {

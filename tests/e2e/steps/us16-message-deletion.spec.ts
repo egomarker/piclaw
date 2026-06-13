@@ -80,16 +80,8 @@ test.describe('US-16: Single Message Deletion', () => {
   });
 
   test('delete a single message removes it from timeline', async ({ authedPage: page }) => {
-    // Send a test message
-    await sendMessage(page, `e2e-delete-test-${Date.now()}`);
-
-    // Get the user message we just sent
-    const userPosts = page.locator('.post:not(.agent-post)');
-    const count = await userPosts.count();
-    expect(count).toBeGreaterThan(0);
-
-    const targetPost = userPosts.last();
-    const postId = await targetPost.getAttribute('id');
+    const postId = await sendMessage(page, `e2e-delete-test-${Date.now()}`);
+    const targetPost = page.locator(`#post-${postId}`);
 
     // Hover and click delete
     await targetPost.hover();
@@ -105,21 +97,18 @@ test.describe('US-16: Single Message Deletion', () => {
     await page.waitForTimeout(500);
 
     // Message should be gone (animation + removal)
-    if (postId) {
-      const stillExists = await page.locator(`#${postId}`).count();
-      expect(stillExists).toBe(0);
-    }
+    const stillExists = await page.locator(`#post-${postId}`).count();
+    expect(stillExists).toBe(0);
   });
 
   test('deleted message stays gone after refresh', async ({ authedPage: page }) => {
     // Send and note a unique message
     const uniqueText = `e2e-persist-delete-${Date.now()}`;
-    await sendMessage(page, uniqueText);
+    const postId = await sendMessage(page, uniqueText);
     await page.waitForTimeout(1000);
 
     // Find and delete our message
-    const userPosts = page.locator(`.post:not(.agent-post)`);
-    const targetPost = userPosts.last();
+    const targetPost = page.locator(`#post-${postId}`);
 
     page.on('dialog', async (dialog) => await dialog.accept());
 

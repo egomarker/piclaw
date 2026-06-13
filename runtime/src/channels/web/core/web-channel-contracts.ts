@@ -184,6 +184,7 @@ export interface WebChannelLike
   handleAgentRenameJid(req: Request): Promise<Response>;
   handleAgentBranchMergeParent(req: Request): Promise<Response>;
   handleAgentBranchPrune(req: Request): Promise<Response>;
+  handleAgentBranchDownload(req: Request): Response;
   handleAgentBranchPurge(req: Request): Promise<Response>;
   handleAgentBranchRestore(req: Request): Promise<Response>;
   handleAgentPeerMessage(req: Request): Promise<Response>;

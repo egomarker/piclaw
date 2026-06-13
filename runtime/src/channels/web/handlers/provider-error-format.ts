@@ -92,19 +92,27 @@ function extractRequestId(text: string, parsed: Record<string, unknown>, nested:
 }
 
 const MODEL_AVAILABILITY_PATTERN = /unsupported model|model(?:\s+is)?\s+not supported|model unavailable/i;
+const NETWORK_ERROR_PATTERN = /\bENOTFOUND\b|\bECONNREFUSED\b|\bETIMEDOUT\b|\bECONNRESET\b|getaddrinfo|dns.*failed|network.*error|connection.*(?:error|refused|reset|lost|ended|closed)|websocket.*(?:closed|ended|1006)|fetch failed|socket hang up|socket connection was closed unexpectedly/i;
+
+export function sanitizeProviderErrorDetail(errorText: string | null | undefined): string {
+  return String(errorText || "")
+    .replace(/\s*For more information,?\s+pass\s+verbose:\s*true\s+in\s+the\s+second\s+argument\s+to\s+fetch\(\)\.?/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function inferCategory(text: string): ProviderErrorCategory {
   if (/\b429\b|rate[ -]?limit|too many requests|retry-after/i.test(text)) return "rate_limit";
   if (/authentication failed|credentials may have expired|no api key(?: found| for provider)?|token refresh failed\s*:\s*401|re-authenticate|unauthorized|\b401\b|\b403\b|invalid.*api.*key|api.*key.*invalid|token.*expired|oauth.*expired|refresh.*token/i.test(text)) return "auth";
   if (/quota|usage.*limit|out of.*usage|billing|insufficient.*funds|exceeded.*limit|credit/i.test(text)) return "quota";
   if (/\b5\d\d\b|server[_ -]?error|internal[_ -]?error|bad gateway|service unavailable|gateway timeout|overloaded/i.test(text)) return "server";
-  if (/\bENOTFOUND\b|\bECONNREFUSED\b|\bETIMEDOUT\b|\bECONNRESET\b|getaddrinfo|dns.*failed|network.*error|connection.*(?:error|refused|lost|ended|closed)|websocket.*(?:closed|ended|1006)|fetch failed|socket hang up/i.test(text)) return "network";
+  if (NETWORK_ERROR_PATTERN.test(text)) return "network";
   if (/no model selected|select a model|use \/model|use \/login|model not found|deployment.*not found/i.test(text)) return "model_config";
   if (MODEL_AVAILABILITY_PATTERN.test(text)) return "model_availability";
   return "provider";
 }
 
-function titleForCategory(category: ProviderErrorCategory, provider: string | null): string {
+function titleForCategory(category: ProviderErrorCategory, provider: string | null, detail = ""): string {
   const prefix = provider ? `${provider} ` : "Provider ";
   switch (category) {
     case "rate_limit":
@@ -116,6 +124,12 @@ function titleForCategory(category: ProviderErrorCategory, provider: string | nu
     case "server":
       return `${prefix}server error`;
     case "network":
+      if (/ECONNRESET|connection.*(?:reset|ended|closed)|websocket.*(?:closed|ended|1006)|socket hang up|socket connection was closed unexpectedly/i.test(detail)) {
+        return `${prefix}connection closed`;
+      }
+      if (/ETIMEDOUT|timed? out|timeout/i.test(detail)) return `${prefix}connection timed out`;
+      if (/ECONNREFUSED|connection.*refused/i.test(detail)) return `${prefix}connection refused`;
+      if (/ENOTFOUND|getaddrinfo|dns/i.test(detail)) return `${prefix}DNS lookup failed`;
       return `${prefix}network error`;
     case "model_availability":
       return provider ? `${provider} model unavailable` : "Model unavailable";
@@ -152,9 +166,29 @@ function severityForCategory(category: ProviderErrorCategory): ProviderErrorSeve
     : "error";
 }
 
+function networkGuidance(message: string): string | null {
+  if (/ECONNRESET|connection.*(?:reset|ended|closed)|websocket.*(?:closed|ended|1006)|socket hang up|socket connection was closed unexpectedly/i.test(message)) {
+    return "The provider dropped the streaming connection before the turn completed. Retry the message; if it repeats, switch provider/model or check provider status.";
+  }
+  if (/ETIMEDOUT|timed? out|timeout/i.test(message)) {
+    return "The provider did not respond in time. Retry shortly; if it repeats, check provider status or network connectivity.";
+  }
+  if (/ECONNREFUSED|connection.*refused/i.test(message)) {
+    return "The provider endpoint refused the connection. Check the provider URL, proxy, firewall, or provider status.";
+  }
+  if (/ENOTFOUND|getaddrinfo|dns/i.test(message)) {
+    return "The provider hostname could not be resolved. Check DNS, provider URL, proxy settings, or network connectivity.";
+  }
+  if (/fetch failed/i.test(message)) {
+    return "The request did not reach the provider successfully. Check provider URL, proxy settings, or network connectivity.";
+  }
+  return null;
+}
+
 function buildDetail(parsed: ParsedProviderError): string {
   const details: string[] = [];
-  if (parsed.message) details.push(parsed.message);
+  const message = sanitizeProviderErrorDetail(parsed.message);
+  if (message) details.push(message);
 
   const metadata: string[] = [];
   if (parsed.code) metadata.push(`code: ${parsed.code}`);
@@ -177,13 +211,14 @@ function inferProviderFromRawText(text: string): string | null {
 }
 
 export function parseProviderError(errorText: string | null | undefined): ParsedProviderError | null {
-  const raw = String(errorText || "").trim();
+  const raw = sanitizeProviderErrorDetail(errorText);
   if (!raw) return null;
 
   const prefixMatch = raw.match(/^([A-Za-z][A-Za-z0-9 ._-]{1,40})\s+error\s*:/i);
   const parsed = extractJsonObject(raw);
   const isModelAvailabilityOnly = MODEL_AVAILABILITY_PATTERN.test(raw);
-  if (!parsed && !prefixMatch && !isModelAvailabilityOnly) return null;
+  const isNetworkOnly = NETWORK_ERROR_PATTERN.test(raw);
+  if (!parsed && !prefixMatch && !isModelAvailabilityOnly && !isNetworkOnly) return null;
 
   const nested = asRecord(parsed?.error) || asRecord(parsed?.errors) || null;
   const message = readString(nested?.message, parsed?.message, nested?.error, parsed?.error_description, parsed?.detail)
@@ -222,9 +257,13 @@ export function formatProviderError(errorText: string | null | undefined): Provi
     parsed.code,
     parsed.status ? String(parsed.status) : "",
   ].filter(Boolean).join(" ");
-  const category = inferCategory(classificationText);
+  const category = inferCategory(classificationText || parsed.message);
 
   let detail = buildDetail(parsed);
+  if (category === "network") {
+    const guidance = networkGuidance(parsed.message);
+    detail = [detail, guidance].filter(Boolean).join(" — ").slice(0, 900);
+  }
   if (category === "model_availability") {
     const guidance = "This may be a temporary provider outage even when your model is valid. Retry shortly or switch provider/model.";
     detail = [detail, guidance].filter(Boolean).join(" — ").slice(0, 900);
@@ -233,7 +272,7 @@ export function formatProviderError(errorText: string | null | undefined): Provi
   return {
     category,
     label: labelForCategory(category),
-    title: titleForCategory(category, parsed.provider),
+    title: titleForCategory(category, parsed.provider, detail || parsed.message),
     detail,
     severity: severityForCategory(category),
     requestId: parsed.requestId,

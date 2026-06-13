@@ -84,21 +84,40 @@ export interface DreamAgentTurnResult {
   result: string;
 }
 
+function parseModelLabel(label: string): { provider?: string; modelId: string } {
+  const trimmed = String(label || "").trim();
+  const slash = trimmed.indexOf("/");
+  if (slash > 0 && slash < trimmed.length - 1) {
+    return {
+      provider: trimmed.slice(0, slash),
+      modelId: trimmed.slice(slash + 1),
+    };
+  }
+  return { provider: undefined, modelId: trimmed };
+}
+
+async function applyModelLabel(agentPool: AgentPool, chatJid: string, label: string): Promise<string | null> {
+  const trimmed = String(label || "").trim();
+  if (!trimmed) return null;
+  const { provider, modelId } = parseModelLabel(trimmed);
+  const control = await agentPool.applyControlCommand(chatJid, {
+    type: "model",
+    provider,
+    modelId,
+    raw: `/model ${trimmed}`,
+  });
+  if (control.status === "error") {
+    return control.message;
+  }
+  return null;
+}
+
 function isDreamToolAllowed(toolName: string): boolean {
   return DREAM_ALLOWED_TOOL_NAMES.has(String(toolName || "").trim());
 }
 
 function refreshDailyNotes(_chatJid: string, days: number): boolean {
-  const backlog = inspectDailyNoteSummaryBacklog({ recentDays: days });
-  const oldestBacklogDay = backlog.dates.length > 0 ? backlog.dates.slice().sort()[0] : null;
-  const boundedDays = (() => {
-    if (!oldestBacklogDay) return 1;
-    const diffMs = Date.now() - new Date(`${oldestBacklogDay}T00:00:00Z`).getTime();
-    const spanDays = Math.max(1, Math.floor(diffMs / 86400000) + 1);
-    return Math.max(1, Math.min(days, spanDays));
-  })();
-
-  refreshDailyNotesFromMessages({ chatJid: DREAM_ALL_CHATS_SCOPE_ANCHOR, days: boundedDays });
+  refreshDailyNotesFromMessages({ chatJid: DREAM_ALL_CHATS_SCOPE_ANCHOR, days });
   return true;
 }
 
@@ -462,7 +481,7 @@ async function createDreamBackup(chatJid: string, mode: "manual" | "auto", days:
   return backupPath;
 }
 
-export async function runDreamAgentTurn(options: { chatJid: string; days?: number; mode?: "manual" | "auto"; agentPool: AgentPool }): Promise<DreamAgentTurnResult> {
+export async function runDreamAgentTurn(options: { chatJid: string; days?: number; mode?: "manual" | "auto"; model?: string | null; agentPool: AgentPool }): Promise<DreamAgentTurnResult> {
   const chatJid = options.chatJid;
   const mode = options.mode === "auto" ? "auto" : "manual";
   const days = Number.isFinite(options.days) && Number(options.days) > 0
@@ -506,6 +525,9 @@ export async function runDreamAgentTurn(options: { chatJid: string; days?: numbe
   let lockFd: number | null = null;
   let shouldCleanupDreamChat = false;
   const dreamChatJid = buildDreamChatJid(chatJid, mode);
+  const requestedDreamModel = typeof options.model === "string" && options.model.trim()
+    ? options.model.trim()
+    : DREAM_MODEL;
   const dreamStartTime = Date.now();
   try {
     const lock = acquireDreamLock();
@@ -521,6 +543,30 @@ export async function runDreamAgentTurn(options: { chatJid: string; days?: numbe
     reapDreamArtifacts(null);
     const backupPath = await createDreamBackup(chatJid, mode, days);
     const dailyNotesRefreshed = refreshDailyNotes(chatJid, days);
+    if (requestedDreamModel) {
+      const modelError = await applyModelLabel(options.agentPool, dreamChatJid, requestedDreamModel);
+      if (modelError) {
+        const refresh = refreshAgentMemoryFromDailyNotes({ recentDays: days });
+        const postBacklog = inspectDailyNoteSummaryBacklog({ recentDays: days });
+        const workspaceIndexRefreshed = await refreshWorkspaceSearchIndex();
+        return {
+          mode,
+          skipped: false,
+          result: [
+            `${mode === "auto" ? "AutoDream" : "Dream"} model switch failed; deterministic refresh completed.`,
+            `- Model switch error: ${modelError}`,
+            `- Daily notes refreshed before Dream: ${dailyNotesRefreshed ? "yes" : "no"}`,
+            formatDailyNoteBacklogSummary(postBacklog),
+            `- Memory refreshed after Dream: yes`,
+            `- Updated memory: ${refresh.memoryPath}`,
+            `- Updated current state: ${refresh.currentStatePath}`,
+            `- Updated recent context: ${refresh.recentContextPath}`,
+            `- Pre-Dream backup: ${backupPath || "(none)"}`,
+            `- Workspace index refreshed: ${workspaceIndexRefreshed ? "yes" : "no"}`,
+          ].filter(Boolean).join("\n"),
+        };
+      }
+    }
     const out = await options.agentPool.runAgent(buildDreamPrompt({ mode, days }), dreamChatJid, {
       timeoutMs: getDreamAgentTimeoutMs(),
       toolCeilingFilter: isDreamToolAllowed,

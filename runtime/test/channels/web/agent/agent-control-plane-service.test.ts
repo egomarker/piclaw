@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import "../../../helpers.js";
-import { beginChatRun, getInflightRuns, initDatabase } from "../../../../src/db.js";
+import { beginChatRun, getDb, getInflightRuns, initDatabase } from "../../../../src/db.js";
 import { WebAgentControlPlaneService } from "../../../../src/channels/web/agent/agent-control-plane-service.js";
 import type { QueuedFollowupLifecycleService } from "../../../../src/channels/web/runtime/queued-followup-lifecycle-service.js";
 
@@ -334,5 +334,46 @@ describe("WebAgentControlPlaneService", () => {
       status: "ok",
       branch: { chat_jid: "web:root:branch:1", agent_name: "restored", archived_at: null },
     });
+  });
+
+  test("downloads archived branch data as attachment JSON", async () => {
+    initDatabase();
+    const db = getDb();
+    db.prepare(`INSERT OR REPLACE INTO chats (jid, name, last_message_time) VALUES (?, ?, ?)`).run(
+      "web:archived-download-service",
+      "Archived Download Service",
+      "2026-06-12T00:00:00.000Z",
+    );
+    db.prepare(`INSERT OR REPLACE INTO chat_branches (branch_id, chat_jid, root_chat_jid, parent_branch_id, agent_name, created_at, updated_at, archived_at)
+      VALUES (?, ?, ?, NULL, ?, ?, ?, ?)`).run(
+      "branch-archived-download-service",
+      "web:archived-download-service",
+      "web:archived-download-service",
+      "download-service",
+      "2026-06-11T00:00:00.000Z",
+      "2026-06-12T00:00:00.000Z",
+      "2026-06-12T01:00:00.000Z",
+    );
+    db.prepare(`INSERT INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      "msg-archived-download-service",
+      "web:archived-download-service",
+      "web-user",
+      "You",
+      "download me",
+      "2026-06-12T00:00:01.000Z",
+      0,
+      0,
+    );
+
+    const service = createService();
+    const response = service.handleAgentBranchDownload(new Request("https://example.com/agent/branch-download?chat_jid=web%3Aarchived-download-service"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("application/json; charset=utf-8");
+    expect(response.headers.get("Content-Disposition")).toContain("attachment;");
+    const payload = await response.json();
+    expect(payload.schema).toBe("piclaw.archived-session.v1");
+    expect(payload.branch.chat_jid).toBe("web:archived-download-service");
+    expect(payload.messages[0].content).toBe("download me");
   });
 });

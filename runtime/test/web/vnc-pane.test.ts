@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { buildDirectVncTargetReference, buildVncTabPath, consumeVncPopoutPassword, createVncPopoutTransferPayload, getVncTargetsEmptyStateCopy, normalizeDirectVncHost, relocateVncPaneRoot, shouldRetryVncPopoutWithoutHandoff, stashVncPopoutPassword } from '../../web/src/panes/vnc-pane.js';
+import { buildDirectVncTargetReference, buildVncTabPath, consumeVncPopoutPassword, createVncPopoutTransferPayload, getVncTargetsEmptyStateCopy, isVncCursorRectAllowed, isVncFramebufferSizeAllowed, normalizeDirectVncHost, relocateVncPaneRoot, shouldRetryVncPopoutWithoutHandoff, stashVncPopoutPassword } from '../../web/src/panes/vnc-pane.js';
 
 test('buildVncTabPath encodes target ids when present', () => {
   expect(buildVncTabPath()).toBe('piclaw://vnc');
@@ -43,10 +43,21 @@ test('createVncPopoutTransferPayload serializes target identity and optional pas
  test('stashVncPopoutPassword stores a one-time password token', () => {
   const memory = createMemoryStorage();
   const runtime = { localStorage: memory.storage } as any;
-  const token = stashVncPopoutPassword('secret', runtime, 1000);
+  const token = stashVncPopoutPassword('secret-long', runtime, 1000);
   expect(typeof token).toBe('string');
-  expect(consumeVncPopoutPassword(token, runtime, 1001)).toBe('secret');
+  expect(consumeVncPopoutPassword(token, runtime, 1001)).toBe('secret-l');
   expect(consumeVncPopoutPassword(token, runtime, 1002)).toBeNull();
+});
+
+test('VNC display bounds reject oversized framebuffers and cursor images', () => {
+  expect(isVncFramebufferSizeAllowed(8192, 2048)).toBe(true);
+  expect(isVncFramebufferSizeAllowed(8193, 1)).toBe(false);
+  expect(isVncFramebufferSizeAllowed(4097, 4097)).toBe(false);
+  expect(isVncFramebufferSizeAllowed(0, 0)).toBe(true);
+
+  expect(isVncCursorRectAllowed({ width: 256, height: 256, rgba: new Uint8ClampedArray(256 * 256 * 4) })).toBe(true);
+  expect(isVncCursorRectAllowed({ width: 257, height: 1, rgba: new Uint8ClampedArray(257 * 4) })).toBe(false);
+  expect(isVncCursorRectAllowed({ width: 32, height: 32, rgba: null })).toBe(false);
 });
 
 test('relocateVncPaneRoot moves the existing VNC shell into a new host container', () => {
