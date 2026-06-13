@@ -125,12 +125,22 @@ test("resolveVncKeysymFromKeyboardEvent maps special keys and printable characte
   expect(resolveVncKeysymFromKeyboardEvent({ key: "é" })).toBe(0xe9);
   expect(resolveVncKeysymFromKeyboardEvent({ key: "😀" })).toBe((0x01000000 | 0x1f600) >>> 0);
   expect(resolveVncKeysymFromKeyboardEvent({ key: "Unidentified", code: "ShiftRight" })).toBe(0xffe2);
+  expect(resolveVncKeysymFromKeyboardEvent({ key: "OS" })).toBe(0xffeb);
+  expect(resolveVncKeysymFromKeyboardEvent({ key: "F24" })).toBe(0xffd5);
   expect(resolveVncKeysymFromKeyboardEvent({ key: "Dead" })).toBeNull();
 });
 
-test("normalizeVncPassword treats empty strings as unset", () => {
+test("resolveVncKeysymFromKeyboardEvent maps numpad keys using keypad keysyms", () => {
+  expect(resolveVncKeysymFromKeyboardEvent({ key: "1", code: "Numpad1", location: 3 })).toBe(0xffb1);
+  expect(resolveVncKeysymFromKeyboardEvent({ key: "+", code: "NumpadAdd", location: 3 })).toBe(0xffab);
+  expect(resolveVncKeysymFromKeyboardEvent({ key: "Enter", code: "NumpadEnter", location: 3 })).toBe(0xff8d);
+  expect(resolveVncKeysymFromKeyboardEvent({ key: "1", code: "Numpad1", location: 0 })).toBe(0x31);
+});
+
+test("normalizeVncPassword treats empty strings as unset and caps VNC passwords to eight chars", () => {
   expect(normalizeVncPassword("")).toBeNull();
   expect(normalizeVncPassword("secret")).toBe("secret");
+  expect(normalizeVncPassword("1234567890")).toBe("12345678");
   expect(normalizeVncPassword(null)).toBeNull();
 });
 

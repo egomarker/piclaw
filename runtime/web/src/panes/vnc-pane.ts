@@ -32,6 +32,29 @@ import {
 import { VncRemoteDisplayProtocol } from './remote-display-vnc.js';
 
 export const VNC_TAB_PREFIX = 'piclaw://vnc';
+export const MAX_VNC_FRAMEBUFFER_DIMENSION = 8192;
+export const MAX_VNC_FRAMEBUFFER_PIXELS = 16 * 1024 * 1024;
+export const MAX_VNC_CURSOR_DIMENSION = 256;
+export const MAX_VNC_CURSOR_PIXELS = 256 * 256;
+
+export function isVncFramebufferSizeAllowed(width, height): boolean {
+    const w = Math.max(1, Math.floor(Number(width || 0)));
+    const h = Math.max(1, Math.floor(Number(height || 0)));
+    return w <= MAX_VNC_FRAMEBUFFER_DIMENSION
+        && h <= MAX_VNC_FRAMEBUFFER_DIMENSION
+        && w * h <= MAX_VNC_FRAMEBUFFER_PIXELS;
+}
+
+export function isVncCursorRectAllowed(rect): boolean {
+    const width = Math.floor(Number(rect?.width || 0));
+    const height = Math.floor(Number(rect?.height || 0));
+    return Boolean(rect?.rgba)
+        && width > 0
+        && height > 0
+        && width <= MAX_VNC_CURSOR_DIMENSION
+        && height <= MAX_VNC_CURSOR_DIMENSION
+        && width * height <= MAX_VNC_CURSOR_PIXELS;
+}
 
 export function buildVncTabPath(targetId?: string | null): string {
     const target = String(targetId || '').trim();
@@ -688,13 +711,18 @@ class VncPaneInstance implements PaneInstance {
 
     private ensureCanvasSize(width, height, options: { reveal?: boolean } = {}) {
         if (!this.canvas || !this.canvasCtx || !width || !height) return;
-        if (this.canvas.width !== width || this.canvas.height !== height) {
-            this.canvas.width = width;
-            this.canvas.height = height;
+        const w = Math.max(1, Math.floor(Number(width || 0)));
+        const h = Math.max(1, Math.floor(Number(height || 0)));
+        if (!isVncFramebufferSizeAllowed(w, h)) {
+            throw new Error(`VNC framebuffer too large: ${w}×${h}`);
+        }
+        if (this.canvas.width !== w || this.canvas.height !== h) {
+            this.canvas.width = w;
+            this.canvas.height = h;
         }
         const reveal = options?.reveal === true;
         this.canvas.style.display = reveal || this.hasRenderedFrame ? 'block' : 'none';
-        this.canvas.style.aspectRatio = `${width} / ${height}`;
+        this.canvas.style.aspectRatio = `${w} / ${h}`;
         if (this.displayPlaceholderEl) {
             this.displayPlaceholderEl.style.display = reveal || this.hasRenderedFrame ? 'none' : '';
         }
@@ -1244,7 +1272,11 @@ class VncPaneInstance implements PaneInstance {
     }
 
     private applyCursorRect(rect) {
-        if (!this.canvas || !rect?.rgba || !rect.width || !rect.height) return;
+        if (!this.canvas) return;
+        if (!isVncCursorRectAllowed(rect)) {
+            this.canvas.style.cursor = 'default';
+            return;
+        }
         const cursorCanvas = document.createElement('canvas');
         cursorCanvas.width = rect.width;
         cursorCanvas.height = rect.height;
