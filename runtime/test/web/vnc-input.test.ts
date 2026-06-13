@@ -1,8 +1,10 @@
 import { expect, test } from "bun:test";
 
 import {
+  boundedVncClientClipboardText,
   buildVncWheelPointerEvents,
   computeContainedRemoteDisplayScale,
+  encodeVncClientCutText,
   encodeVncKeyEvent,
   encodeVncPointerEvent,
   getVncContactTravelDistance,
@@ -19,6 +21,17 @@ import {
   shouldTriggerVncTouchTap,
   vncButtonMaskForPointerButton,
 } from "../../web/src/panes/vnc-input.js";
+
+test("encodeVncClientCutText writes bounded VNC ClientCutText bytes", () => {
+  const encoded = encodeVncClientCutText("hé");
+  expect(Array.from(encoded.slice(0, 8))).toEqual([6, 0, 0, 0, 0, 0, 0, 3]);
+  expect(new TextDecoder().decode(encoded.slice(8))).toBe("hé");
+
+  const long = "x".repeat(256 * 1024 + 7);
+  expect(boundedVncClientClipboardText(long)).toHaveLength(256 * 1024);
+  const bounded = encodeVncClientCutText(long);
+  expect(bounded.byteLength).toBe(8 + 256 * 1024);
+});
 
 test("encodeVncPointerEvent writes VNC pointer-event bytes", () => {
   expect(Array.from(encodeVncPointerEvent(5, 300, 400))).toEqual([

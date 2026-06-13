@@ -1,6 +1,25 @@
 
+const MAX_VNC_CLIPBOARD_CHARS = 256 * 1024;
+
 function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
+}
+
+export function boundedVncClientClipboardText(text) {
+    const value = String(text || '');
+    return value.length > MAX_VNC_CLIPBOARD_CHARS ? value.slice(0, MAX_VNC_CLIPBOARD_CHARS) : value;
+}
+
+export function encodeVncClientCutText(text) {
+    const payload = new TextEncoder().encode(boundedVncClientClipboardText(text));
+    const buffer = new Uint8Array(8 + payload.length);
+    buffer[0] = 6;
+    buffer[4] = (payload.length >>> 24) & 0xff;
+    buffer[5] = (payload.length >>> 16) & 0xff;
+    buffer[6] = (payload.length >>> 8) & 0xff;
+    buffer[7] = payload.length & 0xff;
+    buffer.set(payload, 8);
+    return buffer;
 }
 
 export function encodeVncPointerEvent(buttonMask, x, y) {
