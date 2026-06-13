@@ -140,12 +140,15 @@ export function getComposeHistoryStorageKey(chatJid = 'web:default') {
     return `${COMPOSE_HISTORY_STORAGE_KEY}:${encodeURIComponent(normalized)}`;
 }
 
-export function resolveSessionPopupChats(activeChatAgents, currentChatJid = null) {
+export function resolveSessionPopupChats(activeChatAgents, currentChatJid = null, hiddenChatJids = null) {
     const seen = new Set();
+    const hidden = hiddenChatJids instanceof Set
+        ? hiddenChatJids
+        : new Set(Array.isArray(hiddenChatJids) ? hiddenChatJids : []);
     const chats = [];
     for (const chat of Array.isArray(activeChatAgents) ? activeChatAgents : []) {
         const chatJid = typeof chat?.chat_jid === 'string' ? chat.chat_jid.trim() : '';
-        if (!chatJid || seen.has(chatJid)) continue;
+        if (!chatJid || seen.has(chatJid) || hidden.has(chatJid)) continue;
         const agentName = typeof chat?.agent_name === 'string' ? chat.agent_name.trim() : '';
         if (!agentName) continue;
         seen.add(chatJid);
@@ -1149,6 +1152,8 @@ export function ComposeBox({
     const [showSessionPopup, setShowSessionPopup] = useState(false);
     const [pendingPurgeChatJid, setPendingPurgeChatJid] = useState(null);
     const [pendingPruneChatJid, setPendingPruneChatJid] = useState(null);
+    const [hiddenSessionChatJids, setHiddenSessionChatJids] = useState(() => new Set());
+    const deletingSessionChatJidsRef = useRef(new Set());
     const [modelOptions, setModelOptions] = useState([]);
     const [modelPopupIndex, setModelPopupIndex] = useState(0);
     const [sessionPopupIndex, setSessionPopupIndex] = useState(0);
@@ -1341,7 +1346,7 @@ export function ComposeBox({
         });
         return parent || null;
     })();
-    const switchableChatAgents = useMemo(() => resolveSessionPopupChats(activeChatAgents, currentChatJid), [activeChatAgents, currentChatJid]);
+    const switchableChatAgents = useMemo(() => resolveSessionPopupChats(activeChatAgents, currentChatJid, hiddenSessionChatJids), [activeChatAgents, currentChatJid, hiddenSessionChatJids]);
     const hasSwitchableChatAgents = switchableChatAgents.length > 0;
     const canSwitchSession = hasSwitchableChatAgents && typeof onSwitchChat === 'function';
     const canRestoreSession = hasSwitchableChatAgents && typeof onRestoreSession === 'function';
@@ -1573,6 +1578,30 @@ export function ComposeBox({
             requestAnimationFrame(() => textareaRef.current?.focus());
         }
     };
+
+    const hideSessionRowWhileDeleting = useCallback((chatJid) => {
+        const target = typeof chatJid === 'string' ? chatJid.trim() : '';
+        if (!target || deletingSessionChatJidsRef.current.has(target)) return false;
+        deletingSessionChatJidsRef.current.add(target);
+        setHiddenSessionChatJids((prev) => {
+            const next = new Set(prev instanceof Set ? prev : []);
+            next.add(target);
+            return next;
+        });
+        return true;
+    }, []);
+
+    const finishSessionRowDelete = useCallback((chatJid, succeeded) => {
+        const target = typeof chatJid === 'string' ? chatJid.trim() : '';
+        if (!target) return;
+        deletingSessionChatJidsRef.current.delete(target);
+        if (succeeded) return;
+        setHiddenSessionChatJids((prev) => {
+            const next = new Set(prev instanceof Set ? prev : []);
+            next.delete(target);
+            return next;
+        });
+    }, []);
 
     const sessionPopupEntries = useMemo(() => {
         const entries = [];
@@ -3310,9 +3339,17 @@ export function ComposeBox({
                                                                 setPendingPurgeChatJid(chat.chat_jid);
                                                                 return;
                                                             }
-                                                            const purged = await onPurgeArchivedSession?.(chat.chat_jid, { confirmed: true });
-                                                            if (purged !== false) {
-                                                                setPendingPurgeChatJid(null);
+                                                            if (!hideSessionRowWhileDeleting(chat.chat_jid)) return;
+                                                            setPendingPurgeChatJid(null);
+                                                            let succeeded = false;
+                                                            try {
+                                                                const purged = await onPurgeArchivedSession?.(chat.chat_jid, { confirmed: true });
+                                                                succeeded = purged !== false;
+                                                            } catch (error) {
+                                                                console.warn('Failed to purge archived session:', error);
+                                                            }
+                                                            finishSessionRowDelete(chat.chat_jid, succeeded);
+                                                            if (succeeded) {
                                                                 setShowSessionPopup(false);
                                                             }
                                                             return;
@@ -3322,9 +3359,17 @@ export function ComposeBox({
                                                                 setPendingPruneChatJid(chat.chat_jid);
                                                                 return;
                                                             }
-                                                            const pruned = await onDeleteSession(chat.chat_jid, { confirmed: true });
-                                                            if (pruned !== false) {
-                                                                setPendingPruneChatJid(null);
+                                                            if (!hideSessionRowWhileDeleting(chat.chat_jid)) return;
+                                                            setPendingPruneChatJid(null);
+                                                            let succeeded = false;
+                                                            try {
+                                                                const pruned = await onDeleteSession(chat.chat_jid, { confirmed: true });
+                                                                succeeded = pruned !== false;
+                                                            } catch (error) {
+                                                                console.warn('Failed to delete session:', error);
+                                                            }
+                                                            finishSessionRowDelete(chat.chat_jid, succeeded);
+                                                            if (succeeded) {
                                                                 setShowSessionPopup(false);
                                                             }
                                                             return;
