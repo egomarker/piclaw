@@ -403,12 +403,25 @@ function downloadBunReleaseBinary(bunTarget: string, workdir: string): string {
   return binary;
 }
 
+function bundledPiCliPath(appDir: string): string {
+  return join(appDir, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
+}
+
 function assertBundledPiCli(appDir: string): void {
   const piPackageJson = join(appDir, "node_modules", "@earendil-works", "pi-coding-agent", "package.json");
-  const piCli = join(appDir, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
+  const piCli = bundledPiCliPath(appDir);
 
   if (!existsSync(piPackageJson)) throw new Error("Portable bundle is missing @earendil-works/pi-coding-agent");
   if (!existsSync(piCli)) throw new Error("Portable bundle is missing the Pi CLI entrypoint: node_modules/@earendil-works/pi-coding-agent/dist/cli.js");
+}
+
+export function rewriteBundledPiCliShebang(appDir: string): void {
+  const piCli = bundledPiCliPath(appDir);
+  const text = readFileSync(piCli, "utf8");
+  if (/^#!\/usr\/bin\/env bun\r?\n/.test(text)) return;
+  if (!/^#!\/usr\/bin\/env node\r?\n/.test(text)) return;
+  writeFileSync(piCli, text.replace(/^#!\/usr\/bin\/env node\r?\n/, "#!/usr/bin/env bun\n"), { mode: 0o755 });
+  chmodSync(piCli, 0o755);
 }
 
 function copyBundledBun(bundleDir: string, info: PlatformInfo, workdir: string): void {
@@ -500,6 +513,7 @@ async function buildPortableArtifact(options: Options): Promise<void> {
     });
 
     assertBundledPiCli(appDir);
+    rewriteBundledPiCliShebang(appDir);
     copyBundledBun(bundleDir, info, workdir);
     renameSync(appDir, join(bundleDir, "app"));
     writeLaunchers(bundleDir, info.platform, info.bundleName);
