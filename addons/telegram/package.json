@@ -42,6 +42,7 @@
             "exit",
             "export-html",
             "last",
+            "model",
             "restart",
             "scheduled",
             "session-rotate",

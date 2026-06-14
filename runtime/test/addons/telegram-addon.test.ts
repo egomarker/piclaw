@@ -52,6 +52,19 @@ test("telegram config reads env overrides", () => {
   expect(maskTelegramBotToken("1234567890")).toBe("1234…7890");
 });
 
+test("telegram addon allowlist includes model control command", async () => {
+  const manifest = await Bun.file(new URL("../../../addons/telegram/package.json", import.meta.url)).json() as {
+    pi?: {
+      runtime?: {
+        nonWebCommandPolicies?: Array<{ allowedCommands?: string[] }>;
+      };
+    };
+  };
+  const allowedCommands = manifest.pi?.runtime?.nonWebCommandPolicies?.flatMap((policy) => policy.allowedCommands || []) || [];
+
+  expect(allowedCommands).toContain("model");
+});
+
 test("telegram network classifier treats transient Telegram upstream failures as recoverable", () => {
   expect(isRecoverableTelegramNetworkError(new Error("Telegram getUpdates failed: Bad Gateway"))).toBe(true);
   expect(isRecoverableTelegramNetworkError(new Error("Telegram getMe failed: Gateway Timeout"))).toBe(true);
