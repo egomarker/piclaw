@@ -848,7 +848,7 @@ function extractMessageRefs(content) {
     return { content: cleaned, messageRefs: refs };
 }
 
-function extractAttachmentRefs(content) {
+export function extractAttachmentRefs(content) {
     if (!content) return { content, attachments: [] };
     const normalized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     const lines = normalized.split('\n');
@@ -892,6 +892,37 @@ function extractAttachmentRefs(content) {
 
 function escapeRegex(value) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function resolveInlineAttachments(content, attachments) {
+    const usedIds = new Set();
+    if (!content || attachments.length === 0) {
+        return { content, usedIds };
+    }
+
+    const replaced = content.replace(/attachment:([^\s)"']+)/g, (match, rawRef, offset, source) => {
+        const ref = rawRef.replace(/^\/+/, '');
+        const byName = attachments.find(
+            (entry) => entry.name && entry.name.toLowerCase() === ref.toLowerCase() && !usedIds.has(entry.id)
+        );
+        const entry = byName || attachments.find((item) => !usedIds.has(item.id));
+        if (!entry) return match;
+        usedIds.add(entry.id);
+        const prefix = source.slice(Math.max(0, offset - 2), offset);
+        if (prefix === '](') {
+            return `/media/${entry.id}`;
+        }
+        return entry.name || 'attachment';
+    });
+
+    return { content: replaced, usedIds };
+}
+
+export function filterResolvedAttachmentItems(imageItems, fileIds, usedIds) {
+    return {
+        filteredImageItems: imageItems,
+        filteredFileIds: fileIds.filter((id) => !usedIds.has(id)),
+    };
 }
 
 function highlightHtml(html, query) {
@@ -1170,30 +1201,6 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
         speakPostText(post.id, speakableText);
     };
 
-    const resolveInlineAttachments = (content, attachments) => {
-        const usedIds = new Set();
-        if (!content || attachments.length === 0) {
-            return { content, usedIds };
-        }
-
-        const replaced = content.replace(/attachment:([^\s)"']+)/g, (match, rawRef, offset, source) => {
-            const ref = rawRef.replace(/^\/+/, '');
-            const byName = attachments.find(
-                (entry) => entry.name && entry.name.toLowerCase() === ref.toLowerCase() && !usedIds.has(entry.id)
-            );
-            const entry = byName || attachments.find((item) => !usedIds.has(item.id));
-            if (!entry) return match;
-            usedIds.add(entry.id);
-            const prefix = source.slice(Math.max(0, offset - 2), offset);
-            if (prefix === '](') {
-                return `/media/${entry.id}`;
-            }
-            return entry.name || 'attachment';
-        });
-
-        return { content: replaced, usedIds };
-    };
-
     // Separate images from files using content_blocks info
     const imageItems: Array<{ id: number; annotations?: unknown; mimeType?: string }> = [];
     const fileIds = [];
@@ -1256,8 +1263,7 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
 
     const { content: resolvedContent, usedIds } = resolveInlineAttachments(displayContent, attachmentEntries);
     displayContent = resolvedContent;
-    const filteredImageItems = imageItems.filter(({ id }) => !usedIds.has(id));
-    const filteredFileIds = fileIds.filter((id) => !usedIds.has(id));
+    const { filteredImageItems, filteredFileIds } = filterResolvedAttachmentItems(imageItems, fileIds, usedIds);
 
     const attachmentPills = attachments.length > 0
         ? attachments.map((ref, idx) => ({
