@@ -9,6 +9,7 @@
 
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { runPromptAndCapture } from "../agent-control-helpers.js";
+import { promptWithContextPressureRetry } from "../../agent-pool/context-pressure-retry.js";
 import type { AgentControlCommand, AgentControlResult } from "../agent-control-types.js";
 
 type QueueCommand = Extract<AgentControlCommand, { type: "queue" | "queue_all" }>;
@@ -37,7 +38,7 @@ export async function handleQueue(session: AgentSession, command: QueueCommand):
     if (typeof (session as { subscribe?: unknown }).subscribe === "function") {
       await runPromptAndCapture(session, queuedText, { streamingBehavior: "followUp" });
     } else {
-      await session.prompt(queuedText, { streamingBehavior: "followUp" });
+      await promptWithContextPressureRetry(session, queuedText, { streamingBehavior: "followUp" });
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -65,7 +66,7 @@ export async function handleSteer(session: AgentSession, command: SteerCommand):
 
   if (!session.isStreaming) {
     try {
-      await session.prompt(steerText, { streamingBehavior: "followUp" });
+      await promptWithContextPressureRetry(session, steerText, { streamingBehavior: "followUp" });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return { status: "error", message };

@@ -15,6 +15,7 @@ import { formatThinkingLevelForDisplay } from "../agent-control/agent-control-he
 import { SESSIONS_DIR } from "../core/config.js";
 import { detectChannel } from "../router.js";
 import { executeSlashCommand } from "./slash-command.js";
+import { promptWithContextPressureRetry } from "./context-pressure-retry.js";
 import { peekProviderUsage, warmProviderUsage } from "./provider-usage.js";
 import { resolveModelLabel } from "../utils/model-utils.js";
 import { resolveModelScope } from "../utils/scoped-models.js";
@@ -699,7 +700,11 @@ export class AgentRuntimeFacade {
     const channel = detectChannel(chatJid);
     try {
       return await withChatContext(chatJid, channel, async () => {
-        await session.prompt(text, { streamingBehavior: behavior });
+        if (behavior === "followUp") {
+          await promptWithContextPressureRetry(session, text, { streamingBehavior: "followUp" });
+        } else {
+          await session.prompt(text, { streamingBehavior: behavior });
+        }
         return { queued: true };
       });
     } catch (err) {
@@ -758,7 +763,7 @@ export class AgentRuntimeFacade {
   }
 
   private async restoreQueuedMessages(
-    session: { prompt: (text: string, options?: { streamingBehavior?: "steer" | "followUp" }) => Promise<unknown> },
+    session: AgentSession,
     steering: readonly string[],
     followUp: readonly string[],
   ): Promise<void> {
@@ -766,7 +771,7 @@ export class AgentRuntimeFacade {
       await session.prompt(steer, { streamingBehavior: "steer" });
     }
     for (const queued of followUp) {
-      await session.prompt(queued, { streamingBehavior: "followUp" });
+      await promptWithContextPressureRetry(session, queued, { streamingBehavior: "followUp" });
     }
   }
 

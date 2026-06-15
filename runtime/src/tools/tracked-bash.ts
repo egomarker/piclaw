@@ -41,6 +41,7 @@ const POSIX_ARGS = ["-c"];
 const CMD_ARGS = ["/c"];
 export const TRACKED_BASH_OUTPUT_LIMIT_BYTES = 256 * 1024;
 export const TRACKED_BASH_OUTPUT_TRUNCATION_NOTICE = "\n[output truncated]\n";
+const TRACKED_BASH_POST_EXIT_STDIO_IDLE_GRACE_MS = 150;
 
 function pushUniqueShell(candidates: ShellConfig[], candidate: ShellConfig): void {
   if (!candidate.shell.trim()) return;
@@ -211,30 +212,31 @@ function createTrackedShellOperations(resolveCandidates: () => ShellConfig[]): B
               registerProcess(spawned.pid);
             }
 
-            if (spawned.stdout) {
-              spawned.stdout.on("data", (chunk) => {
-                emitChunk(chunk.toString("utf8"));
-              });
-            }
-            if (spawned.stderr) {
-              spawned.stderr.on("data", (chunk) => {
-                emitChunk(chunk.toString("utf8"));
-              });
-            }
-
             let shellUnavailable = false;
-            spawned.on("error", (err) => {
-              if (spawned.pid) unregisterProcess(spawned.pid);
-              const errWithCode = err as NodeJS.ErrnoException;
-              if (!settled && errWithCode.code === "ENOENT") {
-                shellUnavailable = true;
-                trySpawn(candidateIndex + 1);
-                return;
-              }
-              settleError(err);
-            });
+            let exited = false;
+            let exitCode: number | null = null;
+            let stdoutEnded = !spawned.stdout;
+            let stderrEnded = !spawned.stderr;
+            let postExitTimer: NodeJS.Timeout | undefined;
 
-            spawned.on("close", (code) => {
+            const clearPostExitTimer = () => {
+              if (postExitTimer) clearTimeout(postExitTimer);
+              postExitTimer = undefined;
+            };
+
+            const cleanupSpawnedListeners = () => {
+              clearPostExitTimer();
+              spawned.stdout?.removeListener("data", onData);
+              spawned.stderr?.removeListener("data", onData);
+              spawned.stdout?.removeListener("end", onStdoutEnd);
+              spawned.stderr?.removeListener("end", onStderrEnd);
+              spawned.removeListener("error", onError);
+              spawned.removeListener("exit", onExit);
+              spawned.removeListener("close", onClose);
+            };
+
+            const finalizeExitedProcess = (code: number | null) => {
+              cleanupSpawnedListeners();
               if (spawned.pid) unregisterProcess(spawned.pid);
               if (shellUnavailable) return;
 
@@ -249,7 +251,64 @@ function createTrackedShellOperations(resolveCandidates: () => ShellConfig[]): B
               }
 
               settleSuccess(code);
-            });
+            };
+
+            const maybeFinalizeAfterExit = () => {
+              if (exited && stdoutEnded && stderrEnded) {
+                finalizeExitedProcess(exitCode);
+              }
+            };
+
+            const armPostExitIdleTimer = () => {
+              clearPostExitTimer();
+              postExitTimer = setTimeout(() => finalizeExitedProcess(exitCode), TRACKED_BASH_POST_EXIT_STDIO_IDLE_GRACE_MS);
+            };
+
+            function onData(chunk: Buffer) {
+              emitChunk(chunk.toString("utf8"));
+              if (exited && !settled) armPostExitIdleTimer();
+            }
+
+            function onStdoutEnd() {
+              stdoutEnded = true;
+              maybeFinalizeAfterExit();
+            }
+
+            function onStderrEnd() {
+              stderrEnded = true;
+              maybeFinalizeAfterExit();
+            }
+
+            function onError(err: Error) {
+              cleanupSpawnedListeners();
+              if (spawned.pid) unregisterProcess(spawned.pid);
+              const errWithCode = err as NodeJS.ErrnoException;
+              if (!settled && errWithCode.code === "ENOENT") {
+                shellUnavailable = true;
+                trySpawn(candidateIndex + 1);
+                return;
+              }
+              settleError(err);
+            }
+
+            function onExit(code: number | null) {
+              exited = true;
+              exitCode = code;
+              maybeFinalizeAfterExit();
+              if (!settled) armPostExitIdleTimer();
+            }
+
+            function onClose(code: number | null) {
+              finalizeExitedProcess(code);
+            }
+
+            spawned.stdout?.on("data", onData);
+            spawned.stderr?.on("data", onData);
+            spawned.stdout?.once("end", onStdoutEnd);
+            spawned.stderr?.once("end", onStderrEnd);
+            spawned.once("error", onError);
+            spawned.once("exit", onExit);
+            spawned.once("close", onClose);
           };
 
           trySpawn(0);

@@ -44,6 +44,12 @@ export interface ActiveChatAgent {
   session_name: string | null;
   model: string | null;
   is_active: boolean;
+  is_streaming: boolean;
+  is_compacting: boolean;
+  is_retrying: boolean;
+  is_bash_running: boolean;
+  activity_status: "idle" | "streaming" | "compacting" | "retrying" | "bash_running";
+  activity_label: string;
   has_side_session: boolean;
 }
 
@@ -154,6 +160,29 @@ function createVolatileBranchRecord(chatJid: string, session?: AgentSession | nu
 
 function isSessionActive(session: AgentSession): boolean {
   return Boolean(session.isStreaming || session.isCompacting || session.isRetrying || session.isBashRunning);
+}
+
+function getSessionActivityStatus(session: AgentSession): ActiveChatAgent["activity_status"] {
+  if (session.isCompacting) return "compacting";
+  if (session.isRetrying) return "retrying";
+  if (session.isBashRunning) return "bash_running";
+  if (session.isStreaming) return "streaming";
+  return "idle";
+}
+
+function getSessionActivityLabel(status: ActiveChatAgent["activity_status"]): string {
+  switch (status) {
+    case "compacting":
+      return "Compacting";
+    case "retrying":
+      return "Retrying";
+    case "bash_running":
+      return "Running shell";
+    case "streaming":
+      return "Active";
+    default:
+      return "Idle";
+  }
 }
 
 function isDescendantChatJid(parentChatJid: string, candidateChatJid: string): boolean {
@@ -577,6 +606,7 @@ export class AgentBranchManager {
         const session = entry.runtime.session;
         const branch = this.ensureBranchRegistration(chatJid, session);
         if (branch.archived_at) return [];
+        const activityStatus = getSessionActivityStatus(session);
         return [{
           branch_id: branch.branch_id,
           chat_jid: chatJid,
@@ -589,7 +619,13 @@ export class AgentBranchManager {
           session_id: session.sessionId,
           session_name: session.sessionName?.trim() || null,
           model: session.model ? `${session.model.provider}/${session.model.id}` : null,
-          is_active: isSessionActive(session),
+          is_active: activityStatus !== "idle",
+          is_streaming: Boolean(session.isStreaming),
+          is_compacting: Boolean(session.isCompacting),
+          is_retrying: Boolean(session.isRetrying),
+          is_bash_running: Boolean(session.isBashRunning),
+          activity_status: activityStatus,
+          activity_label: getSessionActivityLabel(activityStatus),
           has_side_session: this.options.sidePool.has(chatJid),
         }];
       })
@@ -621,6 +657,12 @@ export class AgentBranchManager {
             session_name: active?.session_name ?? null,
             model: active?.model ?? null,
             is_active: active?.is_active ?? false,
+            is_streaming: active?.is_streaming ?? false,
+            is_compacting: active?.is_compacting ?? false,
+            is_retrying: active?.is_retrying ?? false,
+            is_bash_running: active?.is_bash_running ?? false,
+            activity_status: active?.activity_status ?? "idle",
+            activity_label: active?.activity_label ?? "Idle",
             has_side_session: active?.has_side_session ?? false,
           } satisfies ActiveChatAgent;
         })

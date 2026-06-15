@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 
 import {
   describeBranchRestoreResult,
+  formatBranchPickerBaseLabel,
   formatBranchPickerLabel,
   formatCurrentBranchLabel,
   getBranchHandleDraftState,
@@ -13,13 +14,29 @@ test('formats the current branch label with a handle-first contract', () => {
     .toBe('@research — web:default:branch:1 • current branch');
 });
 
-test('formats branch picker labels with active and archived lifecycle badges', () => {
+test('formats branch picker labels with active, compacting, and archived lifecycle badges', () => {
+  expect(formatBranchPickerBaseLabel({
+    agent_name: 'builder',
+    chat_jid: 'web:default:branch:2',
+    is_active: true,
+    archived_at: null,
+  })).toBe('@builder — web:default:branch:2');
+
   expect(formatBranchPickerLabel({
     agent_name: 'builder',
     chat_jid: 'web:default:branch:2',
     is_active: true,
     archived_at: null,
   })).toBe('@builder — web:default:branch:2 • active');
+
+  expect(formatBranchPickerLabel({
+    agent_name: 'builder',
+    chat_jid: 'web:default:branch:2',
+    is_active: true,
+    is_compacting: true,
+    activity_status: 'compacting',
+    archived_at: null,
+  })).toBe('@builder — web:default:branch:2 • compacting • active');
 
   expect(formatBranchPickerLabel({
     agent_name: 'release',
@@ -29,12 +46,13 @@ test('formats branch picker labels with active and archived lifecycle badges', (
   })).toBe('@release — web:default:branch:3 • archived');
 });
 
-test('current badge wins while archived and active stay explicit', () => {
+test('current badge stays explicit while compacting and active remain visible', () => {
   expect(getBranchLifecycleBadges({
     chat_jid: 'web:default',
     is_active: true,
+    is_compacting: true,
     archived_at: null,
-  }, { currentChatJid: 'web:default' })).toEqual(['current', 'active']);
+  }, { currentChatJid: 'web:default' })).toEqual(['current', 'compacting', 'active']);
 });
 
 test('restore result explains handle suffixing when a collision changes the final handle', () => {

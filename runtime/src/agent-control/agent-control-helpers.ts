@@ -18,6 +18,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { existsSync } from "fs";
 import { getConfigPath, WORKSPACE_DIR } from "../core/config.js";
 import { readJsonConfig, writeJsonConfig } from "../core/config-store.js";
+import { isContextPressureFailure } from "../agent-pool/automatic-recovery.js";
 
 /** Ordered list of supported thinking levels from off to xhigh. */
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
@@ -269,6 +270,14 @@ export async function runPromptAndCapture(
 ): Promise<string> {
   let assistantBuffer = "";
   const customBuffers: string[] = [];
+  let providerError: string | null = null;
+  let compacted = false;
+
+  const resetCapturedOutput = () => {
+    assistantBuffer = "";
+    customBuffers.length = 0;
+    providerError = null;
+  };
 
   const onEvent = (event: AgentSessionEvent) => {
     if (event.type === "message_update") {
@@ -281,7 +290,10 @@ export async function runPromptAndCapture(
 
     if (event.type !== "message_end") return;
 
-    const message = event.message as { role?: unknown; content?: unknown };
+    const message = event.message as { role?: unknown; content?: unknown; stopReason?: unknown; errorMessage?: unknown };
+    if (message.role === "assistant" && message.stopReason === "error" && typeof message.errorMessage === "string" && message.errorMessage.trim()) {
+      providerError = message.errorMessage.trim();
+    }
     const text = extractTextFromContent(message.content);
     if (message.role === "assistant") {
       assistantBuffer = text || assistantBuffer;
@@ -292,7 +304,22 @@ export async function runPromptAndCapture(
 
   const unsub = session.subscribe(onEvent);
   try {
-    await session.prompt(text, options);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      providerError = null;
+      try {
+        await session.prompt(text, options);
+      } catch (error) {
+        providerError = error instanceof Error ? error.message : String(error);
+      }
+      if (providerError && isContextPressureFailure(providerError) && !compacted) {
+        await session.compact();
+        compacted = true;
+        resetCapturedOutput();
+        continue;
+      }
+      if (providerError) throw new Error(providerError);
+      break;
+    }
   } finally {
     unsub();
   }

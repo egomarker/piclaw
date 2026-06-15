@@ -86,12 +86,62 @@ test("AgentBranchManager registers active chats and resolves agent handles", asy
   expect(active).toHaveLength(1);
   expect(active[0]?.agent_name).toBe("research-bot");
   expect(active[0]?.model).toBe("openai/gpt-test");
+  expect(active[0]?.is_active).toBe(false);
+  expect(active[0]?.is_compacting).toBe(false);
+  expect(active[0]?.activity_status).toBe("idle");
+  expect(active[0]?.activity_label).toBe("Idle");
   expect(fixture.manager.findActiveChatByAgentName("Research Bot")?.chat_jid).toBe("web:topic");
   expect(fixture.manager.findChatByAgentName("research-bot")).toEqual({
     chat_jid: "web:topic",
     agent_name: "research-bot",
   });
   expect(fixture.manager.getAgentHandleForChat("web:topic")).toBe("research-bot");
+
+  ws.cleanup();
+});
+
+test("AgentBranchManager exposes compacting status when enumerating sessions", async () => {
+  const ws = createTempWorkspace("piclaw-branch-compacting-status-");
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+
+  const db = await importFresh<typeof import("../src/db.js")>("../src/db.js");
+  db.initDatabase();
+
+  const fixture = createManager();
+  fixture.pool.set("web:compact", {
+    runtime: createRuntime({
+      sessionId: "session-compact",
+      sessionName: "Compact Bot",
+      model: { provider: "openai", id: "gpt-test" },
+      isStreaming: false,
+      isCompacting: true,
+      isRetrying: false,
+      isBashRunning: false,
+    }),
+    lastUsed: Date.now(),
+  });
+
+  const [active] = fixture.manager.listActiveChats();
+  expect(active).toMatchObject({
+    chat_jid: "web:compact",
+    agent_name: "compact-bot",
+    is_active: true,
+    is_streaming: false,
+    is_compacting: true,
+    is_retrying: false,
+    is_bash_running: false,
+    activity_status: "compacting",
+    activity_label: "Compacting",
+  });
+
+  const [known] = fixture.manager.listKnownChats("web:compact");
+  expect(known).toMatchObject({
+    chat_jid: "web:compact",
+    is_active: true,
+    is_compacting: true,
+    activity_status: "compacting",
+    activity_label: "Compacting",
+  });
 
   ws.cleanup();
 });

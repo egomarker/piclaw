@@ -173,7 +173,10 @@ describe("contextPrune extension", () => {
     expect(pruneResult.content[0].text).toContain("Context prune completed");
     expect(pi.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ customType: CUSTOM_TYPE_SUMMARY, content: expect.stringContaining("Summarized tool refs") }),
-      { deliverAs: "steer" },
+    );
+    expect(pi.sendMessage).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ deliverAs: "steer" }),
     );
     expect(pi.appendEntry).toHaveBeenCalledWith(
       CUSTOM_TYPE_INDEX,
@@ -188,5 +191,42 @@ describe("contextPrune extension", () => {
     }, ctx);
 
     expect(contextResult.messages).toHaveLength(1);
+  });
+
+  it("falls back to a custom message entry instead of steering when summary delivery fails", async () => {
+    (completeSimple as any).mockResolvedValueOnce({
+      stopReason: "end",
+      content: [{ type: "text", text: "- read inspected fallback.ts." }],
+      usage: { input: 1, output: 1 },
+    });
+
+    const { pi, handlers, tools } = makePi();
+    pi.sendMessage.mockImplementationOnce(() => { throw new Error("send unavailable"); });
+    contextPrune(pi as any);
+
+    const longOutput = "fallback details\n".repeat(80);
+    const branch = [
+      userEntry("inspect fallback"),
+      assistantToolEntry("tc-fallback", "read", { path: "fallback.ts" }),
+      toolResultEntry("tc-fallback", "read", longOutput),
+    ];
+    const ctx = makeCtx(branch);
+    await handlers.get("session_start")({}, ctx);
+
+    await tools.get("context_prune").execute("prune-fallback", {}, new AbortController().signal, vi.fn(), ctx);
+
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ customType: CUSTOM_TYPE_SUMMARY, content: expect.stringContaining("Summarized tool refs") }),
+    );
+    expect(ctx.sessionManager.appendCustomMessageEntry).toHaveBeenCalledWith(
+      CUSTOM_TYPE_SUMMARY,
+      expect.stringContaining("Summarized tool refs"),
+      true,
+      expect.objectContaining({ toolCallRefs: [expect.objectContaining({ toolCallId: "tc-fallback" })] }),
+    );
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      CUSTOM_TYPE_INDEX,
+      expect.objectContaining({ toolCalls: [expect.objectContaining({ toolCallId: "tc-fallback", resultText: longOutput })] }),
+    );
   });
 });

@@ -65,7 +65,7 @@ export const contextPrune: ExtensionFactory = (pi: ExtensionAPI) => {
 
   const persistSummary = (ctx: ExtensionContext, content: string, details: unknown): void => {
     try {
-      pi.sendMessage({ customType: CUSTOM_TYPE_SUMMARY, content, display: true, details }, { deliverAs: "steer" });
+      pi.sendMessage({ customType: CUSTOM_TYPE_SUMMARY, content, display: true, details });
       return;
     } catch (err) {
       log.debug("Falling back to direct custom summary append", { operation: "context_prune.summary_fallback", error: errorMessage(err) });

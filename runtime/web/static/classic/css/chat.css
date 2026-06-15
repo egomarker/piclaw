@@ -1074,6 +1074,65 @@
     text-overflow: ellipsis;
 }
 
+.compose-session-row-content {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.compose-session-row-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.compose-session-row-pills {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+}
+
+.compose-session-status-pill {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+    border-radius: 999px;
+    padding: 1px 6px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.35;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    background: color-mix(in srgb, var(--bg-secondary) 86%, transparent);
+}
+
+.compose-session-status-pill.active {
+    color: var(--success-color, #10b981);
+    border-color: color-mix(in srgb, var(--success-color, #10b981) 36%, transparent);
+    background: color-mix(in srgb, var(--success-color, #10b981) 14%, transparent);
+}
+
+.compose-session-status-pill.compacting {
+    color: var(--warning-color, #f59e0b);
+    border-color: color-mix(in srgb, var(--warning-color, #f59e0b) 42%, transparent);
+    background: color-mix(in srgb, var(--warning-color, #f59e0b) 15%, transparent);
+}
+
+.compose-session-status-pill.current {
+    color: var(--accent-color);
+    border-color: color-mix(in srgb, var(--accent-color) 36%, transparent);
+    background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+}
+
+.compose-session-status-pill.archived {
+    color: var(--text-secondary);
+    border-color: color-mix(in srgb, var(--text-secondary) 26%, transparent);
+    background: color-mix(in srgb, var(--text-secondary) 10%, transparent);
+}
+
 .compose-model-popup-item-popout {
     display: none;
     align-items: center;

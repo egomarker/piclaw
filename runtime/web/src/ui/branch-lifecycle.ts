@@ -93,24 +93,32 @@ export function getBranchLifecycleBadges(chat, options = {}) {
     }
     if (chat?.archived_at) {
         badges.push('archived');
-    } else if (chat?.is_active) {
-        badges.push('active');
+    } else {
+        if (chat?.is_compacting || chat?.activity_status === 'compacting') badges.push('compacting');
+        if (chat?.is_active) badges.push('active');
     }
     return badges;
+}
+
+/**
+ * Build the branch row identity without lifecycle badges for rich picker rendering.
+ */
+export function formatBranchPickerBaseLabel(chat) {
+    const handle = normalizeHandle(chat?.agent_name) || String(chat?.chat_jid || '').trim();
+    const chatJid = typeof chat?.chat_jid === 'string' && chat.chat_jid.trim()
+        ? chat.chat_jid.trim()
+        : 'unknown-chat';
+    return `${handle} — ${chatJid}`;
 }
 
 /**
  * Build the branch row label for the session manager popup.
  */
 export function formatBranchPickerLabel(chat, options = {}) {
-    const handle = normalizeHandle(chat?.agent_name) || String(chat?.chat_jid || '').trim();
-    const chatJid = typeof chat?.chat_jid === 'string' && chat.chat_jid.trim()
-        ? chat.chat_jid.trim()
-        : 'unknown-chat';
     const badges = getBranchLifecycleBadges(chat, options);
     return badges.length > 0
-        ? `${handle} — ${chatJid} • ${badges.join(' • ')}`
-        : `${handle} — ${chatJid}`;
+        ? `${formatBranchPickerBaseLabel(chat)} • ${badges.join(' • ')}`
+        : formatBranchPickerBaseLabel(chat);
 }
 
 /**

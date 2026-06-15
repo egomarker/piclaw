@@ -4,7 +4,7 @@ import { getAgentModels, sendAgentMessage, uploadMedia } from '../api.js';
 import { getLocalStorageItem, setLocalStorageItem } from '../utils/storage.js';
 import { buildMentionValue, filterMentionAgents, parseMentionAutocompleteQuery } from '../ui/agent-mentions.js';
 import { shouldOpenSessionSwitcherFromBlankCompose, shouldRouteComposeValueToSessionSwitcher } from '../ui/compose-session-switcher.js';
-import { formatBranchPickerLabel } from '../ui/branch-lifecycle.js';
+import { formatBranchPickerBaseLabel, formatBranchPickerLabel, getBranchLifecycleBadges } from '../ui/branch-lifecycle.js';
 import { buildComposeStatusDotClass } from '../ui/status-dot.js';
 import { getStatusElapsedLabel, isCompactionStatus, resolveStatusPanelTitle } from '../ui/status-duration.js';
 import { useConnectionStatusPresentation } from '../ui/connection-status.js';
@@ -3335,6 +3335,8 @@ export function ComposeBox({
                                     const pruneConfirming = canPrune && pendingPruneChatJid === chat.chat_jid;
                                     const deleteConfirming = purgeConfirming || pruneConfirming;
                                     const label = formatBranchPickerLabel(chat, { currentChatJid });
+                                    const baseLabel = formatBranchPickerBaseLabel(chat);
+                                    const lifecycleBadges = getBranchLifecycleBadges(chat, { currentChatJid });
                                     return html`
                                         <div key=${chat.chat_jid} class=${`compose-model-popup-item-row${archived ? ' archived' : ''}`}>
                                             <button
@@ -3350,9 +3352,18 @@ export function ComposeBox({
                                                     handleSessionSwitch(chat.chat_jid);
                                                 }}
                                                 disabled=${archived ? !canRestoreSession : !canSwitchSession}
-                                                title=${archived ? `Restore archived ${`@${chat.agent_name}`}` : `Switch to ${`@${chat.agent_name}`}`}
+                                                title=${archived ? `Restore archived ${label}` : `Switch to ${label}`}
                                             >
-                                                <span style=${isSessionPopupChatEmphasized(chat) ? 'font-weight:700' : ''}>${label}</span>
+                                                <span class="compose-session-row-content" style=${isSessionPopupChatEmphasized(chat) ? 'font-weight:700' : ''}>
+                                                    <span class="compose-session-row-label">${baseLabel}</span>
+                                                    ${lifecycleBadges.length > 0 && html`
+                                                        <span class="compose-session-row-pills" aria-label=${`Session status: ${lifecycleBadges.join(', ')}`}>
+                                                            ${lifecycleBadges.map((badge) => html`
+                                                                <span key=${badge} class=${`compose-session-status-pill ${badge}`}>${badge}</span>
+                                                            `)}
+                                                        </span>
+                                                    `}
+                                                </span>
                                             </button>
                                             <button
                                                 type="button"

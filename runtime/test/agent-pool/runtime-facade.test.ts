@@ -344,6 +344,54 @@ test("AgentRuntimeFacade does not block getAvailableModels on a cold provider-us
   }
 });
 
+test("AgentRuntimeFacade compacts and retries context pressure while queueing follow-up", async () => {
+  let promptCalls = 0;
+  let compactCalls = 0;
+  const prompts: Array<{ text: string; behavior: string }> = [];
+  const listeners: Array<(event: any) => void> = [];
+  const session = {
+    isStreaming: true,
+    subscribe: (listener: (event: any) => void) => {
+      listeners.push(listener);
+      return () => {
+        const index = listeners.indexOf(listener);
+        if (index >= 0) listeners.splice(index, 1);
+      };
+    },
+    compact: async () => {
+      compactCalls += 1;
+    },
+    prompt: async (text: string, options?: { streamingBehavior?: string }) => {
+      promptCalls += 1;
+      prompts.push({ text, behavior: options?.streamingBehavior ?? "" });
+      if (promptCalls === 1) {
+        for (const listener of listeners) {
+          listener({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              stopReason: "error",
+              errorMessage: "OpenAI API error (400): 400 Your input exceeds the context window of this model. Please adjust your input and try again.",
+              content: [],
+            },
+          });
+        }
+      }
+    },
+  };
+
+  const fixture = createFacade();
+  fixture.pool.set("web:default", { runtime: createRuntime(session), lastUsed: Date.now() });
+
+  await expect(fixture.facade.queueStreamingMessage("web:default", "continue", "followUp")).resolves.toEqual({ queued: true });
+  expect(promptCalls).toBe(2);
+  expect(compactCalls).toBe(1);
+  expect(prompts).toEqual([
+    { text: "continue", behavior: "followUp" },
+    { text: "continue", behavior: "followUp" },
+  ]);
+});
+
 test("AgentRuntimeFacade removes one queued follow-up and replays the remaining queue", async () => {
   const prompts: Array<{ text: string; behavior: string }> = [];
   const session = {

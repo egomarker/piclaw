@@ -22,6 +22,7 @@ import { getAgentRuntimeConfig } from "../core/config.js";
 import { withChatContext } from "../core/chat-context.js";
 import { detectChannel } from "../router.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
+import { promptWithContextPressureRetry } from "./context-pressure-retry.js";
 import { waitForSessionIdle } from "./prompt-utils.js";
 
 const log = createLogger("agent-pool.slash-command");
@@ -238,7 +239,7 @@ export async function executeSlashCommand(
           const args = rawCommand === commandName ? "" : rawCommand.slice(commandName.length).trimStart();
           await executeExtensionSlashCommand(session, commandName, args);
         } else {
-          await session.prompt(rawText);
+          await promptWithContextPressureRetry(session, rawText);
           await waitForSessionIdle(session);
         }
       });

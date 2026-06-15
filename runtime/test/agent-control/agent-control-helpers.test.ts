@@ -118,3 +118,43 @@ test("runPromptAndCapture captures assistant output", async () => {
   const result = await runPromptAndCapture(session as any, "hi");
   expect(result).toBe("Hello world");
 });
+
+test("runPromptAndCapture compacts and retries OpenAI context-window errors", async () => {
+  class ContextErrorSession extends PromptSession {
+    promptCalls = 0;
+    compactCalls = 0;
+
+    async compact() {
+      this.compactCalls += 1;
+    }
+
+    async prompt(_text: string) {
+      this.promptCalls += 1;
+      const listeners = (this as any).listeners as Array<(event: any) => void>;
+      for (const listener of listeners) {
+        if (this.promptCalls === 1) {
+          listener({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              stopReason: "error",
+              errorMessage: "OpenAI API error (400): 400 Your input exceeds the context window of this model. Please adjust your input and try again.",
+              content: [],
+            },
+          });
+        } else {
+          listener({
+            type: "message_end",
+            message: { role: "assistant", content: [{ type: "text", text: "Recovered after compaction" }] },
+          });
+        }
+      }
+    }
+  }
+
+  const session = new ContextErrorSession();
+  const result = await runPromptAndCapture(session as any, "hi");
+  expect(result).toBe("Recovered after compaction");
+  expect(session.promptCalls).toBe(2);
+  expect(session.compactCalls).toBe(1);
+});

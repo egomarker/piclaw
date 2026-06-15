@@ -254,3 +254,43 @@ test("tracked bash caps streamed output and appends a truncation marker", async 
     TRACKED_BASH_OUTPUT_LIMIT_BYTES + Buffer.byteLength(TRACKED_BASH_OUTPUT_TRUNCATION_NOTICE, "utf8")
   );
 });
+
+test.skipIf(process.platform === "win32")("tracked bash drains output written after the shell exits", async () => {
+  const ws = getTestWorkspace();
+  const ops = createTrackedBashOperations();
+  let output = "";
+
+  const result = await ops.exec(
+    'printf "HEAD\\n"; ( for i in 1 2 3 4 5 6; do sleep 0.05; printf "TICK$i\\n"; done ) &',
+    ws.workspace,
+    {
+      onData: (data) => {
+        output += data.toString("utf8");
+      },
+      timeout: 5,
+    },
+  );
+
+  expect(result.exitCode).toBe(0);
+  expect(output).toContain("HEAD");
+  expect(output).toContain("TICK6");
+});
+
+test.skipIf(process.platform === "win32")("tracked bash releases quiet inherited stdout handles after exit", async () => {
+  const ws = getTestWorkspace();
+  const ops = createTrackedBashOperations();
+  let output = "";
+  const start = Date.now();
+
+  const result = await ops.exec('printf "DONE\\n"; ( sleep 2 ) &', ws.workspace, {
+    onData: (data) => {
+      output += data.toString("utf8");
+    },
+    timeout: 5,
+  });
+
+  const elapsed = Date.now() - start;
+  expect(result.exitCode).toBe(0);
+  expect(output).toContain("DONE");
+  expect(elapsed).toBeLessThan(1500);
+});
