@@ -94,11 +94,9 @@ test.describe('US-16: Single Message Deletion', () => {
     });
 
     await deleteBtn.click();
-    await page.waitForTimeout(500);
 
     // Message should be gone (animation + removal)
-    const stillExists = await page.locator(`#post-${postId}`).count();
-    expect(stillExists).toBe(0);
+    await expect(page.locator(`#post-${postId}`)).toHaveCount(0, { timeout: 5000 });
   });
 
   test('deleted message stays gone after refresh', async ({ authedPage: page }) => {
@@ -117,7 +115,7 @@ test.describe('US-16: Single Message Deletion', () => {
     const deleteBtn = targetPost.locator('.post-delete-btn, [aria-label="Delete message"]');
     if (await deleteBtn.isVisible()) {
       await deleteBtn.click();
-      await page.waitForTimeout(500);
+      await expect(page.locator(`#post-${postId}`)).toHaveCount(0, { timeout: 5000 });
     }
 
     // Refresh
