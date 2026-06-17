@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthStorage, ModelRegistry, SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -14,6 +14,8 @@ describe("bundled extension gating by channel/platform", () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "piclaw-session-gating-"));
     const webSessionDir = join(tempRoot, "web-session");
     const whatsappSessionDir = join(tempRoot, "wa-session");
+    const workspaceDir = join(tempRoot, "workspace");
+    mkdirSync(workspaceDir, { recursive: true });
     const warnings: string[] = [];
     const originalWarn = console.warn;
     console.warn = (...args: unknown[]) => {
@@ -27,6 +29,7 @@ describe("bundled extension gating by channel/platform", () => {
         settingsManager,
         tools: [],
         chatJid: "web:test",
+        cwd: workspaceDir,
       });
       const whatsappRuntime = await createSessionInDir(whatsappSessionDir, {
         authStorage,
@@ -34,6 +37,7 @@ describe("bundled extension gating by channel/platform", () => {
         settingsManager,
         tools: [],
         chatJid: "whatsapp:test",
+        cwd: workspaceDir,
       });
 
       const webSession: any = webRuntime.session;

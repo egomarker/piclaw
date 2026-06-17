@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthStorage, ModelRegistry, SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -13,6 +13,8 @@ describe("bundled pi-mcp-adapter integration", () => {
     const settingsManager = SettingsManager.create("/workspace", getAgentDir());
     const tempRoot = mkdtempSync(join(tmpdir(), "piclaw-mcp-adapter-"));
     const sessionDir = join(tempRoot, "session");
+    const workspaceDir = join(tempRoot, "workspace");
+    mkdirSync(workspaceDir, { recursive: true });
 
     try {
       const runtime = await createSessionInDir(sessionDir, {
@@ -20,6 +22,7 @@ describe("bundled pi-mcp-adapter integration", () => {
         modelRegistry,
         settingsManager,
         tools: [],
+        cwd: workspaceDir,
       });
 
       const session: any = runtime.session;
