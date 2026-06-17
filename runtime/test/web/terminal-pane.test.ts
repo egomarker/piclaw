@@ -9,10 +9,12 @@ import { tryRun } from "../helpers.js";
 import {
     buildTerminalTheme,
     buildTerminalWebSocketUrl,
+    createKittyGraphicsState,
     getOrCreateAnonymousTerminalClientToken,
     isCoreTerminalRenderer,
     terminalPaneExtension,
     terminalTabPaneExtension,
+    translateKittyGraphicsOutput,
 } from '../../web/src/panes/terminal-pane.js';
 
 function parseHexColor(input: string) {
@@ -324,6 +326,33 @@ test('getOrCreateAnonymousTerminalClientToken persists a stable client token', (
 
     expect(first).toBe('terminal-client-fixed');
     expect(second).toBe('terminal-client-fixed');
+});
+
+test('translateKittyGraphicsOutput converts complete Kitty graphics frames into iTerm2 inline images', () => {
+    const state = createKittyGraphicsState();
+    const output = translateKittyGraphicsOutput(
+        state,
+        'before\x1b_Ga=T,q=1,f=100,t=d,i=7,s=1,v=1,c=2,r=3,m=0;QUJD\x1b\\\nafter',
+    ).join('');
+
+    expect(output).toBe('before\x1b]1337;File=inline=1;size=3;width=2;height=3;preserveAspectRatio=1:QUJD\x07\nafter');
+    expect(output).not.toContain('\x1b_G');
+});
+
+test('translateKittyGraphicsOutput buffers split Kitty frames across websocket chunks', () => {
+    const state = createKittyGraphicsState();
+    expect(translateKittyGraphicsOutput(state, 'hello\x1b_Ga=T,q=1,f=100,t=d,i=1,c=1,r=1,m=0;QU')).toEqual(['hello']);
+
+    const output = translateKittyGraphicsOutput(state, 'JD\x1b\\!').join('');
+    expect(output).toBe('\x1b]1337;File=inline=1;size=3;width=1;height=1;preserveAspectRatio=1:QUJD\x07!');
+});
+
+test('translateKittyGraphicsOutput joins multi-frame Kitty transfers before rendering', () => {
+    const state = createKittyGraphicsState();
+    expect(translateKittyGraphicsOutput(state, '\x1b_Ga=T,q=1,f=100,t=d,i=42,c=4,r=5,m=1;QU\x1b\\')).toEqual([]);
+
+    const output = translateKittyGraphicsOutput(state, '\x1b_Gm=0;JD\x1b\\').join('');
+    expect(output).toBe('\x1b]1337;File=inline=1;size=3;width=4;height=5;preserveAspectRatio=1:QUJD\x07');
 });
 
 describe('Terminal pane extension', () => {

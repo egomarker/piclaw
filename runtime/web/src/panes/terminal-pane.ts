@@ -17,6 +17,11 @@ const XTERM_CSS_ID = "piclaw-terminal-xterm-css";
 const TERMINAL_FONT_FAMILY = 'FiraCode Nerd Font Mono, JetBrainsMono Nerd Font Mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace';
 const TERMINAL_HEARTBEAT_MS = 25_000;
 const TERMINAL_RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 5_000, 10_000];
+const KITTY_APC_START = "\x1b_G";
+const KITTY_APC_START_ALT = "\x9fG";
+const KITTY_APC_END = "\x1b\\";
+const KITTY_APC_END_ALT = "\x9c";
+const KITTY_GRAPHICS_PENDING_LIMIT = 24 * 1024 * 1024;
 
 const LIGHT_TERMINAL_PALETTE = {
   yellow: "#9a6700",
@@ -58,8 +63,144 @@ function debugTerminalCleanup(label, error) {
 function stripTerminalControl(text) {
   return String(text || "")
     .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b_[^\x1b\x9c]*(?:\x1b\\|\x9c)/g, "")
+    .replace(/\x9f[^\x1b\x9c]*(?:\x1b\\|\x9c)/g, "")
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
     .replace(/\r/g, "\n");
+}
+
+export function createKittyGraphicsState() {
+  return {
+    pending: "",
+    activeImageId: null,
+    transfers: new Map(),
+  };
+}
+
+function findNextKittyStart(input, fromIndex = 0) {
+  const escIndex = input.indexOf(KITTY_APC_START, fromIndex);
+  const c1Index = input.indexOf(KITTY_APC_START_ALT, fromIndex);
+  if (escIndex < 0) return c1Index;
+  if (c1Index < 0) return escIndex;
+  return Math.min(escIndex, c1Index);
+}
+
+function parseKittyGraphicsFrame(framePayload) {
+  const payload = String(framePayload || "");
+  if (!payload.startsWith("G")) return null;
+  const body = payload.slice(1);
+  const separator = body.indexOf(";");
+  const header = separator >= 0 ? body.slice(0, separator) : body;
+  const data = separator >= 0 ? body.slice(separator + 1) : "";
+  const fields = {};
+  for (const part of header.split(",")) {
+    if (!part) continue;
+    const eq = part.indexOf("=");
+    if (eq <= 0) continue;
+    const key = part.slice(0, eq).trim();
+    const value = part.slice(eq + 1).trim();
+    if (key) fields[key] = value;
+  }
+  return { fields, data };
+}
+
+function numericKittyField(fields, key) {
+  const value = Number.parseInt(String(fields?.[key] || ""), 10);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function estimateBase64DecodedBytes(base64) {
+  const compact = String(base64 || "").replace(/\s+/g, "");
+  if (!compact) return 0;
+  const padding = compact.endsWith("==") ? 2 : compact.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor(compact.length * 3 / 4) - padding);
+}
+
+function buildItermInlineImageFromKittyTransfer(transfer) {
+  const fields = transfer?.fields || {};
+  const base64 = (transfer?.chunks || []).join("").replace(/\s+/g, "");
+  if (!base64) return "";
+  const args = [
+    "inline=1",
+    `size=${estimateBase64DecodedBytes(base64)}`,
+  ];
+  const cols = numericKittyField(fields, "c");
+  const rows = numericKittyField(fields, "r");
+  if (cols) args.push(`width=${cols}`);
+  if (rows) args.push(`height=${rows}`);
+  args.push("preserveAspectRatio=1");
+  return `\x1b]1337;File=${args.join(";")}:${base64}\x07`;
+}
+
+function translateKittyGraphicsFrame(state, framePayload) {
+  const parsed = parseKittyGraphicsFrame(framePayload);
+  if (!parsed) return null;
+  const fields = parsed.fields;
+  const explicitId = String(fields.i || "").trim();
+  const imageId = explicitId || state.activeImageId || "default";
+  const existing = state.transfers.get(imageId);
+  const isNewTransfer = Boolean(fields.a || fields.f || fields.t || fields.s || fields.v || fields.c || fields.r || !existing);
+  const transfer = isNewTransfer
+    ? { fields: { ...(existing?.fields || {}), ...fields }, chunks: [] }
+    : { fields: { ...(existing?.fields || {}), ...fields }, chunks: existing?.chunks || [] };
+  transfer.chunks.push(parsed.data || "");
+  state.activeImageId = imageId;
+
+  const more = String(fields.m || "0") === "1";
+  if (more) {
+    state.transfers.set(imageId, transfer);
+    return "";
+  }
+
+  state.transfers.delete(imageId);
+  if (state.activeImageId === imageId) state.activeImageId = null;
+  return buildItermInlineImageFromKittyTransfer(transfer);
+}
+
+export function translateKittyGraphicsOutput(state, chunk) {
+  if (!state) state = createKittyGraphicsState();
+  const writes = [];
+  let input = `${state.pending || ""}${String(chunk || "")}`;
+  state.pending = "";
+
+  while (input) {
+    const start = findNextKittyStart(input);
+    if (start < 0) {
+      writes.push(input);
+      break;
+    }
+
+    if (start > 0) writes.push(input.slice(0, start));
+
+    const usesC1Start = input.startsWith(KITTY_APC_START_ALT, start);
+    const payloadStart = start + (usesC1Start ? 1 : 2);
+    const escEnd = input.indexOf(KITTY_APC_END, payloadStart);
+    const c1End = input.indexOf(KITTY_APC_END_ALT, payloadStart);
+    const hasEscEnd = escEnd >= 0;
+    const hasC1End = c1End >= 0;
+    const end = hasEscEnd && hasC1End ? Math.min(escEnd, c1End) : hasEscEnd ? escEnd : c1End;
+
+    if (end < 0) {
+      state.pending = input.slice(start);
+      if (state.pending.length > KITTY_GRAPHICS_PENDING_LIMIT) {
+        writes.push(state.pending);
+        state.pending = "";
+      }
+      break;
+    }
+
+    const endLength = hasEscEnd && end === escEnd ? KITTY_APC_END.length : KITTY_APC_END_ALT.length;
+    const framePayload = input.slice(payloadStart, end);
+    const translated = translateKittyGraphicsFrame(state, framePayload);
+    if (translated === null) {
+      writes.push(input.slice(start, end + endLength));
+    } else if (translated) {
+      writes.push(translated);
+    }
+    input = input.slice(end + endLength);
+  }
+
+  return writes.filter((part) => part !== "");
 }
 
 function injectStyles(ownerDocument = document) {
@@ -491,6 +632,7 @@ class TerminalPaneInstance {
     this.rendererAddon = null;
     this.outputMirror = null;
     this.outputMirrorText = "";
+    this.kittyGraphicsState = createKittyGraphicsState();
     this.loadedAddons = [];
     this.pendingHandoffToken = typeof context?.transferState?.handoffToken === "string" && context.transferState.handoffToken.trim()
       ? context.transferState.handoffToken.trim()
@@ -932,8 +1074,11 @@ class TerminalPaneInstance {
       return;
     }
     if (payload?.type === "output" && typeof payload.data === "string") {
-      this.appendOutputMirror(payload.data);
-      this.terminal.write(payload.data);
+      const writes = translateKittyGraphicsOutput(this.kittyGraphicsState, payload.data);
+      for (const write of writes) {
+        this.appendOutputMirror(write);
+        this.terminal.write(write);
+      }
       return;
     }
     if (payload?.type === "exit") {
