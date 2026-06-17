@@ -10,10 +10,13 @@ test("core terminal vendors xterm assets", () => {
   expect(existsSync(join(xtermDir, "xterm.mjs"))).toBe(true);
   expect(existsSync(join(xtermDir, "xterm.css"))).toBe(true);
   expect(existsSync(join(xtermDir, "addon-fit.mjs"))).toBe(true);
+  expect(existsSync(join(xtermDir, "addon-image.mjs"))).toBe(true);
   expect(existsSync(join(xtermDir, "addon-serialize.mjs"))).toBe(true);
 
   const pane = readFileSync(join(repoRoot, "runtime/web/src/panes/terminal-pane.ts"), "utf8");
   expect(pane).toContain("/static/common/js/vendor/xterm");
+  expect(pane).toContain('importAddon("image")');
+  expect(pane).toContain("translateKittyGraphicsOutput");
   expect(pane).not.toContain("ghostty-web.js");
   expect(pane).not.toContain("ghostty-vt.wasm");
 });
