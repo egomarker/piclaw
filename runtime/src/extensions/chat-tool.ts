@@ -1,9 +1,9 @@
 /**
  * chat-tool – relay a message from the current chat session to another session.
  *
- * This is the tool analogue of the web peer-message relay endpoint: it routes a
- * message through the normal inbound-message path for the target chat so queue
- * semantics, follow-up handling, and agent execution remain unchanged.
+ * The runtime implementation resolves and verifies source/destination identity,
+ * then routes a message through the normal inbound-message path for the target
+ * chat so queue semantics, follow-up handling, and agent execution remain unchanged.
  */
 import { Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
@@ -11,7 +11,7 @@ import { getChatJid } from "../core/chat-context.js";
 
 type ChatRelayMode = "auto" | "queue" | "steer";
 
-type ChatRelayRequest = {
+export type ChatRelayRequest = {
   source_chat_jid: string;
   target_chat_jid?: string;
   target_agent_name?: string;
@@ -19,13 +19,18 @@ type ChatRelayRequest = {
   mode: ChatRelayMode;
 };
 
-type ChatRelayResult = {
+export type ChatRelayResult = {
   status?: string;
   relayed?: boolean;
   source_chat_jid: string;
   source_agent_name?: string;
+  source_agent_display_name?: string;
   target_chat_jid: string;
   target_agent_name?: string;
+  target_agent_display_name?: string;
+  reply_to?: Record<string, unknown>;
+  source_session_tree?: Record<string, unknown>;
+  target_session_tree?: Record<string, unknown>;
   row_id?: number | null;
   queued?: string;
   thread_id?: number | null;
@@ -41,8 +46,8 @@ export function setChatToolRelayFn(fn: ChatToolRelayFn | undefined): void {
 }
 
 const ChatSchema = Type.Object({
-  target_chat_jid: Type.Optional(Type.String({ description: "Destination chat JID." })),
-  target_agent_name: Type.Optional(Type.String({ description: "Destination branch handle, e.g. 'research' or '@research'." })),
+  target_chat_jid: Type.Optional(Type.String({ description: "Destination chat JID. Fallback only; prefer target_agent_name/@alias so the runtime can resolve the internal session tree." })),
+  target_agent_name: Type.Optional(Type.String({ description: "Preferred destination branch handle/alias, e.g. 'research' or '@research'. Resolves through the internal session tree mapping." })),
   content: Type.String({ description: "Message body to deliver to the destination session." }),
   mode: Type.Optional(Type.Union([
     Type.Literal("auto"),
@@ -61,8 +66,10 @@ type ChatToolParams = {
 const HINT = [
   "## Cross-session chat",
   "Use the chat tool when one agent session needs to message another session.",
-  "Provide either target_chat_jid or target_agent_name (leading @ is accepted for agent handles).",
-  "The destination receives the message through its normal inbound-message path, so queueing and busy-session behavior stay consistent.",
+  "Prefer target_agent_name with an @alias (for example @research). Use target_chat_jid only as a fallback when no alias exists.",
+  "@aliases are resolved through the internal Pi chat-branch/session-tree registry before delivery; do not use opaque session IDs when an alias is available.",
+  "Sender identity is derived from the current chat session and cannot be supplied by the caller; destination identity is resolved before delivery.",
+  "The destination receives the message through its normal inbound-message path with structured reply-to metadata, so queueing and busy-session behavior stay consistent.",
   "Use mode='queue' to enqueue behind active work, or mode='steer' to inject steering while the target is streaming.",
 ].join("\n");
 
@@ -92,8 +99,8 @@ export const chatTool: ExtensionFactory = (pi: ExtensionAPI) => {
   pi.registerTool({
     name: "chat",
     label: "chat",
-    description: "Send a message from the current session to another chat session or @agent branch.",
-    promptSnippet: "chat: relay a message from the current session to another session using target_chat_jid or target_agent_name.",
+    description: "Send a message from the current session to another @alias/agent branch or chat session.",
+    promptSnippet: "chat: relay a message from the current session to another session. Prefer target_agent_name='@alias' over raw target_chat_jid/session IDs.",
     parameters: ChatSchema,
     async execute(_toolCallId, params: ChatToolParams) {
       const sourceChatJid = getChatJid("").trim();
@@ -102,7 +109,7 @@ export const chatTool: ExtensionFactory = (pi: ExtensionAPI) => {
       const targetChatJid = params.target_chat_jid?.trim() || "";
       const targetAgentName = normalizeTargetAgentName(params.target_agent_name);
       if (!targetChatJid && !targetAgentName) {
-        return err("Provide target_chat_jid or target_agent_name.");
+        return err("Provide target_agent_name (@alias preferred) or target_chat_jid.");
       }
       if (targetChatJid && targetAgentName) {
         return err("Provide only one target selector: target_chat_jid or target_agent_name.");

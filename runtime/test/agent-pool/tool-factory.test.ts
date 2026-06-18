@@ -11,6 +11,7 @@ test("AgentToolFactory matches the intended default active-tool baseline on non-
   expect(tools).toContain("list_tools");
   expect(tools).toContain("activate_tools");
   expect(tools).toContain("attach_file");
+  expect(tools).toContain("chat");
 });
 
 test("AgentToolFactory matches the intended default active-tool baseline on Windows", () => {

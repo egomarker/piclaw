@@ -86,6 +86,7 @@ describe("builtin extension factories", () => {
     expect(fake.tools.has("exit_process")).toBe(true);
     expect(fake.tools.has("scheduled_tasks")).toBe(true);
     expect(fake.tools.has("open_workspace_file")).toBe(true);
+    expect(fake.tools.has("session_control")).toBe(true);
 
     // Commands from scheduled-tasks + ui-theme extensions
     expect(fake.commands.has("tasks")).toBe(true);

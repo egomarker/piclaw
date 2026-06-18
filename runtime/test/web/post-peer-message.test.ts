@@ -10,8 +10,10 @@ describe("peer-message post helpers", () => {
       type: "peer_message",
       source_chat_jid: "web:source",
       source_agent_name: "research",
+      source_agent_display_name: "Smith",
       target_chat_jid: "web:target",
       target_agent_name: "review",
+      target_agent_display_name: "Smith",
       body: "Please inspect the branch.",
     }];
 
@@ -19,8 +21,10 @@ describe("peer-message post helpers", () => {
       block: blocks[0],
       sourceChatJid: "web:source",
       sourceAgentName: "research",
+      sourceAgentDisplayName: "Smith",
       targetChatJid: "web:target",
       targetAgentName: "review",
+      targetAgentDisplayName: "Smith",
       body: "Please inspect the branch.",
     });
 

@@ -123,15 +123,21 @@ export function getPeerMessageMeta(contentBlocks) {
     const sourceAgentName = typeof block.source_agent_name === 'string' && block.source_agent_name.trim()
         ? block.source_agent_name.trim()
         : fallbackPeerAgentHandle(sourceChatJid);
+    const sourceAgentDisplayName = typeof block.source_agent_display_name === 'string' && block.source_agent_display_name.trim()
+        ? block.source_agent_display_name.trim()
+        : sourceAgentName;
     const targetChatJid = typeof block.target_chat_jid === 'string' ? block.target_chat_jid.trim() : '';
     const targetAgentName = typeof block.target_agent_name === 'string' ? block.target_agent_name.trim() : '';
+    const targetAgentDisplayName = typeof block.target_agent_display_name === 'string' ? block.target_agent_display_name.trim() : '';
     const body = typeof block.body === 'string' ? block.body : '';
     return {
         block,
         sourceChatJid,
         sourceAgentName,
+        sourceAgentDisplayName,
         targetChatJid,
         targetAgentName,
+        targetAgentDisplayName,
         body,
     };
 }
@@ -998,7 +1004,7 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
     const resolvedUserName = userName || 'You';
     const isPeerAgentMessage = Boolean(!isAgent && peerMessageMeta?.sourceAgentName);
     const displayName = isPeerAgentMessage
-        ? peerMessageMeta.sourceAgentName
+        ? peerMessageMeta.sourceAgentDisplayName
         : isAgent ? (agentName || DEFAULT_AGENT_NAME) : resolvedUserName;
     const searchChatAgentName = typeof post.chat_agent_name === 'string' ? post.chat_agent_name.trim() : '';
     const showSearchChatAgentTag = Boolean(isAgent && highlightQuery && searchChatAgentName && searchChatAgentName !== displayName);
@@ -1006,7 +1012,7 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
     // Get avatar info based on the name.
     // Peer agent messages (cross-session relay) use the agent avatar.
     const avatarInfo = (isAgent || isPeerAgentMessage)
-        ? getAvatarInfo(isPeerAgentMessage ? peerMessageMeta.sourceAgentName : agentName, agentAvatarUrl, true)
+        ? getAvatarInfo(isPeerAgentMessage ? peerMessageMeta.sourceAgentDisplayName : agentName, agentAvatarUrl, true)
         : getAvatarInfo(resolvedUserName, userAvatarUrl);
     const normalizedUserBackground = typeof userAvatarBackground === 'string'
         ? userAvatarBackground.trim().toLowerCase()

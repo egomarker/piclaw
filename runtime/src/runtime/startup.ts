@@ -9,6 +9,9 @@ import { WebChannel } from "../channels/web.js";
 import { PushoverChannel } from "../channels/pushover.js";
 import { setMessagesPostFn } from "../extensions/messages-crud.js";
 import { setChatToolRelayFn } from "../extensions/chat-tool.js";
+import { createDirectChatToolRelayHandler } from "../extensions/chat-tool-runtime.js";
+import { setSessionControlHandler, type SessionControlRequest, type SessionControlResult } from "../extensions/session-control.js";
+import { getSessionActivitySnapshot, getSessionIsolationLevel } from "../extensions/session-status.js";
 import {
   DATA_DIR,
   STORE_DIR,
@@ -16,7 +19,7 @@ import {
   getPushoverConfig,
   getToolOutputConfig,
 } from "../core/config.js";
-import { getDb, initDatabase } from "../db.js";
+import { getChatBranchByAgentName, getChatBranchByChatJid, getChatCursor, getDb, getFailedRun, initDatabase } from "../db.js";
 import type { AgentQueue } from "../queue.js";
 import { startToolOutputCleanup } from "../tool-output.js";
 import { createUuid } from "../utils/ids.js";
@@ -274,6 +277,208 @@ interface StartupRecoveryWebChannel {
   resumePendingChats(chatJid?: string): void;
 }
 
+function parseModelLabel(label: string): { provider?: string; modelId: string } {
+  const trimmed = label.trim();
+  const slash = trimmed.indexOf("/");
+  if (slash > 0) return { provider: trimmed.slice(0, slash), modelId: trimmed.slice(slash + 1) };
+  return { modelId: trimmed };
+}
+
+function summarizeFailedRun(chatJid: string): Record<string, unknown> | null {
+  try {
+    const failed = getFailedRun(chatJid);
+    return failed ? { ...failed } as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function getCursorSnapshot(chatJid: string): string | null {
+  try {
+    return getChatCursor(chatJid) || null;
+  } catch {
+    return null;
+  }
+}
+
+async function buildSessionControlSnapshot(agentPool: AgentPool, chatJid: string): Promise<Record<string, unknown>> {
+  const models = await agentPool.getAvailableModels(chatJid).catch(() => null);
+  const activity = getSessionActivitySnapshot(chatJid);
+  const context = await agentPool.getContextUsageForChat(chatJid).catch(() => null);
+  const tree = agentPool.getSessionTreeForChat(chatJid);
+  return {
+    chat_jid: chatJid,
+    active: agentPool.isActive(chatJid),
+    streaming: agentPool.isStreaming(chatJid),
+    compacting: Boolean(activity?.isCompacting),
+    active_tools: activity?.activeTools?.map((tool) => ({
+      name: tool.toolName,
+      running_for_ms: Date.now() - tool.startedAt,
+    })) ?? [],
+    last_event_at: activity?.lastEventAt ? new Date(activity.lastEventAt).toISOString() : null,
+    model: models?.current ?? null,
+    thinking_level: models?.thinking_level ?? null,
+    context_usage: context,
+    failed_run: summarizeFailedRun(chatJid),
+    cursor: getCursorSnapshot(chatJid),
+    tree: tree ? { leaf_id: tree.leafId, total: tree.total, capped: tree.capped ?? false } : null,
+  };
+}
+
+function assessSessionSnapshot(snapshot: Record<string, unknown>): string {
+  const failed = snapshot.failed_run as Record<string, unknown> | null;
+  if (failed) return "failed_run";
+  if (snapshot.compacting) {
+    const lastEvent = snapshot.last_event_at ? Date.parse(String(snapshot.last_event_at)) : 0;
+    if (lastEvent && Date.now() - lastEvent > 5 * 60_000) return "stale_compaction";
+    return "compacting";
+  }
+  if (snapshot.streaming) {
+    const lastEvent = snapshot.last_event_at ? Date.parse(String(snapshot.last_event_at)) : 0;
+    if (lastEvent && Date.now() - lastEvent > 5 * 60_000) return "stale_stream";
+    return "streaming";
+  }
+  const activeTools = Array.isArray(snapshot.active_tools) ? snapshot.active_tools : [];
+  if (activeTools.length > 0) return "tool_running";
+  return "idle";
+}
+
+function buildSessionControlTreeDescriptor(branch: {
+  branch_id?: string | null;
+  chat_jid: string;
+  root_chat_jid?: string | null;
+  parent_branch_id?: string | null;
+  agent_name?: string | null;
+}): Record<string, unknown> {
+  return {
+    branch_id: branch.branch_id ?? null,
+    chat_jid: branch.chat_jid,
+    root_chat_jid: branch.root_chat_jid ?? branch.chat_jid,
+    parent_branch_id: branch.parent_branch_id ?? null,
+    agent_name: branch.agent_name ?? null,
+  };
+}
+
+function resolveSessionControlTarget(agentPool: AgentPool, request: SessionControlRequest): { chatJid: string; agentName: string | null; sessionTree: Record<string, unknown> | null } {
+  const chatJid = request.target_chat_jid?.trim();
+  if (chatJid) {
+    const branch = getChatBranchByChatJid(chatJid) || agentPool.listKnownChats().find((chat) => chat.chat_jid === chatJid) || null;
+    if (!branch) throw new Error(`No chat session found for ${chatJid}. Prefer target_agent_name (@alias) when available.`);
+    return { chatJid: branch.chat_jid, agentName: branch.agent_name || null, sessionTree: buildSessionControlTreeDescriptor(branch) };
+  }
+  const agentName = String(request.target_agent_name || "").trim().replace(/^@+/, "").trim();
+  if (!agentName) throw new Error("Provide target_agent_name (@alias preferred) or target_chat_jid.");
+  const branch = getChatBranchByAgentName(agentName) || null;
+  if (branch) return { chatJid: branch.chat_jid, agentName: branch.agent_name || agentName, sessionTree: buildSessionControlTreeDescriptor(branch) };
+  const found = agentPool.findChatByAgentName(agentName);
+  if (!found?.chat_jid) throw new Error(`No chat session found for @${agentName}.`);
+  const known = agentPool.listKnownChats().find((chat) => chat.chat_jid === found.chat_jid) || found;
+  return { chatJid: found.chat_jid, agentName: found.agent_name || agentName, sessionTree: buildSessionControlTreeDescriptor(known) };
+}
+
+function registerSessionControlHandler(agentPool: AgentPool, web: WebChannel): void {
+  setSessionControlHandler(async (request): Promise<SessionControlResult> => {
+    if (getSessionIsolationLevel() === "full") throw new Error("Session isolation is full; session_control is disabled.");
+    const target = resolveSessionControlTarget(agentPool, request);
+    const base = {
+      action: request.action,
+      source_chat_jid: request.source_chat_jid,
+      target_chat_jid: target.chatJid,
+      target_agent_name: target.agentName,
+      target_session_tree: target.sessionTree,
+    };
+    const before = await buildSessionControlSnapshot(agentPool, target.chatJid);
+
+    if (request.action === "inspect") return { ok: true, ...base, before };
+    if (request.action === "assess_stuck") return { ok: true, ...base, before, assessment: assessSessionSnapshot(before) };
+
+    let message = "";
+    let extra: Record<string, unknown> = {};
+    if (request.action === "compact") {
+      if (before.streaming && !request.force) throw new Error("Target session is streaming; pass force=true to compact anyway.");
+      const result = await agentPool.applyControlCommand(target.chatJid, {
+        type: "compact",
+        instructions: request.instructions,
+        raw: request.instructions ? `/compact ${request.instructions}` : "/compact",
+      });
+      message = result.message || `Compaction ${result.status}.`;
+      extra = { control_status: result.status };
+    } else if (request.action === "abort") {
+      const result = await agentPool.applyControlCommand(target.chatJid, { type: "abort", raw: "/abort" });
+      message = result.message || `Abort ${result.status}.`;
+      extra = { control_status: result.status };
+    } else if (request.action === "switch_model") {
+      const model = request.model?.trim();
+      if (!model) throw new Error("switch_model requires model.");
+      const resolved = agentPool.resolveModelInput(model);
+      if (!resolved.model) throw new Error(resolved.error || `Invalid model: ${model}`);
+      const { provider, modelId } = parseModelLabel(resolved.model);
+      const result = await agentPool.applyControlCommand(target.chatJid, {
+        type: "model",
+        provider,
+        modelId,
+        raw: `/model ${resolved.model}`,
+      });
+      const retried = web.retryFailedOnModelSwitch(target.chatJid);
+      if (retried) web.resumeChat(target.chatJid);
+      message = result.message || `Model switch ${result.status}.`;
+      extra = { control_status: result.status, requested_model: model, resolved_model: resolved.model, retried_failed_run: retried };
+    } else if (request.action === "retry_failed") {
+      const retried = web.retryFailedOnModelSwitch(target.chatJid);
+      if (retried) web.resumeChat(target.chatJid);
+      message = retried ? "Failed run marked for retry and chat resumed." : "No failed run to retry.";
+      extra = { retried };
+    } else if (request.action === "skip_failed") {
+      const skipped = web.skipFailedOnModelSwitch(target.chatJid);
+      message = skipped ? "Failed run skipped." : "No failed run to skip.";
+      extra = { skipped };
+    } else if (request.action === "wake") {
+      web.resumeChat(target.chatJid);
+      message = "Chat wake/resume queued.";
+      extra = { resumed: true };
+    } else if (request.action === "unblock") {
+      const assessment = assessSessionSnapshot(before);
+      const steps: Record<string, unknown>[] = [];
+      if (request.model?.trim()) {
+        const resolved = agentPool.resolveModelInput(request.model.trim());
+        if (!resolved.model) throw new Error(resolved.error || `Invalid model: ${request.model}`);
+        const { provider, modelId } = parseModelLabel(resolved.model);
+        const result = await agentPool.applyControlCommand(target.chatJid, {
+          type: "model",
+          provider,
+          modelId,
+          raw: `/model ${resolved.model}`,
+        });
+        steps.push({ action: "switch_model", status: result.status, requested_model: request.model.trim(), resolved_model: resolved.model });
+      }
+
+      const retried = web.retryFailedOnModelSwitch(target.chatJid);
+      if (retried) {
+        web.resumeChat(target.chatJid);
+        steps.push({ action: "retry_failed", retried: true });
+        steps.push({ action: "wake", resumed: true });
+        message = "Failed run marked for retry and chat resumed.";
+      } else if (before.streaming || before.compacting || before.active || (Array.isArray(before.active_tools) && before.active_tools.length > 0)) {
+        const result = await agentPool.applyControlCommand(target.chatJid, { type: "abort", raw: "/abort" });
+        steps.push({ action: "abort", status: result.status });
+        web.resumeChat(target.chatJid);
+        steps.push({ action: "wake", resumed: true });
+        message = "Active target work aborted and chat resumed.";
+      } else {
+        web.resumeChat(target.chatJid);
+        steps.push({ action: "wake", resumed: true });
+        message = "Chat wake/resume queued.";
+      }
+      extra = { assessment_before: assessment, steps, retried_failed_run: retried };
+    } else {
+      throw new Error(`Unsupported session_control action: ${request.action}`);
+    }
+
+    const after = await buildSessionControlSnapshot(agentPool, target.chatJid);
+    return { ok: true, ...base, before, after, message, ...extra };
+  });
+}
+
 export function runWebStartupRecoveryBootstrap(web: StartupRecoveryWebChannel): void {
   const startedAt = new Date().toISOString();
   web.updateAgentStatus(STARTUP_STATUS_CHAT_JID, buildStartupAgentStatus({
@@ -326,33 +531,15 @@ export async function startWebChannel(queue: AgentQueue, agentPool: AgentPool): 
     return interaction.id;
   });
 
-  // Wire the cross-session chat tool through the existing peer-message route so
-  // the target chat gets normal inbound-message semantics (queue/defer/steer).
-  setChatToolRelayFn(async (payload) => {
-    const req = new Request("http://internal/agent/peer-message", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const res = await web.handleRequest(req);
-    const body = await res.json().catch(() => ({} as Record<string, unknown>));
-    if (!res.ok) {
-      const message = typeof body.error === "string" ? body.error : `Cross-session chat relay failed (${res.status}).`;
-      throw new Error(message);
-    }
-    return body as {
-      status?: string;
-      relayed?: boolean;
-      source_chat_jid: string;
-      source_agent_name?: string;
-      target_chat_jid: string;
-      target_agent_name?: string;
-      row_id?: number | null;
-      queued?: string;
-      thread_id?: number | null;
-      created?: boolean;
-    };
-  });
+  // Wire the cross-session chat tool directly to the target chat message route.
+  // Do not use the web peer relay endpoint here: the tool runs with a trusted current
+  // chat context, so sender and destination identities are resolved and checked
+  // locally before delivery to avoid spoofing.
+  setChatToolRelayFn(createDirectChatToolRelayHandler(agentPool, web));
+
+  // Wire session_control separately from chat relay. This tool controls target
+  // session runtime state (inspect/compact/abort/model/failed-run/wake).
+  registerSessionControlHandler(agentPool, web);
 
   return web;
 }
