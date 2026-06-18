@@ -70,6 +70,8 @@ test("telegram network classifier treats transient Telegram upstream failures as
   expect(isRecoverableTelegramNetworkError(new Error("Telegram getMe failed: Gateway Timeout"))).toBe(true);
   expect(isRecoverableTelegramNetworkError(new Error("Telegram getUpdates failed: Service Unavailable"))).toBe(true);
   expect(isRecoverableTelegramNetworkError(new Error("Telegram getUpdates failed: 429"))).toBe(true);
+  expect(isRecoverableTelegramNetworkError(new Error("Unable to connect. Is the computer able to access the url?"))).toBe(true);
+  expect(isRecoverableTelegramNetworkError({ message: "request failed", code: "ConnectionRefused" })).toBe(true);
   expect(isRecoverableTelegramNetworkError(new Error("Telegram getUpdates failed: Forbidden"))).toBe(false);
 });
 

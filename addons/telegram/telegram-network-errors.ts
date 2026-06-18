@@ -5,6 +5,8 @@ const RECOVERABLE_TELEGRAM_ERROR_FRAGMENTS = [
   "timeout",
   "econnreset",
   "ecanceled",
+  "connectionrefused",
+  "unable to connect",
   "temporarily unavailable",
   "socket",
   "bad gateway",
