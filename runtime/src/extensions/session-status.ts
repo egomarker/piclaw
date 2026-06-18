@@ -121,12 +121,24 @@ export function getActiveSessionCount(excludeChatJid?: string): number {
   return count;
 }
 
+function cloneActivity(activity: SessionActivity): SessionActivity {
+  return {
+    ...activity,
+    activeTools: activity.activeTools.map((tool) => ({ ...tool })),
+  };
+}
+
+export function getSessionActivitySnapshot(chatJid: string): SessionActivity | null {
+  const activity = activityMap.get(chatJid);
+  return activity ? cloneActivity(activity) : null;
+}
+
 export function getActiveSessions(excludeChatJid?: string): SessionActivity[] {
   const result: SessionActivity[] = [];
   for (const [jid, activity] of activityMap) {
     if (excludeChatJid && jid === excludeChatJid) continue;
     if (activity.isStreaming || activity.isCompacting || activity.activeTools.length > 0) {
-      result.push(activity);
+      result.push(cloneActivity(activity));
     }
   }
   return result;

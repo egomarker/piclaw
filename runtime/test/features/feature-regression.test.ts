@@ -338,7 +338,7 @@ describe("feature: tool catalog", () => {
       "list_tools", "list_scripts",
       "activate_tools", "reset_active_tools", "introspect_sql",
       "search_workspace", "refresh_workspace_index",
-      "send_adaptive_card", "send_dashboard_widget",
+      "send_adaptive_card", "send_dashboard_widget", "session_control",
       "open_workspace_file", "env", "exit_process",
       "image_process",
     ];

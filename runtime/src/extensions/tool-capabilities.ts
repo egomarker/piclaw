@@ -568,6 +568,17 @@ const TOOL_CAPABILITIES: Record<string, ToolCapability> = {
       nouns: ["session", "active", "running", "tool"],
     }),
   },
+  session_control: {
+    kind: "mixed",
+    weight: "standard",
+    summary: "Inspect or control another session: assess stuck state, compact, abort, switch model, handle failed runs, wake it, or unblock it.",
+    recommend: rec({
+      domains: ["lifecycle", "sessions", "agents", "control"],
+      verbs: ["inspect", "assess", "compact", "abort", "unblock", "wake", "switch", "retry"],
+      nouns: ["session", "agent", "stuck", "compaction", "failed run", "model"],
+      negativeTerms: ["send message", "relay chat"],
+    }),
+  },
 
   // image processing
   image_process: {

@@ -77,8 +77,8 @@ export const TOOLSETS: ToolsetDefinition[] = [
   },
   {
     name: "lifecycle",
-    description: "Managed process lifecycle control.",
-    toolNames: ["exit_process", "session_status"],
+    description: "Managed process and cross-session lifecycle control.",
+    toolNames: ["exit_process", "session_status", "session_control"],
   },
 ];
 

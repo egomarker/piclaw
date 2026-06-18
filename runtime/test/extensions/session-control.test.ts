@@ -1,0 +1,121 @@
+import { afterEach, expect, test } from "bun:test";
+
+import { withChatContext } from "../../src/core/chat-context.js";
+import { sessionControl, setSessionControlHandler } from "../../src/extensions/session-control.js";
+
+function makePi() {
+  const tools = new Map<string, any>();
+  const beforeAgentStartHandlers: any[] = [];
+  const api = {
+    on(eventName: string, handler: any) {
+      if (eventName === "before_agent_start") beforeAgentStartHandlers.push(handler);
+    },
+    registerTool(tool: any) { tools.set(tool.name, tool); },
+  };
+  sessionControl(api as any);
+  return { tools, beforeAgentStartHandlers };
+}
+
+afterEach(() => {
+  setSessionControlHandler(undefined);
+});
+
+test("session_control registers a separate tool from chat with startup guidance", async () => {
+  const { tools, beforeAgentStartHandlers } = makePi();
+  expect(tools.has("session_control")).toBe(true);
+  expect(tools.has("chat")).toBe(false);
+
+  const event = await beforeAgentStartHandlers[0]({ systemPrompt: "base" });
+  expect(event.systemPrompt).toContain("Cross-session session control");
+  expect(event.systemPrompt).toContain("separate from the chat tool");
+});
+
+test("session_control requires exactly one target selector", async () => {
+  const { tools } = makePi();
+  const tool = tools.get("session_control");
+  const noTarget = await withChatContext("web:source", "web", () => tool.execute("call-1", { action: "inspect" }));
+  expect(noTarget.details.ok).toBe(false);
+  expect(noTarget.details.error).toContain("Provide target_chat_jid");
+
+  const bothTargets = await withChatContext("web:source", "web", () => tool.execute("call-2", {
+    action: "inspect",
+    target_chat_jid: "web:target",
+    target_agent_name: "other",
+  }));
+  expect(bothTargets.details.ok).toBe(false);
+  expect(bothTargets.details.error).toContain("only one target");
+});
+
+test("session_control dispatches inspect, switch_model, and unblock requests to the runtime handler", async () => {
+  const calls: any[] = [];
+  setSessionControlHandler(async (request) => {
+    calls.push(request);
+    return {
+      ok: true,
+      action: request.action,
+      source_chat_jid: request.source_chat_jid,
+      target_chat_jid: request.target_chat_jid || "web:resolved",
+      target_agent_name: request.target_agent_name || null,
+      before: { active: false },
+      message: `${request.action} ok`,
+    };
+  });
+
+  const { tools } = makePi();
+  const tool = tools.get("session_control");
+  const inspect = await withChatContext("web:source", "web", () => tool.execute("call-3", {
+    action: "inspect",
+    target_agent_name: "research",
+  }));
+  expect(inspect.details.ok).toBe(true);
+  expect(inspect.details.source_chat_jid).toBe("web:source");
+  expect(calls[0]).toMatchObject({ action: "inspect", source_chat_jid: "web:source", target_agent_name: "research" });
+
+  const switched = await withChatContext("web:source", "web", () => tool.execute("call-4", {
+    action: "switch_model",
+    target_chat_jid: "web:target",
+    model: "github-copilot/gpt-5.4",
+  }));
+  expect(switched.details.ok).toBe(true);
+  expect(calls[1]).toMatchObject({ action: "switch_model", target_chat_jid: "web:target", model: "github-copilot/gpt-5.4" });
+
+  const unblocked = await withChatContext("web:source", "web", () => tool.execute("call-5", {
+    action: "unblock",
+    target_chat_jid: "web:target",
+  }));
+  expect(unblocked.details.ok).toBe(true);
+  expect(calls[2]).toMatchObject({ action: "unblock", target_chat_jid: "web:target" });
+});
+
+test("session_control dispatches every supported action name to the runtime handler", async () => {
+  const calls: any[] = [];
+  setSessionControlHandler(async (request) => {
+    calls.push(request);
+    return {
+      ok: true,
+      action: request.action,
+      source_chat_jid: request.source_chat_jid,
+      target_chat_jid: request.target_chat_jid || "web:resolved",
+      target_agent_name: request.target_agent_name || null,
+      message: `${request.action} ok`,
+    };
+  });
+
+  const { tools } = makePi();
+  const tool = tools.get("session_control");
+  const actions = ["inspect", "assess_stuck", "compact", "abort", "retry_failed", "skip_failed", "wake", "unblock"];
+  for (const action of actions) {
+    const result = await withChatContext("web:source", "web", () => tool.execute(`call-${action}`, {
+      action,
+      target_chat_jid: "web:target",
+    }));
+    expect(result.details.ok).toBe(true);
+  }
+  const modelResult = await withChatContext("web:source", "web", () => tool.execute("call-switch_model", {
+    action: "switch_model",
+    target_chat_jid: "web:target",
+    model: "github-copilot/gpt-5.4",
+  }));
+  expect(modelResult.details.ok).toBe(true);
+  expect(calls.map((call) => call.action)).toEqual([...actions, "switch_model"]);
+});
