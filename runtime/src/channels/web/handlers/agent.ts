@@ -316,6 +316,19 @@ function buildErrorOutcomeMarker(
     });
   }
 
+  if (isAbortError(errorText)) {
+    return buildTurnOutcomeMarker({
+      kind: "abort",
+      label: "aborted",
+      title: "Turn aborted",
+      detail: errorText.slice(0, 500),
+      severity: options.severity ?? "warning",
+      draftRecovered: options.draftRecovered,
+      attemptsUsed: options.attemptsUsed,
+      classifier: options.classifier,
+    });
+  }
+
   if (isSessionCorruptionError(errorText)) {
     return buildTurnOutcomeMarker({
       kind: "context",
@@ -2119,7 +2132,6 @@ export async function processChat(
 
     const errorText = output.error || "Agent error";
     const providerError = formatProviderError(errorText);
-    const aborted = isAbortError(errorText);
     const rateLimited = providerError?.category === "rate_limit" || isRateLimitError(errorText);
     const networkFailed = providerError?.category === "network" || isNetworkError(errorText);
     const networkDetail = providerError?.title || (networkFailed ? describeNetworkError(errorText) : null);
@@ -2133,14 +2145,7 @@ export async function processChat(
       ? publishDraftFallback("timeout", errorText, { markerOptions })
       : rateLimited
         ? publishDraftFallback("rate-limit", errorText, { markerOptions })
-        : aborted
-          ? false
-          : publishDraftFallback("error", errorText, { markerOptions });
-
-    if (aborted) {
-      await finalizeSuccessfulRun();
-      return;
-    }
+        : publishDraftFallback("error", errorText, { markerOptions });
 
     if (fallbackPublished) {
       await finalizeSuccessfulRun();

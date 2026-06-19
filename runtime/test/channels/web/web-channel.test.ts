@@ -2299,6 +2299,80 @@ test("processChat appends visible diagnostic text to recovered tool-budget draft
   }));
 });
 
+test("processChat persists raw abort errors as visible outcome markers", async () => {
+  const ws = createTempWorkspace("piclaw-web-channel-");
+  cleanupWorkspace = ws.cleanup;
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+
+  const db = await import("../../../src/db.js");
+  db.initDatabase();
+  db.getDb().exec("DELETE FROM message_media; DELETE FROM messages; DELETE FROM chats; DELETE FROM chat_cursors; DELETE FROM chat_cursors;");
+  db.storeChatMetadata("web:default", new Date().toISOString(), "Web");
+
+  db.storeMessage({
+    id: `msg-${Math.random()}`,
+    chat_jid: "web:default",
+    sender: "user",
+    sender_name: "User",
+    content: "hello",
+    timestamp: new Date().toISOString(),
+    is_from_me: false,
+    is_bot_message: false,
+  });
+
+  const webMod = await import("../../../src/channels/web.js");
+  const web = new (webMod.WebChannel as any)({
+    queue: { enqueue: () => {} },
+    agentPool: {
+      setSessionBinder: () => {},
+      runAgent: async () => ({
+        status: "error",
+        error: "Request was aborted.",
+        result: null,
+        attachments: [],
+        recovery: {
+          attemptsUsed: 1,
+          totalElapsedMs: 1000,
+          recovered: false,
+          exhausted: true,
+          lastClassifier: "budget_exhausted",
+          strategyHistory: ["compact_then_retry"],
+          diagnostics: [{
+            phase: "attempt_failure",
+            attempt: 2,
+            classifier: "budget_exhausted",
+            strategy: null,
+            reason: "Automatic recovery budget exhausted.",
+            error: "Request was aborted.",
+            elapsedMs: 1000,
+            hadToolActivity: true,
+            hadPartialOutput: false,
+            hadCompletedTurnOutput: false,
+            sawCompactionIntent: true,
+            compactionErrorMessage: null,
+            toolExecutionCount: 48,
+          }],
+        },
+      }),
+      getContextUsageForChat: async () => null,
+    },
+  });
+
+  await web.processChat("web:default", "default");
+
+  const timeline = db.getTimeline("web:default", 10);
+  const botMessages = timeline.filter((item: any) => item.data.type === "agent_response");
+  expect(botMessages.length).toBe(1);
+  expect(botMessages[0].data.content_blocks).toContainEqual(expect.objectContaining({
+    type: "turn_outcome_marker",
+    kind: "abort",
+    title: "Turn aborted",
+    detail: "Request was aborted.",
+    attempts_used: 1,
+    classifier: "budget_exhausted",
+  }));
+});
+
 test("processChat includes the last action summary in visible failure fallbacks", async () => {
   const ws = createTempWorkspace("piclaw-web-channel-");
   cleanupWorkspace = ws.cleanup;
@@ -2346,7 +2420,7 @@ test("processChat includes the last action summary in visible failure fallbacks"
   }));
 });
 
-test("processChat suppresses a redundant failure bubble when a turn is aborted", async () => {
+test("processChat persists a visible outcome marker when a turn is aborted", async () => {
   const ws = createTempWorkspace("piclaw-web-channel-");
   cleanupWorkspace = ws.cleanup;
   restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
@@ -2380,8 +2454,15 @@ test("processChat suppresses a redundant failure bubble when a turn is aborted",
   await web.processChat("web:default", "default");
 
   const timeline = db.getTimeline("web:default", 10);
-  expect(timeline).toHaveLength(1);
-  expect(String(timeline[0]?.data?.content || "")).toBe("hello");
+  const botMessages = timeline.filter((item: any) => item.data.type === "agent_response");
+  expect(botMessages.length).toBe(1);
+  expect(String(botMessages[0].data.content || "")).toBe("");
+  expect(botMessages[0].data.content_blocks).toContainEqual(expect.objectContaining({
+    type: "turn_outcome_marker",
+    kind: "abort",
+    title: "Turn aborted",
+    detail: "The operation was aborted.",
+  }));
 });
 
 test("processChat persists a compact recovery bubble instead of a generic no-response warning when compaction/recovery stalls", async () => {

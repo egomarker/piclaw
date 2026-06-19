@@ -510,10 +510,24 @@ function resolveToolBudgetSoftStopThreshold(budget: number): number {
   return Math.max(1, normalized - margin);
 }
 
+function isAbortFailureText(errorText: string): boolean {
+  return /\b(?:aborterror|aborted|operation was aborted|request was aborted)\b/i.test(errorText);
+}
+
 function findToolBudgetDiagnostic(diagnostics: AgentRecoveryDiagnosticEntry[]): AgentRecoveryDiagnosticEntry | null {
-  return diagnostics.find((entry) => entry.toolUseBudgetExceeded
-    || entry.classifier === "tool_history_pressure"
-    || /tool(?:-| )use budget exceeded/i.test(entry.error)) ?? null;
+  for (let index = diagnostics.length - 1; index >= 0; index -= 1) {
+    const entry = diagnostics[index];
+    const toolExecutionCeilingReached = entry.sawCompactionIntent
+      && Number.isFinite(entry.toolExecutionCount)
+      && (entry.toolExecutionCount ?? 0) > 0;
+    if (entry.toolUseBudgetExceeded
+      || entry.classifier === "tool_history_pressure"
+      || /tool(?:-| )use budget exceeded/i.test(entry.error)
+      || toolExecutionCeilingReached) {
+      return entry;
+    }
+  }
+  return null;
 }
 
 function buildToolBudgetRecoveryTerminalError(
@@ -521,13 +535,23 @@ function buildToolBudgetRecoveryTerminalError(
   retryErrorText: string,
 ): { error: string; toolStepsUsed?: number; toolStepsBudget?: number; nextAction: string } {
   const parsed = /\((\d+)\/(\d+) tool steps\)/i.exec(budgetDiagnostic.error);
-  const toolStepsUsed = Number.isFinite(budgetDiagnostic.assistantToolUseMessageCount)
+  const assistantToolUseCount = Number.isFinite(budgetDiagnostic.assistantToolUseMessageCount)
     ? budgetDiagnostic.assistantToolUseMessageCount
-    : parsed ? Number(parsed[1]) : undefined;
+    : undefined;
+  const toolExecutionCount = Number.isFinite(budgetDiagnostic.toolExecutionCount)
+    ? budgetDiagnostic.toolExecutionCount
+    : undefined;
+  const toolStepsUsed = Number.isFinite(assistantToolUseCount) && (assistantToolUseCount ?? 0) > 0
+    ? assistantToolUseCount
+    : Number.isFinite(toolExecutionCount) && (toolExecutionCount ?? 0) > 0
+      ? toolExecutionCount
+      : parsed ? Number(parsed[1]) : undefined;
   const toolStepsBudget = parsed ? Number(parsed[2]) : undefined;
   const budgetDetail = Number.isFinite(toolStepsUsed) && Number.isFinite(toolStepsBudget)
     ? `Tool-use budget exceeded before finalization (${toolStepsUsed}/${toolStepsBudget} tool steps).`
-    : "Tool-use budget exceeded before finalization.";
+    : Number.isFinite(toolStepsUsed)
+      ? `Tool-use budget exceeded before finalization after ${toolStepsUsed} tool execution(s).`
+      : "Tool-use budget exceeded before finalization.";
   const retryDetail = retryErrorText.trim()
     ? ` Automatic recovery compacted context and retried, but the retry still produced no terminal assistant reply: ${retryErrorText}`
     : " Automatic recovery compacted context and retried, but the retry still produced no terminal assistant reply.";
@@ -1714,7 +1738,7 @@ export async function runAgentPrompt(
           const duration = Date.now() - startTime;
           const toolBudgetDiagnostic = recoveryAttemptsUsed > 0 ? findToolBudgetDiagnostic(recoveryDiagnostics) : null;
           const terminalBudgetFailure = toolBudgetDiagnostic
-            && /Prompt completed without emitting an assistant reply before finalization/i.test(errorText)
+            && (/Prompt completed without emitting an assistant reply before finalization/i.test(errorText) || isAbortFailureText(errorText))
             ? buildToolBudgetRecoveryTerminalError(toolBudgetDiagnostic, errorText)
             : null;
           const finalErrorText = terminalBudgetFailure?.error ?? errorText;

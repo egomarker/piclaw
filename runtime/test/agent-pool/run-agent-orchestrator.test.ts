@@ -2374,6 +2374,124 @@ test("runAgentPrompt preserves tool-budget root cause when recovery retry emits 
   }
 });
 
+test("runAgentPrompt reports repeated mid-turn tool ceiling aborts as visible tool-budget exhaustion", async () => {
+  initDatabase();
+  const restoreEnv = setEnv({
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "1",
+    PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
+    PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING: "2",
+  });
+
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    sessionManager = { getLeafId: () => "leaf-repeated-mid-turn-ceiling", getEntries: () => [] };
+    agent = { state: { errorMessage: "Request was aborted." } };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    promptCalls = 0;
+    compactCalls = 0;
+    abortCalls = 0;
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => {
+        this.listeners = this.listeners.filter((entry) => entry !== listener);
+      };
+    }
+    async prompt() {
+      this.promptCalls += 1;
+      for (const listener of this.listeners) {
+        for (let i = 1; i <= 2; i += 1) {
+          listener({ type: "tool_execution_start", toolCallId: `tool-${this.promptCalls}-${i}`, toolName: "grep", args: { pattern: "x" } });
+          listener({
+            type: "tool_execution_end",
+            toolCallId: `tool-${this.promptCalls}-${i}`,
+            toolName: "grep",
+            isError: false,
+            durationMs: 1,
+            result: { content: [{ type: "text", text: `result ${this.promptCalls}-${i}` }] },
+          });
+        }
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "aborted",
+            errorMessage: "Request was aborted.",
+            content: [],
+            usage: { input: 0, output: 0, totalTokens: 0 },
+          },
+        });
+      }
+    }
+    async compact() {
+      this.compactCalls += 1;
+    }
+    async abort() {
+      this.abortCalls += 1;
+    }
+  }
+
+  try {
+    const session = new StubSession();
+    const recoveryEnds: Array<{ classifier?: string | null; errorMessage?: string }> = [];
+    const result = await runAgentPrompt("hello", "web:default", {
+      timeoutMs: 0,
+      onEvent: (event) => {
+        if (event.type === "recovery_end") {
+          recoveryEnds.push({
+            classifier: (event as any).classifier,
+            errorMessage: (event as any).errorMessage,
+          });
+        }
+      },
+    }, {
+      getOrCreateRuntime: async () => createRuntime(session) as any,
+      turnCoordinator: new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} }),
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.error).toContain("Tool-use budget exceeded before finalization after 2 tool execution(s)");
+    expect(result.error).toContain("retry still produced no terminal assistant reply: Request was aborted.");
+    expect(result.error).toContain("Ask me to continue");
+    expect(result.toolBudgetExceeded).toBe(true);
+    expect(result.toolStepsUsed).toBe(2);
+    expect(result.toolStepsBudget).toBeUndefined();
+    expect(result.recovery).toEqual(expect.objectContaining({
+      attemptsUsed: 1,
+      exhausted: true,
+      recovered: false,
+      strategyHistory: ["compact_then_retry"],
+    }));
+    expect(result.recovery?.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        classifier: "context_pressure",
+        sawCompactionIntent: true,
+        toolExecutionCount: 2,
+      }),
+      expect.objectContaining({
+        classifier: "budget_exhausted",
+        sawCompactionIntent: true,
+        toolExecutionCount: 2,
+      }),
+    ]));
+    expect(recoveryEnds).toEqual([expect.objectContaining({
+      errorMessage: expect.stringContaining("Tool-use budget exceeded before finalization after 2 tool execution"),
+    })]);
+    expect(session.promptCalls).toBe(2);
+    expect(session.compactCalls).toBe(1);
+    expect(session.abortCalls).toBe(2);
+  } finally {
+    restoreEnv();
+  }
+});
+
 test("runAgentPrompt uses the configured mid-turn tool execution hard ceiling", async () => {
   initDatabase();
   const restoreEnv = setEnv({ PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING: "2" });
