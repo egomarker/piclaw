@@ -256,6 +256,7 @@ describe("web agent streaming", () => {
     const previousForeground = process.env.PICLAW_PREPROMPT_COMPACTION_FOREGROUND_MS;
     process.env.PICLAW_PREPROMPT_COMPACTION_FOREGROUND_MS = "0";
     const releaseCompaction = deferred<void>();
+    const chatJid = "web:preprompt-defers";
     let compactCalls = 0;
     let runCalls = 0;
     const session = {
@@ -284,26 +285,35 @@ describe("web agent streaming", () => {
       getContextUsageForChat: async () => null,
     } as any;
 
+    const queuedResumeTasks: Array<() => Promise<void>> = [];
     const fixture = await createWebChannelTestFixture({
       workspace: "temp",
-      queue: new AgentQueue(),
+      queue: {
+        enqueue: (fn: () => Promise<void>) => {
+          queuedResumeTasks.push(fn);
+        },
+      },
       agentPool,
     });
 
     try {
       const { channel, db } = fixture;
-      const interaction = channel.storeMessage("web:default", "hello", false, []);
+      const interaction = channel.storeMessage(chatJid, "hello", false, []);
       expect(interaction).not.toBeNull();
 
-      await channel.processChat("web:default", "default");
+      await channel.processChat(chatJid, "default");
 
       expect(compactCalls).toBe(1);
       expect(runCalls).toBe(0);
 
       releaseCompaction.resolve(undefined);
-      await waitFor(() => runCalls === 1, 2_000, 10);
+      await waitFor(() => queuedResumeTasks.length === 1, 2_000, 10);
+      expect(runCalls).toBe(0);
 
-      expect(db.getChatCursor("web:default")).toBe(interaction!.timestamp);
+      await queuedResumeTasks[0]!();
+
+      expect(runCalls).toBe(1);
+      expect(db.getChatCursor(chatJid)).toBe(interaction!.timestamp);
     } finally {
       if (previousForeground === undefined) delete process.env.PICLAW_PREPROMPT_COMPACTION_FOREGROUND_MS;
       else process.env.PICLAW_PREPROMPT_COMPACTION_FOREGROUND_MS = previousForeground;
