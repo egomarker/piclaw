@@ -23,6 +23,7 @@
  *   - envTools: env for persistent workspace-scoped environment variables.
  *   - contextPrune: context_prune/context_tree_query for recoverable tool-result pruning.
  *   - providerRequestSanitizer: defensive provider payload cleanup before HTTP requests.
+ *   - llmContextNormalizer: defensive LLM message-shape cleanup before provider conversion.
  *   - githubCopilotDynamicModels: Piclaw-private GitHub Copilot live /models catalog merge.
  *
  * Note: bun_run, keychain, ssh, proxmox, and portainer now live as packaged
@@ -58,6 +59,7 @@ import { imageProcessing } from "./image-processing.js";
 import { sessionStatus } from "./session-status.js";
 import { providerResponseDiagnostics } from "./provider-response-diagnostics.js";
 import { providerRequestSanitizer } from "./provider-request-sanitizer.js";
+import { llmContextNormalizer } from "./llm-context-normalizer.js";
 import { postCompactionPrune } from "./post-compaction-prune.js";
 import { contextPrune } from "./context-prune.js";
 import { mcpTimeoutPatch } from "./mcp-timeout-patch.js";
@@ -96,6 +98,7 @@ export function createBuiltinExtensionFactories(options?: {
     providerResponseDiagnostics,
     postCompactionPrune,
     contextPrune,
+    llmContextNormalizer,
     mcpTimeoutPatch,
     githubCopilotDynamicModels,
   ];

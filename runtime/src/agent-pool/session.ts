@@ -44,6 +44,7 @@ import { createLogger, debugSuppressedError } from "../utils/logger.js";
 import { installAddonRuntimeApi } from "../addons/runtime-contributions.js";
 import { streamSimple } from "@earendil-works/pi-ai";
 import type { CompactionStreamFn } from "../extensions/smart-compaction/stream-complete.js";
+import { normalizeLlmContext } from "./llm-context-normalizer.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const AGENT_DIR = getAgentDir();
@@ -642,7 +643,7 @@ function createCompactionStreamFn(modelRegistry: ModelRegistry, settingsManager:
       throw new Error(auth.error);
     }
     const providerRetrySettings = settingsManager.getProviderRetrySettings();
-    return streamSimple(model, context, {
+    return streamSimple(model, normalizeLlmContext(context), {
       ...options,
       apiKey: auth.apiKey,
       timeoutMs: options?.timeoutMs ?? providerRetrySettings.timeoutMs,

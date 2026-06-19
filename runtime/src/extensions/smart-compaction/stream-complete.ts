@@ -12,6 +12,7 @@
 
 import { streamSimple } from "@earendil-works/pi-ai";
 import type { AssistantMessage, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { normalizeLlmContext } from "../../agent-pool/llm-context-normalizer.js";
 import { SMART_COMPACTION_PROGRESS_INTERVAL_MS } from "./config.js";
 
 /**
@@ -68,10 +69,12 @@ export async function streamComplete(opts: StreamCompleteOptions): Promise<Assis
     ? { maxTokens, signal, apiKey, headers, reasoning }
     : { maxTokens, signal, apiKey, headers };
 
+  const normalizedContext = normalizeLlmContext(context);
+
   // Use custom stream function if provided, otherwise standard streamSimple
   const stream = await (streamFn
-    ? streamFn(model, context, streamOptions)
-    : streamSimple(model, context, streamOptions));
+    ? streamFn(model, normalizedContext, streamOptions)
+    : streamSimple(model, normalizedContext, streamOptions));
 
   // If no progress callback, just collect the result directly
   if (!onProgress) {

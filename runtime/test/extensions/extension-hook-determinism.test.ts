@@ -30,7 +30,7 @@ describe("built-in extension hook determinism", () => {
       "exitProcess",
       "imageProcessing",
     ]);
-    expect(audit.context_hook_order).toEqual(["fileAttachments", "contextPrune"]);
+    expect(audit.context_hook_order).toEqual(["fileAttachments", "contextPrune", "llmContextNormalizer"]);
     expect(audit.final_system_prompt).toContain("## File Attachments");
     expect(audit.final_system_prompt).toContain("## Script discovery");
     expect(audit.final_system_prompt).toContain("## Database Introspection");
@@ -40,6 +40,7 @@ describe("built-in extension hook determinism", () => {
     expect(audit.context_messages).toEqual([
       {
         role: "user",
+        timestamp: 0,
         content: [
           { type: "text", text: "hello" },
           { type: "text", text: "[Invalid image block removed: unsupported MIME image/svg+xml]" },
@@ -47,15 +48,8 @@ describe("built-in extension hook determinism", () => {
       },
       {
         role: "assistant",
-        content: [
-          {
-            type: "tool_result",
-            content: [
-              { type: "text", text: "[Invalid image block removed: unsupported MIME application/pdf]" },
-              { type: "text", text: "kept" },
-            ],
-          },
-        ],
+        timestamp: 0,
+        content: [{ type: "text", text: "" }],
       },
     ]);
   });
