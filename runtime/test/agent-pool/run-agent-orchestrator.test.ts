@@ -2492,6 +2492,75 @@ test("runAgentPrompt reports repeated mid-turn tool ceiling aborts as visible to
   }
 });
 
+test("runAgentPrompt reports maxToolCalls cap as tool-budget exhaustion with usage counts", async () => {
+  initDatabase();
+
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    sessionManager = { getLeafId: () => "leaf-tool-call-cap", getEntries: () => [] };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    abortCalls = 0;
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => {
+        this.listeners = this.listeners.filter((entry) => entry !== listener);
+      };
+    }
+    async prompt() {
+      for (const listener of this.listeners) {
+        for (let i = 1; i <= 2; i += 1) {
+          listener({ type: "tool_execution_start", toolCallId: `tool-${i}`, toolName: "bash", args: { command: "echo hi" } });
+          listener({
+            type: "tool_execution_end",
+            toolCallId: `tool-${i}`,
+            toolName: "bash",
+            isError: false,
+            durationMs: 1,
+            result: { content: [{ type: "text", text: `result ${i}` }] },
+          });
+        }
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "stop",
+            content: [{ type: "text", text: "finished" }],
+            usage: { input: 1, output: 1, totalTokens: 2 },
+          },
+        });
+      }
+    }
+    async abort() {
+      this.abortCalls += 1;
+    }
+  }
+
+  const session = new StubSession();
+  const result = await runAgentPrompt("hello", "web:default", {
+    timeoutMs: 0,
+    maxToolCalls: 2,
+  }, {
+    getOrCreateRuntime: async () => createRuntime(session) as any,
+    turnCoordinator: new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} }),
+    clearAttachments: () => {},
+    takeAttachments: () => [],
+    logsDir: createTestLogsDir(),
+    setActiveForkBaseLeaf: () => {},
+    clearActiveForkBaseLeaf: () => {},
+  });
+
+  expect(result.status).toBe("error");
+  expect(result.error).toContain("Tool-use budget exceeded before finalization (2/2 tool calls).");
+  expect(result.error).toContain("Ask me to continue");
+  expect(result.toolBudgetExceeded).toBe(true);
+  expect(result.toolStepsUsed).toBe(2);
+  expect(result.toolStepsBudget).toBe(2);
+  expect(result.nextAction).toContain("resume from the latest known partial state");
+  expect(session.abortCalls).toBe(1);
+});
+
 test("runAgentPrompt uses the configured mid-turn tool execution hard ceiling", async () => {
   initDatabase();
   const restoreEnv = setEnv({ PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING: "2" });

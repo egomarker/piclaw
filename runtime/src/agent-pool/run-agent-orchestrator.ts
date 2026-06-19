@@ -1431,7 +1431,7 @@ export async function runAgentPrompt(
 
   // Tool-cap and tool-ceiling state – declared outside try so cleanup
   // can run in finally regardless of how the try exits.
-  const toolCallCapRef = { exceeded: false };
+  const toolCallCapRef = { exceeded: false, count: 0, cap: undefined as number | undefined };
   let toolCallUnsub: (() => void) | undefined;
   type SessionWithToolControl = {
     setActiveToolsByName?: (toolNames: string[]) => void;
@@ -1531,9 +1531,11 @@ export async function runAgentPrompt(
     if (typeof runOptions.maxToolCalls === "number" && runOptions.maxToolCalls > 0) {
       let toolCallCount = 0;
       const cap = runOptions.maxToolCalls;
+      toolCallCapRef.cap = cap;
       toolCallUnsub = session.subscribe((event) => {
         if (event.type === "tool_execution_end") {
           toolCallCount += 1;
+          toolCallCapRef.count = toolCallCount;
           if (toolCallCount >= cap) {
             toolCallCapRef.exceeded = true;
             session.abort().catch((err) => { debugSuppressedError(log, "Failed to abort session after tool-call cap exceeded.", err, {}); });
@@ -1626,8 +1628,25 @@ export async function runAgentPrompt(
         // If the tool-call cap was hit, abort immediately without recovery.
         if (toolCallCapRef.exceeded) {
           const duration = Date.now() - startTime;
-          writeAgentLog(options.logsDir, chatJid, duration, false, null, "Tool call limit exceeded.");
-          return { status: "error", result: null, error: "Tool call limit exceeded." };
+          const used = Number.isFinite(toolCallCapRef.count) ? toolCallCapRef.count : undefined;
+          const cap = Number.isFinite(toolCallCapRef.cap) ? toolCallCapRef.cap : undefined;
+          const budgetDetail = Number.isFinite(used) && Number.isFinite(cap)
+            ? `Tool-use budget exceeded before finalization (${used}/${cap} tool calls).`
+            : Number.isFinite(used)
+              ? `Tool-use budget exceeded before finalization after ${used} tool call(s).`
+              : "Tool-use budget exceeded before finalization.";
+          const nextAction = "Ask me to continue; I will resume from the latest known partial state instead of replaying the whole turn.";
+          const error = `${budgetDetail} ${nextAction}`;
+          writeAgentLog(options.logsDir, chatJid, duration, false, null, error);
+          return {
+            status: "error",
+            result: null,
+            error,
+            toolBudgetExceeded: true,
+            toolStepsUsed: used,
+            toolStepsBudget: cap,
+            nextAction,
+          };
         }
 
         if (attempt.output.status === "success") {
