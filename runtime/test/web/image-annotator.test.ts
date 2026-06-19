@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { resolve } from "node:path";
 
-const repoRoot = "/workspace/piclaw";
-const source = readFileSync(join(repoRoot, "runtime/web/src/components/image-annotator.ts"), "utf8");
-const classicCss = readFileSync(join(repoRoot, "runtime/web/static/classic/css/overlays.css"), "utf8");
-const visualCss = readFileSync(join(repoRoot, "runtime/web/static/visual/css/overlays.css"), "utf8");
+const repoRoot = resolve(import.meta.dir, "../../..");
+const source = readFileSync(resolve(repoRoot, "runtime/web/src/components/image-annotator.ts"), "utf8");
+const classicCss = readFileSync(resolve(repoRoot, "runtime/web/static/classic/css/overlays.css"), "utf8");
+const visualCss = readFileSync(resolve(repoRoot, "runtime/web/static/visual/css/overlays.css"), "utf8");
 
 test("image annotator renders as a centered modal with a clipped stage and protected toolbar", () => {
   expect(source).toContain('role="dialog"');
