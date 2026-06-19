@@ -3251,6 +3251,80 @@ test("processChat executes deferred model commands server-side after materializa
   expect(contents.some((content: string) => content.includes("Model set to openai-codex/gpt-5.5"))).toBe(true);
 });
 
+test("processChat broadcasts context usage after deferred compact command materialization", async () => {
+  const ws = createTempWorkspace("piclaw-web-channel-");
+  cleanupWorkspace = ws.cleanup;
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+
+  const db = await import("../../../src/db.js");
+  db.initDatabase();
+  db.getDb().exec("DELETE FROM message_media; DELETE FROM messages; DELETE FROM chats; DELETE FROM chat_cursors; DELETE FROM chat_cursors;");
+  db.storeChatMetadata("web:default", new Date().toISOString(), "Web");
+
+  const broadcasts: Array<{ event: string; payload: any }> = [];
+  const applyCalls: Array<{ chatJid: string; type: string }> = [];
+  let runCount = 0;
+  const webMod = await import("../../../src/channels/web.js");
+  const web = new (webMod.WebChannel as any)({
+    queue: { enqueue: async (fn: () => Promise<void>) => fn() },
+    agentPool: {
+      setSessionBinder: () => {},
+      applyControlCommand: async (chatJid: string, command: any) => {
+        applyCalls.push({ chatJid, type: command.type });
+        return {
+          status: "success",
+          message: "Compaction complete.",
+          contextUsage: {
+            tokens: 222,
+            contextWindow: 1000,
+            percent: 22.2,
+            estimated: true,
+            source: "compact_command",
+            phase: "after_manual_compaction",
+          },
+        };
+      },
+      runAgent: async () => {
+        runCount += 1;
+        return { status: "success", result: "should not run", attachments: [] };
+      },
+      getContextUsageForChat: async () => null,
+    },
+  });
+  const originalBroadcast = web.broadcastEvent.bind(web);
+  web.broadcastEvent = (event: string, payload: any) => {
+    broadcasts.push({ event, payload });
+    return originalBroadcast(event, payload);
+  };
+
+  web.enqueueQueuedFollowupItem("web:default", 0, "/compact now");
+  await web.processChat("web:default", "default");
+
+  expect(runCount).toBe(0);
+  expect(applyCalls).toEqual([{ chatJid: "web:default", type: "compact" }]);
+  expect(web.getContextUsage("web:default")).toEqual({ tokens: 222, contextWindow: 1000, percent: 22.2 });
+  expect(broadcasts).toContainEqual(expect.objectContaining({
+    event: "agent_status",
+    payload: expect.objectContaining({
+      chat_jid: "web:default",
+      type: "context_usage",
+      context_usage: expect.objectContaining({
+        tokens: 222,
+        contextWindow: 1000,
+        percent: 22.2,
+        estimated: true,
+        source: "compact_command",
+        phase: "after_manual_compaction",
+      }),
+    }),
+  }));
+
+  const timeline = db.getTimeline("web:default", 10);
+  const contents = timeline.map((item: any) => item.data.content);
+  expect(contents).toContain("/compact now");
+  expect(contents).toContain("Compaction complete.");
+});
+
 test("processChat drains multiple deferred queued follow-ups across resume tasks", async () => {
   const ws = createTempWorkspace("piclaw-web-channel-");
   cleanupWorkspace = ws.cleanup;

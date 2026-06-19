@@ -37,8 +37,10 @@ import {
 } from "./prompt-utils.js";
 import {
   cancelScheduledIdleAutoCompaction,
+  buildFreshContextUsageUpdateEvent,
   clearCompactionFailureBackoff,
   getAutoCompactionTokenStatusForSession,
+  getCompactionContextReport,
   isCompactionCancellationError,
   maybeAutoCompactSessionBeforePrompt,
   noteCompactionFailure,
@@ -672,13 +674,23 @@ async function runRecoveryCompaction(
     ...options,
     countSuccess: false,
   });
+  const contextReport = getCompactionContextReport(session, compactionResult.result as { tokensBefore?: unknown; estimatedTokensAfter?: unknown });
   emitAgentSessionEvent(runOptions.onEvent, {
     type: "compaction_end",
     reason: "overflow",
-    result: undefined,
+    result: compactionResult.result,
     aborted: false,
     willRetry: true,
+    tokensBefore: contextReport.tokensBefore ?? undefined,
+    estimatedTokensAfter: contextReport.estimatedTokensAfter,
+    estimatedTokensAfterSource: contextReport.estimatedTokensAfterSource,
+    safetyAdjustedTokensAfter: contextReport.safetyAdjustedTokensAfter,
+    reductionPercent: contextReport.reductionPercent ?? undefined,
+  } as unknown as AgentSessionEvent);
+  const usageEvent = buildFreshContextUsageUpdateEvent(session, chatJid, "after_recovery_compaction", {
+    source: "compaction_recovery",
   });
+  if (usageEvent) emitAgentSessionEvent(runOptions.onEvent, usageEvent);
   return { ok: true };
 }
 

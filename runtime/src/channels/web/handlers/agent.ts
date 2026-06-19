@@ -1060,6 +1060,41 @@ export async function handleAgentMessage(
     channel.broadcastEvent("agent_status", withAgentProfile(nextPayload));
   };
 
+  const publishCommandContextUsage = async (
+    result: { contextUsage?: { tokens: number | null; contextWindow: number | null; percent: number | null; estimated?: boolean; source?: string; phase?: string } },
+    payload: { threadId: string | number | null; turnId: string },
+  ): Promise<void> => {
+    let contextUsage = result.contextUsage;
+    if (!contextUsage) {
+      const current = typeof channel.agentPool.getContextUsageForChat === "function"
+        ? await channel.agentPool.getContextUsageForChat(chatJid).catch(() => null)
+        : null;
+      contextUsage = current
+        ? { tokens: current.tokens, contextWindow: current.contextWindow, percent: current.percent, source: "agent_pool", phase: "after_command" }
+        : undefined;
+    }
+    if (!contextUsage) return;
+    const persistedUsage = {
+      tokens: contextUsage.tokens,
+      contextWindow: contextUsage.contextWindow,
+      percent: contextUsage.percent,
+    };
+    const statusUsage = {
+      ...persistedUsage,
+      estimated: contextUsage.estimated === true,
+      source: contextUsage.source ?? null,
+      phase: contextUsage.phase ?? null,
+    };
+    if (typeof channel.setContextUsage === "function") channel.setContextUsage(chatJid, persistedUsage);
+    emitCommandStatus({
+      thread_id: payload.threadId,
+      agent_id: agentId,
+      turn_id: payload.turnId,
+      type: "context_usage",
+      context_usage: statusUsage,
+    });
+  };
+
   const queueFollowupMessage = async (): Promise<Response | null> => {
     // Web queued follow-ups are managed by the web channel itself rather than
     // AgentSession's internal follow-up queue. This guarantees the current turn
@@ -1175,6 +1210,12 @@ export async function handleAgentMessage(
     }
 
     const result = await channel.agentPool.applyControlCommand(chatJid, command);
+    if (result.status === "success" && isCompactCommand) {
+      await publishCommandContextUsage(result, {
+        threadId: interaction.timestamp,
+        turnId: commandTurnId,
+      });
+    }
     const formatted = formatOutbound(result.message, "web");
     const isQueueCommand = command.type === "queue" || command.type === "queue_all";
     const isSteerCommand = command.type === "steer";
@@ -1411,6 +1452,30 @@ export async function processChat(
     const result = await channel.agentPool.applyControlCommand(chatJid, persistedCommand);
     const formatted = formatOutbound(result.message, "web");
     const commandThreadId = message.threadId ?? effectiveThreadRootId ?? message.rowId ?? null;
+
+    if (result.status === "success" && persistedCommand.type === "compact" && result.contextUsage) {
+      const persistedUsage = {
+        tokens: result.contextUsage.tokens,
+        contextWindow: result.contextUsage.contextWindow,
+        percent: result.contextUsage.percent,
+      };
+      const statusPayload = {
+        chat_jid: chatJid,
+        thread_id: commandThreadId,
+        agent_id: agentId,
+        turn_id: createUuid("turn"),
+        type: "context_usage",
+        context_usage: {
+          ...persistedUsage,
+          estimated: result.contextUsage.estimated === true,
+          source: result.contextUsage.source ?? null,
+          phase: result.contextUsage.phase ?? null,
+        },
+      };
+      channel.setContextUsage(chatJid, persistedUsage);
+      channel.updateAgentStatus(chatJid, statusPayload);
+      channel.broadcastEvent("agent_status", statusPayload);
+    }
 
     if (formatted || result.contentBlocks?.length) {
       const sendOptions: Record<string, unknown> = { threadId: commandThreadId };

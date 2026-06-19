@@ -21,11 +21,14 @@ import { killTrackedProcesses } from "../../utils/process-tracker.js";
 import { abortLiveSshCommand } from "../../extensions/ssh-core.js";
 import { pruneOrphanToolResults } from "../../agent-pool/orphan-tool-results.js";
 import {
+  buildFreshContextUsageUpdateEvent,
   isCompactionCancellationError,
+  getCompactionContextReport,
   getCompactionTimeoutMs,
   noteCompactionFailure,
   noteCompactionSuccess,
   runCompactionWithTimeout,
+  type CompactionContextReport,
 } from "../../agent-pool/compaction.js";
 
 const log = createLogger("agent-control.control");
@@ -70,35 +73,67 @@ function toCompactReportFilename(timestamp: string): string {
   return `compaction-report-${timestamp.replace(/[:.]/g, "-")}.md`;
 }
 
+function formatReductionPercent(value: number | null): string | null {
+  return typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(1)}%` : null;
+}
+
+function formatCompactionTokenDelta(report: CompactionContextReport): string {
+  const source = report.estimatedTokensAfterSource === "upstream" ? "upstream" : "Piclaw";
+  const reduction = formatReductionPercent(report.reductionPercent);
+  return [
+    `${formatCompactNumber(report.estimatedTokensAfter)} after (${source} estimate)`,
+    reduction ? `${reduction} reduction` : null,
+  ].filter(Boolean).join(" · ");
+}
+
+function contextUsageFromEvent(event: unknown): AgentControlResult["contextUsage"] | undefined {
+  if (!event || typeof event !== "object") return undefined;
+  const record = event as Record<string, unknown>;
+  return {
+    tokens: typeof record.tokens === "number" && Number.isFinite(record.tokens) ? record.tokens : null,
+    contextWindow: typeof record.contextWindow === "number" && Number.isFinite(record.contextWindow) ? record.contextWindow : null,
+    percent: typeof record.percent === "number" && Number.isFinite(record.percent) ? record.percent : null,
+    estimated: record.estimated === true,
+    source: typeof record.source === "string" ? record.source : undefined,
+    phase: typeof record.phase === "string" ? record.phase : undefined,
+  };
+}
+
 function buildCompactReport(
   summary: string,
   tokensBefore: number,
   firstKeptEntryId: string | number | null | undefined,
-  timestamp: string
+  timestamp: string,
+  contextReport: CompactionContextReport
 ): string {
+  const reduction = formatReductionPercent(contextReport.reductionPercent);
   return [
     "# Compaction report",
     "",
     `Generated: ${timestamp}`,
     `Tokens before: ${formatCompactNumber(tokensBefore)}`,
+    `Estimated tokens after: ${formatCompactNumber(contextReport.estimatedTokensAfter)} (${contextReport.estimatedTokensAfterSource})`,
+    `Safety-adjusted tokens after: ${formatCompactNumber(contextReport.safetyAdjustedTokensAfter)}`,
+    reduction ? `Estimated reduction: ${reduction}` : null,
     `First kept entry: ${firstKeptEntryId ?? "unknown"}`,
     "",
     "## Summary",
     "",
     summary.trim() || "(empty summary)",
     "",
-  ].join("\n");
+  ].filter((line): line is string => line !== null).join("\n");
 }
 
 function createCompactReportAttachment(
   summary: string,
   tokensBefore: number,
   firstKeptEntryId: string | number | null | undefined,
-  timestamp: string
+  timestamp: string,
+  contextReport: CompactionContextReport
 ): number | null {
   try {
     const filename = toCompactReportFilename(timestamp);
-    const content = buildCompactReport(summary, tokensBefore, firstKeptEntryId, timestamp);
+    const content = buildCompactReport(summary, tokensBefore, firstKeptEntryId, timestamp, contextReport);
     return createMedia(
       filename,
       "text/markdown",
@@ -108,6 +143,10 @@ function createCompactReportAttachment(
         source: "compact",
         generated_at: timestamp,
         tokens_before: tokensBefore,
+        estimated_tokens_after: contextReport.estimatedTokensAfter,
+        estimated_tokens_after_source: contextReport.estimatedTokensAfterSource,
+        safety_adjusted_tokens_after: contextReport.safetyAdjustedTokensAfter,
+        reduction_percent: contextReport.reductionPercent,
         first_kept_entry_id: firstKeptEntryId ?? null,
       }
     );
@@ -291,18 +330,25 @@ export async function handleCompact(session: AgentSession, command: CompactComma
         onWarn: (message, details) => log.warn(message, details),
         countSuccess: false,
       });
-      const compactResult = compactionResult.result as { summary: string; tokensBefore: number; firstKeptEntryId: string | number | null | undefined };
+      const compactResult = compactionResult.result as { summary: string; tokensBefore: number; firstKeptEntryId: string | number | null | undefined; estimatedTokensAfter?: number };
+      const contextReport = getCompactionContextReport(session, compactResult);
+      const freshContextUsage = contextUsageFromEvent(buildFreshContextUsageUpdateEvent(session, chatJid, "after_manual_compaction", {
+        source: "compact_command",
+      }));
       const generatedAt = new Date().toISOString();
       const attachmentId = createCompactReportAttachment(
         compactResult.summary,
         compactResult.tokensBefore,
         compactResult.firstKeptEntryId,
-        generatedAt
+        generatedAt,
+        contextReport
       );
       const lines = [
         "Compaction complete.",
         prunedToolResults > 0 ? `Removed ${prunedToolResults} orphaned tool-result block${prunedToolResults === 1 ? "" : "s"} before rewriting the session.` : null,
         `Tokens before: ${formatCompactNumber(compactResult.tokensBefore)}`,
+        `Estimated after: ${formatCompactionTokenDelta(contextReport)}`,
+        `Safety-adjusted after: ${formatCompactNumber(contextReport.safetyAdjustedTokensAfter)}`,
         `First kept entry: ${compactResult.firstKeptEntryId}`,
         attachmentId ? "Attached: full compaction report (.md)." : "Full compaction report attachment unavailable.",
       ].filter(Boolean) as string[];
@@ -310,6 +356,7 @@ export async function handleCompact(session: AgentSession, command: CompactComma
         status: "success",
         message: lines.join("\n"),
         ...(attachmentId ? { mediaIds: [attachmentId] } : {}),
+        ...(freshContextUsage ? { contextUsage: freshContextUsage } : {}),
       };
     } finally {
       clearExternalFailsafe?.();

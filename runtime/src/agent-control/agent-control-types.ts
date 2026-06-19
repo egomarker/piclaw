@@ -280,4 +280,13 @@ export interface AgentControlResult {
   mediaIds?: number[];
   /** Optional adaptive card content blocks to include with the response message. */
   contentBlocks?: unknown[];
+  /** Fresh context indicator payload to broadcast after commands that rewrite context. */
+  contextUsage?: {
+    tokens: number | null;
+    contextWindow: number | null;
+    percent: number | null;
+    estimated?: boolean;
+    source?: string;
+    phase?: string;
+  };
 }
