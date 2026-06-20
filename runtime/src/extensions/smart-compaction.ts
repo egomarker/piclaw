@@ -496,10 +496,10 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
       }
 
       // Short conversations can still overflow the provider's compaction prompt
-      // when they contain huge tool outputs or image/file payloads. Only fall
-      // through to the built-in full-pass compactor when the estimated full
-      // prompt has room for system overhead plus a minimal summary response;
-      // otherwise keep going into selective/progressive chunking.
+      // when they contain huge tool outputs or image/file payloads. Keep them
+      // on Piclaw's streaming/selective path rather than falling through to
+      // upstream full-pass compaction, which is less observable and has been a
+      // source of apparent threshold-compaction hangs on production instances.
       const fullPassPromptEstimate = estimateFullPassFallbackPromptTokens(llmMessages, tokensBefore);
       const conservativeFullPassLimit = Math.min(
         Math.floor(contextWindow * FULL_PASS_FALLBACK_CONTEXT_FRACTION),
@@ -507,8 +507,12 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
       );
       const fullPassFallbackAllowed = fullPassPromptEstimate + MIN_COMPACTION_OUTPUT_TOKENS <= conservativeFullPassLimit && !targetContext.targetContextWindow;
       if (messagesForCompaction.length < SELECTIVE_THRESHOLD && fullPassFallbackAllowed) {
-        publishCompactionStage("Smart compaction: using built-in compaction fallback…", "builtin_fallback", tokensBefore);
-        return;
+        log.debug("Smart compaction: short conversation still using Piclaw selective path instead of upstream full-pass fallback", {
+          operation: "smart_compaction.short_selective",
+          messageCount: messagesForCompaction.length,
+          fullPassPromptEstimate,
+          conservativeFullPassLimit,
+        });
       }
 
       const compactionStartedAt = Date.now();
@@ -661,13 +665,8 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           if (abortSignal.aborted || /Compaction cancelled/i.test(msg)) return { cancel: true };
-          if (/time budget exhausted/i.test(msg) || !fullPassFallbackAllowed) {
-            log.debug(`Progressive compaction failed without a safe built-in fallback: ${msg}`);
-            return cancelCompactionWithReason(ctx, msg);
-          }
-          log.debug(`Progressive compaction error: ${msg}; falling back to built-in compaction`);
-          publishCompactionStage("Smart compaction: progressive path failed; using built-in fallback…", "progressive_builtin_fallback", tokensBefore);
-          return;
+          log.debug(`Progressive compaction failed; cancelling instead of falling back to upstream full-pass compaction: ${msg}`);
+          return cancelCompactionWithReason(ctx, msg);
         }
       }
 
@@ -727,9 +726,8 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
         if (response.stopReason === "error") {
           const errorMessage = (response as any).errorMessage || "unknown";
           log.debug(
-            `Smart compaction LLM error: ${errorMessage}`,
+            `Smart compaction LLM error: ${errorMessage}; cancelling instead of falling back to upstream full-pass compaction`,
           );
-          if (fullPassFallbackAllowed) return undefined;
           return cancelCompactionWithReason(ctx, `Smart compaction LLM error: ${errorMessage}`);
         }
 
@@ -740,12 +738,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
           .trim();
 
         if (summary.length < MIN_SUMMARY_CHARS) {
-          log.debug(
-            fullPassFallbackAllowed
-              ? "Smart compaction summary too short, falling back to built-in"
-              : "Smart compaction summary too short; failing instead of falling back to unsafe full-pass compaction",
-          );
-          if (fullPassFallbackAllowed) return undefined;
+          log.debug("Smart compaction summary too short; cancelling instead of falling back to upstream full-pass compaction");
           return cancelCompactionWithReason(ctx, "Smart compaction summary too short");
         }
 
@@ -807,8 +800,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
         // reason so the managed wrapper can record backoff/emergency-rotate
         // instead of treating this as a user interrupt.
         if (abortSignal.aborted || /Compaction cancelled/i.test(msg)) return { cancel: true };
-        if (/Compaction result still exceeds|exceeds safe model budget/i.test(msg) || !fullPassFallbackAllowed) return cancelCompactionWithReason(ctx, msg);
-        return; // fall through to built-in only when the full-pass prompt is estimated safe
+        return cancelCompactionWithReason(ctx, msg);
       }
     } finally {
       // Always broadcast a final complete-context estimate so the meter is

@@ -285,7 +285,13 @@ describe("smart-compaction", () => {
     expect(trimmed).toContain("trimmed after provider context-overflow");
   });
 
-  it("falls through for short conversations (< threshold)", async () => {
+  it("uses Piclaw selective compaction for short conversations instead of upstream full-pass fallback", async () => {
+    const summaryText = "## Goal\nShort selective goal\n\n## Current Active Topic\n- short conversation compaction\n\n## Historical / Background Context\n- compacted via Piclaw selective path\n\n## Constraints & Preferences\n- preserve facts\n\n## Progress\n### Done\n- [x] summary generated\n\n### In Progress\n- [ ] continue\n\n### Blocked\n- none\n\n## Key Decisions\n- **No upstream fallback**: short automatic compactions stay observable.\n\n## Next Steps\n1. Continue.\n\n## Critical Context\n- context";
+    (completeSimple as any).mockResolvedValueOnce({
+      content: [{ type: "text", text: summaryText }],
+      stopReason: "end",
+    });
+
     const prep = makePreparation(10);
     const ctx = makeCtx();
     const result = await handler!(
@@ -296,8 +302,8 @@ describe("smart-compaction", () => {
       },
       ctx,
     );
-    expect(result).toBeUndefined();
-    expect(completeSimple).not.toHaveBeenCalled();
+    expect(result?.compaction?.summary).toContain("Short selective goal");
+    expect(completeSimple).toHaveBeenCalledTimes(1);
   });
 
   it("invokes LLM with selective prompt for large conversations", async () => {
@@ -660,7 +666,7 @@ describe("smart-compaction", () => {
     expect(consumeCompactionCancellationReason(ctx)).toBe("Smart compaction LLM error: Rate limited");
   });
 
-  it("falls through on LLM error", async () => {
+  it("cancels on LLM error instead of falling through to upstream full-pass compaction", async () => {
     (completeSimple as any).mockResolvedValueOnce({
       content: [],
       stopReason: "error",
@@ -677,11 +683,12 @@ describe("smart-compaction", () => {
       ctx,
     );
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({ cancel: true });
+    expect(consumeCompactionCancellationReason(ctx)).toBe("Smart compaction LLM error: Rate limited");
     expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
 
-  it("falls through on too-short summary", async () => {
+  it("cancels on too-short summary instead of falling through to upstream full-pass compaction", async () => {
     (completeSimple as any).mockResolvedValueOnce({
       content: [{ type: "text", text: "Short." }],
       stopReason: "end",
@@ -697,7 +704,8 @@ describe("smart-compaction", () => {
       ctx,
     );
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({ cancel: true });
+    expect(consumeCompactionCancellationReason(ctx)).toBe("Smart compaction summary too short");
     expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
 
@@ -718,7 +726,7 @@ describe("smart-compaction", () => {
     expect(completeSimple).not.toHaveBeenCalled();
   });
 
-  it("falls through on exception", async () => {
+  it("cancels with a recorded reason on exception instead of falling back to upstream full-pass compaction", async () => {
     (completeSimple as any).mockRejectedValueOnce(new Error("Network error"));
 
     const ctx = makeCtx();
@@ -731,7 +739,7 @@ describe("smart-compaction", () => {
       ctx,
     );
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({ cancel: true });
     expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
 
