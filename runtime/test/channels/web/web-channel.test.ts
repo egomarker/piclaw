@@ -6,6 +6,8 @@
  */
 
 import { createHmac } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { expect, test, afterEach } from "bun:test";
 import { createTempWorkspace, setEnv, waitFor } from "../../helpers.js";
 
@@ -24,6 +26,22 @@ afterEach(async () => {
   cleanupWorkspace?.();
   cleanupWorkspace = null;
 });
+
+function installRecoveryExcludedChatAddon(workspace: string, prefix = "telegram:") {
+  const packageDir = join(workspace, ".pi", "extensions", "node_modules", "test-recovery-addon");
+  mkdirSync(packageDir, { recursive: true });
+  writeFileSync(join(packageDir, "package.json"), JSON.stringify({
+    name: "test-recovery-addon",
+    version: "0.0.0",
+    pi: {
+      runtime: {
+        recovery: {
+          excludeChatJidPrefixes: [prefix],
+        },
+      },
+    },
+  }, null, 2));
+}
 
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
@@ -1791,6 +1809,117 @@ test("processChat does not advance cursor to pending steering timestamps or skip
   await web.processChat("web:default", "default");
   expect(db.getChatCursor("web:default")).toBe(secondTs);
   expect(runCount).toBe(2);
+});
+
+test("processChat skips stale telegram backlog when runtime cursor is newer", async () => {
+  const ws = createTempWorkspace("piclaw-web-channel-");
+  cleanupWorkspace = ws.cleanup;
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+  installRecoveryExcludedChatAddon(ws.workspace, "telegram:");
+
+  const db = await import("../../../src/db.js");
+  db.initDatabase();
+  db.getDb().exec("DELETE FROM message_media; DELETE FROM messages; DELETE FROM chats; DELETE FROM chat_cursors; DELETE FROM router_state;");
+
+  const chatJid = "telegram:123";
+  const staleCursor = "2024-01-01T00:00:00.000Z";
+  const oldTs = "2024-01-01T12:00:00.000Z";
+  const runtimeCursor = "2024-01-02T00:00:00.000Z";
+  const freshTs = "2024-01-03T00:00:00.000Z";
+
+  db.storeChatMetadata(chatJid, new Date().toISOString(), "Telegram");
+  db.setChatCursor(chatJid, staleCursor);
+  db.setRouterState("last_agent_timestamp", JSON.stringify({ [chatJid]: runtimeCursor }));
+
+  db.storeMessage({
+    id: `msg-${Math.random()}`,
+    chat_jid: chatJid,
+    sender: "tg-user",
+    sender_name: "Telegram User",
+    content: "old telegram message",
+    timestamp: oldTs,
+    is_from_me: false,
+    is_bot_message: false,
+  });
+  db.storeMessage({
+    id: `msg-${Math.random()}`,
+    chat_jid: chatJid,
+    sender: "tg-user",
+    sender_name: "Telegram User",
+    content: "fresh telegram message",
+    timestamp: freshTs,
+    is_from_me: false,
+    is_bot_message: false,
+  });
+
+  let runCount = 0;
+  const webMod = await import("../../../src/channels/web.js");
+  const web = new (webMod.WebChannel as any)({
+    queue: { enqueue: () => {} },
+    agentPool: {
+      setSessionBinder: () => {},
+      runAgent: async () => {
+        runCount += 1;
+        return { status: "success", result: "ok", attachments: [] };
+      },
+      getContextUsageForChat: async () => null,
+    },
+  });
+
+  await web.processChat(chatJid, "default");
+
+  expect(runCount).toBe(1);
+  expect(db.getChatCursor(chatJid)).toBe(freshTs);
+});
+
+test("processChat self-heals stale telegram web cursors when only old backlog remains", async () => {
+  const ws = createTempWorkspace("piclaw-web-channel-");
+  cleanupWorkspace = ws.cleanup;
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+  installRecoveryExcludedChatAddon(ws.workspace, "telegram:");
+
+  const db = await import("../../../src/db.js");
+  db.initDatabase();
+  db.getDb().exec("DELETE FROM message_media; DELETE FROM messages; DELETE FROM chats; DELETE FROM chat_cursors; DELETE FROM router_state;");
+
+  const chatJid = "telegram:456";
+  const staleCursor = "2024-01-01T00:00:00.000Z";
+  const oldTs = "2024-01-01T12:00:00.000Z";
+  const runtimeCursor = "2024-01-02T00:00:00.000Z";
+
+  db.storeChatMetadata(chatJid, new Date().toISOString(), "Telegram");
+  db.setChatCursor(chatJid, staleCursor);
+  db.setRouterState("last_agent_timestamp", JSON.stringify({ [chatJid]: runtimeCursor }));
+
+  db.storeMessage({
+    id: `msg-${Math.random()}`,
+    chat_jid: chatJid,
+    sender: "tg-user",
+    sender_name: "Telegram User",
+    content: "old telegram message",
+    timestamp: oldTs,
+    is_from_me: false,
+    is_bot_message: false,
+  });
+
+  let runCount = 0;
+  const webMod = await import("../../../src/channels/web.js");
+  const web = new (webMod.WebChannel as any)({
+    queue: { enqueue: () => {} },
+    agentPool: {
+      setSessionBinder: () => {},
+      runAgent: async () => {
+        runCount += 1;
+        return { status: "success", result: "ok", attachments: [] };
+      },
+      getContextUsageForChat: async () => null,
+    },
+  });
+
+  await web.processChat(chatJid, "default");
+
+  expect(runCount).toBe(0);
+  expect(db.getChatCursor(chatJid)).toBe(runtimeCursor);
 });
 
 test("processChat rolls back cursor when agent is already processing", async () => {

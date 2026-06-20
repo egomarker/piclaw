@@ -37,6 +37,7 @@ import {
   getMessageRowIdById,
   getMessagesSince,
   getDb,
+  getRouterState,
   promoteChatPreflightToInflight,
   rollbackChatRunWithError,
   rollbackInflightRun,
@@ -64,6 +65,7 @@ import {
   heartbeatTrackedPhase,
   endTrackedPhase,
 } from "../../../runtime/progress-watchdog.js";
+import { getAddonRecoveryExcludedChatJidPrefixes } from "../../../addons/manifest-discovery.js";
 
 const log = createLogger("web.handlers.agent");
 const DEFAULT_PREPROMPT_COMPACTION_FOREGROUND_MS = 250;
@@ -117,6 +119,96 @@ function getPrePromptCompactionForegroundMs(): number {
 
 function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getRecoveryExcludedChatJidPrefixes(): string[] {
+  return getAddonRecoveryExcludedChatJidPrefixes()
+    .filter((prefix): prefix is string => typeof prefix === "string")
+    .map((prefix) => prefix.trim())
+    .filter(Boolean);
+}
+
+function isRecoveryExcludedChat(chatJid: string): boolean {
+  return getRecoveryExcludedChatJidPrefixes().some((prefix) => chatJid.startsWith(prefix));
+}
+
+function getRuntimeAgentCursor(chatJid: string): string | null {
+  const raw = getRouterState("last_agent_timestamp");
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const value = parsed?.[chatJid];
+    return typeof value === "string" && value.trim() ? value.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasOutstandingWebCursorState(chatJid: string): boolean {
+  const row = getDb().prepare(`
+    SELECT preflight_message_id, inflight_message_id, failed_message_id
+    FROM chat_cursors
+    WHERE chat_jid = ?
+  `).get(chatJid) as {
+    preflight_message_id?: string | null;
+    inflight_message_id?: string | null;
+    failed_message_id?: string | null;
+  } | undefined;
+
+  return Boolean(
+    row?.preflight_message_id
+    || row?.inflight_message_id
+    || row?.failed_message_id
+  );
+}
+
+function resolveEffectiveProcessCursor(chatJid: string): {
+  prevCursor: string;
+  dbCursor: string;
+  runtimeCursor: string | null;
+  usedRuntimeCursor: boolean;
+  persistedCursorForward: boolean;
+} {
+  const dbCursor = getChatCursor(chatJid);
+  if (!isRecoveryExcludedChat(chatJid)) {
+    return {
+      prevCursor: dbCursor,
+      dbCursor,
+      runtimeCursor: null,
+      usedRuntimeCursor: false,
+      persistedCursorForward: false,
+    };
+  }
+
+  if (hasOutstandingWebCursorState(chatJid)) {
+    return {
+      prevCursor: dbCursor,
+      dbCursor,
+      runtimeCursor: null,
+      usedRuntimeCursor: false,
+      persistedCursorForward: false,
+    };
+  }
+
+  const runtimeCursor = getRuntimeAgentCursor(chatJid);
+  if (!runtimeCursor || (dbCursor && runtimeCursor <= dbCursor)) {
+    return {
+      prevCursor: dbCursor,
+      dbCursor,
+      runtimeCursor,
+      usedRuntimeCursor: false,
+      persistedCursorForward: false,
+    };
+  }
+
+  setChatCursor(chatJid, runtimeCursor);
+  return {
+    prevCursor: runtimeCursor,
+    dbCursor,
+    runtimeCursor,
+    usedRuntimeCursor: true,
+    persistedCursorForward: true,
+  };
 }
 
 function enqueueProcessChatAfterCompaction(
@@ -1420,7 +1512,23 @@ export async function processChat(
   browserObservability?: BrowserObservabilityContext,
 ): Promise<void> {
   const MAX_MATERIALIZE_RETRIES = 5;
-  const prevCursor = getChatCursor(chatJid);
+  const {
+    prevCursor,
+    dbCursor,
+    runtimeCursor,
+    usedRuntimeCursor,
+    persistedCursorForward,
+  } = resolveEffectiveProcessCursor(chatJid);
+
+  if (usedRuntimeCursor) {
+    log.info("processChat advanced stale web cursor from runtime state", {
+      operation: "process_chat.bridge_runtime_cursor",
+      chatJid,
+      dbCursor,
+      runtimeCursor,
+      persistedCursorForward,
+    });
+  }
 
   type DeferredControlExecutionMessage = {
     rowId: number;
