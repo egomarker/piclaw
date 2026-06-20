@@ -323,6 +323,10 @@ export function recoverStaleInflightRun(
   return false;
 }
 
+function isAutomaticRetryCompactionReason(reason: string | null | undefined): boolean {
+  return reason === "threshold" || reason === "idle" || reason === "recovery";
+}
+
 /** Recover interrupted runs left inflight after a restart. */
 export function recoverInflightRuns(
   ctx: WebRecoveryContext,
@@ -394,11 +398,33 @@ export function recoverInflightRuns(
           if (compactionAgeMs < staleAgeMs) {
             // Even "fresh" compaction markers that survived a restart indicate a
             // failed compaction attempt (the process exited before completing it).
-            // Increment the failure counter so repeated fast crashes eventually
-            // trigger backoff instead of retrying the same doomed compaction
-            // indefinitely (watchdog fires at 120s, stale threshold is 240s).
+            // For automatic threshold/idle/recovery compactions, immediately
+            // enter durable backoff: otherwise the startup resume path selects
+            // the same pending message, crosses the same threshold, and can
+            // re-wedge under the existing progress watchdog repeatedly.
             const prev = store.getChatCompactionBackoff?.(compaction.chatJid) ?? null;
             const freshFailureCount = (prev?.failureCount ?? 0) + 1;
+            if (isAutomaticRetryCompactionReason(compaction.reason)) {
+              const freshBackoffUntil = new Date(now + backoffMs).toISOString();
+              const detail = `Interrupted ${compaction.reason} compaction recovered after ${Math.round(compactionAgeMs / 1000)}s; entering compaction backoff before automatic retry`;
+              store.setChatCompactionBackoff?.(compaction.chatJid, {
+                failureCount: freshFailureCount,
+                lastFailedAt: recoveredAt,
+                backoffUntil: freshBackoffUntil,
+                lastErrorMessage: detail,
+              });
+              store.clearChatCompactionActive?.(compaction.chatJid);
+              log.warn("Fresh automatic compaction marker entered backoff", {
+                operation: "recover_active_compactions.fresh_auto_backoff",
+                chatJid: compaction.chatJid,
+                startedAt: compaction.startedAt,
+                reason: compaction.reason,
+                compactionAgeSeconds: Math.round(compactionAgeMs / 1000),
+                failureCount: freshFailureCount,
+                backoffUntil: freshBackoffUntil,
+              });
+              continue;
+            }
             if (freshFailureCount >= 3) {
               const freshBackoffUntil = new Date(now + backoffMs).toISOString();
               const detail = `Compaction for ${compaction.chatJid} failed ${freshFailureCount} times (cleared as fresh each restart); entering backoff`;

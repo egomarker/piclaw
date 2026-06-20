@@ -197,8 +197,8 @@ describe("web recovery helpers", () => {
     expect(new Date(backoffs[0].backoffUntil).getTime()).toBeGreaterThan(new Date("2026-01-01T00:00:30Z").getTime());
   });
 
-  test("recoverInflightRuns increments failure count for fresh compaction without triggering backoff below threshold", () => {
-    const backoffs: Array<{ chatJid: string; failureCount: number; backoffUntil: string }> = [];
+  test("recoverInflightRuns enters backoff for a fresh automatic threshold compaction", () => {
+    const backoffs: Array<{ chatJid: string; failureCount: number; backoffUntil: string; lastErrorMessage?: string | null }> = [];
 
     const ctx: WebRecoveryContext = {
       assistantName: "Pi",
@@ -215,9 +215,11 @@ describe("web recovery helpers", () => {
       transaction: (run) => run(),
       getAgentReplyStateAfter: () => "none",
       clearChatCompactionActive: () => {},
-      // First failure — no prior backoff
+      // First failure — no prior backoff. Automatic threshold compaction must
+      // still enter backoff immediately because the existing progress watchdog
+      // can restart the process before the stale-age threshold is reached.
       getChatCompactionBackoff: () => null,
-      setChatCompactionBackoff: (_chatJid, backoff) => { backoffs.push({ chatJid: _chatJid, failureCount: backoff.failureCount, backoffUntil: backoff.backoffUntil }); },
+      setChatCompactionBackoff: (_chatJid, backoff) => { backoffs.push({ chatJid: _chatJid, failureCount: backoff.failureCount, backoffUntil: backoff.backoffUntil, lastErrorMessage: backoff.lastErrorMessage }); },
       clearInflightMarker: () => {},
       rollbackInflightRun: () => {},
       getAllChatCursors: () => ({}),
@@ -228,9 +230,10 @@ describe("web recovery helpers", () => {
 
     recoverInflightRuns(ctx, store);
 
-    // Should increment failure count but not set a future backoff (count=1 < threshold=3)
     expect(backoffs.length).toBe(1);
     expect(backoffs[0].failureCount).toBe(1);
+    expect(new Date(backoffs[0].backoffUntil).getTime()).toBeGreaterThan(new Date("2026-01-01T00:00:30Z").getTime());
+    expect(backoffs[0].lastErrorMessage).toContain("Interrupted threshold compaction recovered after 30s");
   });
 
   test("recoverInflightRuns quarantines stale preflight markers instead of requeueing compaction", () => {
