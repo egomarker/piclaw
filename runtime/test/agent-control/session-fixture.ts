@@ -198,7 +198,7 @@ export class TestAgentControlSession {
       thinkingLevel: "low",
       model: { provider: "openai", modelId: "gpt-test" },
     };
-    return { tokensBefore: 1200, firstKeptEntryId: "entry-1", summary: "Summary" } as any;
+    return { tokensBefore: 1200, estimatedTokensAfter: 42, firstKeptEntryId: "entry-1", summary: "Summary" } as any;
   }
 
   setAutoCompactionEnabled(enabled: boolean) {

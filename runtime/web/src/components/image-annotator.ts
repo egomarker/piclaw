@@ -208,7 +208,11 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
   const [canvasReady, setCanvasReady] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [panOffset, setPanOffset] = useState<Point>({ x: 0, y: 0 });
+  const zoomRef = useRef(1);
+  const panOffsetRef = useRef<Point>({ x: 0, y: 0 });
   const pinchRef = useRef<{ startDist: number; startZoom: number; startMid: Point; startPan: Point } | null>(null);
+  const gestureModeRef = useRef<'idle' | 'draw' | 'pinch'>('idle');
+  const suppressTouchDrawUntilRef = useRef(0);
   const [textInput, setTextInput] = useState<{ position: Point; visible: boolean }>({ position: { x: 0, y: 0 }, visible: false });
   const [textValue, setTextValue] = useState('');
   const textInputRef = useRef<HTMLInputElement>(null);
@@ -218,6 +222,8 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
   const colorRef = useRef(color);
   useEffect(() => { toolRef.current = tool; }, [tool]);
   useEffect(() => { colorRef.current = color; }, [color]);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  useEffect(() => { panOffsetRef.current = panOffset; }, [panOffset]);
 
   const getLineWidth = useCallback((t?: Tool) => {
     const activeTool = t ?? toolRef.current;
@@ -283,20 +289,59 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    const clearOverlay = () => {
+      const overlay = overlayRef.current;
+      const octx = overlay?.getContext('2d');
+      if (overlay && octx) octx.clearRect(0, 0, overlay.width, overlay.height);
+    };
+
+    const cancelActiveDrawing = () => {
+      drawingRef.current = false;
+      shapeStartRef.current = null;
+      currentPointsRef.current = [];
+      clearOverlay();
+      const ctx = canvas.getContext('2d');
+      if (ctx) redrawAll(ctx, historyRef.current, canvas.width, canvas.height);
+    };
+
+    const beginPinch = (e: TouchEvent) => {
+      const t0 = e.touches[0]!;
+      const t1 = e.touches[1]!;
+      const dist = Math.max(1, Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY));
+      const mid = { x: (t0.clientX + t1.clientX) / 2, y: (t0.clientY + t1.clientY) / 2 };
+      pinchRef.current = {
+        startDist: dist,
+        startZoom: zoomRef.current,
+        startMid: mid,
+        startPan: { ...panOffsetRef.current },
+      };
+      gestureModeRef.current = 'pinch';
+      suppressTouchDrawUntilRef.current = Date.now() + 250;
+      cancelActiveDrawing();
+    };
+
+    const updatePinch = (e: TouchEvent) => {
+      if (!pinchRef.current || e.touches.length < 2) return;
+      const t0 = e.touches[0]!;
+      const t1 = e.touches[1]!;
+      const dist = Math.max(1, Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY));
+      const mid = { x: (t0.clientX + t1.clientX) / 2, y: (t0.clientY + t1.clientY) / 2 };
+      const scaleFactor = dist / pinchRef.current.startDist;
+      const nextZoom = Math.min(5, Math.max(1, pinchRef.current.startZoom * scaleFactor));
+      setZoom(nextZoom);
+      const dx = mid.x - pinchRef.current.startMid.x;
+      const dy = mid.y - pinchRef.current.startMid.y;
+      setPanOffset({ x: pinchRef.current.startPan.x + dx, y: pinchRef.current.startPan.y + dy });
+    };
+
     const onTouchStart = (e: TouchEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      if (e.touches.length === 2) {
-        // Start pinch-to-zoom
-        const t0 = e.touches[0]!;
-        const t1 = e.touches[1]!;
-        const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
-        const mid = { x: (t0.clientX + t1.clientX) / 2, y: (t0.clientY + t1.clientY) / 2 };
-        pinchRef.current = { startDist: dist, startZoom: zoom, startMid: mid, startPan: { ...panOffset } };
-        drawingRef.current = false;
+      if (e.touches.length >= 2) {
+        beginPinch(e);
         return;
       }
-      if (e.touches.length !== 1) return;
+      if (e.touches.length !== 1 || Date.now() < suppressTouchDrawUntilRef.current) return;
       const touch = e.touches[0]!;
       const pt = canvasPointFromTouch(canvas, touch);
       const currentTool = toolRef.current;
@@ -308,6 +353,7 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
         return;
       }
 
+      gestureModeRef.current = 'draw';
       drawingRef.current = true;
       if (isShapeTool(currentTool)) {
         shapeStartRef.current = pt;
@@ -319,21 +365,12 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
     const onTouchMove = (e: TouchEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      if (e.touches.length === 2 && pinchRef.current) {
-        const t0 = e.touches[0]!;
-        const t1 = e.touches[1]!;
-        const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
-        const mid = { x: (t0.clientX + t1.clientX) / 2, y: (t0.clientY + t1.clientY) / 2 };
-        const scaleFactor = dist / pinchRef.current.startDist;
-        const nextZoom = Math.min(5, Math.max(1, pinchRef.current.startZoom * scaleFactor));
-        setZoom(nextZoom);
-        // Pan follows the midpoint movement
-        const dx = mid.x - pinchRef.current.startMid.x;
-        const dy = mid.y - pinchRef.current.startMid.y;
-        setPanOffset({ x: pinchRef.current.startPan.x + dx, y: pinchRef.current.startPan.y + dy });
+      if (e.touches.length >= 2) {
+        if (!pinchRef.current) beginPinch(e);
+        updatePinch(e);
         return;
       }
-      if (!drawingRef.current || e.touches.length !== 1) return;
+      if (gestureModeRef.current !== 'draw' || !drawingRef.current || e.touches.length !== 1) return;
       const touch = e.touches[0]!;
       const pt = canvasPointFromTouch(canvas, touch);
       const currentTool = toolRef.current;
@@ -389,11 +426,20 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
 
     const onTouchEnd = (e: TouchEvent) => {
       e.preventDefault();
-      if (pinchRef.current) {
+      e.stopPropagation();
+      if (gestureModeRef.current === 'pinch' || pinchRef.current) {
+        if (e.touches.length >= 2) {
+          updatePinch(e);
+          return;
+        }
         pinchRef.current = null;
+        gestureModeRef.current = 'idle';
+        suppressTouchDrawUntilRef.current = Date.now() + 250;
+        cancelActiveDrawing();
         return;
       }
-      if (!drawingRef.current) return;
+      if (gestureModeRef.current !== 'draw' || !drawingRef.current) return;
+      gestureModeRef.current = 'idle';
       drawingRef.current = false;
       const currentTool = toolRef.current;
       const currentColor = colorRef.current;
@@ -414,10 +460,7 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
         historyRef.current.push(entry);
         const ctx = canvas.getContext('2d');
         if (ctx) drawStroke(ctx, entry);
-        if (overlay) {
-          const octx = overlay.getContext('2d');
-          if (octx) octx.clearRect(0, 0, overlay.width, overlay.height);
-        }
+        clearOverlay();
         shapeStartRef.current = null;
       } else {
         const pts = currentPointsRef.current;
@@ -433,17 +476,26 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
       }
     };
 
+    const onTouchCancel = (e: TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      pinchRef.current = null;
+      gestureModeRef.current = 'idle';
+      suppressTouchDrawUntilRef.current = Date.now() + 250;
+      cancelActiveDrawing();
+    };
+
     // Register with { passive: false } — this is the iPad Safari fix
     canvas.addEventListener('touchstart', onTouchStart, { passive: false });
     canvas.addEventListener('touchmove', onTouchMove, { passive: false });
     canvas.addEventListener('touchend', onTouchEnd, { passive: false });
-    canvas.addEventListener('touchcancel', onTouchEnd, { passive: false });
+    canvas.addEventListener('touchcancel', onTouchCancel, { passive: false });
 
     return () => {
       canvas.removeEventListener('touchstart', onTouchStart);
       canvas.removeEventListener('touchmove', onTouchMove);
       canvas.removeEventListener('touchend', onTouchEnd);
-      canvas.removeEventListener('touchcancel', onTouchEnd);
+      canvas.removeEventListener('touchcancel', onTouchCancel);
     };
   }, [canvasReady, getLineWidth]);
 
@@ -494,43 +546,45 @@ export function ImageAnnotator({ src, onSave, onCancel }) {
   }, [tool]);
 
   return html`
-    <div class="image-annotator">
-      <div class="image-annotator-canvas-wrap" style="transform: scale(${zoom}) translate(${panOffset.x / zoom}px, ${panOffset.y / zoom}px); transform-origin: center center;">
-        <img
-          ref=${imgRef}
-          src=${src}
-          class="image-annotator-source"
-          alt="Source"
-          draggable="false"
-        />
-        <canvas
-          ref=${canvasRef}
-          class="image-annotator-draw-canvas"
-        />
-        <canvas
-          ref=${overlayRef}
-          class="image-annotator-preview-canvas"
-        />
-        ${textInput.visible && html`
-          <div
-            class="image-annotator-text-input-wrap"
-            style="left: ${(textInput.position.x / (canvasRef.current?.width || 1)) * 100}%; top: ${(textInput.position.y / (canvasRef.current?.height || 1)) * 100}%"
-          >
-            <input
-              ref=${textInputRef}
-              type="text"
-              class="image-annotator-text-input"
-              value=${textValue}
-              onInput=${(e) => setTextValue(e.currentTarget.value)}
-              onKeyDown=${(e) => {
-                if (e.key === 'Enter') commitTextLabel();
-                if (e.key === 'Escape') cancelTextLabel();
-              }}
-              placeholder="Type label…"
-              style="color: ${color}"
-            />
-          </div>
-        `}
+    <div class="image-annotator" role="dialog" aria-modal="true" aria-label="Annotate image">
+      <div class="image-annotator-stage">
+        <div class="image-annotator-canvas-wrap" style="transform: scale(${zoom}) translate(${panOffset.x / zoom}px, ${panOffset.y / zoom}px); transform-origin: center center;">
+          <img
+            ref=${imgRef}
+            src=${src}
+            class="image-annotator-source"
+            alt="Source"
+            draggable="false"
+          />
+          <canvas
+            ref=${canvasRef}
+            class="image-annotator-draw-canvas"
+          />
+          <canvas
+            ref=${overlayRef}
+            class="image-annotator-preview-canvas"
+          />
+          ${textInput.visible && html`
+            <div
+              class="image-annotator-text-input-wrap"
+              style="left: ${(textInput.position.x / (canvasRef.current?.width || 1)) * 100}%; top: ${(textInput.position.y / (canvasRef.current?.height || 1)) * 100}%"
+            >
+              <input
+                ref=${textInputRef}
+                type="text"
+                class="image-annotator-text-input"
+                value=${textValue}
+                onInput=${(e) => setTextValue(e.currentTarget.value)}
+                onKeyDown=${(e) => {
+                  if (e.key === 'Enter') commitTextLabel();
+                  if (e.key === 'Escape') cancelTextLabel();
+                }}
+                placeholder="Type label…"
+                style="color: ${color}"
+              />
+            </div>
+          `}
+        </div>
       </div>
       <div class="image-annotator-toolbar">
         <div class="image-annotator-tools">

@@ -153,6 +153,68 @@ export function estimateContextTokensFromSession(session: AgentSession): number 
   return tokens;
 }
 
+export interface CompactionContextReport {
+  tokensBefore: number | null;
+  estimatedTokensAfter: number;
+  estimatedTokensAfterSource: "upstream" | "piclaw";
+  safetyAdjustedTokensAfter: number;
+  reductionPercent: number | null;
+}
+
+function coerceNonNegativeFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+export function getCompactionContextReport(
+  session: AgentSession,
+  result: { tokensBefore?: unknown; estimatedTokensAfter?: unknown } | null | undefined,
+): CompactionContextReport {
+  const tokensBefore = coerceNonNegativeFiniteNumber(result?.tokensBefore);
+  const upstreamEstimatedTokensAfter = coerceNonNegativeFiniteNumber(result?.estimatedTokensAfter);
+  const piclawEstimatedTokensAfter = estimateContextTokensFromSession(session);
+  const estimatedTokensAfter = upstreamEstimatedTokensAfter ?? piclawEstimatedTokensAfter;
+  const reductionPercent = tokensBefore !== null && tokensBefore > 0
+    ? ((tokensBefore - estimatedTokensAfter) / tokensBefore) * 100
+    : null;
+
+  return {
+    tokensBefore,
+    estimatedTokensAfter,
+    estimatedTokensAfterSource: upstreamEstimatedTokensAfter !== null ? "upstream" : "piclaw",
+    safetyAdjustedTokensAfter: applyTokenEstimateSafetyMultiplier(estimatedTokensAfter),
+    reductionPercent,
+  };
+}
+
+export function buildFreshContextUsageUpdateEvent(
+  session: AgentSession,
+  chatJid: string,
+  phase: string,
+  options: { projectedAdditionalRawTokens?: number; source?: string } = {},
+): AgentSessionEvent | null {
+  const status = getAutoCompactionTokenStatusForSession(session, chatJid, {
+    projectedAdditionalRawTokens: options.projectedAdditionalRawTokens ?? 0,
+  });
+  if (!status) return null;
+  return {
+    type: "context_usage_update",
+    tokens: status.contextTokens,
+    rawTokens: status.rawContextTokens,
+    contextWindow: status.contextWindow,
+    effectiveContextWindow: status.effectiveContextWindow,
+    overheadTokens: status.overheadTokens,
+    percent: status.contextWindow > 0 ? (status.contextTokens / status.contextWindow) * 100 : null,
+    estimated: true,
+    source: options.source ?? "piclaw",
+    phase,
+    autoCompactionScope: status.tokenStatus.scope,
+    autoCompactionScopeTokens: status.tokenStatus.autoCompactionScopeTokens,
+    autoCompactionScopeLimit: status.tokenStatus.autoCompactionScopeLimit,
+    hardCeilingTokens: status.tokenStatus.fullContextWindowLimit,
+    hardCeilingReached: status.tokenStatus.fullContextWindowLimitReached,
+  } as unknown as AgentSessionEvent;
+}
+
 /** Fallback context window when the model does not report one.
  *  Conservative enough to trigger compaction before most models overflow. */
 // ── Per-session compaction counter for auto-rotation ──
@@ -902,13 +964,23 @@ async function maybeAutoCompactSession(
       onEvent,
       countSuccess: true,
     });
+    const contextReport = getCompactionContextReport(session, compactionResult.result as { tokensBefore?: unknown; estimatedTokensAfter?: unknown });
     onEvent?.({
       type: "compaction_end",
       reason,
-      result: undefined,
+      result: compactionResult.result,
       aborted: false,
       willRetry: false,
-    } as AgentSessionEvent);
+      tokensBefore: contextReport.tokensBefore ?? undefined,
+      estimatedTokensAfter: contextReport.estimatedTokensAfter,
+      estimatedTokensAfterSource: contextReport.estimatedTokensAfterSource,
+      safetyAdjustedTokensAfter: contextReport.safetyAdjustedTokensAfter,
+      reductionPercent: contextReport.reductionPercent ?? undefined,
+    } as unknown as AgentSessionEvent);
+    const usageEvent = buildFreshContextUsageUpdateEvent(session, chatJid, `after_${reason}_compaction`, {
+      source: "compaction",
+    });
+    if (usageEvent) onEvent?.(usageEvent);
   } catch (error) {
     options.onWarn?.(
       reason === "idle" ? "Idle auto-compaction skipped" : "Pre-prompt auto-compaction skipped",

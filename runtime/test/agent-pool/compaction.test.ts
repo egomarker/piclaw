@@ -368,6 +368,13 @@ test("maybeAutoCompactSessionBeforePrompt subtracts overhead before threshold ch
 
     expect(compactCalls).toBe(1);
     expect(events).toContainEqual(expect.objectContaining({ type: "compaction_start", reason: "threshold" }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "context_usage_update",
+      source: "compaction",
+      phase: "after_threshold_compaction",
+      estimated: true,
+      contextWindow: 100_000,
+    }));
   } finally {
     if (previousThreshold === undefined) delete process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT;
     else process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT = previousThreshold;

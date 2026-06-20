@@ -17,6 +17,7 @@ import { CONTROL_COMMAND_DEFINITIONS } from "../command-registry.js";
 import { getChatJid } from "../../core/chat-context.js";
 import { getSessionStorageConfig } from "../../core/config.js";
 import { getSessionFileLineCount } from "../../session-rotation.js";
+import { getAutoCompactionTokenStatusForSession } from "../../agent-pool/compaction.js";
 import { getTokenUsageByModel, getTokenUsageByProvider, getTokenUsageTotals } from "../../db.js";
 import { createLogger, debugSuppressedError } from "../../utils/logger.js";
 import { searchWorkspace } from "../../workspace-search.js";
@@ -29,6 +30,23 @@ type ContextCommand = Extract<AgentControlCommand, { type: "context" }>;
 type LastCommand = Extract<AgentControlCommand, { type: "last" }>;
 type CommandsCommand = Extract<AgentControlCommand, { type: "commands" }>;
 type SearchCommand = Extract<AgentControlCommand, { type: "search_workspace" }>;
+
+function finitePercent(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function percentOf(numerator: number, denominator: number): number | null {
+  return denominator > 0 ? finitePercent((numerator / denominator) * 100) : null;
+}
+
+function formatPercent(value: number | null): string {
+  return value === null ? "unknown" : `${value.toFixed(1)}%`;
+}
+
+function contextUsageBar(percent: number | null): string {
+  if (percent === null) return "⬜";
+  return percent > 90 ? "🟥" : percent > 75 ? "🟧" : "🟩";
+}
 
 /** Handle /state: display current session state summary. */
 export async function handleState(session: AgentSession, _command: StateCommand): Promise<AgentControlResult> {
@@ -180,18 +198,45 @@ export async function handleContext(session: AgentSession, _command: ContextComm
       message: `Context window: ${formatCompactNumber(usage.contextWindow)} tokens. Usage unknown.`,
     };
   }
-  const percent = usage.percent ?? (usage.tokens / usage.contextWindow) * 100;
-  const bar = percent > 90 ? "🟥" : percent > 75 ? "🟧" : "🟩";
+  const percent = finitePercent(usage.percent) ?? percentOf(usage.tokens, usage.contextWindow);
+  const bar = contextUsageBar(percent);
+  const lines = [
+    "**Context usage**",
+    "",
+    "| Metric | Value |",
+    "|---|---|",
+    `| **Provider-reported used** | ${formatCompactNumber(usage.tokens)} / ${formatCompactNumber(usage.contextWindow)} tokens |`,
+    `| **Provider fill** | ${bar} ${formatPercent(percent)} |`,
+  ];
+
+  try {
+    const compactionStatus = getAutoCompactionTokenStatusForSession(session, getChatJid());
+    if (compactionStatus) {
+      const scoped = compactionStatus.tokenStatus;
+      const activePercent = percentOf(compactionStatus.contextTokens, compactionStatus.contextWindow);
+      const scopedPercent = percentOf(scoped.autoCompactionScopeTokens, scoped.autoCompactionScopeLimit);
+      lines.push(
+        `| **Piclaw active estimate** | ${formatCompactNumber(compactionStatus.contextTokens)} / ${formatCompactNumber(compactionStatus.contextWindow)} tokens (${formatPercent(activePercent)}) |`,
+        `| **Raw active estimate** | ${formatCompactNumber(compactionStatus.rawContextTokens)} tokens |`,
+        `| **Effective window** | ${formatCompactNumber(compactionStatus.effectiveContextWindow)} tokens after ${formatCompactNumber(compactionStatus.overheadTokens)} overhead |`,
+        `| **Auto-compaction scope** | ${scoped.scope === "body_after_prefix" ? "body after prefix" : "total context"} |`,
+        `| **Scoped usage** | ${formatCompactNumber(scoped.autoCompactionScopeTokens)} / ${formatCompactNumber(scoped.autoCompactionScopeLimit)} tokens (${formatPercent(scopedPercent)}) |`,
+        `| **Hard ceiling** | ${formatCompactNumber(scoped.fullContextWindowLimit)} tokens${scoped.fullContextWindowLimitReached ? " (reached)" : ""} |`,
+        `| **Reserve** | ${formatCompactNumber(compactionStatus.reserveTokens)} tokens |`,
+      );
+      if (scoped.baselineTokens !== null || scoped.prefillTokens !== null) {
+        lines.push(`| **Compaction window** | #${scoped.windowOrdinal ?? 1}, baseline ${scoped.baselineTokens === null ? "unset" : formatCompactNumber(scoped.baselineTokens)}, prefill ${scoped.prefillTokens === null ? "unset" : formatCompactNumber(scoped.prefillTokens)} |`);
+      }
+    }
+  } catch (error) {
+    debugSuppressedError(log, "Failed to compute Piclaw context estimate for /context", error, {
+      operation: "agent_control.context.compaction_status",
+    });
+  }
+
   return {
     status: "success",
-    message: [
-      "**Context usage**",
-      "",
-      "| Metric | Value |",
-      "|---|---|",
-      `| **Used** | ${formatCompactNumber(usage.tokens)} / ${formatCompactNumber(usage.contextWindow)} tokens |`,
-      `| **Fill** | ${bar} ${percent.toFixed(1)}% |`,
-    ].join("\n"),
+    message: lines.join("\n"),
   };
 }
 

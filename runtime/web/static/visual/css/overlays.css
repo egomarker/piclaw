@@ -590,20 +590,51 @@
 }
 
 
-/* ── Image Annotator (inline in posts, iPad) ── */
+/* ── Image Annotator (centered modal, iPad/tablet) ── */
 
 .post-inline-annotator {
-    margin: 8px 0;
-    border-radius: var(--radius-md);
-    overflow: hidden;
-    border: 2px solid var(--accent-color);
+    position: fixed;
+    inset: 0;
+    z-index: 2400;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+    background: rgba(0, 0, 0, 0.84);
+    backdrop-filter: blur(10px);
+    box-sizing: border-box;
 }
 
 .image-annotator {
     position: relative;
     display: flex;
     flex-direction: column;
+    width: min(1200px, 100%);
+    height: min(900px, 100%);
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+    border-radius: var(--radius-lg, 14px);
     background: var(--bg-primary);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+    touch-action: none;
+}
+
+.image-annotator-stage {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    padding: 12px;
+    background:
+        radial-gradient(circle at center, rgba(255,255,255,0.06), transparent 62%),
+        rgba(0, 0, 0, 0.18);
+    box-sizing: border-box;
     touch-action: none;
 }
 
@@ -611,16 +642,21 @@
     position: relative;
     display: inline-block;
     max-width: 100%;
-    max-height: 60vh;
-    overflow: hidden;
+    max-height: 100%;
+    overflow: visible;
+    will-change: transform;
+    transition: transform 0.05s ease-out;
+    flex: 0 0 auto;
+    touch-action: none;
 }
 
 .image-annotator-source {
     display: block;
-    max-width: 100%;
-    max-height: 60vh;
+    max-width: calc(100vw - 48px);
+    max-height: calc(100vh - 148px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
     width: auto;
     height: auto;
+    object-fit: contain;
     user-select: none;
     -webkit-user-select: none;
     pointer-events: none;
@@ -659,13 +695,18 @@
 }
 
 .image-annotator-toolbar {
+    position: relative;
+    z-index: 20;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 6px;
+    flex: 0 0 auto;
     padding: 8px;
-    background: var(--bg-secondary);
+    background: color-mix(in srgb, var(--bg-secondary) 96%, transparent);
     border-top: 1px solid var(--border-color);
+    box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.18);
+    pointer-events: auto;
 }
 
 .image-annotator-tools,
@@ -673,6 +714,7 @@
     display: flex;
     gap: 4px;
     align-items: center;
+    flex-wrap: wrap;
 }
 
 .image-annotator-tool-btn {
@@ -688,6 +730,7 @@
     justify-content: center;
     cursor: pointer;
     padding: 0;
+    touch-action: manipulation;
 }
 
 .image-annotator-tool-btn.active {
@@ -708,6 +751,7 @@
     cursor: pointer;
     padding: 0;
     flex-shrink: 0;
+    touch-action: manipulation;
 }
 
 .image-annotator-actions {
@@ -723,6 +767,7 @@
     border: 1px solid var(--border-color);
     font-size: 14px;
     cursor: pointer;
+    touch-action: manipulation;
 }
 
 .image-annotator-cancel-btn {
@@ -741,6 +786,38 @@
 .image-annotator-cancel-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+@media (max-width: 720px), (pointer: coarse) {
+    .post-inline-annotator {
+        padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+    }
+
+    .image-annotator {
+        width: 100%;
+        height: 100%;
+        border-radius: var(--radius-md);
+    }
+
+    .image-annotator-stage {
+        padding: 8px;
+    }
+
+    .image-annotator-source {
+        max-width: calc(100vw - 32px);
+        max-height: calc(100vh - 164px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    }
+
+    .image-annotator-toolbar {
+        gap: 8px;
+        padding: 8px;
+    }
+
+    .image-annotator-actions {
+        width: 100%;
+        margin-left: 0;
+        justify-content: flex-end;
+    }
 }
 
 /* ── Post text highlights ── */

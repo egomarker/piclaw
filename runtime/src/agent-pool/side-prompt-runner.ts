@@ -11,6 +11,7 @@ import { withChatContext } from "../core/chat-context.js";
 import { recordMessageUsage } from "./usage.js";
 import { resolveModelRequestAuth } from "../utils/model-auth.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
+import { normalizeLlmContext } from "./llm-context-normalizer.js";
 import {
   extractAssistantText,
   extractAssistantThinking,
@@ -64,7 +65,7 @@ export async function runSidePrompt(
 
     const stream = deps.sideStreamSimple(
       model,
-      {
+      normalizeLlmContext({
         ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
         messages: [
           {
@@ -73,7 +74,7 @@ export async function runSidePrompt(
             timestamp: Date.now(),
           },
         ],
-      },
+      }),
       {
         apiKey: auth.apiKey,
         reasoning: toSideReasoning((session as AgentSession & { thinkingLevel?: unknown }).thinkingLevel),

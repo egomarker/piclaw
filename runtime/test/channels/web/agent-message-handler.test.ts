@@ -194,6 +194,9 @@ describe("web agent message handler", () => {
   test("runs /compact immediately while the current session is still active", async () => {
     const queuedFollowups: Array<{ chatJid: string; content: string }> = [];
     const sentMessages: Array<{ chatJid: string; content: string; options: unknown }> = [];
+    const broadcasts: Array<{ event: string; payload: any }> = [];
+    const statusUpdates: Array<{ chatJid: string; status: any }> = [];
+    const contextUsages: Array<{ chatJid: string; usage: any }> = [];
     let applyCalls = 0;
     let storeMessageCalls = 0;
 
@@ -204,7 +207,18 @@ describe("web agent message handler", () => {
         applyControlCommand: async (_chatJid: string, command: { type: string; raw: string }) => {
           applyCalls += 1;
           expect(command.type).toBe("compact");
-          return { status: "success", message: "Compaction requested immediately." };
+          return {
+            status: "success",
+            message: "Compaction requested immediately.",
+            contextUsage: {
+              tokens: 321,
+              contextWindow: 1000,
+              percent: 32.1,
+              estimated: true,
+              source: "compact_command",
+              phase: "after_manual_compaction",
+            },
+          };
         },
       },
       json: (payload: unknown, status = 200) =>
@@ -217,8 +231,10 @@ describe("web agent message handler", () => {
         return 456;
       },
       getQueuedFollowupCount: () => 0,
-      broadcastEvent: () => {},
-      updateAgentStatus: () => {},
+      getAgentStatus: () => null,
+      broadcastEvent: (event: string, payload: any) => broadcasts.push({ event, payload }),
+      updateAgentStatus: (chatJid: string, status: any) => statusUpdates.push({ chatJid, status }),
+      setContextUsage: (chatJid: string, usage: any) => contextUsages.push({ chatJid, usage }),
       storeMessage: () => {
         storeMessageCalls += 1;
         return {
@@ -248,6 +264,23 @@ describe("web agent message handler", () => {
     expect(applyCalls).toBe(1);
     expect(storeMessageCalls).toBe(1);
     expect(sentMessages[0]?.content).toBe("Compaction requested immediately.");
+    expect(contextUsages).toEqual([{ chatJid: "web:default", usage: { tokens: 321, contextWindow: 1000, percent: 32.1 } }]);
+    expect(statusUpdates.some((entry) => entry.chatJid === "web:default" && entry.status.type === "context_usage")).toBe(true);
+    expect(broadcasts).toContainEqual(expect.objectContaining({
+      event: "agent_status",
+      payload: expect.objectContaining({
+        chat_jid: "web:default",
+        type: "context_usage",
+        context_usage: expect.objectContaining({
+          tokens: 321,
+          contextWindow: 1000,
+          percent: 32.1,
+          estimated: true,
+          source: "compact_command",
+          phase: "after_manual_compaction",
+        }),
+      }),
+    }));
   });
 
   test("runs /model immediately while the current session is still active", async () => {

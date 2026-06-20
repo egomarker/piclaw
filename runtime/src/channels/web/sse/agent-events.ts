@@ -75,6 +75,29 @@ function readWidgetNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function formatStatusTokenCount(value: number): string {
+  return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(Math.max(0, Math.round(value)));
+}
+
+function describeCompactionTokenChange(event: Record<string, unknown>): string | undefined {
+  const result = readJsonRecord(event.result);
+  const tokensBefore = readWidgetNumber(event.tokensBefore) ?? readWidgetNumber(result?.tokensBefore);
+  const estimatedTokensAfter = readWidgetNumber(event.estimatedTokensAfter) ?? readWidgetNumber(result?.estimatedTokensAfter);
+  const safetyAdjustedTokensAfter = readWidgetNumber(event.safetyAdjustedTokensAfter);
+  const reductionPercent = readWidgetNumber(event.reductionPercent);
+  const source = typeof event.estimatedTokensAfterSource === "string" ? event.estimatedTokensAfterSource : null;
+  const parts = [
+    tokensBefore !== null && estimatedTokensAfter !== null
+      ? `Context ${formatStatusTokenCount(tokensBefore)} → ${formatStatusTokenCount(estimatedTokensAfter)} tokens${source ? ` (${source} estimate)` : ""}`
+      : estimatedTokensAfter !== null
+        ? `Estimated context after compaction: ${formatStatusTokenCount(estimatedTokensAfter)} tokens${source ? ` (${source})` : ""}`
+        : null,
+    reductionPercent !== null ? `${reductionPercent.toFixed(1)}% smaller` : null,
+    safetyAdjustedTokensAfter !== null ? `safety-adjusted ${formatStatusTokenCount(safetyAdjustedTokensAfter)}` : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : undefined;
+}
+
 function modelLabelFromEventModel(value: unknown): string | null {
   if (!value || typeof value !== "object") return null;
   const record = value as { provider?: unknown; id?: unknown };
@@ -635,7 +658,8 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
     }
 
     if (event.type === "compaction_end") {
-      const e = event as { errorMessage?: string; willRetry?: boolean; aborted?: boolean; reason?: string };
+      const e = event as { errorMessage?: string; willRetry?: boolean; aborted?: boolean; reason?: string } & Record<string, unknown>;
+      const tokenDetail = describeCompactionTokenChange(e);
       if (e.errorMessage) {
         options.emitter.status({
           ...base,
@@ -647,12 +671,20 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
           ...base,
           type: "intent",
           title: "Retrying after auto-compaction",
+          detail: tokenDetail,
         });
       } else if (e.aborted) {
         options.emitter.status({
           ...base,
           type: "intent",
           title: e.reason === "manual" ? "Compaction cancelled" : "Auto-compaction cancelled",
+        });
+      } else {
+        options.emitter.status({
+          ...base,
+          type: "intent",
+          title: e.reason === "idle" || e.reason === "threshold" ? "Smart compaction complete" : "Compaction complete",
+          detail: tokenDetail,
         });
       }
     }

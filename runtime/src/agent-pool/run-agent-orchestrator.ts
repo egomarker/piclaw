@@ -37,8 +37,10 @@ import {
 } from "./prompt-utils.js";
 import {
   cancelScheduledIdleAutoCompaction,
+  buildFreshContextUsageUpdateEvent,
   clearCompactionFailureBackoff,
   getAutoCompactionTokenStatusForSession,
+  getCompactionContextReport,
   isCompactionCancellationError,
   maybeAutoCompactSessionBeforePrompt,
   noteCompactionFailure,
@@ -510,10 +512,24 @@ function resolveToolBudgetSoftStopThreshold(budget: number): number {
   return Math.max(1, normalized - margin);
 }
 
+function isAbortFailureText(errorText: string): boolean {
+  return /\b(?:aborterror|aborted|operation was aborted|request was aborted)\b/i.test(errorText);
+}
+
 function findToolBudgetDiagnostic(diagnostics: AgentRecoveryDiagnosticEntry[]): AgentRecoveryDiagnosticEntry | null {
-  return diagnostics.find((entry) => entry.toolUseBudgetExceeded
-    || entry.classifier === "tool_history_pressure"
-    || /tool(?:-| )use budget exceeded/i.test(entry.error)) ?? null;
+  for (let index = diagnostics.length - 1; index >= 0; index -= 1) {
+    const entry = diagnostics[index];
+    const toolExecutionCeilingReached = entry.sawCompactionIntent
+      && Number.isFinite(entry.toolExecutionCount)
+      && (entry.toolExecutionCount ?? 0) > 0;
+    if (entry.toolUseBudgetExceeded
+      || entry.classifier === "tool_history_pressure"
+      || /tool(?:-| )use budget exceeded/i.test(entry.error)
+      || toolExecutionCeilingReached) {
+      return entry;
+    }
+  }
+  return null;
 }
 
 function buildToolBudgetRecoveryTerminalError(
@@ -521,13 +537,23 @@ function buildToolBudgetRecoveryTerminalError(
   retryErrorText: string,
 ): { error: string; toolStepsUsed?: number; toolStepsBudget?: number; nextAction: string } {
   const parsed = /\((\d+)\/(\d+) tool steps\)/i.exec(budgetDiagnostic.error);
-  const toolStepsUsed = Number.isFinite(budgetDiagnostic.assistantToolUseMessageCount)
+  const assistantToolUseCount = Number.isFinite(budgetDiagnostic.assistantToolUseMessageCount)
     ? budgetDiagnostic.assistantToolUseMessageCount
-    : parsed ? Number(parsed[1]) : undefined;
+    : undefined;
+  const toolExecutionCount = Number.isFinite(budgetDiagnostic.toolExecutionCount)
+    ? budgetDiagnostic.toolExecutionCount
+    : undefined;
+  const toolStepsUsed = Number.isFinite(assistantToolUseCount) && (assistantToolUseCount ?? 0) > 0
+    ? assistantToolUseCount
+    : Number.isFinite(toolExecutionCount) && (toolExecutionCount ?? 0) > 0
+      ? toolExecutionCount
+      : parsed ? Number(parsed[1]) : undefined;
   const toolStepsBudget = parsed ? Number(parsed[2]) : undefined;
   const budgetDetail = Number.isFinite(toolStepsUsed) && Number.isFinite(toolStepsBudget)
     ? `Tool-use budget exceeded before finalization (${toolStepsUsed}/${toolStepsBudget} tool steps).`
-    : "Tool-use budget exceeded before finalization.";
+    : Number.isFinite(toolStepsUsed)
+      ? `Tool-use budget exceeded before finalization after ${toolStepsUsed} tool execution(s).`
+      : "Tool-use budget exceeded before finalization.";
   const retryDetail = retryErrorText.trim()
     ? ` Automatic recovery compacted context and retried, but the retry still produced no terminal assistant reply: ${retryErrorText}`
     : " Automatic recovery compacted context and retried, but the retry still produced no terminal assistant reply.";
@@ -648,13 +674,23 @@ async function runRecoveryCompaction(
     ...options,
     countSuccess: false,
   });
+  const contextReport = getCompactionContextReport(session, compactionResult.result as { tokensBefore?: unknown; estimatedTokensAfter?: unknown });
   emitAgentSessionEvent(runOptions.onEvent, {
     type: "compaction_end",
     reason: "overflow",
-    result: undefined,
+    result: compactionResult.result,
     aborted: false,
     willRetry: true,
+    tokensBefore: contextReport.tokensBefore ?? undefined,
+    estimatedTokensAfter: contextReport.estimatedTokensAfter,
+    estimatedTokensAfterSource: contextReport.estimatedTokensAfterSource,
+    safetyAdjustedTokensAfter: contextReport.safetyAdjustedTokensAfter,
+    reductionPercent: contextReport.reductionPercent ?? undefined,
+  } as unknown as AgentSessionEvent);
+  const usageEvent = buildFreshContextUsageUpdateEvent(session, chatJid, "after_recovery_compaction", {
+    source: "compaction_recovery",
   });
+  if (usageEvent) emitAgentSessionEvent(runOptions.onEvent, usageEvent);
   return { ok: true };
 }
 
@@ -1407,7 +1443,7 @@ export async function runAgentPrompt(
 
   // Tool-cap and tool-ceiling state – declared outside try so cleanup
   // can run in finally regardless of how the try exits.
-  const toolCallCapRef = { exceeded: false };
+  const toolCallCapRef = { exceeded: false, count: 0, cap: undefined as number | undefined };
   let toolCallUnsub: (() => void) | undefined;
   type SessionWithToolControl = {
     setActiveToolsByName?: (toolNames: string[]) => void;
@@ -1507,9 +1543,11 @@ export async function runAgentPrompt(
     if (typeof runOptions.maxToolCalls === "number" && runOptions.maxToolCalls > 0) {
       let toolCallCount = 0;
       const cap = runOptions.maxToolCalls;
+      toolCallCapRef.cap = cap;
       toolCallUnsub = session.subscribe((event) => {
         if (event.type === "tool_execution_end") {
           toolCallCount += 1;
+          toolCallCapRef.count = toolCallCount;
           if (toolCallCount >= cap) {
             toolCallCapRef.exceeded = true;
             session.abort().catch((err) => { debugSuppressedError(log, "Failed to abort session after tool-call cap exceeded.", err, {}); });
@@ -1602,8 +1640,25 @@ export async function runAgentPrompt(
         // If the tool-call cap was hit, abort immediately without recovery.
         if (toolCallCapRef.exceeded) {
           const duration = Date.now() - startTime;
-          writeAgentLog(options.logsDir, chatJid, duration, false, null, "Tool call limit exceeded.");
-          return { status: "error", result: null, error: "Tool call limit exceeded." };
+          const used = Number.isFinite(toolCallCapRef.count) ? toolCallCapRef.count : undefined;
+          const cap = Number.isFinite(toolCallCapRef.cap) ? toolCallCapRef.cap : undefined;
+          const budgetDetail = Number.isFinite(used) && Number.isFinite(cap)
+            ? `Tool-use budget exceeded before finalization (${used}/${cap} tool calls).`
+            : Number.isFinite(used)
+              ? `Tool-use budget exceeded before finalization after ${used} tool call(s).`
+              : "Tool-use budget exceeded before finalization.";
+          const nextAction = "Ask me to continue; I will resume from the latest known partial state instead of replaying the whole turn.";
+          const error = `${budgetDetail} ${nextAction}`;
+          writeAgentLog(options.logsDir, chatJid, duration, false, null, error);
+          return {
+            status: "error",
+            result: null,
+            error,
+            toolBudgetExceeded: true,
+            toolStepsUsed: used,
+            toolStepsBudget: cap,
+            nextAction,
+          };
         }
 
         if (attempt.output.status === "success") {
@@ -1714,7 +1769,7 @@ export async function runAgentPrompt(
           const duration = Date.now() - startTime;
           const toolBudgetDiagnostic = recoveryAttemptsUsed > 0 ? findToolBudgetDiagnostic(recoveryDiagnostics) : null;
           const terminalBudgetFailure = toolBudgetDiagnostic
-            && /Prompt completed without emitting an assistant reply before finalization/i.test(errorText)
+            && (/Prompt completed without emitting an assistant reply before finalization/i.test(errorText) || isAbortFailureText(errorText))
             ? buildToolBudgetRecoveryTerminalError(toolBudgetDiagnostic, errorText)
             : null;
           const finalErrorText = terminalBudgetFailure?.error ?? errorText;

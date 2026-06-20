@@ -132,6 +132,16 @@ test("agent control info and mode commands", async () => {
 
   const context = await applyControlCommand(runtime as any, registry, { type: "context", raw: "/context" });
   expect(context.message).toContain("**Context usage**");
+  expect(context.message).toContain("Provider-reported used");
+  expect(context.message).toContain("Piclaw active estimate");
+  expect(context.message).toContain("Auto-compaction scope");
+
+  session.getContextUsage = () => ({ tokens: 100, contextWindow: 0, percent: null }) as any;
+  const zeroWindowContext = await applyControlCommand(runtime as any, registry, { type: "context", raw: "/context" });
+  expect(zeroWindowContext.message).toContain("Provider fill");
+  expect(zeroWindowContext.message).toContain("unknown");
+  expect(zeroWindowContext.message).not.toContain("Infinity");
+  expect(zeroWindowContext.message).not.toContain("NaN");
 
   const last = await applyControlCommand(runtime as any, registry, { type: "last", raw: "/last" });
   expect(last.message).toContain("last response");
@@ -258,10 +268,21 @@ test("agent control queue, compact, and abort commands", async () => {
   const compact = await applyControlCommand(runtime as any, registry, { type: "compact", instructions: "shorten", raw: "/compact shorten" });
   expect(compact.message).toContain("Compaction complete.");
   expect(compact.message).toContain("Removed 1 orphaned tool-result block before rewriting the session.");
+  expect(compact.message).toContain("Estimated after: 42 after (upstream estimate)");
+  expect(compact.message).toContain("96.5% reduction");
+  expect(compact.message).toContain("Safety-adjusted after:");
   expect(compact.message).toContain("Attached: full compaction report (.md).");
   expect(compact.message).not.toContain("Summary:");
   expect(compact.message).not.toContain("Summary");
   expect(compact.mediaIds).toHaveLength(1);
+  expect(compact.contextUsage).toEqual(expect.objectContaining({
+    tokens: expect.any(Number),
+    contextWindow: expect.any(Number),
+    percent: expect.any(Number),
+    estimated: true,
+    source: "compact_command",
+    phase: "after_manual_compaction",
+  }));
   expect(session.agent.state.messages).toEqual([
     { role: "assistant", content: [{ type: "toolCall", id: "call-1" }] },
     { role: "toolResult", toolCallId: "call-1" },
@@ -271,6 +292,8 @@ test("agent control queue, compact, and abort commands", async () => {
   expect(compactMedia?.content_type).toBe("text/markdown");
   const compactReport = compactMedia ? new TextDecoder().decode(compactMedia.data) : "";
   expect(compactReport).toContain("# Compaction report");
+  expect(compactReport).toContain("Estimated tokens after: 42 (upstream)");
+  expect(compactReport).toContain("Estimated reduction: 96.5%");
   expect(compactReport).toContain("## Summary");
   expect(compactReport).toContain("Summary");
 
