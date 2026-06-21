@@ -48,6 +48,7 @@ export interface AgentOutput {
   result: string | null;
   error?: string;
   attachments?: AttachmentInfo[];
+  usage?: Usage;
   recovery?: AgentRecoveryMetadata;
   toolBudgetExceeded?: boolean;
   toolStepsUsed?: number;
@@ -59,6 +60,7 @@ export interface AgentOutput {
 export interface TurnOutput {
   text: string;
   attachments: AttachmentInfo[];
+  usage?: Usage;
 }
 
 /** Result returned from a side prompt run. */
