@@ -104,6 +104,64 @@ export function extractOutcomeMarkerBlocks(contentBlocks) {
     return contentBlocks.filter((block) => block && typeof block === 'object' && block.type === 'turn_outcome_marker');
 }
 
+export function extractAgentTimingBlock(contentBlocks) {
+    if (!Array.isArray(contentBlocks)) return null;
+    return contentBlocks.find((block) => block && typeof block === 'object' && block.type === 'agent_timing') || null;
+}
+
+export function formatAgentReplyDuration(durationMs) {
+    if (durationMs === null || durationMs === undefined || durationMs === '') return null;
+    const ms = Number(durationMs);
+    if (!Number.isFinite(ms) || ms < 0) return null;
+    if (ms < 1000) return `${Math.round(ms)}ms`;
+    const totalSeconds = ms / 1000;
+    if (totalSeconds < 60) {
+        return totalSeconds < 10 ? `${totalSeconds.toFixed(1)}s` : `${Math.round(totalSeconds)}s`;
+    }
+    const wholeSeconds = Math.round(totalSeconds);
+    const minutes = Math.floor(wholeSeconds / 60);
+    const seconds = wholeSeconds % 60;
+    if (minutes < 60) return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return `${hours}h ${String(remainingMinutes).padStart(2, '0')}m`;
+}
+
+function readUsageNumber(usage, key) {
+    const value = Number(usage?.[key]);
+    return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
+}
+
+export function formatAgentTokenStats(usage) {
+    if (!usage || typeof usage !== 'object') return null;
+    const input = readUsageNumber(usage, 'input_tokens');
+    const output = readUsageNumber(usage, 'output_tokens');
+    const cacheRead = readUsageNumber(usage, 'cache_read_tokens');
+    const cacheWrite = readUsageNumber(usage, 'cache_write_tokens');
+    const total = readUsageNumber(usage, 'total_tokens') || input + output + cacheRead + cacheWrite;
+    if (!total && !input && !output && !cacheRead && !cacheWrite) return null;
+    const parts = [`${formatCount(total)} total`];
+    if (input) parts.push(`${formatCount(input)} in`);
+    if (output) parts.push(`${formatCount(output)} out`);
+    const cache = cacheRead + cacheWrite;
+    if (cache) parts.push(`${formatCount(cache)} cache`);
+    return `Tokens ${parts.join(' · ')}`;
+}
+
+export function buildPostTimeTooltip(post, timingBlock = extractAgentTimingBlock(post?.data?.content_blocks)) {
+    const sent = formatTimestamp(post?.timestamp);
+    const parts = [`Sent ${sent}`];
+    const duration = formatAgentReplyDuration(timingBlock?.duration_ms);
+    if (duration) parts.push(`Agent reply took ${duration}`);
+    const tokenStats = formatAgentTokenStats(timingBlock?.usage);
+    if (tokenStats) parts.push(tokenStats);
+    const startedAt = typeof timingBlock?.started_at === 'string' && timingBlock.started_at.trim()
+        ? formatTimestamp(timingBlock.started_at)
+        : '';
+    if (startedAt) parts.push(`Started ${startedAt}`);
+    return parts.join('\n');
+}
+
 export function extractPeerMessageBlocks(contentBlocks) {
     if (!Array.isArray(contentBlocks)) return [];
     return contentBlocks.filter((block) => block && typeof block === 'object' && block.type === 'peer_message');
@@ -1065,6 +1123,8 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
     const timeoutMarker = timeoutMarkerBlocks[0] || null;
     const outcomeMarkerBlocks = extractOutcomeMarkerBlocks(blocks);
     const outcomeMarker = outcomeMarkerBlocks[0] || null;
+    const agentTimingBlock = extractAgentTimingBlock(blocks);
+    const postTimeTooltip = buildPostTimeTooltip(post, agentTimingBlock);
     const singleCardFallback = directCardBlocks.length === 1 && typeof directCardBlocks[0]?.fallback_text === 'string'
         ? directCardBlocks[0].fallback_text.trim()
         : '';
@@ -1507,7 +1567,13 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
                             @${searchChatAgentName}
                         </span>
                     `}
-                    <a class="post-time" href=${`#msg-${post.id}`} onClick=${handleActivateMessageRef}>${formatTime(post.timestamp)}</a>
+                    <a
+                        class="post-time"
+                        href=${`#msg-${post.id}`}
+                        title=${postTimeTooltip}
+                        aria-label=${postTimeTooltip}
+                        onClick=${handleActivateMessageRef}
+                    >${formatTime(post.timestamp)}</a>
                     ${recoveryMarker && html`
                         <span
                             class="post-recovery-chip"
