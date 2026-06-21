@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { resolve } from 'node:path';
 
 import {
   buildPostTimeTooltip,
@@ -8,6 +8,8 @@ import {
   formatAgentReplyDuration,
   formatAgentTokenStats,
 } from '../../web/src/components/post.ts';
+
+const repoRoot = resolve(import.meta.dir, '../../..');
 
 test('formatAgentReplyDuration keeps reply timings compact', () => {
   expect(formatAgentReplyDuration(420)).toBe('420ms');
@@ -60,7 +62,7 @@ test('buildPostTimeTooltip includes persisted agent timing and token stats when 
 });
 
 test('terminal agent outcomes attach agent_timing content blocks', () => {
-  const source = readFileSync(join('/workspace/piclaw', 'runtime/src/channels/web/handlers/agent.ts'), 'utf8');
+  const source = readFileSync(resolve(repoRoot, 'runtime/src/channels/web/handlers/agent.ts'), 'utf8');
   expect(source).toContain('type: "agent_timing"');
   expect(source).toContain('normalizeAgentUsageForTiming');
   expect(source).toContain('buildAgentTimingBlock(output.usage)');
