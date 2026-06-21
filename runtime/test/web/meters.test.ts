@@ -10,7 +10,7 @@ import {
   readStoredMetersEnabled,
   toggleMetersCollapsed,
 } from '../../web/src/ui/meters.ts';
-import { buildCompactMetersSummary, buildSparklinePath, formatBytesCompact, resolveCurrentRssBytes, shouldShowRss, shouldShowVram } from '../../web/src/components/system-meters-hud.ts';
+import { SYSTEM_METERS_COMPACT_BREAKPOINT_PX, buildCompactMetersSummary, buildSparklinePath, formatBytesCompact, resolveCurrentRssBytes, shouldShowRss, shouldShowVram } from '../../web/src/components/system-meters-hud.ts';
 
 const originalWindow = globalThis.window;
 
@@ -61,6 +61,10 @@ test('applyMetersCollapsed persists state and dispatches a collapsed-change even
   expect(win.__events).toEqual([
     { type: METERS_COLLAPSED_EVENT_NAME, detail: { collapsed: true } },
   ]);
+});
+
+test('system meters compact breakpoint is 600px', () => {
+  expect(SYSTEM_METERS_COMPACT_BREAKPOINT_PX).toBe(600);
 });
 
 test('buildCompactMetersSummary uses fat bullet separators and includes Linux buffer/cache when present', () => {

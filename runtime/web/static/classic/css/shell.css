@@ -170,6 +170,14 @@
         flex: 1 1 100%;
     }
 
+    .chat-window-header-actions {
+        flex: 1 1 auto;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+    }
+}
+
+@media (max-width: 600px) {
     .system-meters-hud-overlay {
         top: max(10px, calc(env(safe-area-inset-top, 0px) + 8px));
         right: max(8px, calc(env(safe-area-inset-right, 0px) + 8px));
@@ -197,12 +205,6 @@
         line-height: 1;
         font-weight: 600;
         color: var(--text-primary);
-    }
-
-    .chat-window-header-actions {
-        flex: 1 1 auto;
-        justify-content: flex-end;
-        flex-wrap: wrap;
     }
 }
 
