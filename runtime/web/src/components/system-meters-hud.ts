@@ -3,6 +3,8 @@ import { getSystemMetrics } from '../api.js';
 import { METERS_COLLAPSED_EVENT_NAME, METERS_EVENT_NAME, applyMetersCollapsed, readStoredMetersCollapsed, readStoredMetersEnabled } from '../ui/meters.js';
 import { renderDisclosureTriangle } from '../ui/disclosure-triangle.js';
 
+export const SYSTEM_METERS_COMPACT_BREAKPOINT_PX = 600;
+
 function sanitizeSeries(input, maxPoints = 30) {
     const series = Array.isArray(input)
         ? input
@@ -98,7 +100,7 @@ export function shouldShowVram(metrics) {
 
 function readIsNarrowLayout() {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
-    return window.matchMedia('(max-width: 900px)').matches;
+    return window.matchMedia(`(max-width: ${SYSTEM_METERS_COMPACT_BREAKPOINT_PX}px)`).matches;
 }
 
 export function SystemMetersHud({ mode = 'overlay' }) {
@@ -148,7 +150,7 @@ export function SystemMetersHud({ mode = 'overlay' }) {
 
     useEffect(() => {
         if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
-        const mediaQuery = window.matchMedia('(max-width: 900px)');
+        const mediaQuery = window.matchMedia(`(max-width: ${SYSTEM_METERS_COMPACT_BREAKPOINT_PX}px)`);
         const sync = () => setIsNarrowLayout(Boolean(mediaQuery.matches));
         sync();
         if (typeof mediaQuery.addEventListener === 'function') {

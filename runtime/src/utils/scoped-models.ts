@@ -81,18 +81,33 @@ function findExactModelReferenceMatch(pattern: string, models: Model<Api>[]): Mo
   return idMatches.length === 1 ? idMatches[0] : undefined;
 }
 
+function getPartialModelMatchRank(pattern: string, model: Model<Api>): number | undefined {
+  const lower = pattern.toLowerCase();
+  const provider = model.provider.toLowerCase();
+  const id = model.id.toLowerCase();
+  const key = modelKey(model).toLowerCase();
+  const name = typeof model.name === "string" ? model.name.toLowerCase() : "";
+
+  if (provider === lower) return 0;
+  if (key.startsWith(lower)) return 1;
+  if (provider.includes(lower)) return 2;
+  if (name.includes(lower)) return 3;
+  if (key.includes(lower)) return 4;
+  if (id.includes(lower)) return 5;
+  return undefined;
+}
+
 function findBestPartialModel(pattern: string, models: Model<Api>[]): Model<Api> | undefined {
   const exact = findExactModelReferenceMatch(pattern, models);
   if (exact) return exact;
 
-  const lower = pattern.toLowerCase();
-  const matches = models.filter((model) =>
-    model.id.toLowerCase().includes(lower)
-    || (typeof model.name === "string" && model.name.toLowerCase().includes(lower))
-    || modelKey(model).toLowerCase().includes(lower)
-  );
-  if (matches.length === 0) return undefined;
+  const rankedMatches = models
+    .map((model) => ({ model, rank: getPartialModelMatchRank(pattern, model) }))
+    .filter((match): match is { model: Model<Api>; rank: number } => match.rank !== undefined);
+  if (rankedMatches.length === 0) return undefined;
 
+  const bestRank = Math.min(...rankedMatches.map((match) => match.rank));
+  const matches = rankedMatches.filter((match) => match.rank === bestRank).map((match) => match.model);
   const aliases = matches.filter((model) => isAlias(model.id));
   const candidates = aliases.length > 0 ? aliases : matches;
   return [...candidates].sort((left, right) => right.id.localeCompare(left.id))[0];

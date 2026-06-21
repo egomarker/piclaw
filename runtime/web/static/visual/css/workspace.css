@@ -316,7 +316,7 @@
 }
 
 .timeline-menu-dropdown {
-    max-height: min(520px, calc(100dvh - 48px));
+    max-height: calc(100dvh - 48px);
 }
 
 .timeline-menu-dropdown .workspace-menu-item {
