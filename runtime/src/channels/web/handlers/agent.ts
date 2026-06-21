@@ -1923,6 +1923,22 @@ export async function processChat(
     if (intentKey === "compaction" || intentKey === "recovery") return intentKey;
     return null;
   };
+  const buildAgentTimingBlock = () => {
+    const completedAt = new Date().toISOString();
+    const startedMs = Date.parse(runStartedAt);
+    const completedMs = Date.parse(completedAt);
+    return {
+      type: "agent_timing",
+      started_at: runStartedAt,
+      completed_at: completedAt,
+      duration_ms: Number.isFinite(startedMs) && Number.isFinite(completedMs)
+        ? Math.max(0, completedMs - startedMs)
+        : null,
+      turn_id: turnId,
+      source_message_id: lastMessage.id ?? null,
+    };
+  };
+
   const persistTerminalOutcome = (
     text: string,
     marker: Record<string, unknown> | null,
@@ -1936,6 +1952,7 @@ export async function processChat(
     skipPlaceholder: turnCount === 0,
     isTerminalAgentReply: true,
     extraContentBlocks: [
+      buildAgentTimingBlock(),
       ...(marker ? [marker] : []),
       ...(Array.isArray(options.additionalBlocks) ? options.additionalBlocks : []),
     ],
@@ -2266,7 +2283,10 @@ export async function processChat(
         threadId: resolvedThreadRootId,
         skipPlaceholder: turnCount === 0,
         isTerminalAgentReply: true,
-        extraContentBlocks: buildRecoveryMarkerBlocks(output.recovery),
+        extraContentBlocks: [
+          buildAgentTimingBlock(),
+          ...(buildRecoveryMarkerBlocks(output.recovery) ?? []),
+        ],
       })
     : hasDraftFallback
       ? publishDraftFallback("empty-final")

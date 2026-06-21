@@ -104,6 +104,41 @@ export function extractOutcomeMarkerBlocks(contentBlocks) {
     return contentBlocks.filter((block) => block && typeof block === 'object' && block.type === 'turn_outcome_marker');
 }
 
+export function extractAgentTimingBlock(contentBlocks) {
+    if (!Array.isArray(contentBlocks)) return null;
+    return contentBlocks.find((block) => block && typeof block === 'object' && block.type === 'agent_timing') || null;
+}
+
+export function formatAgentReplyDuration(durationMs) {
+    if (durationMs === null || durationMs === undefined || durationMs === '') return null;
+    const ms = Number(durationMs);
+    if (!Number.isFinite(ms) || ms < 0) return null;
+    if (ms < 1000) return `${Math.round(ms)}ms`;
+    const totalSeconds = ms / 1000;
+    if (totalSeconds < 60) {
+        return totalSeconds < 10 ? `${totalSeconds.toFixed(1)}s` : `${Math.round(totalSeconds)}s`;
+    }
+    const wholeSeconds = Math.round(totalSeconds);
+    const minutes = Math.floor(wholeSeconds / 60);
+    const seconds = wholeSeconds % 60;
+    if (minutes < 60) return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return `${hours}h ${String(remainingMinutes).padStart(2, '0')}m`;
+}
+
+export function buildPostTimeTooltip(post, timingBlock = extractAgentTimingBlock(post?.data?.content_blocks)) {
+    const sent = formatTimestamp(post?.timestamp);
+    const parts = [`Sent ${sent}`];
+    const duration = formatAgentReplyDuration(timingBlock?.duration_ms);
+    if (duration) parts.push(`Agent reply took ${duration}`);
+    const startedAt = typeof timingBlock?.started_at === 'string' && timingBlock.started_at.trim()
+        ? formatTimestamp(timingBlock.started_at)
+        : '';
+    if (startedAt) parts.push(`Started ${startedAt}`);
+    return parts.join('\n');
+}
+
 export function extractPeerMessageBlocks(contentBlocks) {
     if (!Array.isArray(contentBlocks)) return [];
     return contentBlocks.filter((block) => block && typeof block === 'object' && block.type === 'peer_message');
@@ -1065,6 +1100,8 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
     const timeoutMarker = timeoutMarkerBlocks[0] || null;
     const outcomeMarkerBlocks = extractOutcomeMarkerBlocks(blocks);
     const outcomeMarker = outcomeMarkerBlocks[0] || null;
+    const agentTimingBlock = extractAgentTimingBlock(blocks);
+    const postTimeTooltip = buildPostTimeTooltip(post, agentTimingBlock);
     const singleCardFallback = directCardBlocks.length === 1 && typeof directCardBlocks[0]?.fallback_text === 'string'
         ? directCardBlocks[0].fallback_text.trim()
         : '';
@@ -1507,7 +1544,13 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
                             @${searchChatAgentName}
                         </span>
                     `}
-                    <a class="post-time" href=${`#msg-${post.id}`} onClick=${handleActivateMessageRef}>${formatTime(post.timestamp)}</a>
+                    <a
+                        class="post-time"
+                        href=${`#msg-${post.id}`}
+                        title=${postTimeTooltip}
+                        aria-label=${postTimeTooltip}
+                        onClick=${handleActivateMessageRef}
+                    >${formatTime(post.timestamp)}</a>
                     ${recoveryMarker && html`
                         <span
                             class="post-recovery-chip"
