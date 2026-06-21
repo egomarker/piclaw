@@ -799,9 +799,9 @@ async function runPromptAttempt(
 
   const originalOnTurnComplete = runOptions.onTurnComplete;
   const onTurnComplete = originalOnTurnComplete
-    ? ((turn: { text: string; attachments: AttachmentInfo[] }) => {
+    ? ((turn: { text: string; attachments: AttachmentInfo[]; usage?: unknown }) => {
         hadCompletedTurnOutput = hadCompletedTurnOutput || !!(turn.text || turn.attachments.length > 0);
-        originalOnTurnComplete(turn);
+        originalOnTurnComplete(turn as Parameters<NonNullable<RunAgentOptions["onTurnComplete"]>>[0]);
       })
     : undefined;
 
@@ -1275,6 +1275,7 @@ async function runPromptAttempt(
   }
 
   const finalText = tracker.getFinalText();
+  const finalUsage = tracker.getFinalUsage();
   hadPartialOutput = hadPartialOutput || !!finalText;
   const finalAttachments = options.takeAttachments(chatJid);
   const timedOut = timedOutRef.value;
@@ -1381,6 +1382,7 @@ async function runPromptAttempt(
           ? {
             status: "tool_complete" as const,
             result: null,
+            ...(finalUsage ? { usage: finalUsage } : {}),
           }
           : {
             status: "error",
@@ -1406,6 +1408,7 @@ async function runPromptAttempt(
           status: "success",
           result: finalText || null,
           attachments: finalAttachments.length ? finalAttachments : undefined,
+          ...(finalUsage ? { usage: finalUsage } : {}),
         };
       }
     }

@@ -7,6 +7,7 @@
  */
 
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { Usage } from "@earendil-works/pi-ai";
 
 import type { AttachmentInfo } from "./attachments.js";
 
@@ -22,6 +23,7 @@ type AssistantTextPhase = "commentary" | "final_answer" | null;
 export interface AgentTurnOutput {
   text: string;
   attachments: AttachmentInfo[];
+  usage?: Usage;
 }
 
 /** Error state captured from an assistant message with stopReason "error". */
@@ -45,6 +47,7 @@ export interface AgentTurnTracker {
   getTurnCount: () => number;
   getError: () => AgentTurnError | null;
   getLastAssistantState: () => AgentTerminalAssistantState | null;
+  getFinalUsage: () => Usage | undefined;
 }
 
 /**
@@ -82,6 +85,7 @@ export class AgentTurnCoordinator {
     let turnCount = 0;
     let messageHasDelta = false;
     let messageComplete = false;
+    let currentTurnUsage: Usage | undefined;
     let lastError: AgentTurnError | null = null;
     let lastAssistantState: AgentTerminalAssistantState | null = null;
 
@@ -137,6 +141,7 @@ export class AgentTurnCoordinator {
     const resetCurrentTurn = () => {
       currentTurnText = "";
       currentTurnPhase = null;
+      currentTurnUsage = undefined;
       messageHasDelta = false;
       messageComplete = false;
     };
@@ -151,6 +156,7 @@ export class AgentTurnCoordinator {
         onTurnComplete?.({
           text: currentTurnPhase === "commentary" ? "" : text,
           attachments: this.options.takeAttachments(chatJid),
+          ...(currentTurnUsage ? { usage: currentTurnUsage } : {}),
         });
         turnCount += 1;
       }
@@ -220,6 +226,7 @@ export class AgentTurnCoordinator {
           content?: unknown;
           stopReason?: string;
           errorMessage?: string;
+          usage?: Usage;
         } | undefined;
         if (message?.role === "assistant") {
           if (message.stopReason === "error" && message.errorMessage) {
@@ -237,6 +244,7 @@ export class AgentTurnCoordinator {
             hadToolCallContent,
             hadThinkingContent,
           };
+          currentTurnUsage = message.usage;
           // message_end is authoritative: extensions can replace the finalized
           // message, so do not trust accumulated streaming buffers as the final
           // turn payload.
@@ -276,6 +284,7 @@ export class AgentTurnCoordinator {
       getTurnCount: () => turnCount,
       getError: () => lastError,
       getLastAssistantState: () => lastAssistantState,
+      getFinalUsage: () => currentTurnUsage,
     };
   }
 

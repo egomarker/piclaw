@@ -1923,10 +1923,40 @@ export async function processChat(
     if (intentKey === "compaction" || intentKey === "recovery") return intentKey;
     return null;
   };
-  const buildAgentTimingBlock = () => {
+  const normalizeAgentUsageForTiming = (usage: unknown): Record<string, unknown> | null => {
+    if (!usage || typeof usage !== "object") return null;
+    const record = usage as Record<string, unknown>;
+    const readNumber = (...keys: string[]) => {
+      for (const key of keys) {
+        const value = Number(record[key]);
+        if (Number.isFinite(value) && value >= 0) return value;
+      }
+      return 0;
+    };
+    const inputTokens = readNumber("input", "inputTokens", "promptTokens");
+    const outputTokens = readNumber("output", "outputTokens", "completionTokens");
+    const cacheReadTokens = readNumber("cacheRead", "cacheReadTokens");
+    const cacheWriteTokens = readNumber("cacheWrite", "cacheWriteTokens");
+    const explicitTotal = readNumber("totalTokens", "total", "total_tokens");
+    const totalTokens = explicitTotal || inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens;
+    if (!totalTokens && !inputTokens && !outputTokens && !cacheReadTokens && !cacheWriteTokens) return null;
+    const cost = record.cost && typeof record.cost === "object" ? record.cost as Record<string, unknown> : null;
+    const costTotal = cost ? Number(cost.total) : Number(record.costTotal ?? record.cost_total);
+    return {
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      cache_read_tokens: cacheReadTokens,
+      cache_write_tokens: cacheWriteTokens,
+      total_tokens: totalTokens,
+      ...(Number.isFinite(costTotal) && costTotal > 0 ? { cost_total: costTotal } : {}),
+    };
+  };
+
+  const buildAgentTimingBlock = (usage?: unknown) => {
     const completedAt = new Date().toISOString();
     const startedMs = Date.parse(runStartedAt);
     const completedMs = Date.parse(completedAt);
+    const normalizedUsage = normalizeAgentUsageForTiming(usage);
     return {
       type: "agent_timing",
       started_at: runStartedAt,
@@ -1936,13 +1966,14 @@ export async function processChat(
         : null,
       turn_id: turnId,
       source_message_id: lastMessage.id ?? null,
+      ...(normalizedUsage ? { usage: normalizedUsage } : {}),
     };
   };
 
   const persistTerminalOutcome = (
     text: string,
     marker: Record<string, unknown> | null,
-    options: { critical?: boolean; additionalBlocks?: Array<Record<string, unknown>> } = {},
+    options: { critical?: boolean; additionalBlocks?: Array<Record<string, unknown>>; usage?: unknown } = {},
   ) => storeAgentTurn(channel, emitter, {
     chatJid,
     text,
@@ -1952,7 +1983,7 @@ export async function processChat(
     skipPlaceholder: turnCount === 0,
     isTerminalAgentReply: true,
     extraContentBlocks: [
-      buildAgentTimingBlock(),
+      buildAgentTimingBlock(options.usage),
       ...(marker ? [marker] : []),
       ...(Array.isArray(options.additionalBlocks) ? options.additionalBlocks : []),
     ],
@@ -2113,7 +2144,7 @@ export async function processChat(
     skipPrePromptCompaction: true,
     scheduleIdleAutoCompaction: true,
     onEvent: trackedStreamingHandler,
-    onTurnComplete: (turn: { text: string; attachments: unknown[] }) => {
+    onTurnComplete: (turn: { text: string; attachments: unknown[]; usage?: unknown }) => {
       // Turn boundary: the first turn (index 0) is the original prompt's
       // response — skip placeholder consumption so it doesn't steal a
       // placeholder that belongs to a queued follow-up.
@@ -2130,6 +2161,7 @@ export async function processChat(
           channelName,
           threadId: resolvedThreadRootId,
           skipPlaceholder: isFirstTurn,
+          extraContentBlocks: [buildAgentTimingBlock(turn.usage)],
         });
         if (!stored) {
           intermediatePersistFailed = true;
@@ -2167,7 +2199,7 @@ export async function processChat(
       draftRecovered: Boolean(toolCompleteDraftText),
     });
     const persisted = toolCompleteDraftText
-      ? persistTerminalOutcome(toolCompleteDraftText, marker)
+      ? persistTerminalOutcome(toolCompleteDraftText, marker, { usage: output.usage })
       : persistVisibleFailureOutcome(marker);
     if (persisted) {
       await finalizeSuccessfulRun();
@@ -2284,7 +2316,7 @@ export async function processChat(
         skipPlaceholder: turnCount === 0,
         isTerminalAgentReply: true,
         extraContentBlocks: [
-          buildAgentTimingBlock(),
+          buildAgentTimingBlock(output.usage),
           ...(buildRecoveryMarkerBlocks(output.recovery) ?? []),
         ],
       })

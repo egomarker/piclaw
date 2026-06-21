@@ -127,11 +127,34 @@ export function formatAgentReplyDuration(durationMs) {
     return `${hours}h ${String(remainingMinutes).padStart(2, '0')}m`;
 }
 
+function readUsageNumber(usage, key) {
+    const value = Number(usage?.[key]);
+    return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
+}
+
+export function formatAgentTokenStats(usage) {
+    if (!usage || typeof usage !== 'object') return null;
+    const input = readUsageNumber(usage, 'input_tokens');
+    const output = readUsageNumber(usage, 'output_tokens');
+    const cacheRead = readUsageNumber(usage, 'cache_read_tokens');
+    const cacheWrite = readUsageNumber(usage, 'cache_write_tokens');
+    const total = readUsageNumber(usage, 'total_tokens') || input + output + cacheRead + cacheWrite;
+    if (!total && !input && !output && !cacheRead && !cacheWrite) return null;
+    const parts = [`${formatCount(total)} total`];
+    if (input) parts.push(`${formatCount(input)} in`);
+    if (output) parts.push(`${formatCount(output)} out`);
+    const cache = cacheRead + cacheWrite;
+    if (cache) parts.push(`${formatCount(cache)} cache`);
+    return `Tokens ${parts.join(' · ')}`;
+}
+
 export function buildPostTimeTooltip(post, timingBlock = extractAgentTimingBlock(post?.data?.content_blocks)) {
     const sent = formatTimestamp(post?.timestamp);
     const parts = [`Sent ${sent}`];
     const duration = formatAgentReplyDuration(timingBlock?.duration_ms);
     if (duration) parts.push(`Agent reply took ${duration}`);
+    const tokenStats = formatAgentTokenStats(timingBlock?.usage);
+    if (tokenStats) parts.push(tokenStats);
     const startedAt = typeof timingBlock?.started_at === 'string' && timingBlock.started_at.trim()
         ? formatTimestamp(timingBlock.started_at)
         : '';
