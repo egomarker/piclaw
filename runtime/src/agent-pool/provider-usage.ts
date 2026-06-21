@@ -12,7 +12,7 @@ export interface ProviderUsageWindow {
 }
 
 export interface ProviderUsageSnapshot {
-  provider: "openai-codex" | "github-copilot";
+  provider: "openai-codex" | "github-copilot" | "zai";
   source: string;
   plan: string | null;
   fetched_at: string;
@@ -43,7 +43,7 @@ function clampPercent(value: unknown): number | null {
 
 function parseDate(value: unknown): Date | null {
   if (typeof value === "number" && Number.isFinite(value)) {
-    // Unix seconds for Codex API
+    // Shared helper expects Unix seconds for numeric inputs.
     return new Date(value * 1000);
   }
   if (typeof value === "string" && value.trim()) {
@@ -61,9 +61,16 @@ function formatResetDescription(date: Date | null): string | null {
 
   const totalMinutes = Math.max(1, Math.round(deltaMs / 60000));
   if (totalMinutes < 60) return `resets in ~${totalMinutes}m`;
-  const hours = Math.floor(totalMinutes / 60);
-  const mins = totalMinutes % 60;
-  return mins > 0 ? `resets in ~${hours}h ${mins}m` : `resets in ~${hours}h`;
+
+  const totalHours = Math.floor(totalMinutes / 60);
+  if (totalHours < 24) {
+    const mins = totalMinutes % 60;
+    return mins > 0 ? `resets in ~${totalHours}h ${mins}m` : `resets in ~${totalHours}h`;
+  }
+
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  return hours > 0 ? `resets in ~${days}d ${hours}h` : `resets in ~${days}d`;
 }
 
 function makeWindow(
@@ -116,6 +123,22 @@ function buildCopilotHint(primary: ProviderUsageWindow | null, secondary: Provid
   if (premium) parts.push(`premium ${premium}`);
   if (chat) parts.push(`chat ${chat}`);
   return parts.join(" • ");
+}
+
+function buildZaiHint(primary: ProviderUsageWindow | null, secondary: ProviderUsageWindow | null): string {
+  const parts: string[] = [];
+  const shortWindow = compactPercent(primary?.remaining_percent ?? null);
+  const tools = compactPercent(secondary?.remaining_percent ?? null);
+  if (shortWindow) parts.push(`5h ${shortWindow}`);
+  if (tools) parts.push(`tools ${tools}`);
+  return parts.join(" • ");
+}
+
+function getApiKeyCredential(authStorage: AuthStorage, providerId: string): { key: string } | null {
+  const current = (authStorage.get(providerId) as any) ?? null;
+  return current && current.type === "api_key" && typeof current.key === "string" && current.key.trim()
+    ? { key: current.key }
+    : null;
 }
 
 async function getOAuthCredential(authStorage: AuthStorage, providerId: string): Promise<any | null> {
@@ -235,8 +258,57 @@ async function fetchGitHubCopilotUsage(authStorage: AuthStorage): Promise<Provid
   };
 }
 
+async function fetchZaiUsage(authStorage: AuthStorage): Promise<ProviderUsageSnapshot | null> {
+  const credential = getApiKeyCredential(authStorage, "zai");
+  if (!credential?.key) return null;
+
+  const res = await fetch("https://api.z.ai/api/monitor/usage/quota/limit", {
+    headers: {
+      Authorization: `Bearer ${credential.key}`,
+      Accept: "application/json",
+      "User-Agent": "PiClaw",
+    },
+  });
+
+  if (!res.ok) return null;
+  const payload = (await res.json()) as any;
+  const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : null;
+  if (!limits) return null;
+
+  const tokensLimit = limits.find((limit: any) => limit?.type === "TOKENS_LIMIT") ?? null;
+  const toolsLimit = limits.find((limit: any) => limit?.type === "TIME_LIMIT") ?? null;
+  const primary = makeWindow(
+    "5h",
+    tokensLimit?.percentage,
+    typeof tokensLimit?.nextResetTime === "number"
+      ? tokensLimit.nextResetTime / 1000 // zai returns ms; parseDate expects seconds.
+      : tokensLimit?.nextResetTime,
+    300
+  );
+  const secondary = makeWindow(
+    "tools",
+    toolsLimit?.percentage,
+    typeof toolsLimit?.nextResetTime === "number"
+      ? toolsLimit.nextResetTime / 1000 // zai returns ms; parseDate expects seconds.
+      : toolsLimit?.nextResetTime,
+    null
+  );
+
+  return {
+    provider: "zai",
+    source: "zai-usage-api",
+    plan: typeof payload?.data?.level === "string" ? payload.data.level : null,
+    fetched_at: new Date().toISOString(),
+    primary,
+    secondary,
+    credits_remaining: null,
+    credits_unlimited: false,
+    hint_short: buildZaiHint(primary, secondary),
+  };
+}
+
 function isSupportedProviderId(providerId: string): providerId is SupportedProviderId {
-  return providerId === "openai-codex" || providerId === "github-copilot";
+  return providerId === "openai-codex" || providerId === "github-copilot" || providerId === "zai";
 }
 
 function getCachedUsageEntry(providerId: string): CachedUsage | null {
@@ -249,9 +321,14 @@ function hasFreshCachedUsage(providerId: string): boolean {
 }
 
 async function fetchProviderUsage(authStorage: AuthStorage, providerId: SupportedProviderId): Promise<ProviderUsageSnapshot | null> {
-  return providerId === "openai-codex"
-    ? await fetchCodexUsage(authStorage)
-    : await fetchGitHubCopilotUsage(authStorage);
+  switch (providerId) {
+    case "openai-codex":
+      return await fetchCodexUsage(authStorage);
+    case "github-copilot":
+      return await fetchGitHubCopilotUsage(authStorage);
+    case "zai":
+      return await fetchZaiUsage(authStorage);
+  }
 }
 
 export function peekProviderUsage(providerId: string, options: { allowStale?: boolean } = {}): ProviderUsageSnapshot | null {
