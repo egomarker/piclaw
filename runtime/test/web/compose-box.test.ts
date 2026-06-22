@@ -614,7 +614,7 @@ test('isComposeSubmitAbortMode keeps compacting on the abort path', () => {
   expect(isComposeSubmitAbortMode(null)).toBe(false);
 });
 
-test('resolveUiOnlyCommandNotice only surfaces read-only model and thinking queries', () => {
+test('resolveUiOnlyCommandNotice surfaces only read-only thinking queries and leaves /model output to the timeline', () => {
   expect(resolveUiOnlyCommandNotice('/thinking', {
     ui_only: true,
     command: { message: 'Current thinking (effort) level: max.' },
@@ -628,7 +628,7 @@ test('resolveUiOnlyCommandNotice only surfaces read-only model and thinking quer
   expect(resolveUiOnlyCommandNotice('/model', {
     ui_only: true,
     command: { message: 'Available models:\n• anthropic/claude-opus-4-6 (current)' },
-  })).toContain('Available models:');
+  })).toBeNull();
 
   expect(resolveUiOnlyCommandNotice('/thinking high', {
     ui_only: true,
