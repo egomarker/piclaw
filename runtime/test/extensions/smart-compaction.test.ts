@@ -175,6 +175,7 @@ import {
   createSmartCompactionExtension,
 } from "../../src/extensions/smart-compaction.js";
 import { consumeCompactionCancellationReason } from "../../src/agent-pool/compaction-cancel-reason.js";
+import { runWithPiclawCompactionTrigger } from "../../src/agent-pool/compaction-trigger-context.js";
 
 describe("smart-compaction", () => {
   let handler: ((event: any, ctx: any) => Promise<any>) | null = null;
@@ -642,6 +643,43 @@ describe("smart-compaction", () => {
     expect(prompt).toContain("Target-aware compaction for test/small");
     expect(prompt).toContain("16000 token raw context window");
     expect(prompt).toContain("keep active work");
+  });
+
+  it("uses Piclaw trigger metadata even when upstream reports manual compaction", async () => {
+    const summaryText = "## Goal\nMetadata target context\n\n## Current Active Topic\n- fit metadata-selected model\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- concise\n\n## Progress\n### Done\n- [x] metadata resolved\n\n### In Progress\n- [ ] validate\n\n### Blocked\n- none\n\n## Key Decisions\n- **Target**: metadata wins over upstream manual reason\n\n## Next Steps\n1. continue\n\n## Critical Context\n- metadata-aware";
+    (completeSimple as any).mockResolvedValueOnce({
+      content: [{ type: "text", text: summaryText }],
+      stopReason: "end",
+    });
+
+    const ctx = makeCtx();
+    const result = await runWithPiclawCompactionTrigger(
+      {
+        chatJid: "web:test",
+        trigger: "model_downshift",
+        willRetry: false,
+        source: "test",
+        targetContextWindow: 16_000,
+        targetModelLabel: "test/metadata-small",
+      },
+      async () => await handler!(
+        {
+          preparation: makePreparation(60, { settings: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 1_000 } }),
+          branchEntries: [],
+          customInstructions: undefined,
+          reason: "manual",
+          willRetry: false,
+          signal: new AbortController().signal,
+        },
+        ctx,
+      ),
+    );
+
+    expect(result.compaction.summary).toContain("Metadata target context");
+    const prompt = (completeSimple as any).mock.calls[0][1].messages[0].content[0].text as string;
+    expect(prompt).toContain("Target-aware compaction for test/metadata-small");
+    expect(prompt).toContain("16000 token raw context window");
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith("smart_compaction", expect.stringContaining("Target-aware smart compaction:"));
   });
 
   it("records a real failure reason instead of plain user-cancel when target-aware single-pass compaction errors", async () => {

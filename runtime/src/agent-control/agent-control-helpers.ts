@@ -18,7 +18,9 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { existsSync } from "fs";
 import { getConfigPath, WORKSPACE_DIR } from "../core/config.js";
 import { readJsonConfig, writeJsonConfig } from "../core/config-store.js";
+import { getChatJid } from "../core/chat-context.js";
 import { isContextPressureFailure } from "../agent-pool/automatic-recovery.js";
+import { runWithPiclawCompactionTrigger } from "../agent-pool/compaction-trigger-context.js";
 
 /** Ordered list of supported thinking levels from off to xhigh. */
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
@@ -312,7 +314,11 @@ export async function runPromptAndCapture(
         providerError = error instanceof Error ? error.message : String(error);
       }
       if (providerError && isContextPressureFailure(providerError) && !compacted) {
-        await session.compact();
+        const chatJid = getChatJid("control:prompt_capture");
+        await runWithPiclawCompactionTrigger(
+          { chatJid, trigger: "recovery", willRetry: true, source: "prompt_capture_context_pressure", attempt: attempt + 1 },
+          async () => await session.compact(),
+        );
         compacted = true;
         resetCapturedOutput();
         continue;

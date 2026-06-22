@@ -19,6 +19,7 @@ import {
 } from "../db.js";
 import { formatTimeoutDuration } from "./prompt-utils.js";
 import { consumeCompactionCancellationReason } from "./compaction-cancel-reason.js";
+import { buildPiclawCompactionEventFields, runWithPiclawCompactionTrigger, type PiclawCompactionTrigger, type PiclawCompactionTriggerMetadata } from "./compaction-trigger-context.js";
 import { updateSessionCompacting } from "../extensions/session-status.js";
 import { applyTokenEstimateSafetyMultiplier, getContextThresholdTokens, getContextWindowFromModel, getEffectiveContextWindow, getSystemPromptOverheadTokens, getUnknownModelContextWindow } from "../utils/context-window-budget.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
@@ -41,6 +42,15 @@ const activeCompactions = new Map<string, ActiveCompaction>();
 type AutoCompactionReason = "threshold" | "idle";
 
 export type CompactionSuccessReason = "threshold" | "idle" | "manual" | "model_switch" | "model_downshift" | "recovery" | "rotation" | string;
+
+export interface RunCompactionTriggerOptions {
+  trigger?: PiclawCompactionTrigger;
+  willRetry?: boolean;
+  source?: string;
+  attempt?: number;
+  targetContextWindow?: number;
+  targetModelLabel?: string;
+}
 
 export interface CompactionSuccessFinalizeOptions extends Pick<CompactionLifecycleOptions, "onInfo" | "onWarn"> {
   onEvent?: (event: AgentSessionEvent) => void;
@@ -505,12 +515,34 @@ export async function abortCompactionBestEffort(
   }
 }
 
+function defaultTriggerForReason(reason: string): PiclawCompactionTrigger {
+  if (reason === "threshold") return "pre_prompt";
+  return reason;
+}
+
+function buildCompactionTriggerMetadata(
+  chatJid: string,
+  reason: string,
+  options: RunCompactionTriggerOptions = {},
+): PiclawCompactionTriggerMetadata {
+  return {
+    chatJid,
+    trigger: options.trigger ?? defaultTriggerForReason(reason),
+    willRetry: options.willRetry ?? (reason === "recovery" || reason === "overflow"),
+    source: options.source ?? "piclaw",
+    attempt: options.attempt,
+    targetContextWindow: options.targetContextWindow,
+    targetModelLabel: options.targetModelLabel,
+  };
+}
+
 export async function runCompactionWithTimeout<T>(
   session: AgentSession,
   chatJid: string,
   options: Pick<CompactionLifecycleOptions, "onWarn">,
   runCompact: () => Promise<T>,
   reason = "manual",
+  triggerOptions: RunCompactionTriggerOptions = {},
 ): Promise<CompactionOutcome<T>> {
   const existing = activeCompactions.get(chatJid);
   if (existing) {
@@ -525,7 +557,9 @@ export async function runCompactionWithTimeout<T>(
   const clearActive = () => {
     if (activeCompactions.get(chatJid) === active) activeCompactions.delete(chatJid);
   };
-  const outcome = runCompactionWithTimeoutExclusive(session, chatJid, options, runCompact, clearActive, reason);
+  const metadata = buildCompactionTriggerMetadata(chatJid, reason, triggerOptions);
+  const runCompactWithTrigger = () => runWithPiclawCompactionTrigger(metadata, runCompact);
+  const outcome = runCompactionWithTimeoutExclusive(session, chatJid, options, runCompactWithTrigger, clearActive, reason);
   active.outcome = outcome as Promise<CompactionOutcome<unknown>>;
   activeCompactions.set(chatJid, active);
   return await outcome;
@@ -898,13 +932,24 @@ async function maybeAutoCompactSession(
       },
     );
 
-    onEvent?.({ type: "compaction_start", reason } as AgentSessionEvent);
+    const triggerMetadata = buildCompactionTriggerMetadata(chatJid, reason, {
+      trigger: reason === "idle" ? "idle" : "pre_prompt",
+      willRetry: false,
+      source: reason === "idle" ? "idle_auto_compaction" : "pre_prompt_auto_compaction",
+    });
+    const eventFields = buildPiclawCompactionEventFields(triggerMetadata, { reason, willRetry: false });
+    onEvent?.({ type: "compaction_start", ...eventFields } as unknown as AgentSessionEvent);
     const compactionResult = await runCompactionWithTimeout(
       session,
       chatJid,
       options,
       async () => await session.compact(),
       reason,
+      {
+        trigger: triggerMetadata.trigger,
+        willRetry: triggerMetadata.willRetry,
+        source: triggerMetadata.source,
+      },
     );
     if (!compactionResult.ok) {
       const aborted = isCompactionCancellationError(compactionResult.errorMessage);
@@ -918,14 +963,14 @@ async function maybeAutoCompactSession(
       const failureState = shouldRecordFailure ? noteCompactionFailure(chatJid, compactionResult.errorMessage) : null;
       onEvent?.({
         type: "compaction_end",
-        reason,
+        ...eventFields,
         result: undefined,
         aborted,
         willRetry: false,
         errorMessage: aborted
           ? (reason === "threshold" ? compactionResult.errorMessage : undefined)
           : `${reason === "idle" ? "Idle compaction failed" : "Pre-prompt compaction failed"}: ${compactionResult.errorMessage}`,
-      } as AgentSessionEvent);
+      } as unknown as AgentSessionEvent);
       if (failureState) {
         options.onWarn?.(
           reason === "idle"
@@ -967,7 +1012,7 @@ async function maybeAutoCompactSession(
     const contextReport = getCompactionContextReport(session, compactionResult.result as { tokensBefore?: unknown; estimatedTokensAfter?: unknown });
     onEvent?.({
       type: "compaction_end",
-      reason,
+      ...eventFields,
       result: compactionResult.result,
       aborted: false,
       willRetry: false,

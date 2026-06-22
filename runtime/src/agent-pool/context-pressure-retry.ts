@@ -9,7 +9,9 @@
 
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
+import { getChatJid } from "../core/chat-context.js";
 import { isContextPressureFailure } from "./automatic-recovery.js";
+import { runWithPiclawCompactionTrigger } from "./compaction-trigger-context.js";
 
 export type DirectPromptOptions = { streamingBehavior?: "steer" | "followUp" };
 
@@ -49,7 +51,11 @@ export async function promptWithContextPressureRetry(
     }
 
     if (providerError && isContextPressureFailure(providerError) && !compacted) {
-      await session.compact();
+      const chatJid = getChatJid("direct_prompt_context_pressure");
+      await runWithPiclawCompactionTrigger(
+        { chatJid, trigger: "recovery", willRetry: true, source: "direct_prompt_context_pressure", attempt: attempt + 1 },
+        async () => await session.compact(),
+      );
       compacted = true;
       continue;
     }
