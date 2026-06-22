@@ -70,7 +70,7 @@ function formatResetDescription(date: Date | null): string | null {
 
   const days = Math.floor(totalHours / 24);
   const hours = totalHours % 24;
-  return hours > 0 ? `resets in ~${days}d ${hours}h` : `resets in ~${days}d`;
+  return `resets in ~${days}d ${hours}h`;
 }
 
 function makeWindow(
@@ -134,11 +134,22 @@ function buildZaiHint(primary: ProviderUsageWindow | null, secondary: ProviderUs
   return parts.join(" • ");
 }
 
-function getApiKeyCredential(authStorage: AuthStorage, providerId: string): { key: string } | null {
+const PROVIDER_API_KEY_ENV: Partial<Record<SupportedProviderId, string[]>> = {
+  zai: ["ZAI_API_KEY"],
+};
+
+function getApiKeyCredential(authStorage: AuthStorage, providerId: SupportedProviderId): { key: string } | null {
   const current = (authStorage.get(providerId) as any) ?? null;
-  return current && current.type === "api_key" && typeof current.key === "string" && current.key.trim()
-    ? { key: current.key }
-    : null;
+  if (current && current.type === "api_key" && typeof current.key === "string" && current.key.trim()) {
+    return { key: current.key.trim() };
+  }
+
+  for (const envName of PROVIDER_API_KEY_ENV[providerId] ?? []) {
+    const value = process.env[envName]?.trim();
+    if (value) return { key: value };
+  }
+
+  return null;
 }
 
 async function getOAuthCredential(authStorage: AuthStorage, providerId: string): Promise<any | null> {

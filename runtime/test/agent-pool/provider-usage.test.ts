@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { clearProviderUsageCache, getProviderUsage, peekProviderUsage, warmProviderUsage } from "../../src/agent-pool/provider-usage.js";
 
 function createAuthStorage(credentials: Record<string, unknown>) {
@@ -9,8 +9,17 @@ function createAuthStorage(credentials: Record<string, unknown>) {
 }
 
 describe("provider usage", () => {
+  let previousZaiApiKey: string | undefined;
+
   beforeEach(() => {
     clearProviderUsageCache();
+    previousZaiApiKey = process.env.ZAI_API_KEY;
+    delete process.env.ZAI_API_KEY;
+  });
+
+  afterEach(() => {
+    if (previousZaiApiKey === undefined) delete process.env.ZAI_API_KEY;
+    else process.env.ZAI_API_KEY = previousZaiApiKey;
   });
 
   test("fetches Codex usage from ChatGPT usage API", async () => {
@@ -188,7 +197,38 @@ describe("provider usage", () => {
     }
   });
 
+  test("fetches Z.ai quota usage from ZAI_API_KEY when no login credential is saved", async () => {
+    process.env.ZAI_API_KEY = "env-zai-token";
+    const fetchMock = mock(async () => new Response(JSON.stringify({
+      data: {
+        level: "lite",
+        limits: [
+          { type: "TOKENS_LIMIT", percentage: 25, nextResetTime: Date.now() + 3600_000 },
+        ],
+      },
+    })));
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock as any;
+
+    try {
+      const usage = await getProviderUsage(createAuthStorage({}), "zai");
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect((fetchMock as any).mock.calls[0][1]).toMatchObject({
+        headers: {
+          Authorization: "Bearer env-zai-token",
+        },
+      });
+      expect(usage?.provider).toBe("zai");
+      expect(usage?.primary?.remaining_percent).toBe(75);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
   test("formats long reset windows with a day tier", async () => {
+    const originalDateNow = Date.now;
+    Date.now = () => 1_700_000_000_000;
     const secondaryResetAt = Math.floor((Date.now() + ((6 * 24 + 14) * 3600_000)) / 1000);
     const fetchMock = mock(async () => new Response(JSON.stringify({
       plan_type: "pro",
@@ -227,6 +267,53 @@ describe("provider usage", () => {
 
       expect(usage?.secondary?.reset_description).toBe("resets in ~6d 14h");
     } finally {
+      Date.now = originalDateNow;
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  test("formats exact long reset windows with zero hours", async () => {
+    const originalDateNow = Date.now;
+    Date.now = () => 1_700_000_000_000;
+    const secondaryResetAt = Math.floor((Date.now() + (7 * 24 * 3600_000)) / 1000);
+    const fetchMock = mock(async () => new Response(JSON.stringify({
+      plan_type: "pro",
+      rate_limit: {
+        primary_window: {
+          used_percent: 38,
+          reset_at: Math.floor(Date.now() / 1000) + 3600,
+          limit_window_seconds: 18000,
+        },
+        secondary_window: {
+          used_percent: 59,
+          reset_at: secondaryResetAt,
+          limit_window_seconds: 604800,
+        },
+      },
+      credits: {
+        balance: 123,
+        unlimited: false,
+      },
+    })));
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock as any;
+
+    try {
+      const usage = await getProviderUsage(
+        createAuthStorage({
+          "openai-codex": {
+            type: "oauth",
+            access: "token",
+            accountId: "acct_123",
+            expires: Date.now() + 60_000,
+          },
+        }),
+        "openai-codex"
+      );
+
+      expect(usage?.secondary?.reset_description).toBe("resets in ~7d 0h");
+    } finally {
+      Date.now = originalDateNow;
       globalThis.fetch = previousFetch;
     }
   });
