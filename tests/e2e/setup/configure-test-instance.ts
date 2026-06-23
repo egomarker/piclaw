@@ -50,9 +50,11 @@ if (existsSync(authPath)) {
 }
 
 authData[OPENCODE_PROVIDER_ID] = {
-  type: "api-key",
-  apiKey: OPENCODE_API_KEY || "free-tier", // free models don't need a real key
-  baseUrl: OPENCODE_BASE_URL,
+  type: "api_key",
+  key: OPENCODE_API_KEY || "free-tier", // free models don't need a real key
+  env: {
+    OPENCODE_BASE_URL,
+  },
 };
 
 writeFileSync(authPath, JSON.stringify(authData, null, 2));

@@ -44,9 +44,11 @@ if (existsSync(authPath)) {
 }
 
 authData[PROVIDER_ID] = {
-  type: "api-key",
-  apiKey: GITHUB_TOKEN,
-  baseUrl: GITHUB_MODELS_BASE_URL,
+  type: "api_key",
+  key: GITHUB_TOKEN,
+  env: {
+    GITHUB_MODELS_BASE_URL,
+  },
 };
 
 writeFileSync(authPath, JSON.stringify(authData, null, 2));
