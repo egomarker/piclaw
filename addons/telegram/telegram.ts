@@ -543,15 +543,20 @@ export class TelegramChannel {
   private async pollLoop(): Promise<void> {
     let reconnectAttempts = 0;
     while (!this.stopped && this.api) {
-      const api = this.api;
-      let updates: TelegramUpdate[];
-
       try {
-        updates = await api.getUpdates({
+        const api = this.api;
+        const updates = await api.getUpdates({
           offset: this.lastUpdateId > 0 ? this.lastUpdateId + 1 : undefined,
           timeout: resolveTelegramLongPollTimeoutSeconds(this.options.pollingTimeoutSeconds),
           allowed_updates: ["message"],
         });
+
+        reconnectAttempts = 0;
+        await this.markConnected();
+        for (const update of updates) {
+          this.setLastUpdateId(update.update_id);
+          await this.options.onUpdate(update, api);
+        }
       } catch (error) {
         if (this.stopped) return;
         await this.markDisconnected(error);
@@ -561,14 +566,6 @@ export class TelegramChannel {
         reconnectAttempts += 1;
         const delayMs = Math.min(30_000, 1_000 * 2 ** Math.min(reconnectAttempts, 5));
         await Bun.sleep(delayMs);
-        continue;
-      }
-
-      reconnectAttempts = 0;
-      await this.markConnected();
-      for (const update of updates) {
-        this.setLastUpdateId(update.update_id);
-        await this.options.onUpdate(update, api);
       }
     }
   }

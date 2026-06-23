@@ -307,11 +307,19 @@ test("telegram pollLoop stops without rejecting on fatal auth errors", async () 
   expect(disconnects[0]).toContain("Unauthorized");
 });
 
-test("telegram pollLoop still rejects on update handler errors", async () => {
-  const channel = new TelegramChannel({
+test("telegram pollLoop routes update handler failures through the reconnect path", async () => {
+  const disconnects: string[] = [];
+  const originalSleep = Bun.sleep;
+  let channel: any;
+
+  channel = new TelegramChannel({
     botToken: "test",
     onUpdate: async () => {
       throw new Error("update handler failed");
+    },
+    onDisconnected: async (error) => {
+      disconnects.push(String((error as { message?: unknown })?.message || error));
+      channel.stopped = true;
     },
   }) as any;
 
@@ -330,7 +338,15 @@ test("telegram pollLoop still rejects on update handler errors", async () => {
   channel.connected = true;
   channel.stopped = false;
 
-  await expect(channel.pollLoop()).rejects.toThrow("update handler failed");
+  (Bun as any).sleep = async () => undefined;
+  try {
+    await expect(channel.pollLoop()).resolves.toBeUndefined();
+  } finally {
+    (Bun as any).sleep = originalSleep;
+  }
+
+  expect(channel.connected).toBe(false);
+  expect(disconnects[0]).toContain("update handler failed");
 });
 
 test("telegram runtime converts location-only messages into plain text", async () => {
