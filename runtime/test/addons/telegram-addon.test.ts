@@ -7,7 +7,7 @@ import {
   isTelegramDirectChatId,
   parseTelegramChatJid,
 } from "../../../addons/telegram/telegram-targets.ts";
-import { isRecoverableTelegramNetworkError } from "../../../addons/telegram/telegram-network-errors.ts";
+import { isFatalTelegramError, isRecoverableTelegramNetworkError } from "../../../addons/telegram/telegram-network-errors.ts";
 import { TelegramBotApi, TelegramChannel } from "../../../addons/telegram/telegram.ts";
 import { importFresh, setEnv } from "../helpers.js";
 
@@ -65,14 +65,19 @@ test("telegram addon allowlist includes model control command", async () => {
   expect(allowedCommands).toContain("model");
 });
 
-test("telegram network classifier treats transient Telegram upstream failures as recoverable", () => {
+test("telegram classifier retries unknown transport failures and only stops for explicit auth/config failures", () => {
   expect(isRecoverableTelegramNetworkError(new Error("Telegram getUpdates failed: Bad Gateway"))).toBe(true);
   expect(isRecoverableTelegramNetworkError(new Error("Telegram getMe failed: Gateway Timeout"))).toBe(true);
   expect(isRecoverableTelegramNetworkError(new Error("Telegram getUpdates failed: Service Unavailable"))).toBe(true);
   expect(isRecoverableTelegramNetworkError(new Error("Telegram getUpdates failed: 429"))).toBe(true);
   expect(isRecoverableTelegramNetworkError(new Error("Unable to connect. Is the computer able to access the url?"))).toBe(true);
   expect(isRecoverableTelegramNetworkError({ message: "request failed", code: "ConnectionRefused" })).toBe(true);
-  expect(isRecoverableTelegramNetworkError(new Error("Telegram getUpdates failed: Forbidden"))).toBe(false);
+  expect(isRecoverableTelegramNetworkError({ message: "request failed", code: "FailedToOpenSocket" })).toBe(true);
+  expect(isRecoverableTelegramNetworkError(new Error("UNKNOWN_CERTIFICATE_VERIFICATION_ERROR"))).toBe(true);
+
+  expect(isFatalTelegramError(new Error("Telegram getMe failed: Unauthorized"))).toBe(true);
+  expect(isFatalTelegramError(new Error("Telegram getUpdates failed: 401"))).toBe(true);
+  expect(isFatalTelegramError(new Error("Telegram getMe failed: Not Found"))).toBe(true);
 });
 
 test("telegram api sendMessage uses Markdown parse mode", async () => {
@@ -278,7 +283,7 @@ test("telegram channel sends SVGs as documents and PNGs as photos", async () => 
   ]);
 });
 
-test("telegram pollLoop stops without rejecting on nonrecoverable errors", async () => {
+test("telegram pollLoop stops without rejecting on fatal auth errors", async () => {
   const disconnects: string[] = [];
   const channel = new TelegramChannel({
     botToken: "test",
@@ -290,7 +295,7 @@ test("telegram pollLoop stops without rejecting on nonrecoverable errors", async
 
   channel.api = {
     getUpdates: async () => {
-      throw new Error("Telegram getUpdates failed: Forbidden");
+      throw new Error("Telegram getUpdates failed: Unauthorized");
     },
   };
   channel.botUser = { id: 1, is_bot: true, username: "bot" };
@@ -299,7 +304,33 @@ test("telegram pollLoop stops without rejecting on nonrecoverable errors", async
 
   await expect(channel.pollLoop()).resolves.toBeUndefined();
   expect(channel.connected).toBe(false);
-  expect(disconnects[0]).toContain("Forbidden");
+  expect(disconnects[0]).toContain("Unauthorized");
+});
+
+test("telegram pollLoop still rejects on update handler errors", async () => {
+  const channel = new TelegramChannel({
+    botToken: "test",
+    onUpdate: async () => {
+      throw new Error("update handler failed");
+    },
+  }) as any;
+
+  channel.api = {
+    getUpdates: async () => [{
+      update_id: 1,
+      message: {
+        message_id: 1,
+        date: 0,
+        text: "hello",
+        chat: { id: 123456, type: "private" },
+      },
+    }],
+  };
+  channel.botUser = { id: 1, is_bot: true, username: "bot" };
+  channel.connected = true;
+  channel.stopped = false;
+
+  await expect(channel.pollLoop()).rejects.toThrow("update handler failed");
 });
 
 test("telegram runtime converts location-only messages into plain text", async () => {
