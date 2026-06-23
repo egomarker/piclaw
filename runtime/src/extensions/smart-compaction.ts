@@ -14,6 +14,7 @@ import { resolveModelRequestAuth } from "../utils/model-auth.js";
 import { createLogger } from "../utils/logger.js";
 import { applyTokenEstimateSafetyMultiplier, getEffectiveContextWindow } from "../utils/context-window-budget.js";
 import { recordCompactionCancellationReason } from "../agent-pool/compaction-cancel-reason.js";
+import { resolvePiclawCompactionTrigger, type PiclawCompactionTriggerMetadata } from "../agent-pool/compaction-trigger-context.js";
 
 import { getCompactionRuntimeConfig } from "../core/config.js";
 import { FULL_PASS_FALLBACK_MAX_PROMPT_TOKENS, MIN_COMPACTION_OUTPUT_TOKENS, MIN_SUMMARY_CHARS, PROGRESSIVE_FALLBACK_CONTEXT_WINDOW, SELECTIVE_THRESHOLD, SMART_COMPACTION_PROGRESS_INTERVAL_MS, SYSTEM_PROMPT_OVERHEAD_TOKENS } from "./smart-compaction/config.js";
@@ -90,6 +91,22 @@ function resolveCompactionModel(ctx: { model?: unknown }): unknown {
 
 function publishCompactionStatus(ctx: { ui: { setStatus?: (key: string, text: string | undefined) => void } }, message?: string, completionPercent?: number | null): void {
   ctx.ui.setStatus?.("smart_compaction", message ? formatSmartCompactionStatus(message, completionPercent) : undefined);
+}
+
+function isRecoveryCompaction(metadata: PiclawCompactionTriggerMetadata): boolean {
+  return metadata.willRetry || metadata.trigger === "recovery" || metadata.trigger === "overflow";
+}
+
+function getCompactionStatusPrefix(metadata: PiclawCompactionTriggerMetadata): string {
+  if (isRecoveryCompaction(metadata)) return "Recovery compaction";
+  if (metadata.trigger === "idle") return "Idle smart compaction";
+  if (metadata.trigger === "manual") return "Manual smart compaction";
+  if (metadata.trigger === "model_switch" || metadata.trigger === "model_downshift") return "Target-aware smart compaction";
+  return "Smart compaction";
+}
+
+function statusMessage(metadata: PiclawCompactionTriggerMetadata, message: string): string {
+  return `${getCompactionStatusPrefix(metadata)}: ${message}`;
 }
 
 function estimateProgressiveProgressCompletion(progress?: ProgressiveCompactionProgress): number {
@@ -339,7 +356,16 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
   pi.on("session_before_compact", async (event, rawCtx) => {
     const ctx = makeResilientCtx(rawCtx as any) as typeof rawCtx;
     const { preparation, signal, customInstructions, branchEntries } = event;
-    const targetContext = parseTargetContextInstructions(customInstructions);
+    const compactionMetadata = resolvePiclawCompactionTrigger({
+      reason: (event as { reason?: string }).reason,
+      willRetry: (event as { willRetry?: boolean }).willRetry,
+    });
+    const parsedTargetContext = parseTargetContextInstructions(customInstructions);
+    const targetContext = {
+      targetContextWindow: compactionMetadata.targetContextWindow ?? parsedTargetContext.targetContextWindow,
+      targetModelLabel: compactionMetadata.targetModelLabel ?? parsedTargetContext.targetModelLabel,
+      instructions: parsedTargetContext.instructions,
+    };
     const {
       messagesToSummarize,
       tokensBefore,
@@ -358,7 +384,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
     if (messagesToSummarize.length === 0) return;
 
     publishContextSnapshot(tokensBefore, "before_compaction");
-    publishCompactionStatus(ctx, `Smart compaction: scanning ${messagesToSummarize.length} messages…`, estimateSmartCompactionCompletionPercent("scanning"));
+    publishCompactionStatus(ctx, statusMessage(compactionMetadata, `scanning ${messagesToSummarize.length} messages…`), estimateSmartCompactionCompletionPercent("scanning"));
 
     try {
       // Capture the signal reference from the event. The upstream
@@ -474,7 +500,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
               );
             }
             finalContextTokens = adjusted.estimatedTotal;
-            publishCompactionStage("Smart compaction: reused summary with adjusted kept context…", "completed_noop_adjusted", adjusted.estimatedTotal);
+            publishCompactionStage(statusMessage(compactionMetadata, "reused summary with adjusted kept context…"), "completed_noop_adjusted", adjusted.estimatedTotal);
             return {
               compaction: {
                 ...noOpResult.compaction,
@@ -485,12 +511,12 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
             log.debug(
               `No-op compaction: post-compaction estimate ${postFit.estimatedTotal} tokens is unsafe for ${contextWindow} context (configured kept ${configuredKeepRecent}t, safe kept ${safeKeepRecent}t, margin ${postFit.margin}t). Falling through to LLM compaction.`,
             );
-            publishCompactionStage("Smart compaction: no-op estimate unsafe; extracting signal…", "noop_unsafe", postFit.estimatedTotal);
+            publishCompactionStage(statusMessage(compactionMetadata, "no-op estimate unsafe; extracting signal…"), "noop_unsafe", postFit.estimatedTotal);
             // Don't return the no-op — fall through to LLM-based compaction
           }
         } else {
           finalContextTokens = postFit.estimatedTotal;
-          publishCompactionStage("Smart compaction: reused existing summary…", "completed_noop", postFit.estimatedTotal);
+          publishCompactionStage(statusMessage(compactionMetadata, "reused existing summary…"), "completed_noop", postFit.estimatedTotal);
           return noOpResult;
         }
       }
@@ -509,6 +535,8 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
       if (messagesForCompaction.length < SELECTIVE_THRESHOLD && fullPassFallbackAllowed) {
         log.debug("Smart compaction: short conversation still using Piclaw selective path instead of upstream full-pass fallback", {
           operation: "smart_compaction.short_selective",
+          trigger: compactionMetadata.trigger,
+          willRetry: compactionMetadata.willRetry,
           messageCount: messagesForCompaction.length,
           fullPassPromptEstimate,
           conservativeFullPassLimit,
@@ -522,9 +550,9 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
           );
       }
 
-      publishCompactionStage(`Smart compaction: extracting signal from ${messagesForCompaction.length} messages…`, "extracting", tokensBefore);
+      publishCompactionStage(statusMessage(compactionMetadata, `extracting signal from ${messagesForCompaction.length} messages…`), "extracting", tokensBefore);
       log.debug(
-        `Smart compaction: ${messagesForCompaction.length} msgs → selective extraction`,
+        `${getCompactionStatusPrefix(compactionMetadata)}: ${messagesForCompaction.length} msgs → selective extraction`,
           );
 
       const promptText = buildSelectivePrompt(
@@ -539,7 +567,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
       log.debug(
         `Prompt: ${Math.round(promptText.length / 1000)}k chars / ~${Math.round(promptTokens / 1000)}k tokens (vs ~${Math.round(tokensBefore / 1000)}k tokens full)`,
           );
-      publishCompactionStage("Smart compaction: preparing selective summary prompt…", "summarizing_prompt", promptTokens);
+      publishCompactionStage(statusMessage(compactionMetadata, "preparing selective summary prompt…"), "summarizing_prompt", promptTokens);
 
       // Compaction model — currently the session model, resolved through one
       // seam so a future dedicated compaction model can be inserted without
@@ -555,13 +583,15 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
         return;
       }
 
-      const budget = getProgressiveCompactionBudget(compactionModel);
+      const baseBudget = getProgressiveCompactionBudget(compactionModel);
+      const recoveryCompaction = isRecoveryCompaction(compactionMetadata);
+      const budget = recoveryCompaction ? { ...baseBudget, forceProgressive: true } : baseBudget;
       const promptTooLargeForSinglePass = promptTokens + MIN_COMPACTION_OUTPUT_TOKENS > budget.contextWindow;
       if (budget.forceProgressive || promptText.length > budget.promptBudgetChars || promptTooLargeForSinglePass) {
         try {
-          publishCompactionStage("Smart compaction: progressive iterative mode…", "progressive_iterative", promptTokens);
+          publishCompactionStage(statusMessage(compactionMetadata, "progressive iterative mode…"), "progressive_iterative", promptTokens);
           log.debug(
-            `Progressive compaction enabled: prompt ${Math.round(promptText.length / 1000)}k chars / ~${Math.round(promptTokens / 1000)}k tokens exceeds safe single-pass budget (${Math.round(budget.promptBudgetChars / 1000)}k chars, ${budget.contextWindow.toLocaleString()} context)`,
+            `Progressive compaction enabled (${compactionMetadata.trigger}): prompt ${Math.round(promptText.length / 1000)}k chars / ~${Math.round(promptTokens / 1000)}k tokens exceeds safe single-pass budget (${Math.round(budget.promptBudgetChars / 1000)}k chars, ${budget.contextWindow.toLocaleString()} context)`,
           );
           const progressiveResult = await runProgressiveCompaction({
             llmMessages,
@@ -584,7 +614,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
             streamFn: options.streamFn,
             onProgress: (_generatedChars, progress) => {
               setThrottledProgressMessage(
-                formatProgressiveProgressMessage(progress),
+                statusMessage(compactionMetadata, formatProgressiveProgressMessage(progress).replace(/^Smart compaction:\s*/, "")),
                 progress?.phase ?? "progressive_streaming",
                 estimateProgressiveProgressCompletion(progress),
               );
@@ -644,8 +674,8 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
           finalContextTokens = estimatedTotal;
           publishCompactionStage(
             progressiveResult.complete
-              ? "Smart compaction: completed progressive summary…"
-              : "Smart compaction: completed partial progressive summary…",
+              ? statusMessage(compactionMetadata, "completed progressive summary…")
+              : statusMessage(compactionMetadata, "completed partial progressive summary…"),
             progressiveResult.complete ? "completed_progressive" : "completed_progressive_partial",
             estimatedTotal,
           );
@@ -689,12 +719,12 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
             reasoning: (compactionModel as any).reasoning ? getCompactionReasoningEffort(compactionModel, "selective") : undefined,
             streamFn: options.streamFn,
             onProgress: () => {
-              setThrottledProgressMessage("Smart compaction: generating summary still running…", "generating_summary_streaming");
+              setThrottledProgressMessage(statusMessage(compactionMetadata, "generating summary still running…"), "generating_summary_streaming");
             },
           });
         };
 
-        publishCompactionStage("Smart compaction: generating selective summary…", "generating_summary", estimateCompactionPromptTokens(activePromptText));
+        publishCompactionStage(statusMessage(compactionMetadata, "generating selective summary…"), "generating_summary", estimateCompactionPromptTokens(activePromptText));
         let response;
         try {
           response = await runCompletion(activePromptText);
@@ -706,7 +736,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
           if (!trimmedPrompt || abortSignal.aborted) throw err;
           activePromptText = trimmedPrompt;
           log.debug(`Smart compaction input overflow; retrying with trimmed prompt (~${Math.round(estimateCompactionPromptTokens(activePromptText) / 1000)}k tokens).`);
-          publishCompactionStage("Smart compaction: retrying with trimmed summary prompt…", "generating_summary_trimmed_retry", estimateCompactionPromptTokens(activePromptText));
+          publishCompactionStage(statusMessage(compactionMetadata, "retrying with trimmed summary prompt…"), "generating_summary_trimmed_retry", estimateCompactionPromptTokens(activePromptText));
           response = await runCompletion(activePromptText);
         }
 
@@ -718,7 +748,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
           if (trimmedPrompt && trimmedPrompt !== activePromptText && !abortSignal.aborted) {
             activePromptText = trimmedPrompt;
             log.debug(`Smart compaction LLM overflow response; retrying with trimmed prompt (~${Math.round(estimateCompactionPromptTokens(activePromptText) / 1000)}k tokens).`);
-            publishCompactionStage("Smart compaction: retrying with trimmed summary prompt…", "generating_summary_trimmed_retry", estimateCompactionPromptTokens(activePromptText));
+            publishCompactionStage(statusMessage(compactionMetadata, "retrying with trimmed summary prompt…"), "generating_summary_trimmed_retry", estimateCompactionPromptTokens(activePromptText));
             response = await runCompletion(activePromptText);
           }
         }
@@ -774,7 +804,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
           branchEntries,
         });
         finalContextTokens = adjustedFit.estimatedTotal;
-        publishCompactionStage("Smart compaction: completed selective summary…", "completed_selective", adjustedFit.estimatedTotal);
+        publishCompactionStage(statusMessage(compactionMetadata, "completed selective summary…"), "completed_selective", adjustedFit.estimatedTotal);
 
         if (adjustedFit.adjusted) {
           log.debug(

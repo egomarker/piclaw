@@ -200,7 +200,7 @@ export function resolveUiOnlyCommandNotice(commandText, response) {
     const slashName = parts[0]?.toLowerCase() || '';
     const hasArgs = parts.length > 1;
 
-    if (!hasArgs && (slashName === '/model' || slashName === '/thinking' || slashName === '/effort')) {
+    if (!hasArgs && (slashName === '/thinking' || slashName === '/effort')) {
         return message;
     }
 

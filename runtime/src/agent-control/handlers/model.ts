@@ -181,12 +181,21 @@ export async function handleModel(session: AgentSession, modelRegistry: ModelReg
       explicitCompact: command.compact,
       isModelDownshift,
     });
+    const targetModelLabel = getModelLabel(selected);
+    const compactionReason = isModelDownshift ? "model_downshift" : "model_switch";
     const compactionResult = await runCompactionWithTimeout(
       session,
       chatJid,
       { onWarn: (message, details) => log.warn(message, details) },
-      async () => await session.compact(buildTargetContextCompactionInstructions(targetContextWindow, getModelLabel(selected))),
-      isModelDownshift ? "model_downshift" : "model_switch",
+      async () => await session.compact(buildTargetContextCompactionInstructions(targetContextWindow, targetModelLabel)),
+      compactionReason,
+      {
+        trigger: compactionReason,
+        willRetry: false,
+        source: command.compact ? "model_command_compact" : "model_downshift_auto_compact",
+        targetContextWindow,
+        targetModelLabel,
+      },
     );
     if (!compactionResult.ok) {
       return {
