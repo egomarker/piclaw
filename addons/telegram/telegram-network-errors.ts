@@ -6,7 +6,6 @@ const FATAL_TELEGRAM_ERROR_FRAGMENTS = [
 
 const FATAL_TELEGRAM_ERROR_PATTERNS = [
   /telegram\s+(getme|getupdates)\s+failed:\s*401\b/i,
-  /telegram\s+(getme|getupdates)\s+failed:\s*not found\b/i,
 ];
 
 function collectTelegramErrorText(error: unknown, seen = new Set<unknown>()): string[] {

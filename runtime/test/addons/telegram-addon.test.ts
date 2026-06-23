@@ -77,7 +77,7 @@ test("telegram classifier retries unknown transport failures and only stops for 
 
   expect(isFatalTelegramError(new Error("Telegram getMe failed: Unauthorized"))).toBe(true);
   expect(isFatalTelegramError(new Error("Telegram getUpdates failed: 401"))).toBe(true);
-  expect(isFatalTelegramError(new Error("Telegram getMe failed: Not Found"))).toBe(true);
+  expect(isRecoverableTelegramNetworkError(new Error("Telegram getMe failed: Not Found"))).toBe(true);
 });
 
 test("telegram api sendMessage uses Markdown parse mode", async () => {
