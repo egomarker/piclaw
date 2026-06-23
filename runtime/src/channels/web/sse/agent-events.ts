@@ -88,14 +88,40 @@ function describeCompactionTokenChange(event: Record<string, unknown>): string |
   const source = typeof event.estimatedTokensAfterSource === "string" ? event.estimatedTokensAfterSource : null;
   const parts = [
     tokensBefore !== null && estimatedTokensAfter !== null
-      ? `Context ${formatStatusTokenCount(tokensBefore)} → ${formatStatusTokenCount(estimatedTokensAfter)} tokens${source ? ` (${source} estimate)` : ""}`
+      ? `Compaction result estimate: ${formatStatusTokenCount(tokensBefore)} → ${formatStatusTokenCount(estimatedTokensAfter)} tokens${source ? ` (${source})` : ""}`
       : estimatedTokensAfter !== null
-        ? `Estimated context after compaction: ${formatStatusTokenCount(estimatedTokensAfter)} tokens${source ? ` (${source})` : ""}`
+        ? `Compaction result estimate: ${formatStatusTokenCount(estimatedTokensAfter)} tokens${source ? ` (${source})` : ""}`
         : null,
     reductionPercent !== null ? `${reductionPercent.toFixed(1)}% smaller` : null,
     safetyAdjustedTokensAfter !== null ? `safety-adjusted ${formatStatusTokenCount(safetyAdjustedTokensAfter)}` : null,
   ].filter(Boolean);
   return parts.length ? parts.join(" · ") : undefined;
+}
+
+function buildCompactionStatusFields(event: Record<string, unknown>): Record<string, unknown> {
+  const result = readJsonRecord(event.result);
+  const tokensBefore = readWidgetNumber(event.tokensBefore) ?? readWidgetNumber(result?.tokensBefore);
+  const estimatedTokensAfter = readWidgetNumber(event.estimatedTokensAfter) ?? readWidgetNumber(result?.estimatedTokensAfter);
+  const safetyAdjustedTokensAfter = readWidgetNumber(event.safetyAdjustedTokensAfter);
+  const reductionPercent = readWidgetNumber(event.reductionPercent);
+  return {
+    reason: typeof event.reason === "string" ? event.reason : null,
+    trigger: typeof event.trigger === "string" ? event.trigger : null,
+    piclawReason: typeof event.piclawReason === "string" ? event.piclawReason : (typeof event.trigger === "string" ? event.trigger : null),
+    willRetry: event.willRetry === true,
+    aborted: event.aborted === true,
+    result: event.result,
+    errorMessage: typeof event.errorMessage === "string" ? event.errorMessage : null,
+    source: typeof event.source === "string" ? event.source : null,
+    chatJid: typeof event.chatJid === "string" ? event.chatJid : null,
+    ...(typeof event.targetContextWindow === "number" && Number.isFinite(event.targetContextWindow) ? { targetContextWindow: event.targetContextWindow } : {}),
+    ...(typeof event.targetModelLabel === "string" ? { targetModelLabel: event.targetModelLabel } : {}),
+    ...(tokensBefore !== null ? { tokensBefore } : {}),
+    ...(estimatedTokensAfter !== null ? { estimatedTokensAfter } : {}),
+    ...(typeof event.estimatedTokensAfterSource === "string" ? { estimatedTokensAfterSource: event.estimatedTokensAfterSource } : {}),
+    ...(safetyAdjustedTokensAfter !== null ? { safetyAdjustedTokensAfter } : {}),
+    ...(reductionPercent !== null ? { reductionPercent } : {}),
+  };
 }
 
 function modelLabelFromEventModel(value: unknown): string | null {
@@ -634,17 +660,20 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
     }
 
     if (event.type === "compaction_start") {
-      const reason = (event as { reason?: string }).reason;
-      const title = reason === "overflow"
+      const e = event as Record<string, unknown>;
+      const reason = typeof e.reason === "string" ? e.reason : undefined;
+      const trigger = typeof e.trigger === "string" ? e.trigger : undefined;
+      const willRetry = e.willRetry === true;
+      const title = willRetry || reason === "overflow"
         ? "Compacting context"
-        : reason === "threshold" || reason === "idle"
+        : reason === "threshold" || reason === "idle" || trigger === "pre_prompt" || trigger === "idle"
           ? "Smart compaction"
           : "Compacting context";
-      const detail = reason === "overflow"
+      const detail = willRetry || reason === "overflow"
         ? "Recovering from context pressure so the turn can continue."
-        : reason === "threshold"
+        : reason === "threshold" || trigger === "pre_prompt"
           ? "Shrinking recent context before continuing the turn."
-          : reason === "idle"
+          : reason === "idle" || trigger === "idle"
             ? "Tidying context a few seconds after the turn finished."
             : undefined;
       options.emitter.status({
@@ -654,17 +683,21 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
         detail,
         intent_key: "compaction",
         started_at: new Date().toISOString(),
+        ...buildCompactionStatusFields(e),
       });
     }
 
     if (event.type === "compaction_end") {
-      const e = event as { errorMessage?: string; willRetry?: boolean; aborted?: boolean; reason?: string } & Record<string, unknown>;
+      const e = event as { errorMessage?: string; willRetry?: boolean; aborted?: boolean; reason?: string; trigger?: string } & Record<string, unknown>;
       const tokenDetail = describeCompactionTokenChange(e);
+      const fields = buildCompactionStatusFields(e);
       if (e.errorMessage) {
         options.emitter.status({
           ...base,
           type: "error",
           title: e.errorMessage,
+          detail: tokenDetail,
+          ...fields,
         });
       } else if (e.willRetry) {
         options.emitter.status({
@@ -672,19 +705,22 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
           type: "intent",
           title: "Retrying after auto-compaction",
           detail: tokenDetail,
+          ...fields,
         });
       } else if (e.aborted) {
         options.emitter.status({
           ...base,
           type: "intent",
-          title: e.reason === "manual" ? "Compaction cancelled" : "Auto-compaction cancelled",
+          title: e.reason === "manual" || e.trigger === "manual" ? "Compaction cancelled" : "Auto-compaction cancelled",
+          ...fields,
         });
       } else {
         options.emitter.status({
           ...base,
           type: "intent",
-          title: e.reason === "idle" || e.reason === "threshold" ? "Smart compaction complete" : "Compaction complete",
+          title: e.reason === "idle" || e.reason === "threshold" || e.trigger === "pre_prompt" || e.trigger === "idle" ? "Smart compaction complete" : "Compaction complete",
           detail: tokenDetail,
+          ...fields,
         });
       }
     }
@@ -741,6 +777,8 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
         detail,
         intent_key: "compaction",
         started_at: new Date().toISOString(),
+        reason: "previous_failure",
+        willRetry: false,
       });
     }
 

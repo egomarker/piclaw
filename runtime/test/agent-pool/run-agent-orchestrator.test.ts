@@ -671,7 +671,8 @@ test("runAgentPrompt suppresses upstream auto-compaction inside session.prompt",
     }
     async prompt() {
       calls.push("prompt");
-      await this._checkCompaction();
+      await this._checkCompaction("threshold");
+      await this._runAutoCompaction("overflow", true);
       for (const listener of this.listeners) {
         listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "done" } });
       }
@@ -680,6 +681,8 @@ test("runAgentPrompt suppresses upstream auto-compaction inside session.prompt",
   }
 
   const session = new StubSession();
+  const originalCheckCompaction = session._checkCompaction;
+  const originalRunAutoCompaction = session._runAutoCompaction;
   const turnCoordinator = new AgentTurnCoordinator({
     takeAttachments: () => [],
     touchSession: () => {},
@@ -707,8 +710,16 @@ test("runAgentPrompt suppresses upstream auto-compaction inside session.prompt",
     operation: "run_agent.suppress_upstream_auto_compaction",
     chatJid: "web:upstream-auto-suppressed",
     method: "_checkCompaction",
+    upstreamReason: "threshold",
   }));
-  expect(typeof (session as any)._checkCompaction).toBe("function");
+  expect(warnings).toContainEqual(expect.objectContaining({
+    operation: "run_agent.suppress_upstream_auto_compaction",
+    chatJid: "web:upstream-auto-suppressed",
+    method: "_runAutoCompaction",
+    upstreamReason: "overflow",
+  }));
+  expect(session._checkCompaction).toBe(originalCheckCompaction);
+  expect(session._runAutoCompaction).toBe(originalRunAutoCompaction);
 });
 
 test.skip("runAgentPrompt still pre-prompt compacts even when upstream auto-compaction is disabled", async () => {
@@ -1351,7 +1362,7 @@ test("runAgentPrompt compacts and retries after OpenAI context-window 400 errors
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
-  const events: string[] = [];
+  const events: any[] = [];
 
   class StubSession {
     private listeners: Array<(event: any) => void> = [];
@@ -1399,7 +1410,7 @@ test("runAgentPrompt compacts and retries after OpenAI context-window 400 errors
       skipPrePromptCompaction: true,
       onEvent: (event) => {
         if (event.type === "recovery_start" || event.type === "recovery_end" || event.type === "compaction_start" || event.type === "compaction_end") {
-          events.push(event.type);
+          events.push(event);
         }
       },
     }, {
@@ -1416,7 +1427,15 @@ test("runAgentPrompt compacts and retries after OpenAI context-window 400 errors
     expect(result.result).toBe("recovered");
     expect(session.promptCalls).toBe(2);
     expect(session.compactCalls).toBe(1);
-    expect(events).toEqual(["recovery_start", "compaction_start", "compaction_end", "recovery_end"]);
+    expect(events.map((event) => event.type)).toEqual(["recovery_start", "compaction_start", "compaction_end", "recovery_end"]);
+    expect(events.find((event) => event.type === "compaction_end")).toEqual(expect.objectContaining({
+      reason: "overflow",
+      trigger: "recovery",
+      piclawReason: "recovery",
+      willRetry: true,
+      aborted: false,
+      source: "automatic_recovery",
+    }));
   } finally {
     restoreEnv();
   }

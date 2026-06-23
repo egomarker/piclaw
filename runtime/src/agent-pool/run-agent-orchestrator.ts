@@ -48,6 +48,7 @@ import {
   runCompactionWithTimeout,
   scheduleIdleAutoCompaction,
 } from "./compaction.js";
+import { buildPiclawCompactionEventFields, type PiclawCompactionTriggerMetadata } from "./compaction-trigger-context.js";
 import {
   getContextThresholdTokens,
   getSystemPromptOverheadTokens,
@@ -120,6 +121,14 @@ type UpstreamAutoCompactionSession = Record<string, unknown> & {
 };
 
 const recentRecoveryFailuresByChat = new Map<string, RecoveryFailureSignatureRecord[]>();
+let warnedMissingUpstreamAutoCompactionSuppressorMethods = false;
+
+function isPrivateUpstreamAutoCompactionSuppressorEnabled(): boolean {
+  // Future experiment flag: keep the public upstream auto-compaction switch disabled at session creation,
+  // but run prompts without patching upstream private methods. This lets us canary whether public controls
+  // are sufficient before removing Piclaw-managed compaction boundaries and telemetry.
+  return process.env.PICLAW_DISABLE_PRIVATE_UPSTREAM_AUTO_COMPACTION_SUPPRESSOR !== "1";
+}
 
 function suppressUpstreamAutoCompactionDuringPrompt(
   session: AgentSession,
@@ -134,7 +143,20 @@ function suppressUpstreamAutoCompactionDuringPrompt(
     ? upstream._runAutoCompaction
     : null;
 
-  if (!originalCheckCompaction && !originalRunAutoCompaction) return () => {};
+  if (!isPrivateUpstreamAutoCompactionSuppressorEnabled()) return () => {};
+
+  if (!originalCheckCompaction && !originalRunAutoCompaction) {
+    if (!warnedMissingUpstreamAutoCompactionSuppressorMethods) {
+      warnedMissingUpstreamAutoCompactionSuppressorMethods = true;
+      options.onWarn?.("Upstream auto-compaction private suppressor methods were not found", {
+        operation: "run_agent.suppress_upstream_auto_compaction.missing_private_methods",
+        chatJid,
+        reason: "Piclaw still disables upstream auto-compaction through setAutoCompactionEnabled(false), but the private _checkCompaction/_runAutoCompaction canary could not be installed. Re-audit upstream AgentSession auto-compaction controls before removing Piclaw-managed compaction.",
+        expectedMethods: ["_checkCompaction", "_runAutoCompaction"],
+      });
+    }
+    return () => {};
+  }
 
   let suppressedCount = 0;
   const warnSuppressed = (method: "_checkCompaction" | "_runAutoCompaction", args: unknown[]) => {
@@ -629,13 +651,21 @@ async function runRecoveryCompaction(
     operation: "run_agent.recovery_compact",
     chatJid,
   });
-  emitAgentSessionEvent(runOptions.onEvent, { type: "compaction_start", reason: "overflow" });
+  const retryMetadata: PiclawCompactionTriggerMetadata = {
+    chatJid,
+    trigger: "recovery",
+    willRetry: true,
+    source: "automatic_recovery",
+  };
+  const retryEventFields = buildPiclawCompactionEventFields(retryMetadata, { reason: "overflow", willRetry: true });
+  emitAgentSessionEvent(runOptions.onEvent, { type: "compaction_start", ...retryEventFields } as unknown as AgentSessionEvent);
   const compactionResult = await runCompactionWithTimeout(
     session,
     chatJid,
     options,
     async () => await session.compact(),
     "recovery",
+    { trigger: "recovery", willRetry: true, source: "automatic_recovery" },
   );
   if (!compactionResult.ok) {
     const aborted = isCompactionCancellationError(compactionResult.errorMessage);
@@ -653,21 +683,21 @@ async function runRecoveryCompaction(
       });
       emitAgentSessionEvent(runOptions.onEvent, {
         type: "compaction_end",
-        reason: "overflow",
+        ...retryEventFields,
         result: undefined,
         aborted: false,
         willRetry: true,
-      });
+      } as unknown as AgentSessionEvent);
       return { ok: true };
     }
     emitAgentSessionEvent(runOptions.onEvent, {
       type: "compaction_end",
-      reason: "overflow",
+      ...buildPiclawCompactionEventFields(retryMetadata, { reason: "overflow", willRetry: false }),
       result: undefined,
       aborted,
       willRetry: false,
       errorMessage: aborted ? undefined : `Recovery compaction failed: ${compactionResult.errorMessage}`,
-    });
+    } as unknown as AgentSessionEvent);
     return { ok: false, errorMessage: compactionResult.errorMessage };
   }
   noteCompactionSuccess(session, chatJid, "recovery", {
@@ -677,7 +707,7 @@ async function runRecoveryCompaction(
   const contextReport = getCompactionContextReport(session, compactionResult.result as { tokensBefore?: unknown; estimatedTokensAfter?: unknown });
   emitAgentSessionEvent(runOptions.onEvent, {
     type: "compaction_end",
-    reason: "overflow",
+    ...retryEventFields,
     result: compactionResult.result,
     aborted: false,
     willRetry: true,

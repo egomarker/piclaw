@@ -33,6 +33,15 @@ import {
 
 const log = createLogger("agent-control.control");
 const DEFAULT_ABORT_SETTLE_TIMEOUT_MS = 1000;
+let killTrackedProcessesForRestart = killTrackedProcesses;
+
+export function setKillTrackedProcessesForRestartForTests(fn: typeof killTrackedProcesses): () => void {
+  const previous = killTrackedProcessesForRestart;
+  killTrackedProcessesForRestart = fn;
+  return () => {
+    killTrackedProcessesForRestart = previous;
+  };
+}
 
 type RestartCommand = Extract<AgentControlCommand, { type: "restart" }>;
 type ExitCommand = Extract<AgentControlCommand, { type: "exit" }>;
@@ -245,10 +254,14 @@ export async function handleRestart(session: AgentSession, _command: RestartComm
     });
   }
 
-  const killed = killTrackedProcesses();
+  let killed = 0;
 
   try {
-    await session.reload();
+    await session.reload({
+      beforeSessionStart: () => {
+        killed = killTrackedProcessesForRestart();
+      },
+    } as unknown as Parameters<typeof session.reload>[0]);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
@@ -310,6 +323,7 @@ export async function handleCompact(session: AgentSession, command: CompactComma
         },
         async () => await session.compact(command.instructions?.trim() || undefined),
         "manual",
+        { trigger: "manual", willRetry: false, source: "compact_command" },
       );
       clearExternalFailsafe?.();
       if (!compactionResult.ok) {

@@ -448,6 +448,7 @@ export async function rotateSession(
       { onWarn: (message, details) => log.warn(message, details) },
       async () => await session.compact(compactionInstructions),
       "rotation",
+      { trigger: "rotation", willRetry: false, source: "session_rotation" },
     );
     if (compactionResult.ok) {
       compacted = true;

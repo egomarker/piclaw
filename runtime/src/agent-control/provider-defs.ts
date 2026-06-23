@@ -60,7 +60,7 @@ const API_KEY_HINTS: Record<string, string> = {
   "xiaomi-token-plan-cn": "XIAOMI_TOKEN_PLAN_CN_API_KEY",
   "xiaomi-token-plan-ams": "XIAOMI_TOKEN_PLAN_AMS_API_KEY",
   "xiaomi-token-plan-sgp": "XIAOMI_TOKEN_PLAN_SGP_API_KEY",
-  zai: "...",
+  zai: "ZAI_API_KEY",
 };
 
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {

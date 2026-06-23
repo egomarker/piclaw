@@ -367,7 +367,23 @@ test("maybeAutoCompactSessionBeforePrompt subtracts overhead before threshold ch
     );
 
     expect(compactCalls).toBe(1);
-    expect(events).toContainEqual(expect.objectContaining({ type: "compaction_start", reason: "threshold" }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "compaction_start",
+      reason: "threshold",
+      trigger: "pre_prompt",
+      piclawReason: "pre_prompt",
+      willRetry: false,
+      source: "pre_prompt_auto_compaction",
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "compaction_end",
+      reason: "threshold",
+      trigger: "pre_prompt",
+      piclawReason: "pre_prompt",
+      willRetry: false,
+      aborted: false,
+      source: "pre_prompt_auto_compaction",
+    }));
     expect(events).toContainEqual(expect.objectContaining({
       type: "context_usage_update",
       source: "compaction",
@@ -380,6 +396,86 @@ test("maybeAutoCompactSessionBeforePrompt subtracts overhead before threshold ch
     else process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT = previousThreshold;
     if (previousOverhead === undefined) delete process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS;
     else process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS = previousOverhead;
+  }
+});
+
+test("maybeAutoCompactSessionBeforePrompt emits normalized failure compaction-end events", async () => {
+  const previousThreshold = process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT;
+  process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT = "75";
+  try {
+    const events: any[] = [];
+    const session = {
+      ...makeSession([{ role: "user", content: [{ type: "text", text: "x" }] }], 90_000),
+      model: { provider: "test", id: "failure-shape", contextWindow: 100_000 },
+      settingsManager: { getCompactionSettings: () => ({ enabled: true, reserveTokens: 25_000 }) },
+      isStreaming: false,
+      isCompacting: false,
+      isRetrying: false,
+      async compact() {
+        throw new Error("model failed");
+      },
+    };
+
+    await maybeAutoCompactSessionBeforePrompt(
+      session as any,
+      "web:failure-shape",
+      { onWarn: () => undefined, onInfo: () => undefined },
+      (event) => events.push(event),
+    );
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "compaction_end",
+      reason: "threshold",
+      trigger: "pre_prompt",
+      piclawReason: "pre_prompt",
+      willRetry: false,
+      aborted: false,
+      source: "pre_prompt_auto_compaction",
+      errorMessage: "Pre-prompt compaction failed: model failed",
+    }));
+  } finally {
+    if (previousThreshold === undefined) delete process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT;
+    else process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT = previousThreshold;
+  }
+});
+
+test("maybeAutoCompactSessionBeforePrompt emits normalized cancellation compaction-end events", async () => {
+  const previousThreshold = process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT;
+  process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT = "75";
+  try {
+    const events: any[] = [];
+    const session = {
+      ...makeSession([{ role: "user", content: [{ type: "text", text: "x" }] }], 90_000),
+      model: { provider: "test", id: "cancel-shape", contextWindow: 100_000 },
+      settingsManager: { getCompactionSettings: () => ({ enabled: true, reserveTokens: 25_000 }) },
+      isStreaming: false,
+      isCompacting: false,
+      isRetrying: false,
+      async compact() {
+        throw new Error("Compaction cancelled");
+      },
+    };
+
+    await maybeAutoCompactSessionBeforePrompt(
+      session as any,
+      "web:cancel-shape",
+      { onWarn: () => undefined, onInfo: () => undefined },
+      (event) => events.push(event),
+    );
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "compaction_end",
+      reason: "threshold",
+      trigger: "pre_prompt",
+      piclawReason: "pre_prompt",
+      willRetry: false,
+      aborted: true,
+      source: "pre_prompt_auto_compaction",
+      errorMessage: "Compaction cancelled",
+    }));
+  } finally {
+    if (previousThreshold === undefined) delete process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT;
+    else process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT = previousThreshold;
   }
 });
 

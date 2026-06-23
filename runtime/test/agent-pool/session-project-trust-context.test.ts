@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthStorage, ModelRegistry, SettingsManager, getAgentDir, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
@@ -10,9 +10,10 @@ describe("project trust extension context", () => {
   test("extension command contexts expose ctx.isProjectTrusted", async () => {
     const authStorage = AuthStorage.create();
     const modelRegistry = ModelRegistry.inMemory(authStorage);
-    const workspaceDir = "/workspace";
-    const settingsManager = SettingsManager.create(workspaceDir, getAgentDir());
     const tempRoot = mkdtempSync(join(tmpdir(), "piclaw-project-trust-context-"));
+    const workspaceDir = join(tempRoot, "workspace");
+    mkdirSync(workspaceDir, { recursive: true });
+    const settingsManager = SettingsManager.create(workspaceDir, getAgentDir());
     const sessionDir = join(tempRoot, "session");
     let observed: unknown;
 
@@ -35,6 +36,7 @@ describe("project trust extension context", () => {
         settingsManager,
         tools: [],
         extensionFactories: [extension],
+        cwd: workspaceDir,
       });
 
       await runtime.session.prompt("/project-trust-context-test");
