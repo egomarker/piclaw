@@ -100,7 +100,7 @@ type AgentSessionCreateOptions = {
  * Because bun may hoist dependencies, we create a node_modules symlink
  * next to the extensions directory pointing to the nearest real
  * node_modules so that jiti's fallback resolution finds packages like
- * @earendil-works/pi-ai/dist/providers/*.
+ * @earendil-works/pi-ai and its public API entrypoints.
  */
 const EXTENSIONS_DIR = resolve(process.env.PICLAW_RUNTIME_ROOT || resolve(__dirname, "../.."), "extensions");
 const log = createLogger("agent-pool.session");
