@@ -1,10 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-vi.mock("@earendil-works/pi-ai", () => ({
+vi.mock("@earendil-works/pi-ai/compat", () => ({
   completeSimple: vi.fn(),
 }));
 
-import { completeSimple } from "@earendil-works/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { captureUnindexedBatchesFromSession, groupBatchesByAgentMessage } from "../../src/extensions/context-prune/batch-capture.js";
 import { ToolCallIndexer } from "../../src/extensions/context-prune/indexer.js";
 import { CUSTOM_TYPE_INDEX, CUSTOM_TYPE_SUMMARY } from "../../src/extensions/context-prune/types.js";

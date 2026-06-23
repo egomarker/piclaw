@@ -3,13 +3,13 @@
  */
 
 import type { AgentSessionEvent, AgentSessionRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
+import type { streamSimple } from "@earendil-works/pi-ai/compat";
 import type {
   Api,
   AssistantMessageEvent,
   AssistantMessageEventStream,
   Model,
   Usage,
-  streamSimple,
 } from "@earendil-works/pi-ai";
 
 import type { AttachmentInfo } from "./attachments.js";

@@ -10,7 +10,7 @@
  * compaction summary calls through custom agent stream functions.
  */
 
-import { streamSimple } from "@earendil-works/pi-ai";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type { AssistantMessage, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { normalizeLlmContext } from "../../agent-pool/llm-context-normalizer.js";
 import { SMART_COMPACTION_PROGRESS_INTERVAL_MS } from "./config.js";

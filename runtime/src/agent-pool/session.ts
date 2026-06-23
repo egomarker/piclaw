@@ -42,7 +42,7 @@ import { bindImmediateToolActivation } from "./tool-activation-live-update.js";
 import { ensureExtensionNodeModulesLink } from "./session-node-modules-link.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
 import { installAddonRuntimeApi } from "../addons/runtime-contributions.js";
-import { streamSimple } from "@earendil-works/pi-ai";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type { CompactionStreamFn } from "../extensions/smart-compaction/stream-complete.js";
 import { normalizeLlmContext } from "./llm-context-normalizer.js";
 
