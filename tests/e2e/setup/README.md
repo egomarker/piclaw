@@ -21,10 +21,10 @@ OPENCODE_API_KEY=oc-your-key bun run setup/configure-test-instance.ts
 ```
 
 This will:
-- Write provider credentials to `~/.pi/agent/auth.json`
-- Configure the active model in `~/.pi/agent/models.json`
+- Write provider credentials to `~/.pi/agent/auth.json` using the current Pi credential shape (`type: "api_key"`, `key`, and provider `env`)
+- Configure the active model in `~/.pi/agent/models.json` with an explicit custom-provider `models` array
 - Validate API connectivity (model list)
-- Run a test completion against `hy3-preview-free`
+- Run a test completion against the configured `OPENCODE_MODEL`
 
 ### 2. Validate the full test environment
 
@@ -57,16 +57,19 @@ bun run test
 | `OPENCODE_MODEL` | No | `minimax-m2.5-free` | Model to use for tests |
 | `PICLAW_E2E_URL` | Yes (tests) | `http://localhost:3000` | PiClaw instance URL |
 | `PICLAW_INTERNAL_SECRET` | Yes (tests) | — | Instance internal secret for auth |
+| `PICLAW_PI_AGENT_DIR` | No | `~/.pi/agent` | Override where setup scripts write `auth.json`, `models.json`, and `settings.json` |
 
 ## Provider Options
 
-### Option A: OpenCode ZEN (no auth, anywhere)
+### Option A: OpenCode ZEN (no external API key, anywhere)
 
 ```bash
 bun run setup/configure-test-instance.ts
 ```
 
-- No API key required
+- No external API key required for free-tier models
+- Writes a placeholder `auth.json` credential so Pi's model registry marks the custom provider available
+- Defines `opencode-zen` in `models.json` with `baseUrl`, `api: "openai-completions"`, and a `models` array containing `OPENCODE_MODEL`
 - Works anywhere (local, CI, etc.)
 - Model: `minimax-m2.5-free` — fast, 38 tokens for hello
 - Free models return both `reasoning` and `content` fields
@@ -81,7 +84,8 @@ bun run setup/configure-github-models.ts
 GITHUB_TOKEN=ghp_... bun run setup/configure-github-models.ts
 ```
 
-- Uses `$GITHUB_TOKEN` (auto-injected in Actions runners)
+- Uses `$GITHUB_TOKEN` (auto-injected in Actions runners) stored in `auth.json`
+- Defines `github-models` in `models.json` with `authHeader: true`; request auth comes from `auth.json`, not a duplicate literal token in `models.json`
 - Model: `gpt-4o-mini` — fast, predictable, 19 tokens for hello
 - **Preferred for CI** — reliable, no external dependency
 - Requires `permissions: { models: read }` in workflow
@@ -115,7 +119,7 @@ steps:
       PICLAW_INTERNAL_SECRET: ${{ secrets.PICLAW_INTERNAL_SECRET }}
 ```
 
-Or using OpenCode (no secrets at all):
+Or using OpenCode (no external secrets at all):
 
 ```yaml
 steps:

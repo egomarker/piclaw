@@ -50,8 +50,9 @@ The hamburger menu button uses `position: fixed` and appears:
 - Green left border for configured providers; auth type badge (oauth/api_key)
 - Capability badges: OAuth, API Key, Custom
 - **Set up** button triggers `/login <provider>` card flow in chat
+- Custom provider setup writes explicit `models` entries to `~/.pi/agent/models.json`; request auth comes from `auth.json` or configured `models.json` request fields
 - **Logout** / **Reconfigure** for configured providers
-- Supported: Anthropic, GitHub Copilot, Google Gemini CLI, Antigravity, OpenAI Codex, OpenAI, OpenCode, Azure OpenAI, Ollama, OpenAI-compatible
+- Supported: Anthropic, GitHub Copilot, OpenAI Codex, OpenAI, OpenCode, Azure OpenAI, Ollama, OpenAI-compatible
 
 ### Models (order 30)
 - Searchable model table (filter in title bar) with radio buttons

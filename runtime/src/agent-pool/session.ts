@@ -640,7 +640,7 @@ function createCompactionStreamFn(modelRegistry: ModelRegistry, settingsManager:
   return async (model, context, options) => {
     const auth = await modelRegistry.getApiKeyAndHeaders(model);
     if (!auth.ok) {
-      throw new Error(auth.error);
+      throw new Error(auth.error ?? `No credentials available for ${model.provider}/${model.id}.`);
     }
     const providerRetrySettings = settingsManager.getProviderRetrySettings();
     return streamSimple(model, normalizeLlmContext(context), {
@@ -651,6 +651,9 @@ function createCompactionStreamFn(modelRegistry: ModelRegistry, settingsManager:
       maxRetryDelayMs: options?.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
       headers: auth.headers || options?.headers
         ? { ...auth.headers, ...options?.headers }
+        : undefined,
+      env: auth.env || options?.env
+        ? { ...auth.env, ...options?.env }
         : undefined,
     });
   };

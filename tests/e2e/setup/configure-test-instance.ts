@@ -13,7 +13,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { homedir } from "node:os";
 
 // --- Configuration ---
@@ -75,7 +75,18 @@ if (existsSync(modelsPath)) {
 if (!modelsData.providers) modelsData.providers = {};
 modelsData.providers[OPENCODE_PROVIDER_ID] = {
   baseUrl: OPENCODE_BASE_URL,
-  modelId: OPENCODE_MODEL,
+  api: "openai-completions",
+  models: [
+    {
+      id: OPENCODE_MODEL,
+      name: `OpenCode ZEN ${OPENCODE_MODEL}`,
+      input: ["text"],
+      reasoning: true,
+      contextWindow: 128000,
+      maxTokens: 4096,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    },
+  ],
 };
 modelsData.activeModel = `${OPENCODE_PROVIDER_ID}/${OPENCODE_MODEL}`;
 
