@@ -128,6 +128,9 @@ test("parseControlCommand parses model and thinking commands", () => {
   const stateCmd = parseControlCommand("/state");
   expect(stateCmd?.type).toBe("state");
 
+  const quotaCmd = parseControlCommand("/quota");
+  expect(quotaCmd?.type).toBe("quota");
+
   const autoCompactCmd = parseControlCommand("/auto-compact on");
   expect(autoCompactCmd?.type).toBe("auto_compact");
   expect(autoCompactCmd && "enabled" in autoCompactCmd ? autoCompactCmd.enabled : null).toBe(true);

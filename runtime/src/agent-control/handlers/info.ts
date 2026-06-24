@@ -1,8 +1,9 @@
 /**
  * agent-control/handlers/info.ts – Handlers for informational / read-only commands.
  *
- * Handles /commands, /state, /stats, /context, /last, /search-workspace,
- * /labels, and /label. These commands display session state, token usage,
+ * Handles /commands, /state, /stats, /context, /quota, /last,
+ * /search-workspace, /labels, and /label. These commands display session
+ * state, token usage,
  * and search results without modifying the session.
  *
  * Consumers: agent-control-handlers.ts dispatches to these handlers.
@@ -18,6 +19,7 @@ import { getChatJid } from "../../core/chat-context.js";
 import { getSessionStorageConfig } from "../../core/config.js";
 import { getSessionFileLineCount } from "../../session-rotation.js";
 import { getAutoCompactionTokenStatusForSession } from "../../agent-pool/compaction.js";
+import { peekProviderUsage } from "../../agent-pool/provider-usage.js";
 import { getTokenUsageByModel, getTokenUsageByProvider, getTokenUsageTotals } from "../../db.js";
 import { createLogger, debugSuppressedError } from "../../utils/logger.js";
 import { searchWorkspace } from "../../workspace-search.js";
@@ -27,6 +29,7 @@ const log = createLogger("agent-control.info");
 type StateCommand = Extract<AgentControlCommand, { type: "state" }>;
 type StatsCommand = Extract<AgentControlCommand, { type: "stats" }>;
 type ContextCommand = Extract<AgentControlCommand, { type: "context" }>;
+type QuotaCommand = Extract<AgentControlCommand, { type: "quota" }>;
 type LastCommand = Extract<AgentControlCommand, { type: "last" }>;
 type CommandsCommand = Extract<AgentControlCommand, { type: "commands" }>;
 type SearchCommand = Extract<AgentControlCommand, { type: "search_workspace" }>;
@@ -237,6 +240,29 @@ export async function handleContext(session: AgentSession, _command: ContextComm
   return {
     status: "success",
     message: lines.join("\n"),
+  };
+}
+
+/** Handle /quota: dump the cached provider usage snapshot for the current model (no live refetch). */
+export async function handleQuota(session: AgentSession, _command: QuotaCommand): Promise<AgentControlResult> {
+  const provider = session.model?.provider ?? null;
+  const modelLabel = session.model ? `${session.model.provider}/${session.model.id}` : "<none>";
+  const snapshot = provider ? peekProviderUsage(provider, { allowStale: true }) : null;
+  if (!snapshot) {
+    return { status: "success", message: `${modelLabel}\nNo quota data available.` };
+  }
+
+  const parts = [
+    snapshot.plan ? `Plan: ${snapshot.plan}` : null,
+    snapshot.hint_short?.trim() || null,
+    snapshot.primary?.reset_description || null,
+    snapshot.secondary?.reset_description || null,
+  ].filter((part): part is string => Boolean(part));
+  const quotaLine = parts.length > 0 ? parts.join(" • ") : "No quota data available.";
+
+  return {
+    status: "success",
+    message: `${modelLabel}\n${quotaLine}`,
   };
 }
 

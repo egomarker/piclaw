@@ -519,6 +519,7 @@ export const COMMAND_PARSERS: Record<string, CommandParser> = {
   "/state": simple("state"),
   "/stats": simple("stats"),
   "/context": simple("context"),
+  "/quota": simple("quota"),
   "/last": simple("last"),
   "/compact": parseCompact,
   "/auto-compact": parseAutoCompact,
