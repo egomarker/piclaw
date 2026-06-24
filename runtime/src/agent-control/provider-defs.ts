@@ -176,8 +176,8 @@ export const PROVIDER_DEFS: ProviderDef[] = [
     authNote: EXTERNAL_AUTH_NOTES["google-vertex"],
   },
   customProvider("opencode-zen", "OpenCode ZEN", "openai-completions", [
-    { key: "baseUrl", label: "Base URL", placeholder: "https://opencode.ai/zen", required: true },
-    { key: "apiKey", label: "ZEN API Key", placeholder: "oc-...", required: true },
+    { key: "baseUrl", label: "Base URL", placeholder: "https://opencode.ai/zen/v1", required: true },
+    { key: "apiKey", label: "ZEN API Key", placeholder: "optional for free-tier models", required: false },
     { key: "modelId", label: "Model ID", placeholder: "big-pickle", required: true },
     { key: "modelIds", label: "Additional models (comma-separated)", placeholder: "gpt-5.4,glm-5,kimi-k2", required: false },
   ]),

@@ -44,9 +44,11 @@ if (existsSync(authPath)) {
 }
 
 authData[PROVIDER_ID] = {
-  type: "api-key",
-  apiKey: GITHUB_TOKEN,
-  baseUrl: GITHUB_MODELS_BASE_URL,
+  type: "api_key",
+  key: GITHUB_TOKEN,
+  env: {
+    GITHUB_MODELS_BASE_URL,
+  },
 };
 
 writeFileSync(authPath, JSON.stringify(authData, null, 2));
@@ -64,7 +66,6 @@ if (!modelsData.providers) modelsData.providers = {};
 modelsData.providers[PROVIDER_ID] = {
   baseUrl: GITHUB_MODELS_BASE_URL,
   api: "openai-completions",
-  apiKey: "GITHUB_TOKEN",
   authHeader: true,
   compat: {
     supportsDeveloperRole: false,

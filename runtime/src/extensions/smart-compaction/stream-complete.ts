@@ -10,7 +10,7 @@
  * compaction summary calls through custom agent stream functions.
  */
 
-import { streamSimple } from "@earendil-works/pi-ai";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type { AssistantMessage, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { normalizeLlmContext } from "../../agent-pool/llm-context-normalizer.js";
 import { SMART_COMPACTION_PROGRESS_INTERVAL_MS } from "./config.js";
@@ -39,6 +39,7 @@ export interface StreamCompleteOptions {
   signal: AbortSignal;
   apiKey?: string;
   headers?: Record<string, string>;
+  env?: SimpleStreamOptions["env"];
   reasoning?: "minimal" | "low" | "medium" | "high";
   /** Custom stream function for proxy-routed providers. Falls back to streamSimple. */
   streamFn?: CompactionStreamFn;
@@ -56,7 +57,7 @@ export interface StreamCompleteOptions {
 export async function streamComplete(opts: StreamCompleteOptions): Promise<AssistantMessage> {
   const {
     model, systemPrompt, userPrompt, maxTokens, signal,
-    apiKey, headers, reasoning, streamFn, onProgress,
+    apiKey, headers, env, reasoning, streamFn, onProgress,
     progressIntervalMs = SMART_COMPACTION_PROGRESS_INTERVAL_MS,
   } = opts;
 
@@ -66,8 +67,8 @@ export async function streamComplete(opts: StreamCompleteOptions): Promise<Assis
   };
 
   const streamOptions: SimpleStreamOptions = reasoning
-    ? { maxTokens, signal, apiKey, headers, reasoning }
-    : { maxTokens, signal, apiKey, headers };
+    ? { maxTokens, signal, apiKey, headers, env, reasoning }
+    : { maxTokens, signal, apiKey, headers, env };
 
   const normalizedContext = normalizeLlmContext(context);
 

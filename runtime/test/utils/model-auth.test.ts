@@ -4,20 +4,26 @@ import { resolveModelRequestAuth } from "../../src/utils/model-auth.js";
 describe("model auth helper", () => {
   const model = { provider: "openai", id: "gpt-test" } as any;
 
-  test("prefers getApiKeyAndHeaders compat path when available", async () => {
+  test("uses getApiKeyAndHeaders request auth when available", async () => {
     const auth = await resolveModelRequestAuth({
       getApiKeyAndHeaders: async () => ({
         ok: true,
         apiKey: "header-key",
+        headers: { "X-Test": "1" },
+        env: { TEST_BASE_URL: "https://example.test" },
       }),
       getApiKey: async () => "legacy-key",
     } as any, model);
 
-    // Should use getApiKeyAndHeaders and return apiKey (headers no longer forwarded)
-    expect(auth).toEqual({ ok: true, apiKey: "header-key" });
+    expect(auth).toEqual({
+      ok: true,
+      apiKey: "header-key",
+      headers: { "X-Test": "1" },
+      env: { TEST_BASE_URL: "https://example.test" },
+    });
   });
 
-  test("uses getApiKey for current upstream surface (0.67.6+)", async () => {
+  test("uses getApiKey only as a legacy fallback", async () => {
     const auth = await resolveModelRequestAuth({
       getApiKey: async () => "direct-key",
     } as any, model);

@@ -7,7 +7,6 @@ const ENTRY_EXTENSIONS_DIR = "extensions";
 const SRC_EXTENSIONS_DIR = "src/extensions";
 
 const ALLOWED_ENTRY_SRC_IMPORT_PREFIX = "../src/extensions/";
-const ALLOWED_DIST_IMPORTERS = new Set(["src/extensions/azure-openai-api.ts"]);
 
 function walkFiles(baseDir: string, suffix: string): string[] {
   if (!existsSync(baseDir)) return [];
@@ -69,8 +68,6 @@ export function findImportBoundaryViolations(projectDir: string): string[] {
 
   for (const file of srcBridgeFiles) {
     const rel = relative(projectDir, file);
-    if (ALLOWED_DIST_IMPORTERS.has(rel)) continue;
-
     const specifiers = extractModuleSpecifiers(readFileSync(file, "utf8"));
     for (const specifier of specifiers) {
       if (specifier.startsWith("@earendil-works/pi-ai/dist/")) {

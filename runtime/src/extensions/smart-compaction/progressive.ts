@@ -361,7 +361,7 @@ function hasSafeCompactionOutputRoom(model: any, promptText: string, maxTokens: 
 
 async function completeCompactionPrompt(
   model: any,
-  auth: { apiKey?: string; headers?: Record<string, string> },
+  auth: { apiKey?: string; headers?: Record<string, string>; env?: Record<string, string> },
   promptText: string,
   maxTokens: number,
   abortSignal: AbortSignal,
@@ -380,6 +380,7 @@ async function completeCompactionPrompt(
       signal: abortSignal,
       apiKey: auth.apiKey,
       headers: auth.headers,
+      env: auth.env,
       reasoning: (model as any).reasoning ? reasoning ?? getCompactionReasoningEffort(model, "selective") : undefined,
       streamFn,
       onProgress,
@@ -432,7 +433,7 @@ function countMergeBatches(summaries: string[], mergeBudgetChars: number): numbe
 async function mergeProgressiveSummaries(input: {
   summaries: string[];
   model: any;
-  auth: { apiKey?: string; headers?: Record<string, string> };
+  auth: { apiKey?: string; headers?: Record<string, string>; env?: Record<string, string> };
   budget: ProgressiveCompactionBudget;
   maxTokens: number;
   abortSignal: AbortSignal;
@@ -598,7 +599,7 @@ export async function runProgressiveCompaction(input: {
   humanUserIndexes: Set<number>;
   sourceIndexesByLlmIndex?: number[];
   model: any;
-  auth: { apiKey?: string; headers?: Record<string, string> };
+  auth: { apiKey?: string; headers?: Record<string, string>; env?: Record<string, string> };
   settings: { reserveTokens: number };
   previousSummary?: string;
   keptMessagesSummary?: string;

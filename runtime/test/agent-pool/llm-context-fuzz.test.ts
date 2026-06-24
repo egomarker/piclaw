@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { convertToLlm } from "@earendil-works/pi-coding-agent";
-import { convertMessages } from "@earendil-works/pi-ai/openai-completions";
+import { convertMessages } from "@earendil-works/pi-ai/api/openai-completions";
 import type { Model } from "@earendil-works/pi-ai";
 
 import { normalizeAgentMessages, normalizeLlmContext } from "../../src/agent-pool/llm-context-normalizer.js";

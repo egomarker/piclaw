@@ -7,7 +7,7 @@
  */
 
 import type { AgentSession, AgentSessionRuntime, ExtensionFactory, ModelRegistry, SettingsManager, AuthStorage } from "@earendil-works/pi-coding-agent";
-import { closeOpenAICodexWebSocketSessions } from "@earendil-works/pi-ai/openai-codex-responses";
+import { closeOpenAICodexWebSocketSessions } from "@earendil-works/pi-ai/api/openai-codex-responses";
 
 import {
   claimDeferredBranchSeed,

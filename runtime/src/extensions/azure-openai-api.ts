@@ -5,18 +5,13 @@
  * does not depend directly on fragile deep implementation paths.
  */
 
-import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const OPENAI_RESPONSES_SHARED_RELATIVE_PATH = join(
-  "@earendil-works",
-  "pi-ai",
-  "dist",
-  "providers",
-  "openai-responses-shared.js",
-);
+import type { Api, AssistantMessage, AssistantMessageEventStream, Model } from "@earendil-works/pi-ai";
+import {
+  convertResponsesMessages,
+  convertResponsesTools,
+  processResponsesStream as upstreamProcessResponsesStream,
+  type OpenAIResponsesStreamOptions,
+} from "@earendil-works/pi-ai/api/openai-responses-shared";
 
 type AsyncIterableLike<T> = AsyncIterable<T> | Iterable<T>;
 
@@ -40,29 +35,6 @@ type ResponseEventRecord = {
   delta?: string;
   text?: string;
 };
-
-export function resolvePiAiResponsesSharedModulePath(startDir: string = __dirname): string {
-  // Walk up from startDir looking for node_modules containing the target module.
-  let dir = startDir;
-  for (let i = 0; i < 10; i += 1) {
-    const candidate = join(dir, "node_modules", OPENAI_RESPONSES_SHARED_RELATIVE_PATH);
-    if (existsSync(candidate)) return candidate;
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  // Fallback: when running from a bundle output dir (e.g. /workspace/tmp), the
-  // walk-up may miss the project's node_modules. Check the global install path.
-  const globalCandidate = join("/usr/local/lib/bun/install/global", "node_modules", OPENAI_RESPONSES_SHARED_RELATIVE_PATH);
-  if (existsSync(globalCandidate)) return globalCandidate;
-  throw new Error(`Unable to resolve ${OPENAI_RESPONSES_SHARED_RELATIVE_PATH} from ${startDir}`);
-}
-
-const {
-  convertResponsesMessages,
-  convertResponsesTools,
-  processResponsesStream: upstreamProcessResponsesStream,
-} = await import(pathToFileURL(resolvePiAiResponsesSharedModulePath()).href);
 
 function cloneEvent<T>(event: T): T {
   return JSON.parse(JSON.stringify(event));
@@ -222,9 +194,14 @@ export { convertResponsesMessages, convertResponsesTools };
  * flavor. Adapt the other provider-native forms to the existing summary events so
  * the UI consistently receives `thinking_*` updates instead of Draft pollution.
  */
-export async function processResponsesStream(...args: any[]): Promise<void> {
-  const [openaiStream, ...rest] = args;
-  await upstreamProcessResponsesStream(adaptAzureReasoningEvents(openaiStream), ...rest);
+export async function processResponsesStream<TApi extends Api>(
+  openaiStream: AsyncIterableLike<any>,
+  output: AssistantMessage,
+  stream: AssistantMessageEventStream,
+  model: Model<TApi>,
+  options?: OpenAIResponsesStreamOptions,
+): Promise<void> {
+  await upstreamProcessResponsesStream(adaptAzureReasoningEvents(openaiStream) as any, output, stream, model, options);
 }
 
 /** Input contract accepted by buildBaseOptions(). */

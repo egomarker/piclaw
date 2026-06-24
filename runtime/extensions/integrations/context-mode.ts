@@ -8,7 +8,8 @@
  * Activated unconditionally (no env-var gate).
  */
 import { createHash } from "node:crypto";
-import { completeSimple, type Message } from "@earendil-works/pi-ai";
+import type { Message } from "@earendil-works/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai/compat";
 
 import {
   buildPreview,

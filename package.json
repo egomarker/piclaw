@@ -1,6 +1,6 @@
 {
   "name": "piclaw",
-  "version": "2.6.15",
+  "version": "2.7.1",
   "description": "Personal pi coding agent assistant. Lightweight nanoclaw-style orchestrator using Bun and pi.",
   "type": "module",
   "license": "MIT",
@@ -111,9 +111,9 @@
   },
   "dependencies": {
     "@e965/xlsx": "0.20.3",
-    "@earendil-works/pi-agent-core": "0.79.10",
-    "@earendil-works/pi-ai": "0.79.10",
-    "@earendil-works/pi-coding-agent": "0.79.10",
+    "@earendil-works/pi-agent-core": "0.80.2",
+    "@earendil-works/pi-ai": "0.80.2",
+    "@earendil-works/pi-coding-agent": "0.80.2",
     "@fontsource-variable/inter": "5.2.8",
     "@lezer/highlight": "1.2.3",
     "@simplewebauthn/server": "13.3.1",

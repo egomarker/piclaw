@@ -27,7 +27,7 @@ import {
   processResponsesStream,
   resolveCacheSessionId,
 } from "../../src/extensions/azure-openai-api.js";
-import { streamSimpleOpenAICompletions } from "@earendil-works/pi-ai";
+import { streamSimple as streamSimpleOpenAICompletions } from "@earendil-works/pi-ai/api/openai-completions";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 

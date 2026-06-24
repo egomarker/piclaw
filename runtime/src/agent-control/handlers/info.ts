@@ -9,7 +9,7 @@
  */
 
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import { getOpenAICodexWebSocketDebugStats } from "@earendil-works/pi-ai/openai-codex-responses";
+import { getOpenAICodexWebSocketDebugStats } from "@earendil-works/pi-ai/api/openai-codex-responses";
 import { statSync } from "fs";
 import type { AgentControlCommand, AgentControlResult } from "../agent-control-types.js";
 import { formatBytes, formatCompactNumber, formatCurrency } from "../agent-control-helpers.js";

@@ -1,27 +1,20 @@
 import { expect, test } from "bun:test";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-
 import {
   applySessionCorrelationHeaders,
   buildBaseOptions,
   processResponsesStream,
   resolveCacheRetention,
   resolveCacheSessionId,
-  resolvePiAiResponsesSharedModulePath,
 } from "../../src/extensions/azure-openai-api.js";
 
-test("resolvePiAiResponsesSharedModulePath finds the bundled pi-ai helper", () => {
-  const resolved = resolvePiAiResponsesSharedModulePath();
-  expect(resolved.endsWith(join("@earendil-works", "pi-ai", "dist", "providers", "openai-responses-shared.js"))).toBe(true);
-});
-
-test("resolvePiAiResponsesSharedModulePath walks up to a parent node_modules", () => {
-  const startDir = join(process.cwd(), "runtime", "src", "extensions", "nested", "deeper");
-  const resolved = resolvePiAiResponsesSharedModulePath(startDir);
-  expect(existsSync(resolved)).toBe(true);
-  expect(resolved.endsWith(join("@earendil-works", "pi-ai", "dist", "providers", "openai-responses-shared.js"))).toBe(true);
-});
+function responsesModel() {
+  return {
+    id: "gpt-5-4",
+    provider: "azure-openai",
+    api: "responses",
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  };
+}
 
 test("processResponsesStream maps reasoning_text events into thinking events", async () => {
   async function* events() {
@@ -65,12 +58,21 @@ test("processResponsesStream maps reasoning_text events into thinking events", a
         content: [{ type: "reasoning_text", text: "plan" }],
       },
     };
+    yield {
+      type: "response.completed",
+      sequence_number: 6,
+      response: {
+        id: "resp_reasoning",
+        status: "completed",
+        usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, input_tokens_details: { cached_tokens: 0 } },
+      },
+    };
   }
 
   const output: any = { content: [] };
   const pushed: any[] = [];
   const stream = { push: (event: any) => pushed.push(event) };
-  const model: any = { id: "gpt-5-4", provider: "azure-openai", api: "responses" };
+  const model: any = responsesModel();
 
   await processResponsesStream(events(), output, stream, model);
 
@@ -249,12 +251,21 @@ test("processResponsesStream reroutes commentary-phase output_text into thinking
         content: [{ type: "output_text", text: "thinking aloud", annotations: [] }],
       },
     };
+    yield {
+      type: "response.completed",
+      sequence_number: 6,
+      response: {
+        id: "resp_commentary",
+        status: "completed",
+        usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, input_tokens_details: { cached_tokens: 0 } },
+      },
+    };
   }
 
   const output: any = { content: [] };
   const pushed: any[] = [];
   const stream = { push: (event: any) => pushed.push(event) };
-  const model: any = { id: "gpt-5-4", provider: "azure-openai", api: "responses" };
+  const model: any = responsesModel();
 
   await processResponsesStream(events(), output, stream, model);
 

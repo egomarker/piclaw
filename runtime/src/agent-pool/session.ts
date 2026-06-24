@@ -42,7 +42,7 @@ import { bindImmediateToolActivation } from "./tool-activation-live-update.js";
 import { ensureExtensionNodeModulesLink } from "./session-node-modules-link.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
 import { installAddonRuntimeApi } from "../addons/runtime-contributions.js";
-import { streamSimple } from "@earendil-works/pi-ai";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type { CompactionStreamFn } from "../extensions/smart-compaction/stream-complete.js";
 import { normalizeLlmContext } from "./llm-context-normalizer.js";
 
@@ -100,7 +100,7 @@ type AgentSessionCreateOptions = {
  * Because bun may hoist dependencies, we create a node_modules symlink
  * next to the extensions directory pointing to the nearest real
  * node_modules so that jiti's fallback resolution finds packages like
- * @earendil-works/pi-ai/dist/providers/*.
+ * @earendil-works/pi-ai and its public API entrypoints.
  */
 const EXTENSIONS_DIR = resolve(process.env.PICLAW_RUNTIME_ROOT || resolve(__dirname, "../.."), "extensions");
 const log = createLogger("agent-pool.session");
@@ -640,7 +640,7 @@ function createCompactionStreamFn(modelRegistry: ModelRegistry, settingsManager:
   return async (model, context, options) => {
     const auth = await modelRegistry.getApiKeyAndHeaders(model);
     if (!auth.ok) {
-      throw new Error(auth.error);
+      throw new Error(auth.error ?? `No credentials available for ${model.provider}/${model.id}.`);
     }
     const providerRetrySettings = settingsManager.getProviderRetrySettings();
     return streamSimple(model, normalizeLlmContext(context), {
@@ -651,6 +651,9 @@ function createCompactionStreamFn(modelRegistry: ModelRegistry, settingsManager:
       maxRetryDelayMs: options?.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
       headers: auth.headers || options?.headers
         ? { ...auth.headers, ...options?.headers }
+        : undefined,
+      env: auth.env || options?.env
+        ? { ...auth.env, ...options?.env }
         : undefined,
     });
   };

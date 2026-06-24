@@ -79,8 +79,8 @@ function toolCallChunk(): unknown {
 }
 
 async function runOpenAICompletionsStream(messages: AssistantMessage[] = []): Promise<AssistantMessage> {
-  const { streamOpenAICompletions } = await import("@earendil-works/pi-ai/openai-completions");
-  return await streamOpenAICompletions(model(), { messages, tools: [readTool] }, { apiKey: "test" }).result();
+  const { stream } = await import("@earendil-works/pi-ai/api/openai-completions");
+  return await stream(model(), { messages, tools: [readTool] }, { apiKey: "test" }).result();
 }
 
 function getAssistantPayload(payload: unknown): { reasoning_details?: unknown } | undefined {

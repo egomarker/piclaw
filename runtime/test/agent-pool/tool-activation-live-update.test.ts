@@ -5,10 +5,40 @@ import { join } from "node:path";
 import { Type } from "typebox";
 import { Agent } from "@earendil-works/pi-agent-core";
 import { AuthStorage, ModelRegistry, SettingsManager, getAgentDir, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
-import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ToolCall } from "@earendil-works/pi-ai";
+import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import "../helpers.js";
 import { createSessionInDir } from "../../src/agent-pool/session.ts";
 import { applyActiveToolsImmediately, bindImmediateToolActivation } from "../../src/agent-pool/tool-activation-live-update.js";
+
+function fauxToolCall(name: string, args: Record<string, unknown>): ToolCall {
+  return {
+    type: "toolCall",
+    id: `call_${name}`,
+    name,
+    arguments: args,
+  };
+}
+
+function fauxAssistantMessage(content: string | ToolCall): AssistantMessage {
+  return {
+    role: "assistant",
+    content: typeof content === "string" ? [{ type: "text", text: content }] : [content],
+    api: "faux",
+    provider: "faux",
+    model: "faux",
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: typeof content === "string" ? "stop" : "toolUse",
+    timestamp: Date.now(),
+  };
+}
 
 const customExtension: ExtensionFactory = (pi) => {
   pi.registerTool({

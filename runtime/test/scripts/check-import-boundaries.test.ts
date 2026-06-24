@@ -26,7 +26,7 @@ describe("check-import-boundaries", () => {
       writeFileSync(join(dir, "extensions", "bad3.ts"), "import x from '../src/db/messages.js';\n");
       writeFileSync(
         join(dir, "src", "extensions", "helper.ts"),
-        "import x from '@earendil-works/pi-ai/dist/providers/openai-responses-shared.js';\n"
+        "import x from '@earendil-works/pi-ai/dist/api/openai-responses-shared.js';\n"
       );
 
       const violations = findImportBoundaryViolations(dir);
@@ -49,7 +49,7 @@ describe("check-import-boundaries", () => {
       writeFileSync(join(dir, "extensions", "ok.ts"), "import x from '../src/extensions/azure-openai-api.js';\n");
       writeFileSync(
         join(dir, "src", "extensions", "azure-openai-api.ts"),
-        "import x from '@earendil-works/pi-ai/dist/providers/openai-responses-shared.js';\n"
+        "import x from '@earendil-works/pi-ai/api/openai-responses-shared';\n"
       );
 
       expect(findImportBoundaryViolations(dir)).toEqual([]);

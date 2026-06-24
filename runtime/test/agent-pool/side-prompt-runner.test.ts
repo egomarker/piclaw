@@ -15,7 +15,7 @@ test("runSidePrompt returns an error when no model is active", async () => {
 });
 
 test("runSidePrompt handles streamSimple side prompts", async () => {
-  const seen: Array<{ prompt: string; reasoning: unknown }> = [];
+  const seen: Array<{ prompt: string; reasoning: unknown; headers: unknown; env: unknown }> = [];
   const session = {
     model: { provider: "openai", id: "gpt-test", reasoning: true },
     thinkingLevel: "high",
@@ -26,12 +26,14 @@ test("runSidePrompt handles streamSimple side prompts", async () => {
     getOrCreateSideRuntime: async () => ({ session: {} }) as any,
     syncSideSessionFromMain: async () => {},
     modelRegistry: {
-      getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "key" }),
+      getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "key", headers: { "X-Test": "1" }, env: { TEST_BASE_URL: "https://example.test" } }),
     },
     sideStreamSimple: (_model, context, options) => {
       seen.push({
         prompt: String((context.messages[0] as any).content[0].text),
         reasoning: options?.reasoning,
+        headers: options?.headers,
+        env: options?.env,
       });
       return (async function* () {
         yield { type: "thinking_delta", delta: "plan" } as any;
@@ -53,5 +55,10 @@ test("runSidePrompt handles streamSimple side prompts", async () => {
   expect(result.result).toBe("answer");
   expect(result.thinking).toBe("plan");
   expect(result.model).toBe("openai/gpt-test");
-  expect(seen).toEqual([{ prompt: "hello", reasoning: "high" }]);
+  expect(seen).toEqual([{
+    prompt: "hello",
+    reasoning: "high",
+    headers: { "X-Test": "1" },
+    env: { TEST_BASE_URL: "https://example.test" },
+  }]);
 });
