@@ -233,7 +233,7 @@ The extension:
 
 ### Required Azure OpenAI settings
 
-- `AOAI_BASE_URL`
+- `AOAI_BASE_URL` — accepts Azure OpenAI/Cognitive Services/modern Foundry host roots such as `https://name.openai.azure.com`, `https://name.cognitiveservices.azure.com`, or `https://name.services.ai.azure.com`, plus `/openai` and `/openai/v1` forms. Azure host roots are normalized to `/openai/v1` before the OpenAI SDK appends `/responses`.
 - `AOAI_MODEL_ID` or `AOAI_MODEL_IDS`
 
 ### Optional Azure OpenAI settings
@@ -262,7 +262,7 @@ The extension:
 
 ### Foundry settings
 
-- `FOUNDRY_BASE_URL`
+- `FOUNDRY_BASE_URL` — for OpenAI-compatible text models, accepts the same Azure host root and `/openai/v1` forms as `AOAI_BASE_URL`; non-Azure proxy paths are preserved.
 - `FOUNDRY_MODEL_IDS`
 - `FOUNDRY_MODEL_NAMES`
 - `FOUNDRY_IMAGE_MODEL_ID`

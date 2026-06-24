@@ -14,6 +14,7 @@ import {
   getAzureMaxEstimatedInputTokens,
   getAzureResponsesReasoningConfig,
   getAzureResponsesTextConfig,
+  normalizeAzureOpenAIBaseUrl,
 } from "../../extensions/integrations/azure-openai.ts";
 
 describe("Slice 1: Responses-only routing", () => {
@@ -117,6 +118,46 @@ describe("Slice 3: Foundry compat flags", () => {
       // Azure OpenAI models should not have Foundry-specific compat
       expect(model.compat).toBeUndefined();
     }
+  });
+});
+
+describe("Azure OpenAI base URL normalization", () => {
+  test("normalizes Cognitive Services root endpoints to /openai/v1", () => {
+    expect(normalizeAzureOpenAIBaseUrl("https://demo.cognitiveservices.azure.com"))
+      .toBe("https://demo.cognitiveservices.azure.com/openai/v1");
+  });
+
+  test("normalizes modern Microsoft Foundry root endpoints to /openai/v1", () => {
+    expect(normalizeAzureOpenAIBaseUrl("https://demo.services.ai.azure.com"))
+      .toBe("https://demo.services.ai.azure.com/openai/v1");
+  });
+
+  test("normalizes Azure OpenAI root endpoints to /openai/v1", () => {
+    expect(normalizeAzureOpenAIBaseUrl("https://demo.openai.azure.com"))
+      .toBe("https://demo.openai.azure.com/openai/v1");
+  });
+
+  test("normalizes /openai and /openai/v1/responses Azure paths", () => {
+    expect(normalizeAzureOpenAIBaseUrl("https://demo.openai.azure.com/openai"))
+      .toBe("https://demo.openai.azure.com/openai/v1");
+    expect(normalizeAzureOpenAIBaseUrl("https://demo.services.ai.azure.com/openai/v1/responses"))
+      .toBe("https://demo.services.ai.azure.com/openai/v1");
+  });
+
+  test("strips query params only when normalizing Azure host paths", () => {
+    expect(normalizeAzureOpenAIBaseUrl("https://demo.openai.azure.com/openai?api-version=2024-12-01"))
+      .toBe("https://demo.openai.azure.com/openai/v1");
+    expect(normalizeAzureOpenAIBaseUrl("https://proxy.example/v1?custom=true"))
+      .toBe("https://proxy.example/v1?custom=true");
+  });
+
+  test("preserves explicit non-Azure proxy paths", () => {
+    expect(normalizeAzureOpenAIBaseUrl("https://proxy.example/foundry/v1"))
+      .toBe("https://proxy.example/foundry/v1");
+  });
+
+  test("throws on invalid URLs", () => {
+    expect(() => normalizeAzureOpenAIBaseUrl("not-a-url")).toThrow("Invalid Azure OpenAI base URL");
   });
 });
 

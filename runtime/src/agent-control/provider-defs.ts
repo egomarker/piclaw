@@ -182,7 +182,7 @@ export const PROVIDER_DEFS: ProviderDef[] = [
     { key: "modelIds", label: "Additional models (comma-separated)", placeholder: "gpt-5.4,glm-5,kimi-k2", required: false },
   ]),
   customProvider("azure-openai", "Azure OpenAI", "openai-responses", [
-    { key: "baseUrl", label: "Base URL", placeholder: "https://myresource.openai.azure.com/openai/v1", required: true },
+    { key: "baseUrl", label: "Base URL", placeholder: "https://myresource.openai.azure.com", required: true },
     { key: "apiKey", label: "API Key (or empty for managed identity)", placeholder: "Bearer ...", required: false },
     { key: "modelId", label: "Model ID", placeholder: "gpt-4o", required: true },
     { key: "modelIds", label: "Additional model IDs (comma-separated)", placeholder: "gpt-4o,o3-mini", required: false },

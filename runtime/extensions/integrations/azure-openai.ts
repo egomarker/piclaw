@@ -952,6 +952,35 @@ function isAuthError(error: unknown): boolean {
   return /unauthorized|forbidden|401|403/i.test(message);
 }
 
+export function normalizeAzureOpenAIBaseUrl(baseUrl: string): string {
+  const trimmed = baseUrl.trim().replace(/\/+$/, "");
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    throw new Error(`Invalid Azure OpenAI base URL: ${baseUrl}`);
+  }
+
+  const isAzureHost =
+    url.hostname.endsWith(".openai.azure.com") ||
+    url.hostname.endsWith(".cognitiveservices.azure.com") ||
+    url.hostname.endsWith(".ai.azure.com");
+  const normalizedPath = url.pathname.replace(/\/+$/, "");
+
+  if (
+    isAzureHost &&
+    (normalizedPath === "" ||
+      normalizedPath === "/" ||
+      normalizedPath === "/openai" ||
+      normalizedPath === "/openai/v1/responses")
+  ) {
+    url.pathname = "/openai/v1";
+    url.search = "";
+  }
+
+  return url.toString().replace(/\/+$/, "");
+}
+
 // Build an OpenAI SDK client for Azure-style endpoints.
 //
 // Important: the SDK itself owns the Authorization header construction, so we
@@ -961,7 +990,7 @@ function isAuthError(error: unknown): boolean {
 function createAzureClient(baseUrl: string, headers: Record<string, string>) {
   return new OpenAI({
     apiKey: async () => await getAzureAccessToken(),
-    baseURL: baseUrl,
+    baseURL: normalizeAzureOpenAIBaseUrl(baseUrl),
     defaultHeaders: headers,
     dangerouslyAllowBrowser: true,
   });
@@ -1385,7 +1414,12 @@ function streamSimpleFoundryOpenAICompletions(model: any, context: any, options:
   // Foundry uses the standard OpenAI Completions transport, but we keep a custom API name
   // so this extension doesn't override global handlers. Force the api back to openai-completions
   // when calling the built-in stream implementation.
-  const overrideModel = model.api === "openai-completions" ? model : { ...model, api: "openai-completions" };
+  const normalizedBaseUrl = typeof model.baseUrl === "string" ? normalizeAzureOpenAIBaseUrl(model.baseUrl) : model.baseUrl;
+  const overrideModel = {
+    ...model,
+    api: "openai-completions",
+    baseUrl: normalizedBaseUrl,
+  };
   return streamSimpleOpenAICompletions(overrideModel, context, options);
 }
 
