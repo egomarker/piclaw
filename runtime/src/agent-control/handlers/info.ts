@@ -19,7 +19,7 @@ import { getChatJid } from "../../core/chat-context.js";
 import { getSessionStorageConfig } from "../../core/config.js";
 import { getSessionFileLineCount } from "../../session-rotation.js";
 import { getAutoCompactionTokenStatusForSession } from "../../agent-pool/compaction.js";
-import { peekProviderUsage } from "../../agent-pool/provider-usage.js";
+import { peekProviderUsage, type ProviderUsageWindow } from "../../agent-pool/provider-usage.js";
 import { getTokenUsageByModel, getTokenUsageByProvider, getTokenUsageTotals } from "../../db.js";
 import { createLogger, debugSuppressedError } from "../../utils/logger.js";
 import { searchWorkspace } from "../../workspace-search.js";
@@ -49,6 +49,30 @@ function formatPercent(value: number | null): string {
 function contextUsageBar(percent: number | null): string {
   if (percent === null) return "⬜";
   return percent > 90 ? "🟥" : percent > 75 ? "🟧" : "🟩";
+}
+
+function formatQuotaResetDescription(window: ProviderUsageWindow | null): string | null {
+  if (!window?.resets_at) return window?.reset_description ?? null;
+  const resetDate = new Date(window.resets_at);
+  const resetAt = resetDate.getTime();
+  if (!Number.isFinite(resetAt)) return window.reset_description;
+
+  const deltaMs = resetAt - Date.now();
+  if (!Number.isFinite(deltaMs)) return window.reset_description;
+  if (deltaMs <= 0) return "resets soon";
+
+  const totalMinutes = Math.max(1, Math.round(deltaMs / 60000));
+  if (totalMinutes < 60) return `resets in ~${totalMinutes}m`;
+
+  const totalHours = Math.floor(totalMinutes / 60);
+  if (totalHours < 24) {
+    const mins = totalMinutes % 60;
+    return mins > 0 ? `resets in ~${totalHours}h ${mins}m` : `resets in ~${totalHours}h`;
+  }
+
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  return `resets in ~${days}d ${hours}h`;
 }
 
 /** Handle /state: display current session state summary. */
@@ -255,8 +279,8 @@ export async function handleQuota(session: AgentSession, _command: QuotaCommand)
   const parts = [
     snapshot.plan ? `Plan: ${snapshot.plan}` : null,
     snapshot.hint_short?.trim() || null,
-    snapshot.primary?.reset_description || null,
-    snapshot.secondary?.reset_description || null,
+    formatQuotaResetDescription(snapshot.primary),
+    formatQuotaResetDescription(snapshot.secondary),
   ].filter((part): part is string => Boolean(part));
   const quotaLine = parts.length > 0 ? parts.join(" • ") : "No quota data available.";
 

@@ -139,25 +139,28 @@ test("agent control info and mode commands", async () => {
   const authStorage = createTestAuthStorage();
   authStorage.set("zai", { type: "api_key", key: "test-key" });
   const previousFetch = globalThis.fetch;
+  const previousNow = Date.now;
+  const now = new Date("2026-06-25T12:00:00.000Z").getTime();
+  Date.now = () => now;
   const fetchMock = mock(async () => new Response(JSON.stringify({
     data: {
       level: "Pro",
       limits: [
-        { type: "TOKENS_LIMIT", percentage: 38, nextResetTime: Date.now() + 90 * 60 * 1000 },
-        { type: "TIME_LIMIT", percentage: 59, nextResetTime: Date.now() + 48 * 60 * 60 * 1000 },
+        { type: "TOKENS_LIMIT", percentage: 38, nextResetTime: now + 90 * 60 * 1000 },
+        { type: "TIME_LIMIT", percentage: 59, nextResetTime: now + 48 * 60 * 60 * 1000 },
       ],
     },
   })));
   globalThis.fetch = fetchMock as any;
   try {
     await warmProviderUsage(authStorage as any, "zai");
+    session.model = { provider: "zai", id: "glm-4.6", reasoning: true } as any;
+    const warmQuota = await applyControlCommand(runtime as any, registry, { type: "quota", raw: "/quota" });
+    expect(warmQuota.message).toBe("zai/glm-4.6\nPlan: Pro • 5h 62% • tools 41% • resets in ~1h 30m • resets in ~2d 0h");
   } finally {
     globalThis.fetch = previousFetch;
+    Date.now = previousNow;
   }
-
-  session.model = { provider: "zai", id: "glm-4.6", reasoning: true } as any;
-  const warmQuota = await applyControlCommand(runtime as any, registry, { type: "quota", raw: "/quota" });
-  expect(warmQuota.message).toBe("zai/glm-4.6\nPlan: Pro • 5h 62% • tools 41% • resets in ~1h 30m • resets in ~2d 0h");
 
   const context = await applyControlCommand(runtime as any, registry, { type: "context", raw: "/context" });
   expect(context.message).toContain("**Context usage**");
