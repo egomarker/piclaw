@@ -20,6 +20,7 @@ const ROUTING_SAMPLES: Record<string, string> = {
   "/state": "/state",
   "/stats": "/stats",
   "/context": "/context",
+  "/quota": "/quota",
   "/last": "/last",
   "/compact": "/compact keep focus",
   "/auto-compact": "/auto-compact on",

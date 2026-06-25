@@ -18,6 +18,7 @@ const COMMAND_PARAMS: Record<string, CommandParam> = {
   "/stats": { type: "bare" },
   "/state": { type: "bare" },
   "/context": { type: "bare" },
+  "/quota": { type: "bare" },
   "/abort": { type: "bare" },
   "/last": { type: "bare" },
   "/restart": { type: "bare" },
