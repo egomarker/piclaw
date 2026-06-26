@@ -6,13 +6,14 @@
  * and error/success result formatting.
  */
 
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, truncateSync, writeFileSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { withChatContext } from "../../src/core/chat-context.js";
+import { clearProviderUsageCache, warmProviderUsage } from "../../src/agent-pool/provider-usage.js";
 import { listTrackedProcesses, registerProcess } from "../../src/utils/process-tracker.js";
 import { getTestWorkspace, setEnv } from "../helpers.js";
-import { DEFAULT_TEST_MODEL, TestAgentControlSession, cleanupRotatedSessionArtifacts, createTestModelRegistry, createTestSessionRuntime } from "./session-fixture.js";
+import { DEFAULT_TEST_MODEL, TestAgentControlSession, cleanupRotatedSessionArtifacts, createTestAuthStorage, createTestModelRegistry, createTestSessionRuntime } from "./session-fixture.js";
 
 let restoreEnv: (() => void) | null = null;
 let restoreIdentityState: (() => void) | null = null;
@@ -69,6 +70,7 @@ beforeEach(async () => {
   restoreIdentityState = await saveIdentityState();
   saveConfig();
   cleanupRotatedSessionArtifacts(process.cwd());
+  clearProviderUsageCache();
 });
 
 afterEach(() => {
@@ -78,6 +80,7 @@ afterEach(() => {
   restoreIdentityState?.();
   restoreIdentityState = null;
   restoreConfig();
+  clearProviderUsageCache();
 });
 
 const registry = createTestModelRegistry([DEFAULT_TEST_MODEL]);
@@ -129,6 +132,35 @@ test("agent control info and mode commands", async () => {
   expect(stats.message).toContain("**Tracked usage (persisted)**");
   expect(stats.message).toContain("**Per provider**");
   expect(stats.message).toContain("**Per model**");
+
+  const coldQuota = await applyControlCommand(runtime as any, registry, { type: "quota", raw: "/quota" });
+  expect(coldQuota.message).toBe("openai/gpt-test\nNo quota data available.");
+
+  const authStorage = createTestAuthStorage();
+  authStorage.set("zai", { type: "api_key", key: "test-key" });
+  const previousFetch = globalThis.fetch;
+  const previousNow = Date.now;
+  const now = new Date("2026-06-25T12:00:00.000Z").getTime();
+  Date.now = () => now;
+  const fetchMock = mock(async () => new Response(JSON.stringify({
+    data: {
+      level: "Pro",
+      limits: [
+        { type: "TOKENS_LIMIT", percentage: 38, nextResetTime: now + 90 * 60 * 1000 },
+        { type: "TIME_LIMIT", percentage: 59, nextResetTime: now + 48 * 60 * 60 * 1000 },
+      ],
+    },
+  })));
+  globalThis.fetch = fetchMock as any;
+  try {
+    await warmProviderUsage(authStorage as any, "zai");
+    session.model = { provider: "zai", id: "glm-4.6", reasoning: true } as any;
+    const warmQuota = await applyControlCommand(runtime as any, registry, { type: "quota", raw: "/quota" });
+    expect(warmQuota.message).toBe("zai/glm-4.6\nPlan: Pro • 5h 62% • tools 41% • resets in ~1h 30m • resets in ~2d 0h");
+  } finally {
+    globalThis.fetch = previousFetch;
+    Date.now = previousNow;
+  }
 
   const context = await applyControlCommand(runtime as any, registry, { type: "context", raw: "/context" });
   expect(context.message).toContain("**Context usage**");

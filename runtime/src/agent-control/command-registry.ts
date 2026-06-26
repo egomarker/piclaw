@@ -26,6 +26,7 @@ export const CONTROL_COMMAND_DEFINITIONS: ControlCommandDefinition[] = [
   { name: "/state", description: "Show current session state" },
   { name: "/stats", description: "Show session token and cost stats" },
   { name: "/context", description: "Show context window usage", aliases: ["/ctx"] },
+  { name: "/quota", description: "Show cached provider quota / rate-limit usage for the current model" },
   { name: "/last", description: "Show last assistant response" },
   { name: "/compact", description: "Manually compact the session" },
   { name: "/auto-compact", description: "Toggle auto-compaction" },

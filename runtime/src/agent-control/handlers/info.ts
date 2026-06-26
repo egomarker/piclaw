@@ -1,8 +1,9 @@
 /**
  * agent-control/handlers/info.ts – Handlers for informational / read-only commands.
  *
- * Handles /commands, /state, /stats, /context, /last, /search-workspace,
- * /labels, and /label. These commands display session state, token usage,
+ * Handles /commands, /state, /stats, /context, /quota, /last,
+ * /search-workspace, /labels, and /label. These commands display session
+ * state, token usage,
  * and search results without modifying the session.
  *
  * Consumers: agent-control-handlers.ts dispatches to these handlers.
@@ -18,6 +19,7 @@ import { getChatJid } from "../../core/chat-context.js";
 import { getSessionStorageConfig } from "../../core/config.js";
 import { getSessionFileLineCount } from "../../session-rotation.js";
 import { getAutoCompactionTokenStatusForSession } from "../../agent-pool/compaction.js";
+import { peekProviderUsage, type ProviderUsageWindow } from "../../agent-pool/provider-usage.js";
 import { getTokenUsageByModel, getTokenUsageByProvider, getTokenUsageTotals } from "../../db.js";
 import { createLogger, debugSuppressedError } from "../../utils/logger.js";
 import { searchWorkspace } from "../../workspace-search.js";
@@ -27,6 +29,7 @@ const log = createLogger("agent-control.info");
 type StateCommand = Extract<AgentControlCommand, { type: "state" }>;
 type StatsCommand = Extract<AgentControlCommand, { type: "stats" }>;
 type ContextCommand = Extract<AgentControlCommand, { type: "context" }>;
+type QuotaCommand = Extract<AgentControlCommand, { type: "quota" }>;
 type LastCommand = Extract<AgentControlCommand, { type: "last" }>;
 type CommandsCommand = Extract<AgentControlCommand, { type: "commands" }>;
 type SearchCommand = Extract<AgentControlCommand, { type: "search_workspace" }>;
@@ -46,6 +49,30 @@ function formatPercent(value: number | null): string {
 function contextUsageBar(percent: number | null): string {
   if (percent === null) return "⬜";
   return percent > 90 ? "🟥" : percent > 75 ? "🟧" : "🟩";
+}
+
+function formatQuotaResetDescription(window: ProviderUsageWindow | null): string | null {
+  if (!window?.resets_at) return window?.reset_description ?? null;
+  const resetDate = new Date(window.resets_at);
+  const resetAt = resetDate.getTime();
+  if (!Number.isFinite(resetAt)) return window.reset_description;
+
+  const deltaMs = resetAt - Date.now();
+  if (!Number.isFinite(deltaMs)) return window.reset_description;
+  if (deltaMs <= 0) return "resets soon";
+
+  const totalMinutes = Math.max(1, Math.round(deltaMs / 60000));
+  if (totalMinutes < 60) return `resets in ~${totalMinutes}m`;
+
+  const totalHours = Math.floor(totalMinutes / 60);
+  if (totalHours < 24) {
+    const mins = totalMinutes % 60;
+    return mins > 0 ? `resets in ~${totalHours}h ${mins}m` : `resets in ~${totalHours}h`;
+  }
+
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  return `resets in ~${days}d ${hours}h`;
 }
 
 /** Handle /state: display current session state summary. */
@@ -237,6 +264,29 @@ export async function handleContext(session: AgentSession, _command: ContextComm
   return {
     status: "success",
     message: lines.join("\n"),
+  };
+}
+
+/** Handle /quota: dump the cached provider usage snapshot for the current model (no live refetch). */
+export async function handleQuota(session: AgentSession, _command: QuotaCommand): Promise<AgentControlResult> {
+  const provider = session.model?.provider ?? null;
+  const modelLabel = session.model ? `${session.model.provider}/${session.model.id}` : "<none>";
+  const snapshot = provider ? peekProviderUsage(provider, { allowStale: true }) : null;
+  if (!snapshot) {
+    return { status: "success", message: `${modelLabel}\nNo quota data available.` };
+  }
+
+  const parts = [
+    snapshot.plan ? `Plan: ${snapshot.plan}` : null,
+    snapshot.hint_short?.trim() || null,
+    formatQuotaResetDescription(snapshot.primary),
+    formatQuotaResetDescription(snapshot.secondary),
+  ].filter((part): part is string => Boolean(part));
+  const quotaLine = parts.length > 0 ? parts.join(" • ") : "No quota data available.";
+
+  return {
+    status: "success",
+    message: `${modelLabel}\n${quotaLine}`,
   };
 }
 

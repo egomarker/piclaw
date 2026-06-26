@@ -75,6 +75,10 @@ export type AgentControlCommand =
       raw: string;
     }
   | {
+      type: "quota";
+      raw: string;
+    }
+  | {
       type: "last";
       raw: string;
     }

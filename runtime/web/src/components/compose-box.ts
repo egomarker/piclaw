@@ -36,6 +36,7 @@ export const SLASH_COMMANDS = [
   { name: "/state", description: "Show current session state" },
   { name: "/stats", description: "Show session token and cost stats" },
   { name: "/context", description: "Show context window usage" },
+  { name: "/quota", description: "Show cached provider quota / rate-limit usage" },
   { name: "/last", description: "Show last assistant response" },
   { name: "/compact", description: "Manually compact the session" },
   { name: "/auto-compact", description: "Toggle auto-compaction" },

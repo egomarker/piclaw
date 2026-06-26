@@ -29,6 +29,7 @@ import {
   handleCommands,
   handleContext,
   handleLast,
+  handleQuota,
   handleSearchWorkspace,
   handleState,
   handleStats,
@@ -83,6 +84,8 @@ export async function applyControlCommand(
       return handleStats(session, command);
     case "context":
       return handleContext(session, command);
+    case "quota":
+      return handleQuota(session, command);
     case "last":
       return handleLast(session, command);
     case "compact":
