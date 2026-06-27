@@ -107,6 +107,67 @@ interface TelegramSendMessageOptions {
 // Telegram text messages are limited to ~4096 chars after entity parsing.
 // Keep a little headroom so Markdown-mode sends are less likely to bounce.
 const TELEGRAM_MAX_TEXT_CHARS = 4000;
+const TELEGRAM_REQUEST_TIMEOUT_MS = 20_000;
+const TELEGRAM_REQUEST_MAX_ATTEMPTS = 5;
+const TELEGRAM_REQUEST_RETRY_DELAYS_MS = [1_000, 5_000, 10_000, 15_000] as const;
+const TELEGRAM_RETRY_LOG_ERROR_MAX_CHARS = 300;
+
+type TelegramRequestOptions = {
+  retryEnabled?: boolean;
+  retryLabel?: string;
+  shouldShortCircuitRetry?: (errorText: string) => boolean;
+};
+
+type RetryableTelegramRequestError = Error & {
+  retryable?: boolean;
+};
+
+function redactTelegramSecrets(text: string): string {
+  return String(text || "")
+    .replace(/bot\d+:[A-Za-z0-9_-]+/gi, "bot<redacted>")
+    .replace(/\b\d{5,}:[A-Za-z0-9_-]{10,}\b/g, "<redacted-token>");
+}
+
+function formatTelegramRetryError(error: unknown): string {
+  const raw = String((error as { message?: unknown } | null | undefined)?.message ?? error ?? "Telegram request failed.")
+    .replace(/\s+/g, " ")
+    .trim();
+  const redacted = redactTelegramSecrets(raw);
+  if (redacted.length <= TELEGRAM_RETRY_LOG_ERROR_MAX_CHARS) return redacted;
+  return `${redacted.slice(0, TELEGRAM_RETRY_LOG_ERROR_MAX_CHARS - 1).trimEnd()}…`;
+}
+
+function createTelegramRequestError(message: string, retryable: boolean): RetryableTelegramRequestError {
+  const error = new Error(message) as RetryableTelegramRequestError;
+  error.retryable = retryable;
+  return error;
+}
+
+function isRetryableTelegramRequestError(error: unknown): boolean {
+  return (error as RetryableTelegramRequestError | null | undefined)?.retryable !== false;
+}
+
+function getTelegramRequestRetryDelayMs(failedAttempt: number): number | null {
+  return TELEGRAM_REQUEST_RETRY_DELAYS_MS[failedAttempt - 1] ?? null;
+}
+
+function logTelegramRequestRetryFailure(label: string, attempt: number, nextRetryDelayMs: number, timeoutMs: number, error: unknown): void {
+  console.warn("[telegram-addon] Telegram request failed; retrying.", {
+    request: label,
+    attempt,
+    maxAttempts: TELEGRAM_REQUEST_MAX_ATTEMPTS,
+    timeoutMs,
+    nextRetryDelayMs,
+    err: formatTelegramRetryError(error),
+  });
+}
+
+function logTelegramRequestRetrySuccess(label: string, attempt: number): void {
+  console.info("[telegram-addon] Telegram request succeeded after retry.", {
+    request: label,
+    attempt,
+  });
+}
 
 export class TelegramBotApi {
   constructor(private readonly botToken: string) {}
@@ -119,28 +180,108 @@ export class TelegramBotApi {
     return `${TELEGRAM_API_BASE}/file/bot${this.botToken}/${filePath}`;
   }
 
-  private async requestJson<T>(method: string, payload?: Record<string, unknown>): Promise<T> {
-    const response = await fetch(this.endpoint(method), {
+  private async fetchAttempt(url: string, initFactory: () => RequestInit, options: { label: string; retryEnabled: boolean; timeoutMs: number }): Promise<Response> {
+    if (!options.retryEnabled) {
+      return await fetch(url, initFactory());
+    }
+
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeoutHandle = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, options.timeoutMs);
+
+    try {
+      const init = initFactory();
+      return await fetch(url, {
+        ...init,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (timedOut) {
+        throw createTelegramRequestError(`Telegram ${options.label} timed out after ${options.timeoutMs}ms.`, true);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
+  }
+
+  private async requestJson<T>(method: string, payload?: Record<string, unknown>, options: TelegramRequestOptions = {}): Promise<T> {
+    const retryEnabled = options.retryEnabled !== false;
+    const retryLabel = options.retryLabel || method;
+    const url = this.endpoint(method);
+    const initFactory = () => ({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload || {}),
-    });
-    const raw = await response.text();
-    let json: TelegramApiEnvelope<T> | null = null;
-    if (raw) {
+    } satisfies RequestInit);
+
+    for (let attempt = 1; attempt <= TELEGRAM_REQUEST_MAX_ATTEMPTS; attempt += 1) {
       try {
-        json = JSON.parse(raw) as TelegramApiEnvelope<T>;
-      } catch {
-        if (!response.ok) {
-          throw new Error(`Telegram ${method} failed: ${raw.trim() || response.statusText || response.status}`);
+        const response = await this.fetchAttempt(url, initFactory, {
+          label: retryLabel,
+          retryEnabled,
+          timeoutMs: TELEGRAM_REQUEST_TIMEOUT_MS,
+        });
+        const raw = await response.text();
+        let json: TelegramApiEnvelope<T> | null = null;
+        if (raw) {
+          try {
+            json = JSON.parse(raw) as TelegramApiEnvelope<T>;
+          } catch {
+            if (!response.ok) {
+              throw createTelegramRequestError(`Telegram ${method} failed: ${raw.trim() || response.statusText || response.status}`,
+                true);
+            }
+            throw createTelegramRequestError(`Telegram ${method} returned invalid JSON.`, false);
+          }
         }
-        throw new Error(`Telegram ${method} returned invalid JSON.`);
+
+        if (!response.ok) {
+          const message = `Telegram ${method} failed: ${json?.description || raw.trim() || response.statusText || response.status}`;
+          const error = createTelegramRequestError(message, true);
+          if (options.shouldShortCircuitRetry?.(message)) {
+            error.retryable = false;
+          }
+          throw error;
+        }
+
+        if (!json) {
+          throw createTelegramRequestError(`Telegram ${method} failed: ${raw.trim() || response.statusText || response.status}`,
+            false);
+        }
+
+        if (!json.ok) {
+          const message = `Telegram ${method} failed: ${json.description || raw.trim() || response.statusText || response.status}`;
+          const error = createTelegramRequestError(message, true);
+          if (options.shouldShortCircuitRetry?.(message)) {
+            error.retryable = false;
+          }
+          throw error;
+        }
+
+        if (json.result === undefined) {
+          throw createTelegramRequestError(`Telegram ${method} failed: ${json.description || raw.trim() || response.statusText || response.status}`,
+            false);
+        }
+
+        if (retryEnabled && attempt > 1) {
+          logTelegramRequestRetrySuccess(retryLabel, attempt);
+        }
+        return json.result;
+      } catch (error) {
+        const nextRetryDelayMs = getTelegramRequestRetryDelayMs(attempt);
+        if (!retryEnabled || !isRetryableTelegramRequestError(error) || nextRetryDelayMs === null) {
+          throw error;
+        }
+        logTelegramRequestRetryFailure(retryLabel, attempt, nextRetryDelayMs, TELEGRAM_REQUEST_TIMEOUT_MS, error);
+        await Bun.sleep(nextRetryDelayMs);
       }
     }
-    if (!response.ok || !json?.ok || json.result === undefined) {
-      throw new Error(`Telegram ${method} failed: ${json?.description || raw.trim() || response.statusText || response.status}`);
-    }
-    return json.result;
+
+    throw createTelegramRequestError(`Telegram ${method} failed after ${TELEGRAM_REQUEST_MAX_ATTEMPTS} attempts.`, true);
   }
 
   async getMe(): Promise<TelegramUser> {
@@ -152,7 +293,7 @@ export class TelegramBotApi {
     timeout?: number;
     allowed_updates?: string[];
   }): Promise<TelegramUpdate[]> {
-    return await this.requestJson<TelegramUpdate[]>("getUpdates", params);
+    return await this.requestJson<TelegramUpdate[]>("getUpdates", params, { retryEnabled: false });
   }
 
   async sendMessage(chatId: string | number, text: string, options: TelegramSendMessageOptions = {}): Promise<TelegramMessage> {
@@ -168,7 +309,12 @@ export class TelegramBotApi {
     }
 
     try {
-      return await this.requestJson<TelegramMessage>("sendMessage", payload);
+      return await this.requestJson<TelegramMessage>("sendMessage", payload, {
+        retryLabel: parseMode === "Markdown" ? "sendMessage:markdown" : "sendMessage",
+        shouldShortCircuitRetry: parseMode === "Markdown"
+          ? (errorText) => /can't parse entities/i.test(errorText)
+          : undefined,
+      });
     } catch (error) {
       if (parseMode !== "Markdown" || !/can't parse entities/i.test(String(error))) {
         throw error;
@@ -177,7 +323,9 @@ export class TelegramBotApi {
         ...payload,
       } satisfies Record<string, unknown>;
       delete fallbackPayload.parse_mode;
-      return await this.requestJson<TelegramMessage>("sendMessage", fallbackPayload);
+      return await this.requestJson<TelegramMessage>("sendMessage", fallbackPayload, {
+        retryLabel: "sendMessage:plain",
+      });
     }
   }
 
@@ -203,36 +351,63 @@ export class TelegramBotApi {
     });
   }
 
-  async sendChatAction(chatId: string | number, action: "typing"): Promise<void> {
+  async sendChatAction(chatId: string | number, action: "typing", options: TelegramRequestOptions = {}): Promise<void> {
     await this.requestJson("sendChatAction", {
       chat_id: chatId,
       action,
-    });
+    }, options);
   }
 
   private async sendBinary(method: "sendPhoto" | "sendDocument", field: "photo" | "document", chatId: string | number, attachment: TelegramBinaryAttachment): Promise<void> {
-    const body = new FormData();
-    body.set("chat_id", String(chatId));
-    body.append(field, new Blob([attachment.data], { type: attachment.contentType || "application/octet-stream" }), attachment.filename);
-    const response = await fetch(this.endpoint(method), {
-      method: "POST",
-      body,
-    });
-    const raw = await response.text();
-    let json: TelegramApiEnvelope<unknown> | null = null;
-    if (raw) {
+    const url = this.endpoint(method);
+
+    for (let attempt = 1; attempt <= TELEGRAM_REQUEST_MAX_ATTEMPTS; attempt += 1) {
       try {
-        json = JSON.parse(raw) as TelegramApiEnvelope<unknown>;
-      } catch {
-        if (!response.ok) {
-          throw new Error(`Telegram ${method} failed: ${raw.trim() || response.statusText || response.status}`);
+        const response = await this.fetchAttempt(url, () => {
+          const body = new FormData();
+          body.set("chat_id", String(chatId));
+          body.append(field, new Blob([attachment.data], { type: attachment.contentType || "application/octet-stream" }), attachment.filename);
+          return {
+            method: "POST",
+            body,
+          } satisfies RequestInit;
+        }, {
+          label: method,
+          retryEnabled: true,
+          timeoutMs: TELEGRAM_REQUEST_TIMEOUT_MS,
+        });
+        const raw = await response.text();
+        let json: TelegramApiEnvelope<unknown> | null = null;
+        if (raw) {
+          try {
+            json = JSON.parse(raw) as TelegramApiEnvelope<unknown>;
+          } catch {
+            if (!response.ok) {
+              throw createTelegramRequestError(`Telegram ${method} failed: ${raw.trim() || response.statusText || response.status}`,
+                true);
+            }
+            throw createTelegramRequestError(`Telegram ${method} returned invalid JSON.`, false);
+          }
         }
-        throw new Error(`Telegram ${method} returned invalid JSON.`);
+        if (!response.ok || !json?.ok) {
+          throw createTelegramRequestError(`Telegram ${method} failed: ${json?.description || raw.trim() || response.statusText || response.status}`,
+            !response.ok || json?.ok === false);
+        }
+        if (attempt > 1) {
+          logTelegramRequestRetrySuccess(method, attempt);
+        }
+        return;
+      } catch (error) {
+        const nextRetryDelayMs = getTelegramRequestRetryDelayMs(attempt);
+        if (!isRetryableTelegramRequestError(error) || nextRetryDelayMs === null) {
+          throw error;
+        }
+        logTelegramRequestRetryFailure(method, attempt, nextRetryDelayMs, TELEGRAM_REQUEST_TIMEOUT_MS, error);
+        await Bun.sleep(nextRetryDelayMs);
       }
     }
-    if (!response.ok || !json?.ok) {
-      throw new Error(`Telegram ${method} failed: ${json?.description || raw.trim() || response.statusText || response.status}`);
-    }
+
+    throw createTelegramRequestError(`Telegram ${method} failed after ${TELEGRAM_REQUEST_MAX_ATTEMPTS} attempts.`, true);
   }
 
   async sendPhoto(chatId: string | number, attachment: TelegramBinaryAttachment): Promise<void> {
@@ -248,11 +423,34 @@ export class TelegramBotApi {
   }
 
   async downloadFile(filePath: string): Promise<Uint8Array> {
-    const response = await fetch(this.fileUrl(filePath));
-    if (!response.ok) {
-      throw new Error(`Telegram file download failed: ${response.status}`);
+    const url = this.fileUrl(filePath);
+
+    for (let attempt = 1; attempt <= TELEGRAM_REQUEST_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        const response = await this.fetchAttempt(url, () => ({} satisfies RequestInit), {
+          label: "downloadFile",
+          retryEnabled: true,
+          timeoutMs: TELEGRAM_REQUEST_TIMEOUT_MS,
+        });
+        if (!response.ok) {
+          throw createTelegramRequestError(`Telegram file download failed: ${response.status}`, true);
+        }
+        const data = new Uint8Array(await response.arrayBuffer());
+        if (attempt > 1) {
+          logTelegramRequestRetrySuccess("downloadFile", attempt);
+        }
+        return data;
+      } catch (error) {
+        const nextRetryDelayMs = getTelegramRequestRetryDelayMs(attempt);
+        if (!isRetryableTelegramRequestError(error) || nextRetryDelayMs === null) {
+          throw error;
+        }
+        logTelegramRequestRetryFailure("downloadFile", attempt, nextRetryDelayMs, TELEGRAM_REQUEST_TIMEOUT_MS, error);
+        await Bun.sleep(nextRetryDelayMs);
+      }
     }
-    return new Uint8Array(await response.arrayBuffer());
+
+    throw createTelegramRequestError(`Telegram file download failed after ${TELEGRAM_REQUEST_MAX_ATTEMPTS} attempts.`, true);
   }
 }
 
@@ -537,7 +735,7 @@ export class TelegramChannel {
   async setTyping(chatJid: string, isTyping: boolean): Promise<void> {
     if (!isTyping || !this.api || !this.connected) return;
     const { chatId } = parseTelegramChatJid(chatJid);
-    await this.api.sendChatAction(chatId, "typing");
+    await this.api.sendChatAction(chatId, "typing", { retryEnabled: false });
   }
 
   private async pollLoop(): Promise<void> {

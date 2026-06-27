@@ -14,6 +14,42 @@ import { importFresh, setEnv } from "../helpers.js";
 let restoreEnv: (() => void) | null = null;
 const originalFetch = globalThis.fetch;
 
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+async function withPatchedSleepAndCapturedLogs<T>(
+  run: (context: { sleepCalls: number[]; warnCalls: unknown[][]; infoCalls: unknown[][] }) => Promise<T> | T,
+): Promise<T> {
+  const originalSleep = Bun.sleep;
+  const originalWarn = console.warn;
+  const originalInfo = console.info;
+  const sleepCalls: number[] = [];
+  const warnCalls: unknown[][] = [];
+  const infoCalls: unknown[][] = [];
+
+  (Bun as any).sleep = async (ms: number) => {
+    sleepCalls.push(ms);
+  };
+  console.warn = ((...args: unknown[]) => {
+    warnCalls.push(args);
+  }) as typeof console.warn;
+  console.info = ((...args: unknown[]) => {
+    infoCalls.push(args);
+  }) as typeof console.info;
+
+  try {
+    return await run({ sleepCalls, warnCalls, infoCalls });
+  } finally {
+    (Bun as any).sleep = originalSleep;
+    console.warn = originalWarn;
+    console.info = originalInfo;
+  }
+}
+
 afterEach(() => {
   restoreEnv?.();
   restoreEnv = null;
@@ -114,6 +150,135 @@ test("telegram api surfaces plain-text upstream errors", async () => {
   await expect(api.getUpdates({})).rejects.toThrow("Bad Gateway");
 });
 
+test("telegram api retries thrown transport errors with the configured backoff and redacted logs", async () => {
+  await withPatchedSleepAndCapturedLogs(async ({ sleepCalls, warnCalls, infoCalls }) => {
+    let attempts = 0;
+    globalThis.fetch = (async () => {
+      attempts += 1;
+      if (attempts < 5) {
+        throw new Error("UNKNOWN_CERTIFICATE_VERIFICATION_ERROR for https://api.telegram.org/bot123456:super-secret-token/getMe");
+      }
+      return jsonResponse({ ok: true, result: { id: 1, is_bot: true, username: "bot" } });
+    }) as typeof fetch;
+
+    const api = new TelegramBotApi("123456:super-secret-token");
+    const me = await api.getMe();
+
+    expect(me).toMatchObject({ id: 1, username: "bot" });
+    expect(attempts).toBe(5);
+    expect(sleepCalls).toEqual([1000, 5000, 10000, 15000]);
+    expect(warnCalls).toHaveLength(4);
+    expect(infoCalls).toHaveLength(1);
+    const warnText = JSON.stringify(warnCalls);
+    expect(warnText).toContain("bot<redacted>");
+    expect(warnText).not.toContain("123456:super-secret-token");
+  });
+});
+
+test("telegram api retries ok false responses up to the fifth attempt", async () => {
+  await withPatchedSleepAndCapturedLogs(async ({ sleepCalls, warnCalls }) => {
+    let attempts = 0;
+    globalThis.fetch = (async () => {
+      attempts += 1;
+      return jsonResponse({ ok: false, description: "Too Many Requests" });
+    }) as typeof fetch;
+
+    const api = new TelegramBotApi("test-token");
+    await expect(api.getMe()).rejects.toThrow("Too Many Requests");
+
+    expect(attempts).toBe(5);
+    expect(sleepCalls).toEqual([1000, 5000, 10000, 15000]);
+    expect(warnCalls).toHaveLength(4);
+  });
+});
+
+test("telegram api retries non-2xx http responses and succeeds on a later attempt", async () => {
+  await withPatchedSleepAndCapturedLogs(async ({ sleepCalls, warnCalls, infoCalls }) => {
+    let attempts = 0;
+    globalThis.fetch = (async () => {
+      attempts += 1;
+      if (attempts < 3) {
+        return new Response("Bad Gateway", {
+          status: 502,
+          headers: { "Content-Type": "text/plain" },
+        });
+      }
+      return jsonResponse({ ok: true, result: { id: 7, is_bot: true, username: "rescued" } });
+    }) as typeof fetch;
+
+    const api = new TelegramBotApi("test-token");
+    const me = await api.getMe();
+
+    expect(me).toMatchObject({ id: 7, username: "rescued" });
+    expect(attempts).toBe(3);
+    expect(sleepCalls).toEqual([1000, 5000]);
+    expect(warnCalls).toHaveLength(2);
+    expect(infoCalls).toHaveLength(1);
+  });
+});
+
+test("telegram api timeouts count as failed attempts", async () => {
+  await withPatchedSleepAndCapturedLogs(async ({ sleepCalls, warnCalls }) => {
+    let attempts = 0;
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    globalThis.setTimeout = (((handler: TimerHandler) => {
+      queueMicrotask(() => {
+        if (typeof handler === "function") {
+          handler();
+        }
+      });
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    }) as unknown) as typeof setTimeout;
+    globalThis.clearTimeout = (((_timer: ReturnType<typeof setTimeout>) => {}) as unknown) as typeof clearTimeout;
+
+    globalThis.fetch = (((_input: RequestInfo | URL, init?: RequestInit) => {
+      attempts += 1;
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal as AbortSignal | undefined;
+        signal?.addEventListener("abort", () => {
+          const error = new Error("The operation was aborted.");
+          (error as Error & { name?: string }).name = "AbortError";
+          reject(error);
+        }, { once: true });
+      });
+    }) as unknown) as typeof fetch;
+
+    try {
+      const api = new TelegramBotApi("test-token");
+      await expect(api.getMe()).rejects.toThrow("timed out after 20000ms");
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+    }
+
+    expect(attempts).toBe(5);
+    expect(sleepCalls).toEqual([1000, 5000, 10000, 15000]);
+    expect(warnCalls).toHaveLength(4);
+  });
+});
+
+test("telegram api getUpdates remains outside the request retry wrapper", async () => {
+  await withPatchedSleepAndCapturedLogs(async ({ sleepCalls, warnCalls, infoCalls }) => {
+    let attempts = 0;
+    globalThis.fetch = (async () => {
+      attempts += 1;
+      return new Response("Bad Gateway", {
+        status: 502,
+        headers: { "Content-Type": "text/plain" },
+      });
+    }) as typeof fetch;
+
+    const api = new TelegramBotApi("test-token");
+    await expect(api.getUpdates({ timeout: 60 })).rejects.toThrow("Bad Gateway");
+
+    expect(attempts).toBe(1);
+    expect(sleepCalls).toEqual([]);
+    expect(warnCalls).toEqual([]);
+    expect(infoCalls).toEqual([]);
+  });
+});
+
 test("telegram api sendMessage falls back to plain text when Markdown parsing fails", async () => {
   const requests: Array<Record<string, unknown>> = [];
   globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -146,6 +311,112 @@ test("telegram api sendMessage falls back to plain text when Markdown parsing fa
     }),
   ]);
   expect(requests[1]).not.toHaveProperty("parse_mode");
+});
+
+test("telegram api sendMessage fallback gets its own retry cycle", async () => {
+  await withPatchedSleepAndCapturedLogs(async ({ sleepCalls, warnCalls }) => {
+    const requests: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body || "{}")) as Record<string, unknown>;
+      requests.push(body);
+      if (requests.length === 1) {
+        return jsonResponse({ ok: false, description: "Bad Request: can't parse entities" }, 400);
+      }
+      if (requests.length === 2) {
+        throw new Error("ECONNRESET during fallback");
+      }
+      return jsonResponse({ ok: true, result: { message_id: 99 } });
+    }) as typeof fetch;
+
+    const api = new TelegramBotApi("test-token");
+    const message = await api.sendMessage("123456", "I will *not* use `curl`.");
+
+    expect(message).toMatchObject({ message_id: 99 });
+    expect(requests).toHaveLength(3);
+    expect(requests[0]?.parse_mode).toBe("Markdown");
+    expect(requests[1]).not.toHaveProperty("parse_mode");
+    expect(requests[2]).not.toHaveProperty("parse_mode");
+    expect(sleepCalls).toEqual([1000]);
+    expect(warnCalls).toHaveLength(1);
+  });
+});
+
+test("telegram api sendPhoto retries with rebuilt multipart bodies", async () => {
+  await withPatchedSleepAndCapturedLogs(async ({ sleepCalls, warnCalls, infoCalls }) => {
+    const bodies: unknown[] = [];
+    let attempts = 0;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      attempts += 1;
+      bodies.push(init?.body);
+      if (attempts === 1) {
+        return new Response("Service Unavailable", {
+          status: 503,
+          headers: { "Content-Type": "text/plain" },
+        });
+      }
+      return jsonResponse({ ok: true, result: true });
+    }) as typeof fetch;
+
+    const api = new TelegramBotApi("test-token");
+    await api.sendPhoto("123456", {
+      filename: "chart.png",
+      contentType: "image/png",
+      data: new Uint8Array([1, 2, 3]),
+      kind: "image",
+    });
+
+    expect(attempts).toBe(2);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).not.toBe(bodies[1]);
+    expect(sleepCalls).toEqual([1000]);
+    expect(warnCalls).toHaveLength(1);
+    expect(infoCalls).toHaveLength(1);
+  });
+});
+
+test("telegram api downloadFile retries transient failures", async () => {
+  await withPatchedSleepAndCapturedLogs(async ({ sleepCalls, warnCalls, infoCalls }) => {
+    let attempts = 0;
+    globalThis.fetch = (async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error("UNKNOWN_CERTIFICATE_VERIFICATION_ERROR");
+      }
+      return new Response(new Uint8Array([4, 5, 6]), { status: 200 });
+    }) as typeof fetch;
+
+    const api = new TelegramBotApi("test-token");
+    const data = await api.downloadFile("abc/file.txt");
+
+    expect([...data]).toEqual([4, 5, 6]);
+    expect(attempts).toBe(2);
+    expect(sleepCalls).toEqual([1000]);
+    expect(warnCalls).toHaveLength(1);
+    expect(infoCalls).toHaveLength(1);
+  });
+});
+
+test("telegram channel typing updates stay one shot without retries", async () => {
+  await withPatchedSleepAndCapturedLogs(async ({ sleepCalls, warnCalls, infoCalls }) => {
+    let attempts = 0;
+    globalThis.fetch = (async () => {
+      attempts += 1;
+      throw new Error("typing failed");
+    }) as typeof fetch;
+
+    const channel = new TelegramChannel({
+      botToken: "test-token",
+      onUpdate: async () => {},
+    }) as any;
+    channel.api = new TelegramBotApi("test-token");
+    channel.connected = true;
+
+    await expect(channel.setTyping("telegram:123456", true)).rejects.toThrow("typing failed");
+    expect(attempts).toBe(1);
+    expect(sleepCalls).toEqual([]);
+    expect(warnCalls).toEqual([]);
+    expect(infoCalls).toEqual([]);
+  });
 });
 
 test("telegram channel renders progress replies as escaped HTML blocks", async () => {
