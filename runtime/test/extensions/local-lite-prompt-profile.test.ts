@@ -8,8 +8,9 @@ describe("local-lite prompt profile", () => {
 
     expect(isLocalLitePromptModel({ provider: "ollama", baseUrl: "https://example.com" })).toBe(true);
     expect(isLocalLitePromptModel({ provider: "openai-compatible", baseUrl: "http://sandbox.local:8090/v1" })).toBe(true);
+    expect(isLocalLitePromptModel({ provider: "milkv-local", baseUrl: "http://milkv.local:8090/v1" })).toBe(true);
     expect(isLocalLitePromptModel({ provider: "openai-compatible", baseUrl: "http://192.168.1.10:8090/v1" })).toBe(true);
-    expect(isLocalLitePromptModel({ provider: "custom", baseUrl: "http://10.1.2.3:8090/v1" })).toBe(false);
+    expect(isLocalLitePromptModel({ provider: "custom", baseUrl: "http://10.1.2.3:8090/v1" })).toBe(true);
     expect(isLocalLitePromptModel({ provider: "github-copilot", baseUrl: "https://api.githubcopilot.com" })).toBe(false);
     expect(isLocalLitePromptModel(undefined)).toBe(false);
   });
@@ -134,5 +135,8 @@ describe("local-lite prompt profile", () => {
       },
     });
     expect(hostedResult).toBeUndefined();
+
+    const missingContextResult = await beforeAgentStart!.handler(event);
+    expect(missingContextResult).toBeUndefined();
   });
 });

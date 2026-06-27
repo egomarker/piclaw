@@ -20,7 +20,6 @@ import { createLogger, debugSuppressedError } from "../utils/logger.js";
 const log = createLogger("local-lite-prompt-profile");
 const LOCAL_LITE_ACTIVE_TOOLS = ["list_tools", "activate_tools", "read"] as const;
 const ALWAYS_LOCAL_PROVIDER_IDS = new Set(["ollama"]);
-const LOCAL_BASE_URL_PROVIDER_IDS = new Set(["openai-compatible"]);
 const LOCALHOST_NAMES = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
 const PRIVATE_172_SECOND_OCTET_MIN = 16;
 const PRIVATE_172_SECOND_OCTET_MAX = 31;
@@ -80,8 +79,7 @@ export function isLocalBaseUrl(baseUrl: unknown): boolean {
 export function isLocalLitePromptModel(model: Pick<Model<Api>, "provider" | "baseUrl"> | null | undefined): boolean {
   if (!model) return false;
   const provider = normalize(model.provider);
-  return ALWAYS_LOCAL_PROVIDER_IDS.has(provider)
-    || (LOCAL_BASE_URL_PROVIDER_IDS.has(provider) && isLocalBaseUrl(model.baseUrl));
+  return ALWAYS_LOCAL_PROVIDER_IDS.has(provider) || isLocalBaseUrl(model.baseUrl);
 }
 
 function formatModelLabel(model?: PromptProfileModel): string {
@@ -182,8 +180,8 @@ export const localLitePromptProfile: ExtensionFactory = (pi: ExtensionAPI) => {
   let localProfileActive = false;
   let previousActiveTools: string[] | null = null;
 
-  const applyToolProfile = (ctx: Pick<ExtensionContext, "model">): void => {
-    const model = ctx.model as Model<Api> | undefined;
+  const applyToolProfile = (ctx?: Pick<ExtensionContext, "model">): void => {
+    const model = ctx?.model as Model<Api> | undefined;
     try {
       if (isLocalLitePromptModel(model)) {
         const localTools = filterAvailableTools(pi, LOCAL_LITE_ACTIVE_TOOLS);
@@ -217,9 +215,9 @@ export const localLitePromptProfile: ExtensionFactory = (pi: ExtensionAPI) => {
 
   pi.on("before_agent_start", async (
     event: BeforeAgentStartEvent,
-    ctx: ExtensionContext,
+    ctx?: ExtensionContext,
   ): Promise<BeforeAgentStartEventResult | undefined> => {
-    const model = ctx.model as Model<Api> | undefined;
+    const model = ctx?.model as Model<Api> | undefined;
     if (!isLocalLitePromptModel(model)) return undefined;
     return {
       systemPrompt: buildLocalLiteSystemPrompt(event.systemPromptOptions, model),

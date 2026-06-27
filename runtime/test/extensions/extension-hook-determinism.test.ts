@@ -29,6 +29,7 @@ describe("built-in extension hook determinism", () => {
       "envTools",
       "exitProcess",
       "imageProcessing",
+      "localLitePromptProfile",
     ]);
     expect(audit.context_hook_order).toEqual(["fileAttachments", "contextPrune", "llmContextNormalizer"]);
     expect(audit.final_system_prompt).toContain("## File Attachments");
