@@ -25,6 +25,7 @@
  *   - providerRequestSanitizer: defensive provider payload cleanup before HTTP requests.
  *   - llmContextNormalizer: defensive LLM message-shape cleanup before provider conversion.
  *   - githubCopilotDynamicModels: Piclaw-private GitHub Copilot live /models catalog merge.
+ *   - localLitePromptProfile: compact prompt/tool profile for local OpenAI-compatible models.
  *
  * Note: bun_run, keychain, ssh, proxmox, and portainer now live as packaged
  * runtime extensions under runtime/extensions/integrations/* and are loaded via
@@ -64,6 +65,7 @@ import { postCompactionPrune } from "./post-compaction-prune.js";
 import { contextPrune } from "./context-prune.js";
 import { mcpTimeoutPatch } from "./mcp-timeout-patch.js";
 import { githubCopilotDynamicModels } from "./github-copilot-dynamic-models.js";
+import { localLitePromptProfile } from "./local-lite-prompt-profile.js";
 
 /** Build the built-in extension factory list used for session creation. */
 export function createBuiltinExtensionFactories(options?: {
@@ -101,6 +103,7 @@ export function createBuiltinExtensionFactories(options?: {
     llmContextNormalizer,
     mcpTimeoutPatch,
     githubCopilotDynamicModels,
+    localLitePromptProfile,
   ];
 }
 
