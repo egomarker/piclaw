@@ -35,6 +35,26 @@ function asStringOrNull(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+function firstNumber(...values: unknown[]): number {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return 0;
+}
+
+function extractReasoningTokens(usage: Record<string, unknown>): number {
+  const outputDetails = asRecord(usage.outputTokensDetails)
+    ?? asRecord(usage.output_tokens_details)
+    ?? asRecord(usage.completion_tokens_details);
+  return firstNumber(
+    usage.reasoningTokens,
+    usage.reasoning_tokens,
+    usage.reasoning,
+    outputDetails?.reasoning_tokens,
+    outputDetails?.reasoningTokens,
+  );
+}
+
 /**
  * Extract token usage from an assistant message and store it in the database.
  * Called on each `message_end` event during agent execution.
@@ -50,6 +70,7 @@ export function recordMessageUsage(chatJid: string, message: unknown): void {
   const output = asNumber(usage, "output");
   const cacheRead = asNumber(usage, "cacheRead");
   const cacheWrite = asNumber(usage, "cacheWrite");
+  const reasoningTokens = extractReasoningTokens(usage);
   const totalTokens =
     asNumber(usage, "totalTokens") ||
     asNumber(usage, "total") ||
@@ -76,6 +97,7 @@ export function recordMessageUsage(chatJid: string, message: unknown): void {
     run_at: runAt,
     input_tokens: input,
     output_tokens: output,
+    reasoning_tokens: reasoningTokens,
     cache_read_tokens: cacheRead,
     cache_write_tokens: cacheWrite,
     total_tokens: totalTokens,

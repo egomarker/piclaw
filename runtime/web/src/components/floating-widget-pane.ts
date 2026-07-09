@@ -1,4 +1,5 @@
 import { html, useEffect, useMemo, useRef, useState } from '../vendor/preact-htm.js';
+import { useTranslation } from '../utils/i18n.js';
 import { postIframeMessageBestEffort, setIframeNameBestEffort } from './generated-widget-host-bridge.js';
 import {
     buildWidgetSrcDoc,
@@ -20,6 +21,7 @@ export function buildFloatingWidgetPaneClassName(maximized = false) {
 }
 
 export function FloatingWidgetPane({ widget, onClose, onWidgetEvent }) {
+    const { t } = useTranslation();
     const frameRef = useRef(null);
     const frameLoadedRef = useRef(false);
     const [maximized, setMaximized] = useState(false);
@@ -202,8 +204,8 @@ export function FloatingWidgetPane({ widget, onClose, onWidgetEvent }) {
                             class="floating-widget-close"
                             type="button"
                             onClick=${() => onClose?.()}
-                            title="Close widget"
-                            aria-label="Close widget"
+                            title=${t('widget.close')}
+                            aria-label=${t('widget.close')}
                         >
                             Close
                         </button>

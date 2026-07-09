@@ -7,6 +7,7 @@
 import { html, useState, useCallback } from '../../vendor/preact-htm.js';
 import { registerSettingsPane, notifySettingsPanesChanged } from './pane-registry.js';
 import { NumberStepper, normalizeNumberValue } from './number-stepper.js';
+import { useTranslation } from '../../utils/i18n.js';
 
 function getBool(key, fallback) {
     try { const v = localStorage.getItem(key); return v === null ? fallback : v === 'true'; }
@@ -33,6 +34,7 @@ function setInt(key, value) {
 }
 
 function EditorSettingsSection() {
+    const { t } = useTranslation();
     const [vimMode, setVimMode] = useState(() => getBool('piclaw_vim_mode', false));
     const [showWhitespace, setShowWhitespace] = useState(() => getBool('piclaw_show_whitespace', true));
     const [livePreview, setLivePreview] = useState(() => getBool('piclaw_md_live_preview', true));
@@ -47,26 +49,26 @@ function EditorSettingsSection() {
 
     return html`
         <div class="settings-section">
-            <h3>Editor</h3>
+            <h3>${t('settings.editor.heading')}</h3>
             <div class="settings-row">
-                <label>Vim mode</label>
+                <label>${t('settings.editor.vimMode')}</label>
                 <input type="checkbox" checked=${vimMode}
                     onChange=${() => { const v = !vimMode; setVimMode(v); setBool('piclaw_vim_mode', v); }} />
             </div>
             <div class="settings-row">
-                <label>Show whitespace</label>
+                <label>${t('settings.editor.showWhitespace')}</label>
                 <input type="checkbox" checked=${showWhitespace}
                     onChange=${() => { const v = !showWhitespace; setShowWhitespace(v); setBool('piclaw_show_whitespace', v); }} />
             </div>
             <div class="settings-row">
-                <label>Markdown live preview</label>
+                <label>${t('settings.editor.livePreview')}</label>
                 <input type="checkbox" checked=${livePreview}
                     onChange=${() => { const v = !livePreview; setLivePreview(v); setBool('piclaw_md_live_preview', v); }} />
             </div>
             <div class="settings-row">
-                <label>Font size (px)</label>
+                <label>${t('settings.editor.fontSize')}</label>
                 <${NumberStepper}
-                    label="editor font size"
+                    label=${t('settings.editor.fontSizeAria')}
                     value=${editorFontSize}
                     min=${10}
                     max=${24}
@@ -76,12 +78,12 @@ function EditorSettingsSection() {
                 />
             </div>
             <div class="settings-row">
-                <label>Font family</label>
+                <label>${t('settings.editor.fontFamily')}</label>
                 <input type="text" value=${editorFontFamily}
                     onInput=${e => { const v = e.target.value; setEditorFontFamily(v); setString('piclaw_editor_font_family', v); }}
-                    placeholder="monospace (default)" />
+                    placeholder=${t('settings.editor.fontFamilyPlaceholder')} />
             </div>
-            <p class="settings-hint settings-local-only-hint">This browser only. Editor changes are stored in local browser storage and take effect when you next open or reload a file tab.</p>
+            <p class="settings-hint settings-local-only-hint">${t('settings.editor.localOnlyHint')}</p>
         </div>
     `;
 }

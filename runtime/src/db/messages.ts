@@ -321,6 +321,177 @@ export function updateMessageAnnotations(
   return res.changes > 0;
 }
 
+export function storeThinkingContent(
+  messageId: string,
+  text: string,
+  lines: number,
+  durationMs: number,
+  model?: string,
+  truncated = false,
+): void {
+  const db = getDb();
+  db.prepare(
+    `INSERT OR REPLACE INTO thinking_content (message_id, text, lines, duration_ms, model, truncated)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    String(messageId),
+    text,
+    Math.max(0, Math.trunc(lines) || 0),
+    Math.max(0, Math.trunc(durationMs) || 0),
+    typeof model === "string" && model.trim() ? model.trim() : null,
+    truncated ? 1 : 0,
+  );
+}
+
+export function getThinkingContent(messageId: string): {
+  text: string;
+  lines: number;
+  duration_ms: number;
+  model: string | null;
+  truncated: boolean;
+} | null {
+  const db = getDb();
+  const row = db.prepare(
+    `SELECT text, lines, duration_ms, model, truncated
+     FROM thinking_content
+     WHERE message_id = ?`
+  ).get(String(messageId)) as {
+    text: string;
+    lines: number;
+    duration_ms: number;
+    model: string | null;
+    truncated: number;
+  } | undefined;
+  if (!row) return null;
+  return {
+    text: row.text,
+    lines: row.lines,
+    duration_ms: row.duration_ms || 0,
+    model: row.model,
+    truncated: Boolean(row.truncated),
+  };
+}
+
+/**
+ * Fetch persisted thinking for a message, scoped to a specific chat_jid and
+ * validated to ensure the message exists, is a bot reply, and carries a
+ * thinking_ref block in its content_blocks. Returns null if any check fails
+ * (without distinguishing why — avoids enumeration oracles).
+ *
+ * This is the function the public /agent/thinking endpoint should call so
+ * that callers cannot read arbitrary thinking by guessing message_ids.
+ */
+export function getThinkingContentForChat(chatJid: string, messageId: string): {
+  text: string;
+  lines: number;
+  duration_ms: number;
+  model: string | null;
+  truncated: boolean;
+} | null {
+  const db = getDb();
+  // Single query joins messages + thinking_content with all defense checks:
+  //   - message belongs to chat_jid
+  //   - message is a bot reply (is_bot_message = 1)
+  //   - message references thinking via a thinking_ref content block (uses
+  //     json_each so an attacker can't confuse the matcher by embedding the
+  //     literal string 'thinking_ref' in unrelated block payload — the
+  //     predicate is satisfied only when an actual block has type='thinking_ref')
+  //   - thinking_content row exists for the message rowid
+  const row = db.prepare(
+    `SELECT tc.text, tc.lines, tc.duration_ms, tc.model, tc.truncated
+     FROM thinking_content tc
+     JOIN messages m ON m.rowid = CAST(tc.message_id AS INTEGER)
+     WHERE m.chat_jid = ?
+       AND CAST(tc.message_id AS INTEGER) = CAST(? AS INTEGER)
+       AND m.is_bot_message = 1
+       AND EXISTS (
+         SELECT 1 FROM json_each(m.content_blocks)
+         WHERE json_extract(value, '$.type') = 'thinking_ref'
+       )`
+  ).get(chatJid, String(messageId)) as {
+    text: string;
+    lines: number;
+    duration_ms: number;
+    model: string | null;
+    truncated: number;
+  } | undefined;
+  if (!row) return null;
+  return {
+    text: row.text,
+    lines: row.lines,
+    duration_ms: row.duration_ms || 0,
+    model: row.model,
+    truncated: Boolean(row.truncated),
+  };
+}
+
+/**
+ * Delete thinking_content rows for a set of message rowids.
+ *
+ * Called from every code path that deletes messages, to avoid orphan
+ * thinking_content rows. Safe to call with an empty list (no-op).
+ *
+ * @param rowIds Array of message rowids whose thinking should be purged.
+ */
+export function deleteThinkingContentByMessageRowIds(rowIds: number[]): void {
+  if (rowIds.length === 0) return;
+  const db = getDb();
+  const placeholders = rowIds.map(() => "?").join(",");
+  db.prepare(
+    `DELETE FROM thinking_content WHERE message_id IN (${placeholders})`
+  ).run(...rowIds.map((id) => String(id)));
+}
+
+/**
+ * Delete all thinking_content rows whose owning message belongs to a chat.
+ *
+ * Must be called BEFORE the matching messages DELETE so the subquery still
+ * sees the rows. Used by chat-branches.ts and dream.ts for bulk wipes.
+ *
+ * @param chatJid Chat JID whose thinking content should be purged.
+ */
+export function deleteThinkingContentByChatJid(chatJid: string): void {
+  const db = getDb();
+  db.prepare(
+    `DELETE FROM thinking_content
+     WHERE message_id IN (
+       SELECT CAST(rowid AS TEXT) FROM messages WHERE chat_jid = ?
+     )`
+  ).run(chatJid);
+}
+
+/**
+ * Delete all thinking_content rows whose owning message belongs to any chat
+ * matching a JID LIKE pattern, optionally excluding one specific chat.
+ *
+ * Used by dream.ts which sweeps dream:% chats (all or all-except-current).
+ *
+ * @param jidPattern SQL LIKE pattern for chat JIDs (e.g. 'dream:%').
+ * @param excludeChatJid Optional chat JID to exclude from the sweep.
+ */
+export function deleteThinkingContentByChatJidPattern(
+  jidPattern: string,
+  excludeChatJid?: string,
+): void {
+  const db = getDb();
+  if (excludeChatJid) {
+    db.prepare(
+      `DELETE FROM thinking_content
+       WHERE message_id IN (
+         SELECT CAST(rowid AS TEXT) FROM messages
+         WHERE chat_jid LIKE ? AND chat_jid != ?
+       )`
+    ).run(jidPattern, excludeChatJid);
+  } else {
+    db.prepare(
+      `DELETE FROM thinking_content
+       WHERE message_id IN (
+         SELECT CAST(rowid AS TEXT) FROM messages WHERE chat_jid LIKE ?
+       )`
+    ).run(jidPattern);
+  }
+}
+
 /**
  * Replace the content (and optionally content_blocks, link_previews, media)
  * of an existing message. Used by the web channel's edit-post feature.
@@ -366,12 +537,20 @@ export function replaceMessageContent(
 export function deleteMessageByRowId(chatJid: string, rowId: number): boolean {
   const db = getDb();
   const mediaIds = getMediaIdsForMessage(rowId);
-  db.prepare("DELETE FROM message_media WHERE message_rowid = ?").run(rowId);
-  const res = db.prepare("DELETE FROM messages WHERE chat_jid = ? AND rowid = ?").run(chatJid, rowId);
-  if (res.changes > 0) {
+  // Atomic cleanup: wrap the message_media + thinking_content + messages
+  // DELETEs in a transaction. Otherwise a crash between any two leaves an
+  // orphan thinking_content row, and SQLite will reuse the rowid for a
+  // future INSERT (composite PK on messages means no AUTOINCREMENT), causing
+  // the new message to inherit ghost thinking via the endpoint's rowid join.
+  const changes = db.transaction(() => {
+    db.prepare("DELETE FROM message_media WHERE message_rowid = ?").run(rowId);
+    db.prepare("DELETE FROM thinking_content WHERE message_id = ?").run(String(rowId));
+    return db.prepare("DELETE FROM messages WHERE chat_jid = ? AND rowid = ?").run(chatJid, rowId).changes;
+  })();
+  if (changes > 0) {
     deleteUnreferencedMedia(mediaIds);
   }
-  return res.changes > 0;
+  return changes > 0;
 }
 
 /**
@@ -389,8 +568,12 @@ export function deleteThreadByRowId(chatJid: string, rowId: number): number[] {
 
   const mediaIds = getMediaIdsForMessages(ids);
   const placeholders = ids.map(() => "?").join(",");
-  db.prepare(`DELETE FROM message_media WHERE message_rowid IN (${placeholders})`).run(...ids);
-  db.prepare(`DELETE FROM messages WHERE chat_jid = ? AND rowid IN (${placeholders})`).run(chatJid, ...ids);
+  // Atomic cleanup (see deleteMessageByRowId for the rowid-reuse rationale).
+  db.transaction(() => {
+    db.prepare(`DELETE FROM message_media WHERE message_rowid IN (${placeholders})`).run(...ids);
+    db.prepare(`DELETE FROM thinking_content WHERE message_id IN (${ids.map(() => "?").join(",")})`).run(...ids.map(String));
+    db.prepare(`DELETE FROM messages WHERE chat_jid = ? AND rowid IN (${placeholders})`).run(chatJid, ...ids);
+  })();
   deleteUnreferencedMedia(mediaIds);
   return ids;
 }

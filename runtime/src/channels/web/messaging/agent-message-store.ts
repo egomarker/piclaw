@@ -77,7 +77,18 @@ function maybeWarnOnEscapedSvgSource(
   });
 }
 
-/** Persist the accumulated agent turn (text + attachments) to the database. */
+/** Persist the accumulated agent turn (text + attachments) to the database.
+ *
+ * Returns the message rowid on success, or null on failure. The rowid is the
+ * SQLite internal integer id of the persisted message row and is used as the
+ * foreign key for thinking_content rows. Callers may treat the result as a
+ * truthy/falsy boolean to preserve legacy call patterns.
+ *
+ * The optional `onMessageStored` callback fires AFTER the message row is
+ * written but BEFORE any SSE broadcast or web-push notification, so callers
+ * that need to write related rows (e.g. thinking_content keyed by rowid) can
+ * do so without a race window where a fast client receives the broadcast and
+ * fetches the related data before it exists. */
 export function storeAgentTurn(
   channel: WebChannelLike,
   emitter: AgentEventEmitter,
@@ -95,8 +106,13 @@ export function storeAgentTurn(
     isTerminalAgentReply?: boolean;
     extraContentBlocks?: Array<Record<string, unknown>>;
     dispatchWebPushNotification?: (interaction: ReturnType<WebChannelLike["storeMessage"]>) => Promise<unknown>;
+    /** Fires after the row is persisted but BEFORE any SSE broadcast or web
+     *  push. Receives the persisted message rowid. Errors thrown from this
+     *  callback are caught and logged but do not prevent the broadcast —
+     *  message persistence wins over auxiliary writes. */
+    onMessageStored?: (rowId: number) => void;
   }
-): boolean {
+): number | null {
   const { mediaIds, contentBlocks } = buildAttachmentBlocks(params.attachments);
   const mergedContentBlocks = [
     ...contentBlocks,
@@ -105,6 +121,20 @@ export function storeAgentTurn(
   maybeWarnOnEscapedSvgSource(params, mergedContentBlocks);
   const formatted = formatOutbound(params.text, params.channelName);
   const resolvedThreadId = params.threadId ?? undefined;
+
+  // Safely invoke onMessageStored — catches errors so auxiliary writes
+  // (e.g. thinking_content) can fail without blocking the message broadcast.
+  const safeOnStored = (rowId: number): void => {
+    if (!params.onMessageStored) return;
+    try {
+      params.onMessageStored(rowId);
+    } catch (err) {
+      debugSuppressedError(log, "onMessageStored callback failed; continuing with broadcast.", err, {
+        chatJid: params.chatJid,
+        rowId,
+      });
+    }
+  };
 
   if (!params.skipPlaceholder) {
     const placeholderId = channel.consumeQueuedFollowupPlaceholder(params.chatJid);
@@ -122,6 +152,10 @@ export function storeAgentTurn(
         params.isTerminalAgentReply
       );
       if (updated) {
+        const resolvedRowId = typeof updated.id === "number" ? updated.id : placeholderId;
+        // Run auxiliary writes BEFORE broadcasting so clients that fetch
+        // related data on the broadcast event don't race the row creation.
+        safeOnStored(resolvedRowId);
         channel.broadcastEvent?.("agent_followup_consumed", {
           chat_jid: params.chatJid,
           thread_id: params.threadId ?? null,
@@ -130,7 +164,7 @@ export function storeAgentTurn(
         if (params.isTerminalAgentReply) {
           dispatchStoredReplyWebPush(updated, params.dispatchWebPushNotification);
         }
-        return true;
+        return resolvedRowId;
       }
     }
   }
@@ -141,11 +175,13 @@ export function storeAgentTurn(
     isTerminalAgentReply: params.isTerminalAgentReply,
   });
   if (interaction) {
+    const resolvedRowId = typeof interaction.id === "number" ? interaction.id : null;
+    if (resolvedRowId !== null) safeOnStored(resolvedRowId);
     emitter.response(interaction);
     if (params.isTerminalAgentReply) {
       dispatchStoredReplyWebPush(interaction, params.dispatchWebPushNotification);
     }
-    return true;
+    return resolvedRowId;
   }
-  return false;
+  return null;
 }

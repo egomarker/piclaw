@@ -8,7 +8,7 @@ afterEach(() => {
   restoreEnv = null;
 });
 
-test('server UI state persists theme, tint, and meters in global extension KV', async () => {
+test('server UI state persists theme, tint, meters, and output padding in global extension KV', async () => {
   const ws = createTempWorkspace('piclaw-ui-state-');
   restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
 
@@ -24,6 +24,9 @@ test('server UI state persists theme, tint, and meters in global extension KV', 
     enabled: true,
     collapsed: true,
   });
+  expect(uiState.setServerUiOutputConfig({ outputPad: 32 })).toEqual({
+    outputPad: 24,
+  });
 
   expect(db.extensionKvGet('piclaw-ui', 'theme', 'global')).toEqual({
     theme: 'dracula',
@@ -33,9 +36,13 @@ test('server UI state persists theme, tint, and meters in global extension KV', 
     enabled: true,
     collapsed: true,
   });
+  expect(db.extensionKvGet('piclaw-ui', 'output-pad', 'global')).toEqual({
+    outputPad: 24,
+  });
   expect(uiState.getServerUiState()).toEqual({
     ui_theme: { theme: 'dracula', tint: '#bd93f9' },
     ui_meters: { enabled: true, collapsed: true },
+    ui_output: { outputPad: 24 },
   });
 
   ws.cleanup();

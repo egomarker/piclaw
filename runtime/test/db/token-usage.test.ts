@@ -28,6 +28,7 @@ describe("token-usage", () => {
       run_at: new Date().toISOString(),
       input_tokens: 100,
       output_tokens: 50,
+      reasoning_tokens: 7,
       cache_read_tokens: 10,
       cache_write_tokens: 5,
       total_tokens: 165,
@@ -46,6 +47,7 @@ describe("token-usage", () => {
     expect(row).toBeDefined();
     expect(row.input_tokens).toBe(100);
     expect(row.output_tokens).toBe(50);
+    expect(row.reasoning_tokens).toBe(7);
     expect(row.total_tokens).toBe(165);
     expect(row.model).toBe("gpt-4");
     expect(row.response_model).toBeNull();
@@ -89,6 +91,7 @@ describe("token-usage", () => {
       run_at: new Date().toISOString(),
       input_tokens: 100,
       output_tokens: 50,
+      reasoning_tokens: 15,
       cache_read_tokens: 10,
       cache_write_tokens: 0,
       total_tokens: 160,
@@ -137,6 +140,7 @@ describe("token-usage", () => {
 
     const totals = getTokenUsageTotals(chatJid);
     expect(totals.total_tokens).toBe(340);
+    expect(totals.reasoning_tokens).toBe(15);
     expect(totals.runs).toBe(3);
 
     const provider = getTokenUsageByProvider(chatJid, 10);
@@ -257,6 +261,7 @@ describe("token-usage", () => {
       provider: "legacy-provider",
       input_tokens: 0,
       output_tokens: 0,
+      reasoning_tokens: 0,
       cache_read_tokens: 0,
       cache_write_tokens: 0,
       total_tokens: 0,
@@ -269,6 +274,7 @@ describe("token-usage", () => {
       model: "legacy-model",
       input_tokens: 0,
       output_tokens: 0,
+      reasoning_tokens: 0,
       cache_read_tokens: 0,
       cache_write_tokens: 0,
       total_tokens: 0,

@@ -35,7 +35,7 @@ import {
 import { updateAssistantConfig, updateUserConfig } from "../../../agent-control/agent-control-helpers.js";
 import { generateTotpQr } from "../../../utils/totp-qr.js";
 import { ensureAvatarCache, resolveAvatarUrl, type AvatarKind } from "../media/avatar-service.js";
-import { getServerUiThemeConfig, setServerUiThemeConfig } from "../ui-state.js";
+import { getServerUiOutputConfig, getServerUiThemeConfig, setServerUiOutputConfig, setServerUiThemeConfig } from "../ui-state.js";
 
 export interface GeneralSettingsData {
   assistantName: string;
@@ -65,6 +65,7 @@ export interface GeneralSettingsData {
   scopedModelsOnly: boolean;
   uiTheme: string;
   uiTint: string | null;
+  outputPad: number;
   widgetToken: string;
 }
 
@@ -87,6 +88,7 @@ export interface GeneralSettingsInput {
   scopedModelsOnly?: unknown;
   uiTheme?: unknown;
   uiTint?: unknown;
+  outputPad?: unknown;
 }
 
 export interface GeneralSettingsProfileUpdatePayload {
@@ -182,6 +184,7 @@ export function getGeneralSettingsData(): GeneralSettingsData {
   const session = getSessionStorageConfig();
   const web = getWebRuntimeConfig();
   const uiTheme = getServerUiThemeConfig();
+  const uiOutput = getServerUiOutputConfig();
   return {
     assistantName: identity.assistantName || "PiClaw",
     assistantAvatar: identity.assistantAvatar || "",
@@ -203,6 +206,7 @@ export function getGeneralSettingsData(): GeneralSettingsData {
     scopedModelsOnly: getScopedModelsOnly(),
     uiTheme: uiTheme.theme,
     uiTint: uiTheme.tint,
+    outputPad: uiOutput.outputPad,
     widgetToken: getOrCreateWebWidgetToken(),
   };
 }
@@ -320,6 +324,11 @@ export async function saveGeneralSettings(input: GeneralSettingsInput): Promise<
       ...(nextUiTheme !== undefined ? { theme: nextUiTheme || "default" } : {}),
       ...(nextUiTint !== undefined ? { tint: nextUiTint } : {}),
     });
+  }
+
+  const nextOutputPad = normalizeOptionalInt(input.outputPad, 0, 24);
+  if (nextOutputPad !== undefined) {
+    setServerUiOutputConfig({ outputPad: nextOutputPad });
   }
 
   return getGeneralSettingsData();

@@ -93,6 +93,7 @@ test("runScheduledTask logs run and updates task", async () => {
   });
 
   const sent: string[] = [];
+  const nudges: string[] = [];
   const deps = {
     queue: { enqueueTask: (_id: string, fn: () => Promise<void>) => fn() } as any,
     agentPool: {
@@ -105,6 +106,9 @@ test("runScheduledTask logs run and updates task", async () => {
     sendMessage: async (_jid: string, text: string) => {
       sent.push(text);
     },
+    sendNudge: async (text: string) => {
+      nudges.push(text);
+    },
   };
 
   const task = db.getTaskById(taskId)!;
@@ -114,6 +118,7 @@ test("runScheduledTask logs run and updates task", async () => {
   expect(updated.last_run).not.toBeNull();
   expect(updated.last_result).toContain("Hello");
   expect(sent.length).toBe(1);
+  expect(nudges).toEqual(["Hello"]);
 
   const logs = db.getTaskRunLogs(taskId);
   expect(logs.length).toBe(1);
@@ -123,6 +128,58 @@ test("runScheduledTask logs run and updates task", async () => {
   expect(metrics.taskRunsStarted).toBe(1);
   expect(metrics.taskRunsSucceeded).toBe(1);
   expect(metrics.taskRunsFailed).toBe(0);
+});
+
+test("runScheduledTask can post task output without sending Pushover nudges", async () => {
+  const ws = getTestWorkspace();
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+
+  const db = await import("../../src/db.js");
+  db.initDatabase();
+
+  const scheduler = await import("../../src/task-scheduler.js");
+  scheduler.resetSchedulerMetricsForTests();
+
+  const taskId = `task-muted-${Date.now()}`;
+  db.createTask({
+    id: taskId,
+    chat_jid: "web:default",
+    prompt: "say hi",
+    notify_on_complete: false,
+    schedule_type: "interval",
+    schedule_value: "60000",
+    next_run: new Date(Date.now() - 1000).toISOString(),
+    status: "active",
+    created_at: new Date().toISOString(),
+  });
+
+  const sent: string[] = [];
+  const nudges: string[] = [];
+  const deps = {
+    queue: { enqueueTask: (_id: string, fn: () => Promise<void>) => fn() } as any,
+    agentPool: {
+      runAgent: async () => ({ status: "success", result: "Hello" }),
+      saveSessionPosition: async () => "leaf-muted",
+      restoreSessionPosition: async () => {},
+      getCurrentModelLabel: async () => null,
+      applyControlCommand: async () => ({ status: "success", message: "" }),
+    } as any,
+    sendMessage: async (_jid: string, text: string) => {
+      sent.push(text);
+    },
+    sendNudge: async (text: string) => {
+      nudges.push(text);
+    },
+  };
+
+  const task = db.getTaskById(taskId)!;
+  await scheduler.runScheduledTask(task, deps as any);
+
+  expect(sent).toEqual(["Hello"]);
+  expect(nudges).toEqual([]);
+
+  const updated = db.getTaskById(taskId)!;
+  expect(updated.last_result).toContain("Hello");
 });
 
 test("runScheduledTask records recovery summaries in task logs without polluting outbound text", async () => {

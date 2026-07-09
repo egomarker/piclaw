@@ -26,6 +26,49 @@ function makeHandler() {
   return { handler, statuses, emitter };
 }
 
+describe("web SSE provider retry events", () => {
+  it("includes the selected model in rate-limit retry status", () => {
+    const { handler, statuses } = makeHandler();
+
+    handler({
+      type: "model_select",
+      model: { provider: "azure-openai", id: "gpt-5-4" },
+    } as any);
+    handler({
+      type: "auto_retry_start",
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 30000,
+      errorMessage: "Azure OpenAI API error (429): RateLimitReached. Retry-After: 30",
+    } as any);
+
+    expect(statuses[0]).toMatchObject({
+      type: "intent",
+      title: "Rate limited (HTTP 429) on azure-openai/gpt-5-4 — retrying (attempt 1/3, 30s delay)",
+    });
+    expect(String(statuses[0].detail)).toContain("model: azure-openai/gpt-5-4");
+  });
+
+  it("includes the selected model when the rate-limit retry budget is exhausted", () => {
+    const { handler, statuses } = makeHandler();
+
+    handler({
+      type: "model_select",
+      model: { provider: "azure-openai", id: "gpt-5-4" },
+    } as any);
+    handler({
+      type: "auto_retry_end",
+      success: false,
+      finalError: "Azure OpenAI error: Retry budget exhausted. Azure rate limit exceeded. Wait about 30s before retrying.",
+    } as any);
+
+    expect(statuses[0]).toMatchObject({
+      type: "error",
+      title: "Rate limited (HTTP 429) on azure-openai/gpt-5-4 — retry budget exhausted",
+    });
+  });
+});
+
 describe("web SSE agent compaction events", () => {
   it("includes structured Piclaw trigger fields on compaction start and end", () => {
     const { handler, statuses } = makeHandler();

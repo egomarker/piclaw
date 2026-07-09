@@ -3,6 +3,7 @@
  */
 import { html, useState, useEffect, useCallback, useMemo, useRef } from '../../vendor/preact-htm.js';
 import { NumberStepper } from './number-stepper.js';
+import { useTranslation } from '../../utils/i18n.js';
 
 function normalizeCompactionSettings(data: Record<string, any> = {}) {
     return {
@@ -32,6 +33,7 @@ function formatIso(value) {
 }
 
 export function CompactionSection({ settingsData, setStatus, mergeSettingsData }) {
+    const { t } = useTranslation();
     const [compactionTimeoutSec, setCompactionTimeoutSec] = useState(180);
     const [compactionBackoffBaseMin, setCompactionBackoffBaseMin] = useState(15);
     const [compactionBackoffMaxMin, setCompactionBackoffMaxMin] = useState(360);
@@ -126,7 +128,7 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
         saveTimerRef.current = setTimeout(async () => {
             if (!mountedRef.current) return;
             try {
-                setStatus?.('Saving compaction settings…', 'info');
+                setStatus?.(t('settings.compaction.saving'), 'info');
                 const response = await fetch('/agent/settings/compaction', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -135,13 +137,13 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
                 const payload = await response.json().catch(() => ({}));
                 if (!mountedRef.current) return;
                 if (!response.ok || !payload?.ok || !payload?.settings) {
-                    setStatus?.(payload?.error || 'Failed to save compaction settings.', 'error');
+                    setStatus?.(payload?.error || t('settings.compaction.saveFailed'), 'error');
                     return;
                 }
                 savedSnapshotRef.current = currentSnapshot;
                 mergeSettingsData?.(payload.settings);
                 applyIncoming({ ...(settingsData || {}), ...(payload.settings || {}) });
-                setStatus?.('Compaction settings saved.', 'success');
+                setStatus?.(t('settings.compaction.saved'), 'success');
                 setAppliedHint(true);
                 setTimeout(() => {
                     if (mountedRef.current) {
@@ -151,7 +153,7 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
                 }, 4000);
             } catch (error) {
                 console.warn('[settings/compaction] Failed to persist compaction settings.', error);
-                if (mountedRef.current) setStatus?.('Failed to save compaction settings.', 'error');
+                if (mountedRef.current) setStatus?.(t('settings.compaction.saveFailed'), 'error');
             }
         }, 800);
         return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
@@ -159,7 +161,7 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
 
     const resetBackoff = useCallback(async (chatJid) => {
         try {
-            setStatus?.(`Clearing compaction suppression for ${chatJid}…`, 'info');
+            setStatus?.(t('settings.compaction.clearing', { chat: chatJid }), 'info');
             const response = await fetch('/agent/settings/compaction/reset-backoff', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -167,15 +169,15 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
             });
             const payload = await response.json().catch(() => ({}));
             if (!response.ok || !payload?.ok || !payload?.settings) {
-                setStatus?.(payload?.error || 'Failed to clear compaction suppression.', 'error');
+                setStatus?.(payload?.error || t('settings.compaction.clearFailed'), 'error');
                 return;
             }
             mergeSettingsData?.(payload.settings);
             applyIncoming({ ...(settingsData || {}), ...(payload.settings || {}) });
-            setStatus?.(`Cleared compaction suppression for ${chatJid}.`, 'success');
+            setStatus?.(t('settings.compaction.cleared', { chat: chatJid }), 'success');
         } catch (error) {
             console.warn('[settings/compaction] Failed to clear compaction suppression.', error);
-            setStatus?.('Failed to clear compaction suppression.', 'error');
+            setStatus?.(t('settings.compaction.clearFailed'), 'error');
         }
     }, [applyIncoming, mergeSettingsData, setStatus, settingsData]);
 
@@ -183,29 +185,29 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
         <div class="settings-section">
             ${appliedHint && html`
                 <div class="settings-general-applied-notice" role="status" aria-live="polite">
-                    Compaction settings applied. Existing turns keep their current timers; new turns use the updated values.
+                    ${t('settings.compaction.appliedNotice')}
                 </div>
             `}
 
-            <h3>Automatic compaction</h3>
+            <h3>${t('settings.compaction.autoHeading')}</h3>
             <div class="settings-row">
-                <label>Enable tool-result compaction</label>
+                <label>${t('settings.compaction.enableToolResult')}</label>
                 <div style="display:flex; align-items:center; gap:10px;">
                     <input type="checkbox" checked=${toolResultCompactionEnabled} onChange=${e => setToolResultCompactionEnabled(Boolean(e.target.checked))} />
-                    <span class="settings-hint" style="margin:0">When disabled, large tool results stay inline and are not externalized into searchable tool-output handles.</span>
+                    <span class="settings-hint" style="margin:0">${t('settings.compaction.enableToolResultHint')}</span>
                 </div>
             </div>
             <div class="settings-row">
-                <label>Semantic summaries for compacted tool results</label>
+                <label>${t('settings.compaction.semanticSummaries')}</label>
                 <div style="display:flex; align-items:center; gap:10px;">
                     <input type="checkbox" checked=${toolResultSemanticSummaryEnabled} onChange=${e => setToolResultSemanticSummaryEnabled(Boolean(e.target.checked))} />
-                    <span class="settings-hint" style="margin:0">When enabled, compacted outputs include a semantic summary generated with the active model (preview fallback on failure).</span>
+                    <span class="settings-hint" style="margin:0">${t('settings.compaction.semanticSummariesHint')}</span>
                 </div>
             </div>
             <div class="settings-row">
-                <label>Semantic summary input limit (chars)</label>
+                <label>${t('settings.compaction.inputLimit')}</label>
                 <${NumberStepper}
-                    label="semantic summary input limit"
+                    label=${t('settings.compaction.inputLimitAria')}
                     value=${toolResultSemanticSummaryMaxInputChars}
                     min=${500}
                     max=${200000}
@@ -214,12 +216,12 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
                     disabled=${!toolResultSemanticSummaryEnabled}
                     onChange=${setToolResultSemanticSummaryMaxInputChars}
                 />
-                <span class="settings-hint" style="margin:0">Maximum characters sampled from full tool output for semantic summarization.</span>
+                <span class="settings-hint" style="margin:0">${t('settings.compaction.inputLimitHint')}</span>
             </div>
             <div class="settings-row">
-                <label>Semantic summary output max tokens</label>
+                <label>${t('settings.compaction.maxTokens')}</label>
                 <${NumberStepper}
-                    label="semantic summary max tokens"
+                    label=${t('settings.compaction.maxTokensAria')}
                     value=${toolResultSemanticSummaryMaxTokens}
                     min=${64}
                     max=${4096}
@@ -228,12 +230,12 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
                     disabled=${!toolResultSemanticSummaryEnabled}
                     onChange=${setToolResultSemanticSummaryMaxTokens}
                 />
-                <span class="settings-hint" style="margin:0">Upper bound for generated summary length.</span>
+                <span class="settings-hint" style="margin:0">${t('settings.compaction.maxTokensHint')}</span>
             </div>
             <div class="settings-row">
-                <label>Semantic summary timeout (sec)</label>
+                <label>${t('settings.compaction.summaryTimeout')}</label>
                 <${NumberStepper}
-                    label="semantic summary timeout"
+                    label=${t('settings.compaction.summaryTimeoutAria')}
                     value=${toolResultSemanticSummaryTimeoutSec}
                     min=${1}
                     max=${300}
@@ -242,12 +244,12 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
                     disabled=${!toolResultSemanticSummaryEnabled}
                     onChange=${setToolResultSemanticSummaryTimeoutSec}
                 />
-                <span class="settings-hint" style="margin:0">Abort semantic summary generation after this timeout and fall back to preview compaction.</span>
+                <span class="settings-hint" style="margin:0">${t('settings.compaction.summaryTimeoutHint')}</span>
             </div>
             <div class="settings-row">
-                <label>Compaction threshold (%)</label>
+                <label>${t('settings.compaction.threshold')}</label>
                 <${NumberStepper}
-                    label="compaction threshold"
+                    label=${t('settings.compaction.thresholdAria')}
                     value=${compactionThresholdPercent}
                     min=${10}
                     max=${95}
@@ -255,12 +257,12 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
                     width="80px"
                     onChange=${setCompactionThresholdPercent}
                 />
-                <span class="settings-hint" style="margin:0">auto-compact when context exceeds this % of window</span>
+                <span class="settings-hint" style="margin:0">${t('settings.compaction.thresholdHint')}</span>
             </div>
             <div class="settings-row">
-                <label>Compaction timeout (sec)</label>
+                <label>${t('settings.compaction.timeout')}</label>
                 <${NumberStepper}
-                    label="compaction timeout"
+                    label=${t('settings.compaction.timeoutAria')}
                     value=${compactionTimeoutSec}
                     min=${1}
                     max=${3600}
@@ -268,12 +270,12 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
                     width="90px"
                     onChange=${setCompactionTimeoutSec}
                 />
-                <span class="settings-hint" style="margin:0">Abort a stuck pre-prompt/manual compaction instead of hanging forever.</span>
+                <span class="settings-hint" style="margin:0">${t('settings.compaction.timeoutHint')}</span>
             </div>
             <div class="settings-row">
-                <label>Failure backoff base (min)</label>
+                <label>${t('settings.compaction.backoffBase')}</label>
                 <${NumberStepper}
-                    label="compaction backoff base"
+                    label=${t('settings.compaction.backoffBaseAria')}
                     value=${compactionBackoffBaseMin}
                     min=${1}
                     max=${24 * 60}
@@ -281,12 +283,12 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
                     width="90px"
                     onChange=${setCompactionBackoffBaseMin}
                 />
-                <span class="settings-hint" style="margin:0">First suppression window after a compaction failure.</span>
+                <span class="settings-hint" style="margin:0">${t('settings.compaction.backoffBaseHint')}</span>
             </div>
             <div class="settings-row">
-                <label>Failure backoff max (min)</label>
+                <label>${t('settings.compaction.backoffMax')}</label>
                 <${NumberStepper}
-                    label="compaction backoff max"
+                    label=${t('settings.compaction.backoffMaxAria')}
                     value=${compactionBackoffMaxMin}
                     min=${1}
                     max=${7 * 24 * 60}
@@ -294,13 +296,13 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
                     width="90px"
                     onChange=${setCompactionBackoffMaxMin}
                 />
-                <span class="settings-hint" style="margin:0">Upper bound for exponential suppression after repeated failures.</span>
+                <span class="settings-hint" style="margin:0">${t('settings.compaction.backoffMaxHint')}</span>
             </div>
 
             <div class="settings-row">
-                <label>Backoff decay factor</label>
+                <label>${t('settings.compaction.decayFactor')}</label>
                 <${NumberStepper}
-                    label="backoff decay factor"
+                    label=${t('settings.compaction.decayFactorAria')}
                     value=${Math.round(compactionBackoffDecayFactor * 100)}
                     min=${10}
                     max=${100}
@@ -308,21 +310,21 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
                     width="80px"
                     onChange=${v => setCompactionBackoffDecayFactor(v / 100)}
                 />
-                <span class="settings-hint" style="margin:0">% — halves backoff after each successful compaction</span>
+                <span class="settings-hint" style="margin:0">${t('settings.compaction.decayFactorHint')}</span>
             </div>
 
-            <h3 style="margin-top:20px">Stall watchdog</h3>
+            <h3 style="margin-top:20px">${t('settings.compaction.watchdogHeading')}</h3>
             <div class="settings-row">
-                <label>Enable watchdog</label>
+                <label>${t('settings.compaction.enableWatchdog')}</label>
                 <div style="display:flex; align-items:center; gap:10px;">
                     <input type="checkbox" checked=${progressWatchdogEnabled} onChange=${e => setProgressWatchdogEnabled(Boolean(e.target.checked))} />
-                    <span class="settings-hint" style="margin:0">Disabled by default. When enabled, a helper process terminates the runtime if an active phase stops heartbeating.</span>
+                    <span class="settings-hint" style="margin:0">${t('settings.compaction.enableWatchdogHint')}</span>
                 </div>
             </div>
             <div class="settings-row">
-                <label>Watchdog timeout (sec)</label>
+                <label>${t('settings.compaction.watchdogTimeout')}</label>
                 <${NumberStepper}
-                    label="watchdog timeout"
+                    label=${t('settings.compaction.watchdogTimeoutAria')}
                     value=${progressWatchdogTimeoutSec}
                     min=${0}
                     max=${3600}
@@ -331,12 +333,12 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
                     disabled=${!progressWatchdogEnabled}
                     onChange=${setProgressWatchdogTimeoutSec}
                 />
-                <span class="settings-hint" style="margin:0">How long an active phase can go without a heartbeat before the watchdog kills the runtime.</span>
+                <span class="settings-hint" style="margin:0">${t('settings.compaction.watchdogTimeoutHint')}</span>
             </div>
 
-            <h3 style="margin-top:20px">Active compaction suppressions</h3>
+            <h3 style="margin-top:20px">${t('settings.compaction.suppressionsHeading')}</h3>
             ${compactionBackoffs.length === 0 ? html`
-                <p class="settings-hint">No chats are currently under compaction backoff.</p>
+                <p class="settings-hint">${t('settings.compaction.noBackoff')}</p>
             ` : html`
                 <div class="settings-table-wrapper">
                     <table class="settings-table">
@@ -358,7 +360,7 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
                                     <td title=${entry.lastErrorMessage || ''}>${entry.lastErrorMessage || '—'}</td>
                                     <td>
                                         <button class="settings-secondary-btn" onClick=${() => resetBackoff(entry.chatJid)}>
-                                            Clear
+                                            ${t('settings.compaction.clear')}
                                         </button>
                                     </td>
                                 </tr>
@@ -368,9 +370,9 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
                 </div>
             `}
 
-            <h3 style="margin-top:20px">Live watchdog phases</h3>
+            <h3 style="margin-top:20px">${t('settings.compaction.phasesHeading')}</h3>
             ${progressWatchdogPhases.length === 0 ? html`
-                <p class="settings-hint">No active tracked phases right now.</p>
+                <p class="settings-hint">${t('settings.compaction.noPhases')}</p>
             ` : html`
                 <div class="settings-table-wrapper">
                     <table class="settings-table">

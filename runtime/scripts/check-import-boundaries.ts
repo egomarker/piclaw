@@ -14,10 +14,10 @@ function walkFiles(baseDir: string, suffix: string): string[] {
 
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir)) {
+      if (entry === "node_modules") continue;
       const full = join(dir, entry);
       const stats = statSync(full);
       if (stats.isDirectory()) {
-        if (entry === "node_modules") continue;
         walk(full);
       } else if (stats.isFile() && full.endsWith(suffix)) {
         out.push(full);

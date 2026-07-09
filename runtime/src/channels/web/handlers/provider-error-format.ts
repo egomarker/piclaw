@@ -10,6 +10,7 @@ export type ProviderErrorCategory =
   | "network"
   | "model_availability"
   | "model_config"
+  | "output_limit"
   | "provider";
 
 export type ProviderErrorSeverity = "warning" | "error" | "critical" | "info";
@@ -92,6 +93,7 @@ function extractRequestId(text: string, parsed: Record<string, unknown>, nested:
 }
 
 const MODEL_AVAILABILITY_PATTERN = /unsupported model|model(?:\s+is)?\s+not supported|model unavailable/i;
+const OUTPUT_LIMIT_PATTERN = /finish[_ -]?reason\s*:?\s*length|stop\s*reason\s*:?\s*length|\bstopReason\s*:?\s*length|max(?:imum)? output (?:tokens?|length)|output token limit|hit (?:the )?(?:maximum )?output/i;
 const NETWORK_ERROR_PATTERN = /\bENOTFOUND\b|\bECONNREFUSED\b|\bETIMEDOUT\b|\bECONNRESET\b|getaddrinfo|dns.*failed|network.*error|connection.*(?:error|refused|reset|lost|ended|closed)|websocket.*(?:closed|ended|1006)|fetch failed|socket hang up|socket connection was closed unexpectedly/i;
 
 export function sanitizeProviderErrorDetail(errorText: string | null | undefined): string {
@@ -104,6 +106,7 @@ export function sanitizeProviderErrorDetail(errorText: string | null | undefined
 function inferCategory(text: string): ProviderErrorCategory {
   if (/\b429\b|rate[ -]?limit|too many requests|retry-after/i.test(text)) return "rate_limit";
   if (/authentication failed|credentials may have expired|no api key(?: found| for provider)?|token refresh failed\s*:\s*401|re-authenticate|unauthorized|\b401\b|\b403\b|invalid.*api.*key|api.*key.*invalid|token.*expired|oauth.*expired|refresh.*token/i.test(text)) return "auth";
+  if (OUTPUT_LIMIT_PATTERN.test(text) && !/context(?: window| length)|maximum context length|context_length/i.test(text)) return "output_limit";
   if (/quota|usage.*limit|out of.*usage|billing|insufficient.*funds|exceeded.*limit|credit/i.test(text)) return "quota";
   if (/\b5\d\d\b|server[_ -]?error|internal[_ -]?error|bad gateway|service unavailable|gateway timeout|overloaded/i.test(text)) return "server";
   if (NETWORK_ERROR_PATTERN.test(text)) return "network";
@@ -135,6 +138,8 @@ function titleForCategory(category: ProviderErrorCategory, provider: string | nu
       return provider ? `${provider} model unavailable` : "Model unavailable";
     case "model_config":
       return "Model configuration error";
+    case "output_limit":
+      return provider ? `${provider} output limit reached` : "Provider output limit reached";
     default:
       return `${prefix}error`;
   }
@@ -155,13 +160,15 @@ function labelForCategory(category: ProviderErrorCategory): string {
     case "model_availability":
     case "model_config":
       return "model";
+    case "output_limit":
+      return "output limit";
     default:
       return "provider";
   }
 }
 
 function severityForCategory(category: ProviderErrorCategory): ProviderErrorSeverity {
-  return category === "rate_limit" || category === "server" || category === "model_availability"
+  return category === "rate_limit" || category === "server" || category === "model_availability" || category === "output_limit"
     ? "warning"
     : "error";
 }
@@ -214,11 +221,12 @@ export function parseProviderError(errorText: string | null | undefined): Parsed
   const raw = sanitizeProviderErrorDetail(errorText);
   if (!raw) return null;
 
-  const prefixMatch = raw.match(/^([A-Za-z][A-Za-z0-9 ._-]{1,40})\s+error\s*:/i);
+  const prefixMatch = raw.match(/^([A-Za-z][A-Za-z0-9 ._-]{1,40})\s+(?:api\s+)?error(?:\s*\(([45]\d\d)\))?\s*:/i);
   const parsed = extractJsonObject(raw);
   const isModelAvailabilityOnly = MODEL_AVAILABILITY_PATTERN.test(raw);
   const isNetworkOnly = NETWORK_ERROR_PATTERN.test(raw);
-  if (!parsed && !prefixMatch && !isModelAvailabilityOnly && !isNetworkOnly) return null;
+  const isOutputLimitOnly = OUTPUT_LIMIT_PATTERN.test(raw) && !/context(?: window| length)|maximum context length|context_length/i.test(raw);
+  if (!parsed && !prefixMatch && !isModelAvailabilityOnly && !isNetworkOnly && !isOutputLimitOnly) return null;
 
   const nested = asRecord(parsed?.error) || asRecord(parsed?.errors) || null;
   const message = readString(nested?.message, parsed?.message, nested?.error, parsed?.error_description, parsed?.detail)
@@ -232,7 +240,7 @@ export function parseProviderError(errorText: string | null | undefined): Parsed
   const code = readString(nested?.code, parsed?.code, nested?.error_code, parsed?.error_code);
   const type = readString(nested?.type, parsed?.type, nested?.error, parsed?.error);
   const statusFromRaw = raw.match(/\b([45]\d\d)\b/)?.[1];
-  const status = readNumber(nested?.status, nested?.status_code, parsed?.status, parsed?.status_code, statusFromRaw);
+  const status = readNumber(nested?.status, nested?.status_code, parsed?.status, parsed?.status_code, prefixMatch?.[2], statusFromRaw);
   const requestId = parsed ? extractRequestId(raw, parsed, nested) : extractRequestId(raw, {}, null);
   const sequenceNumber = readNumber(parsed?.sequence_number, parsed?.sequenceNumber, nested?.sequence_number, nested?.sequenceNumber);
 
@@ -266,6 +274,10 @@ export function formatProviderError(errorText: string | null | undefined): Provi
   }
   if (category === "model_availability") {
     const guidance = "This may be a temporary provider outage even when your model is valid. Retry shortly or switch provider/model.";
+    detail = [detail, guidance].filter(Boolean).join(" — ").slice(0, 900);
+  }
+  if (category === "output_limit") {
+    const guidance = "The model stopped after reaching its maximum output length. Ask to continue, increase max output tokens, or switch to a model with a larger output budget.";
     detail = [detail, guidance].filter(Boolean).join(" — ").slice(0, 900);
   }
 

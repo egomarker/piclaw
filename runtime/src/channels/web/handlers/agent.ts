@@ -12,7 +12,9 @@ import type { WebChannelLike } from "../core/web-channel-contracts.js";
 import {
   getAgentRuntimeConfig,
   getIdentityConfig,
+  getPersistThinkingMaxChars,
   getRoutingConfig,
+  isPersistThinkingEnabled,
 } from "../../../core/config.js";
 import { parseControlCommand } from "../../../agent-control/index.js";
 import type { AgentControlCommand, AgentControlResult } from "../../../agent-control/index.js";
@@ -54,11 +56,13 @@ import { resolveToolStatusHints } from "../../../tool-status-hints.js";
 import "../../../extensions/local-core-tool-status-hints.js";
 import "../../../extensions/generic-tool-status-hints.js";
 import { createUuid } from "../../../utils/ids.js";
-import { createLogger } from "../../../utils/logger.js";
+import { createLogger, debugSuppressedError } from "../../../utils/logger.js";
 import type { AttachmentInfo } from "../../../agent-pool/attachments.js";
 import { cancelScheduledIdleAutoCompaction, isCompactionCancellationError, maybeAutoCompactSessionBeforePrompt } from "../../../agent-pool/compaction.js";
 import { checkPendingShutdown } from "../../../runtime/shutdown-registry.js";
 import { DEFAULT_BASE_RETRY_MS, getRetryAtIso } from "../../../queue/retry-policy.js";
+import { storeThinkingContent } from "../../../db/messages.js";
+import { safeTruncateUtf16 } from "../../../utils/safe-truncate.js";
 import { formatProviderError } from "./provider-error-format.js";
 import {
   beginTrackedPhase,
@@ -1358,7 +1362,8 @@ export async function handleAgentMessage(
         if (thinkingLevel == null) thinkingLevel = modelState.thinking_level ?? null;
         if (!thinkingLevelLabel) thinkingLevelLabel = modelState.thinking_level_label ?? thinkingLevel;
         supportsThinking = modelState.supports_thinking;
-      } catch {
+      } catch (err) {
+      debugSuppressedError(log, "Failed to read current model for thinking persistence.", err, { operation: "persist_thinking.init_model" });
         if (typeof channel.agentPool.getCurrentModelLabel === "function") {
           nextModel = await channel.agentPool.getCurrentModelLabel(chatJid).catch(() => null);
         }
@@ -1798,6 +1803,11 @@ export async function processChat(
   const PREVIEW_MAX_CHARS_PER_LINE = 160;
 
   const turnId = createUuid("turn");
+  const shouldPersistThinking = isPersistThinkingEnabled() && !chatJid.startsWith("dream:");
+  let pendingThinkingText = "";
+  let pendingThinkingLines = 0;
+  let pendingThinkingDurationMs = 0;
+  let currentModel: string | null = null;
   const identity = getIdentityConfig();
   const withAgentProfile = createAgentProfileBuilder(
     chatJid,
@@ -1821,7 +1831,22 @@ export async function processChat(
       channel.updateAgentStatus(chatJid, nextPayload);
       emitter.status(nextPayload);
     },
+    modelChanged: (payload: Record<string, unknown>) => {
+      const nextModel = typeof payload?.model === "string" ? payload.model.trim() : "";
+      if (nextModel) currentModel = nextModel;
+      emitter.modelChanged(payload);
+    },
   };
+
+  if (shouldPersistThinking) {
+    try {
+      const modelState = await channel.agentPool.getAvailableModels(chatJid);
+      currentModel = modelState.current ?? null;
+    } catch (err) {
+      debugSuppressedError(log, "Failed to read current model for thinking persistence.", err, { operation: "persist_thinking.init_model" });
+      currentModel = null;
+    }
+  }
 
   const hasActiveClients = channel.sse.clients.size > 0;
   const agentRuntimeConfig = getAgentRuntimeConfig();
@@ -1858,6 +1883,22 @@ export async function processChat(
     includeThoughtFull: () => channel.isPanelExpanded(turnId, "thought"),
     includeDraftFull: () => channel.isPanelExpanded(turnId, "draft"),
     onThoughtBuffer: (text, totalLines) => channel.updateThoughtBuffer(turnId, text, totalLines),
+    onThinkingComplete: (text, totalLines, durationMs) => {
+      const realLines = text ? text.split("\n").length : 0;
+      log.info("Thinking block complete", {
+        operation: "persist_thinking.block_complete",
+        chatJid,
+        chars: text?.length ?? 0,
+        softLines: totalLines,
+        realLines,
+        durationMs,
+        shouldPersist: shouldPersistThinking,
+      });
+      if (!shouldPersistThinking || !text) return;
+      pendingThinkingText = pendingThinkingText ? `${pendingThinkingText}\n\n---\n\n${text}` : text;
+      pendingThinkingLines += realLines;
+      pendingThinkingDurationMs += durationMs;
+    },
     onDraftBuffer: (text, totalLines) => channel.updateDraftBuffer(turnId, text, totalLines),
   });
   const trackedStreamingHandler = (event: Record<string, unknown>) => {
@@ -1890,6 +1931,28 @@ export async function processChat(
     }
     if (type === "recovery_start" || type === "recovery_end") {
       sawRecoveryEvent = true;
+    }
+    if (type === "recovery_start") {
+      // I6: a previous attempt's thinking is associated with the failed run.
+      // Reset the per-turn thinking buffer so only the successful attempt's
+      // reasoning ends up persisted alongside the eventual message. Without
+      // this, the stored thinking would concatenate failed-attempt reasoning
+      // with successful-attempt reasoning and inflate both the line count
+      // and duration. The structural correctness of pendingThinkingText is
+      // preserved by relying on the same accumulator that onThinkingComplete
+      // populates after each thinking_end block.
+      if (shouldPersistThinking && pendingThinkingText) {
+        log.info("Discarding thinking buffer at recovery_start", {
+          operation: "persist_thinking.discard_on_recovery",
+          chatJid,
+          discardedChars: pendingThinkingText.length,
+          discardedLines: pendingThinkingLines,
+          discardedDurationMs: pendingThinkingDurationMs,
+        });
+      }
+      pendingThinkingText = "";
+      pendingThinkingLines = 0;
+      pendingThinkingDurationMs = 0;
     }
     if (type === "recovery_end") {
       lastRecoveryOutcome = typeof event.outcome === "string" ? event.outcome : null;
@@ -2043,16 +2106,18 @@ export async function processChat(
     };
     const inputTokens = readNumber("input", "inputTokens", "promptTokens");
     const outputTokens = readNumber("output", "outputTokens", "completionTokens");
+    const reasoningTokens = readNumber("reasoning", "reasoningTokens", "reasoning_tokens");
     const cacheReadTokens = readNumber("cacheRead", "cacheReadTokens");
     const cacheWriteTokens = readNumber("cacheWrite", "cacheWriteTokens");
     const explicitTotal = readNumber("totalTokens", "total", "total_tokens");
     const totalTokens = explicitTotal || inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens;
-    if (!totalTokens && !inputTokens && !outputTokens && !cacheReadTokens && !cacheWriteTokens) return null;
+    if (!totalTokens && !inputTokens && !outputTokens && !reasoningTokens && !cacheReadTokens && !cacheWriteTokens) return null;
     const cost = record.cost && typeof record.cost === "object" ? record.cost as Record<string, unknown> : null;
     const costTotal = cost ? Number(cost.total) : Number(record.costTotal ?? record.cost_total);
     return {
       input_tokens: inputTokens,
       output_tokens: outputTokens,
+      reasoning_tokens: reasoningTokens,
       cache_read_tokens: cacheReadTokens,
       cache_write_tokens: cacheWriteTokens,
       total_tokens: totalTokens,
@@ -2078,24 +2143,68 @@ export async function processChat(
     };
   };
 
+  const buildThinkingRefBlocks = (): Array<Record<string, unknown>> => (
+    shouldPersistThinking && pendingThinkingText
+      ? [{ type: "thinking_ref", lines: pendingThinkingLines, duration_ms: pendingThinkingDurationMs }]
+      : []
+  );
+  // Persist accumulated thinking text against a known message rowid (returned
+  // from storeAgentTurn). This replaces the previous content-LIKE rediscovery
+  // which was both fragile (failed on duplicate content / retries) and O(N)
+  // per turn (full table scan of messages_fts predicate). The rowid is the
+  // authoritative identifier returned by the message persistence layer.
+  const persistThinkingForRow = (messageRowId: number | null): void => {
+    if (!shouldPersistThinking || !pendingThinkingText) return;
+    if (!messageRowId || messageRowId <= 0) {
+      log.warn("Skipping thinking persistence — no message rowid available", {
+        operation: "persist_thinking.no_rowid",
+        chatJid,
+      });
+      return;
+    }
+    const maxChars = getPersistThinkingMaxChars();
+    const truncated = pendingThinkingText.length > maxChars;
+    const textToStore = truncated ? safeTruncateUtf16(pendingThinkingText, maxChars) : pendingThinkingText;
+    storeThinkingContent(String(messageRowId), textToStore, pendingThinkingLines, pendingThinkingDurationMs, currentModel ?? undefined, truncated);
+    log.info("Persisted thinking content", {
+      operation: "persist_thinking.persist",
+      chatJid,
+      messageRowid: messageRowId,
+      lines: pendingThinkingLines,
+      durationMs: pendingThinkingDurationMs,
+      chars: textToStore.length,
+      truncated,
+      model: currentModel,
+    });
+    pendingThinkingText = "";
+    pendingThinkingLines = 0;
+    pendingThinkingDurationMs = 0;
+  };
   const persistTerminalOutcome = (
     text: string,
     marker: Record<string, unknown> | null,
     options: { critical?: boolean; additionalBlocks?: Array<Record<string, unknown>>; usage?: unknown } = {},
-  ) => storeAgentTurn(channel, emitter, {
-    chatJid,
-    text,
-    attachments: [],
-    channelName,
-    threadId: resolvedThreadRootId,
-    skipPlaceholder: turnCount === 0,
-    isTerminalAgentReply: true,
-    extraContentBlocks: [
-      buildAgentTimingBlock(options.usage),
-      ...(marker ? [marker] : []),
-      ...(Array.isArray(options.additionalBlocks) ? options.additionalBlocks : []),
-    ],
-  });
+  ) => {
+    // Capture thinking BEFORE broadcast via onMessageStored callback so a
+    // fast client receiving the SSE agent_response event can immediately
+    // fetch /agent/thinking?message_id=N without racing the INSERT.
+    return storeAgentTurn(channel, emitter, {
+      chatJid,
+      text,
+      attachments: [],
+      channelName,
+      threadId: resolvedThreadRootId,
+      skipPlaceholder: turnCount === 0,
+      isTerminalAgentReply: true,
+      extraContentBlocks: [
+        buildAgentTimingBlock(options.usage),
+        ...(marker ? [marker] : []),
+        ...(Array.isArray(options.additionalBlocks) ? options.additionalBlocks : []),
+        ...buildThinkingRefBlocks(),
+      ],
+      onMessageStored: persistThinkingForRow,
+    });
+  };
   const persistVisibleFailureOutcome = (
     markerBase: Record<string, unknown>,
     detail?: string,
@@ -2426,7 +2535,9 @@ export async function processChat(
         extraContentBlocks: [
           buildAgentTimingBlock(output.usage),
           ...(buildRecoveryMarkerBlocks(output.recovery) ?? []),
+          ...buildThinkingRefBlocks(),
         ],
+        onMessageStored: persistThinkingForRow,
       })
     : hasDraftFallback
       ? publishDraftFallback("empty-final")

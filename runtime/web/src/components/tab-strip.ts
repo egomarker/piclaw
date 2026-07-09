@@ -11,6 +11,7 @@
  */
 
 import { html, useCallback, useEffect, useMemo, useRef, useState } from '../vendor/preact-htm.js';
+import { useTranslation } from '../utils/i18n.js';
 import { paneRegistry } from '../panes/index.js';
 import { resolveAddonStandaloneTabUrl } from '../ui/addon-web-extensions.js';
 import { canTabCompareToSaved } from '../ui/tab-compare-saved.js';
@@ -67,6 +68,7 @@ export function getStandaloneTabUrl(path, { hasPopOutTab = false } = {}) {
 }
 
 export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, onCloseAll, onTogglePin, onTogglePreview, onToggleDiff, onEditSource, previewTabs, diffTabs, paneOverrides, detachedTabs, onReattachTab, onToggleDock, dockVisible, onToggleZen, zenMode, onPopOutTab }) {
+    const { t } = useTranslation();
     const [contextMenu, setContextMenu] = useState(null);
     const stripRef = useRef(null);
 
@@ -223,7 +225,7 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
                     onContextMenu=${(e) => handleContextMenu(e, tab.id)}
                 >
                     ${tab.pinned && html`
-                        <span class="tab-pin-icon" aria-label="Pinned">
+                        <span class="tab-pin-icon" aria-label=${t('tab.pinned')}>
                             <svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor">
                                 <path d="M4.456.734a1.75 1.75 0 0 1 2.826.504l.613 1.327a3.1 3.1 0 0 0 2.084 1.707l2.454.584c1.332.317 1.8 1.972.832 2.94L11.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06L10 11.06l-2.204 2.205c-.968.968-2.623.5-2.94-.832l-.584-2.454a3.1 3.1 0 0 0-1.707-2.084l-1.327-.613a1.75 1.75 0 0 1-.504-2.826z"/>
                             </svg>
@@ -231,7 +233,7 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
                     `}
                     <span class="tab-label">${tab.label}</span>
                     ${detachedTabs instanceof Map && detachedTabs.has(tab.id) && html`
-                        <span class="tab-detached-badge" aria-label="Detached" title="Open in separate window">↗</span>
+                        <span class="tab-detached-badge" aria-label=${t('tab.detached')} title=${t('tab.openSeparateWindow')}>↗</span>
                     `}
                     <button
                         type="button"
@@ -287,9 +289,9 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
         </div>
         ${contextMenu && html`
             <div class="tab-context-menu" style=${{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }}>
-                <button onClick=${() => { onClose?.(contextMenu.id); setContextMenu(null); }}>Close</button>
-                <button onClick=${() => { onCloseOthers?.(contextMenu.id); setContextMenu(null); }}>Close Others</button>
-                <button onClick=${() => { onCloseAll?.(); setContextMenu(null); }}>Close All</button>
+                <button onClick=${() => { onClose?.(contextMenu.id); setContextMenu(null); }}>${t('tab.close')}</button>
+                <button onClick=${() => { onCloseOthers?.(contextMenu.id); setContextMenu(null); }}>${t('tab.closeOthers')}</button>
+                <button onClick=${() => { onCloseAll?.(); setContextMenu(null); }}>${t('tab.closeAll')}</button>
                 <hr />
                 <button onClick=${() => { onTogglePin?.(contextMenu.id); setContextMenu(null); }}>
                     ${contextMenuTab?.pinned ? 'Unpin' : 'Pin'}
@@ -310,14 +312,14 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
                     <button onClick=${() => {
                         onReattachTab(contextMenu.id);
                         setContextMenu(null);
-                    }}>Reattach</button>
+                    }}>${t('tab.reattach')}</button>
                 `}
                 ${onPopOutTab && !isContextMenuTabDetached && html`
                     <button onClick=${() => {
                         const tab = tabs.find(t => t.id === contextMenu.id);
                         onPopOutTab(contextMenu.id, tab?.label);
                         setContextMenu(null);
-                    }}>Open in Window</button>
+                    }}>${t('tab.openInWindow')}</button>
                 `}
                 ${contextMenuCanCompareToSaved && onToggleDiff && html`
                     <hr />
@@ -343,7 +345,7 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
                         <button onClick=${() => {
                             window.open(standaloneUrl, '_blank', 'noopener');
                             setContextMenu(null);
-                        }}>Open in New Tab</button>
+                        }}>${t('tab.openInNewTab')}</button>
                     `;
                 })()}
             </div>

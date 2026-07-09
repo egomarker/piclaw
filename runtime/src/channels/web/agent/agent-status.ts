@@ -9,6 +9,7 @@ import { appendServerTiming, measureAsync, measureSync } from "../http/server-ti
 export interface TokenUsageCounterSummary {
   input_tokens: number;
   output_tokens: number;
+  reasoning_tokens?: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
   total_tokens: number;
@@ -74,6 +75,7 @@ function formatTokenUsageRecord(record: LatestTokenUsageCounterSummary | null | 
   return {
     inputTokens: record.input_tokens,
     outputTokens: record.output_tokens,
+    reasoningTokens: record.reasoning_tokens ?? 0,
     cacheReadTokens: record.cache_read_tokens,
     cacheWriteTokens: record.cache_write_tokens,
     totalTokens: record.total_tokens,
@@ -94,6 +96,7 @@ function formatTokenUsageTotals(record: TokenUsageCounterSummary | null | undefi
   return {
     inputTokens: record.input_tokens,
     outputTokens: record.output_tokens,
+    reasoningTokens: record.reasoning_tokens ?? 0,
     cacheReadTokens: record.cache_read_tokens,
     cacheWriteTokens: record.cache_write_tokens,
     totalTokens: record.total_tokens,

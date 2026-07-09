@@ -13,6 +13,7 @@ import { resolve, extname } from "path";
 import { fileURLToPath } from "url";
 
 import { WORKSPACE_DIR } from "../../../core/config.js";
+import { getMediaById } from "../../../db/media.js";
 import { createLogger, debugSuppressedError } from "../../../utils/logger.js";
 import { validateCallbackUrl } from "../../../remote/ssrf.js";
 import { contentTypeForPath } from "../workspace/file-utils.js";
@@ -216,12 +217,36 @@ function loadDataAvatar(source: string): { data: Uint8Array; contentType: string
   }
 }
 
+function parseMediaAvatarId(source: string): number | null {
+  try {
+    const url = new URL(source, "http://localhost");
+    const match = url.pathname.match(/^\/media\/(\d+)\/?$/);
+    if (!match) return null;
+    const id = Number.parseInt(match[1], 10);
+    return Number.isSafeInteger(id) && id > 0 ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadMediaAvatar(source: string): { data: Uint8Array; contentType: string } | null {
+  const id = parseMediaAvatarId(source);
+  if (id === null) return null;
+  const record = getMediaById(id);
+  const contentType = normalizeContentType(record?.content_type);
+  if (!record || !contentType.startsWith("image/")) return null;
+  return { data: new Uint8Array(record.data), contentType };
+}
+
 async function loadAvatarSource(source: string): Promise<{ data: Uint8Array; contentType: string } | null> {
   if (source.startsWith("http://") || source.startsWith("https://")) {
     return await loadRemoteAvatar(source);
   }
   if (source.startsWith("data:")) {
     return loadDataAvatar(source);
+  }
+  if (source.startsWith("/media/")) {
+    return loadMediaAvatar(source);
   }
   return loadLocalAvatar(source);
 }

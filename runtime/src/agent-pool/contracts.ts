@@ -110,8 +110,8 @@ export interface RunAgentOptions {
    */
   skipPrePromptCompaction?: boolean;
   /**
-   * Schedule a background idle compaction shortly after a successful turn
-   * when the session remains near the context threshold.
+   * Run an idle auto-compaction check after a successful terminal turn when
+   * the completed turn leaves the session near the context threshold.
    */
   scheduleIdleAutoCompaction?: boolean;
   /**

@@ -157,7 +157,7 @@ jobs:
             tests/e2e/reports/piclaw-e2e-report.pdf
             tests/e2e/reports/piclaw-e2e-report.html
             tests/e2e/reports/results.json
-          retention-days: 14
+          retention-days: 7
 
       - name: Upload test results
         if: always()

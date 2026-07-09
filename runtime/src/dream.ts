@@ -12,6 +12,7 @@ import { refreshAgentMemoryFromDailyNotes, type RefreshAgentMemoryResult } from 
 import { AUTO_DREAM_DEFAULT_DAYS, MANUAL_DREAM_DEFAULT_DAYS } from "./dream-defaults.js";
 import { DATA_DIR, SESSIONS_DIR, WORKSPACE_DIR, getAgentRuntimeConfig } from "./core/config.js";
 import { getTaskById, createTask, getDb, updateTask } from "./db.js";
+import { deleteThinkingContentByChatJid, deleteThinkingContentByChatJidPattern } from "./db/messages.js";
 import { refreshWorkspaceIndex } from "./workspace-search.js";
 import { computeNextRun } from "./task-scheduler-utils.js";
 import { sanitiseJid } from "./agent-pool/session.js";
@@ -244,6 +245,10 @@ function reapDreamArtifacts(excludeDreamChatJid?: string | null): void {
     const db = getDb();
     if (excludeDreamChatJid) {
       db.prepare("DELETE FROM message_media WHERE message_rowid IN (SELECT rowid FROM messages WHERE chat_jid LIKE 'dream:%' AND chat_jid != ?)").run(excludeDreamChatJid);
+      // Purge thinking_content for messages we're about to delete. Defensive:
+      // dream sessions don't currently persist thinking (excluded in agent.ts)
+      // but if exclusion is ever removed or bypassed, this prevents orphans.
+      deleteThinkingContentByChatJidPattern('dream:%', excludeDreamChatJid);
       db.prepare("DELETE FROM messages WHERE chat_jid LIKE 'dream:%' AND chat_jid != ?").run(excludeDreamChatJid);
       db.prepare("DELETE FROM chat_cursors WHERE chat_jid LIKE 'dream:%' AND chat_jid != ?").run(excludeDreamChatJid);
       db.prepare("DELETE FROM chat_branches WHERE chat_jid LIKE 'dream:%' AND chat_jid != ?").run(excludeDreamChatJid);
@@ -251,6 +256,7 @@ function reapDreamArtifacts(excludeDreamChatJid?: string | null): void {
       db.prepare("DELETE FROM token_usage WHERE chat_jid LIKE 'dream:%' AND chat_jid != ?").run(excludeDreamChatJid);
     } else {
       db.prepare("DELETE FROM message_media WHERE message_rowid IN (SELECT rowid FROM messages WHERE chat_jid LIKE 'dream:%')").run();
+      deleteThinkingContentByChatJidPattern('dream:%');
       db.prepare("DELETE FROM messages WHERE chat_jid LIKE 'dream:%'").run();
       db.prepare("DELETE FROM chat_cursors WHERE chat_jid LIKE 'dream:%'").run();
       db.prepare("DELETE FROM chat_branches WHERE chat_jid LIKE 'dream:%'").run();
@@ -283,6 +289,7 @@ async function cleanupDreamChat(agentPool: AgentPool, dreamChatJid: string): Pro
   try {
     const db = getDb();
     db.prepare("DELETE FROM message_media WHERE message_rowid IN (SELECT rowid FROM messages WHERE chat_jid = ?)").run(dreamChatJid);
+    deleteThinkingContentByChatJid(dreamChatJid);
     db.prepare("DELETE FROM messages WHERE chat_jid = ?").run(dreamChatJid);
     db.prepare("DELETE FROM chat_cursors WHERE chat_jid = ?").run(dreamChatJid);
     db.prepare("DELETE FROM chat_branches WHERE chat_jid = ?").run(dreamChatJid);

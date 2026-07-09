@@ -97,6 +97,7 @@ export function shouldBlockLiveDatabaseOpenInTests(options: {
  * Tables created:
  *   - chats – known chat endpoints (jid, name, last_message_time)
  *   - messages – individual messages with sender/content/timestamp
+ *   - thinking_content – persisted reasoning text keyed by stored message row id
  *   - messages_fts – FTS5 index over message content for full-text search
  *   - media – binary file storage for attachments
  *   - message_media – join table linking messages to media records
@@ -251,6 +252,25 @@ function createSchema(database: Database): void {
     CREATE INDEX IF NOT EXISTS idx_message_media_message_rowid ON message_media(message_rowid);
     CREATE INDEX IF NOT EXISTS idx_message_media_media_id ON message_media(media_id);
 
+    CREATE TABLE IF NOT EXISTS thinking_content (
+      message_id TEXT PRIMARY KEY,
+      text TEXT NOT NULL,
+      lines INTEGER NOT NULL DEFAULT 0,
+      duration_ms INTEGER NOT NULL DEFAULT 0,
+      model TEXT,
+      truncated INTEGER NOT NULL DEFAULT 0,
+      -- Use ISO 8601 with millisecond precision and trailing Z so created_at
+      -- is lexicographically comparable to messages.timestamp (which is also
+      -- ISO Z). Old rows from before this change keep their sqlite-default
+      -- 'YYYY-MM-DD HH:MM:SS' format — those won't sort correctly against
+      -- messages.timestamp but no query currently makes that comparison.
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+    -- Index on created_at lets retention/purge queries (e.g. DELETE WHERE
+    -- created_at < cutoff) skip the full table scan once row counts grow.
+    CREATE INDEX IF NOT EXISTS idx_thinking_content_created_at
+      ON thinking_content(created_at);
+
     CREATE TABLE IF NOT EXISTS tool_outputs (
       id TEXT PRIMARY KEY,
       created_at TEXT NOT NULL,
@@ -277,6 +297,7 @@ function createSchema(database: Database): void {
       command TEXT,
       cwd TEXT,
       timeout_sec INTEGER,
+      notify_on_complete INTEGER NOT NULL DEFAULT 1,
       schedule_type TEXT NOT NULL,
       schedule_value TEXT NOT NULL,
       next_run TEXT,
@@ -495,6 +516,7 @@ function createSchema(database: Database): void {
       run_at TEXT NOT NULL,
       input_tokens INTEGER DEFAULT 0,
       output_tokens INTEGER DEFAULT 0,
+      reasoning_tokens INTEGER DEFAULT 0,
       cache_read_tokens INTEGER DEFAULT 0,
       cache_write_tokens INTEGER DEFAULT 0,
       total_tokens INTEGER DEFAULT 0,
@@ -660,14 +682,21 @@ function ensureKeychainNoteColumns(database: Database): void {
 function ensureTokenUsageColumns(database: Database): void {
   const columns = database.prepare("PRAGMA table_info(token_usage)").all() as Array<{ name: string }>;
   const existing = new Set(columns.map((col) => col.name));
-  if (existing.has("response_model")) return;
-  try {
-    database.exec("ALTER TABLE token_usage ADD COLUMN response_model TEXT");
-  } catch (err) {
-    debugSuppressedError(log, "Token-usage response_model migration raced an already-updated schema state.", err, {
-      operation: "db.ensure_token_usage_columns.add_response_model",
-    });
-  }
+  const ensureColumn = (name: string, type: string) => {
+    if (existing.has(name)) return;
+    try {
+      database.exec(`ALTER TABLE token_usage ADD COLUMN ${name} ${type}`);
+    } catch (err) {
+      debugSuppressedError(log, "Token-usage column migration raced an already-updated schema state.", err, {
+        operation: "db.ensure_token_usage_columns.add_column",
+        name,
+        type,
+      });
+    }
+  };
+
+  ensureColumn("response_model", "TEXT");
+  ensureColumn("reasoning_tokens", "INTEGER DEFAULT 0");
 }
 
 function ensureScheduledTaskColumns(database: Database): void {
@@ -691,6 +720,7 @@ function ensureScheduledTaskColumns(database: Database): void {
   ensureColumn("command", "TEXT");
   ensureColumn("cwd", "TEXT");
   ensureColumn("timeout_sec", "INTEGER");
+  ensureColumn("notify_on_complete", "INTEGER NOT NULL DEFAULT 1");
 }
 
 function ensureWebSessionColumns(database: Database): void {
@@ -940,8 +970,26 @@ export function initDatabase(): void {
   ensureRemotePeerBaseUrl(db);
   ensureOutboundPairRequestsTable(db);
   ensureMediaCompression(db);
+  ensureThinkingContentDuration(db);
   if (!useMemory) {
     ensureIncrementalAutoVacuum(db);
+  }
+}
+
+/** Add duration_ms column to thinking_content for databases created before it was introduced. */
+function ensureThinkingContentDuration(database: Database): void {
+  try {
+    const cols = new Set(
+      (database.prepare("PRAGMA table_info(thinking_content)").all() as Array<{ name: string }>)
+        .map((r) => r.name)
+    );
+    if (!cols.has("duration_ms")) {
+      database.exec("ALTER TABLE thinking_content ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0");
+    }
+  } catch (err) {
+    debugSuppressedError(log, "thinking_content duration_ms migration skipped.", err, {
+      operation: "db.ensure_thinking_content_duration",
+    });
   }
 }
 

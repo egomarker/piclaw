@@ -172,7 +172,7 @@ export async function handleStats(session: AgentSession, _command: StatsCommand)
         "",
         "| Metric | Value |",
         "|---|---|",
-        `| Tokens | in ${formatCompactNumber(totals.input_tokens)}, out ${formatCompactNumber(totals.output_tokens)}, cache-r ${formatCompactNumber(totals.cache_read_tokens)}, cache-w ${formatCompactNumber(totals.cache_write_tokens)}, total ${formatCompactNumber(totals.total_tokens)} |`,
+        `| Tokens | in ${formatCompactNumber(totals.input_tokens)}, out ${formatCompactNumber(totals.output_tokens)}, reason ${formatCompactNumber(totals.reasoning_tokens ?? 0)}, cache-r ${formatCompactNumber(totals.cache_read_tokens)}, cache-w ${formatCompactNumber(totals.cache_write_tokens)}, total ${formatCompactNumber(totals.total_tokens)} |`,
         `| Cost | ${formatCurrency(totals.cost_total)} |`,
         `| Runs | ${formatCompactNumber(totals.runs)} |`,
       );
@@ -182,11 +182,11 @@ export async function handleStats(session: AgentSession, _command: StatsCommand)
           "",
           "**Per provider**",
           "",
-          "| Provider | Tokens | Cost | Runs |",
-          "|---|---|---|---|",
+          "| Provider | Tokens | Reasoning | Cost | Runs |",
+          "|---|---|---|---|---|",
         );
         for (const row of providerRows) {
-          lines.push(`| ${row.provider || "unknown"} | ${formatCompactNumber(row.total_tokens)} | ${formatCurrency(row.cost_total)} | ${formatCompactNumber(row.runs)} |`);
+          lines.push(`| ${row.provider || "unknown"} | ${formatCompactNumber(row.total_tokens)} | ${formatCompactNumber(row.reasoning_tokens ?? 0)} | ${formatCurrency(row.cost_total)} | ${formatCompactNumber(row.runs)} |`);
         }
       }
 
@@ -195,11 +195,11 @@ export async function handleStats(session: AgentSession, _command: StatsCommand)
           "",
           "**Per model**",
           "",
-          "| Model | Tokens | Cost | Runs |",
-          "|---|---|---|---|",
+          "| Model | Tokens | Reasoning | Cost | Runs |",
+          "|---|---|---|---|---|",
         );
         for (const row of modelRows) {
-          lines.push(`| ${row.model || "unknown"} | ${formatCompactNumber(row.total_tokens)} | ${formatCurrency(row.cost_total)} | ${formatCompactNumber(row.runs)} |`);
+          lines.push(`| ${row.model || "unknown"} | ${formatCompactNumber(row.total_tokens)} | ${formatCompactNumber(row.reasoning_tokens ?? 0)} | ${formatCurrency(row.cost_total)} | ${formatCompactNumber(row.runs)} |`);
         }
       }
     }

@@ -17,6 +17,7 @@ import { getDb } from "./connection.js";
 export interface TokenUsageTotalsSummary {
   input_tokens: number;
   output_tokens: number;
+  reasoning_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
   total_tokens: number;
@@ -70,6 +71,8 @@ export interface TokenUsageRecord {
   input_tokens: number;
   /** Number of output (completion) tokens generated. */
   output_tokens: number;
+  /** Reasoning tokens reported by providers when available. Included in output tokens by OpenAI-compatible usage. */
+  reasoning_tokens?: number;
   /** Tokens served from the provider's prompt cache. */
   cache_read_tokens: number;
   /** Tokens written into the provider's prompt cache. */
@@ -107,6 +110,7 @@ export function storeTokenUsage(record: TokenUsageRecord): void {
       run_at,
       input_tokens,
       output_tokens,
+      reasoning_tokens,
       cache_read_tokens,
       cache_write_tokens,
       total_tokens,
@@ -120,12 +124,13 @@ export function storeTokenUsage(record: TokenUsageRecord): void {
       provider,
       api,
       turns
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     record.chat_jid,
     record.run_at,
     record.input_tokens,
     record.output_tokens,
+    record.reasoning_tokens ?? 0,
     record.cache_read_tokens,
     record.cache_write_tokens,
     record.total_tokens,
@@ -153,6 +158,7 @@ export function getTokenUsageTotals(chatJid: string): TokenUsageTotalsSummary {
     `SELECT
       COALESCE(SUM(input_tokens), 0) AS input_tokens,
       COALESCE(SUM(output_tokens), 0) AS output_tokens,
+      COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
       COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
       COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
       COALESCE(SUM(total_tokens), 0) AS total_tokens,
@@ -165,6 +171,7 @@ export function getTokenUsageTotals(chatJid: string): TokenUsageTotalsSummary {
   return row ?? {
     input_tokens: 0,
     output_tokens: 0,
+    reasoning_tokens: 0,
     cache_read_tokens: 0,
     cache_write_tokens: 0,
     total_tokens: 0,
@@ -180,6 +187,7 @@ export function getLatestTokenUsage(chatJid: string): LatestTokenUsageSummary | 
     `SELECT
       input_tokens,
       output_tokens,
+      reasoning_tokens,
       cache_read_tokens,
       cache_write_tokens,
       total_tokens,
@@ -212,6 +220,7 @@ export function getTokenUsageByProvider(chatJid: string, limit = 5): TokenUsageB
       provider,
       COALESCE(SUM(input_tokens), 0) AS input_tokens,
       COALESCE(SUM(output_tokens), 0) AS output_tokens,
+      COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
       COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
       COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
       COALESCE(SUM(total_tokens), 0) AS total_tokens,
@@ -233,6 +242,7 @@ export function getTokenUsageByModel(chatJid: string, limit = 5): TokenUsageByMo
       COALESCE(response_model, model) AS model,
       COALESCE(SUM(input_tokens), 0) AS input_tokens,
       COALESCE(SUM(output_tokens), 0) AS output_tokens,
+      COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
       COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
       COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
       COALESCE(SUM(total_tokens), 0) AS total_tokens,

@@ -6,6 +6,7 @@
  */
 
 import { getDb } from "./connection.js";
+import { deleteThinkingContentByChatJid } from "./messages.js";
 import { attachMediaToMessage, deleteUnreferencedMedia } from "./media.js";
 import type { ChatBranchRecord } from "./types.js";
 import { createUuid } from "../utils/ids.js";
@@ -754,6 +755,10 @@ export function permanentDeleteArchivedBranch(chatJid: string): PermanentDeleteA
       `DELETE FROM message_media
         WHERE message_rowid IN (SELECT rowid FROM messages WHERE chat_jid = ?)`
     ).run(branch.chat_jid);
+    // Purge thinking_content for messages we're about to delete (no FK
+    // cascade is possible; see I2 in PR #655 issues tracker). Must run
+    // BEFORE the messages DELETE so the subquery still resolves.
+    deleteThinkingContentByChatJid(branch.chat_jid);
     db.prepare(`DELETE FROM messages WHERE chat_jid = ?`).run(branch.chat_jid);
     db.prepare(`DELETE FROM chat_cursors WHERE chat_jid = ?`).run(branch.chat_jid);
     db.prepare(`DELETE FROM token_usage WHERE chat_jid = ?`).run(branch.chat_jid);

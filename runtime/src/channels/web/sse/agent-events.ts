@@ -226,6 +226,7 @@ export interface StreamingEventHandlerOptions {
   includeThoughtFull?: () => boolean;
   includeDraftFull?: () => boolean;
   onThoughtBuffer?: (text: string, totalLines: number) => void;
+  onThinkingComplete?: (text: string, totalLines: number, durationMs: number) => void;
   onDraftBuffer?: (text: string, totalLines: number) => void;
 }
 
@@ -236,6 +237,7 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
   const previewMaxCharsPerLine = options.previewMaxCharsPerLine ?? 160;
 
   let thoughtBuffer = "";
+  let thoughtStartedAt = 0;
   let draftBuffer = "";
   let thoughtHasDelta = false;
   let thoughtDeltaActive = false;
@@ -283,6 +285,18 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
 
   let pendingRateLimit: { message: string } | null = null;
   let pendingRateLimitTimer: ReturnType<typeof setTimeout> | null = null;
+  let currentModelLabel: string | null = null;
+
+  const appendModelContext = (detail: string | undefined): string | undefined => {
+    if (!currentModelLabel) return detail;
+    if (detail?.includes(currentModelLabel)) return detail;
+    return [detail, `model: ${currentModelLabel}`].filter(Boolean).join(" — ");
+  };
+
+  const rateLimitTitle = (message?: string): string => {
+    const baseTitle = describeRateLimit(message);
+    return currentModelLabel ? `${baseTitle} on ${currentModelLabel}` : baseTitle;
+  };
 
   const scheduleRateLimitIntent = () => {
     if (pendingRateLimitTimer) return;
@@ -295,8 +309,8 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
       options.emitter.status({
         ...base,
         type: "intent",
-        title: describeRateLimit(detail),
-        detail,
+        title: rateLimitTitle(detail),
+        detail: appendModelContext(detail),
       });
       pendingRateLimit = null;
       pendingRateLimitTimer = null;
@@ -323,6 +337,7 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
       const record = event as { model?: unknown; previousModel?: unknown; source?: unknown };
       const model = modelLabelFromEventModel(record.model);
       if (model) {
+        currentModelLabel = model;
         options.emitter.modelChanged({
           ...base,
           model,
@@ -336,6 +351,7 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
       const messageEvent = event.assistantMessageEvent;
       if (messageEvent.type === "thinking_start") {
         thoughtBuffer = "";
+        thoughtStartedAt = Date.now();
         thoughtHasDelta = false;
         thoughtDeltaActive = false;
         if (options.includeThoughtFull?.()) {
@@ -386,6 +402,8 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
           previewMaxCharsPerLine
         );
         options.onThoughtBuffer?.(thoughtBuffer, totalLines);
+        const thinkingDurationMs = thoughtStartedAt > 0 ? Date.now() - thoughtStartedAt : 0;
+        options.onThinkingComplete?.(thoughtBuffer, totalLines, thinkingDurationMs);
         options.emitter.thought({
           ...base,
           text: preview,
@@ -627,16 +645,18 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
       const isNetwork = providerError?.category === "network" || isNetworkError(errorMessage);
       const retrySuffix = `retrying (attempt ${e.attempt ?? "?"}/${e.maxAttempts ?? "?"}, ${delaySec}s delay)`;
       const title = isRateLimit
-        ? `${describeRateLimit(errorMessage)} — ${retrySuffix}`
-        : isNetwork
-          ? `${providerError?.title || describeNetworkError(errorMessage)} — ${retrySuffix}`
-          : `Retrying after error (attempt ${e.attempt ?? "?"}/${e.maxAttempts ?? "?"}, ${delaySec}s delay)`;
+        ? `${rateLimitTitle(errorMessage)} — ${retrySuffix}`
+        : providerError
+          ? `${providerError.title} — ${retrySuffix}`
+          : isNetwork
+            ? `${describeNetworkError(errorMessage)} — ${retrySuffix}`
+            : `Retrying after error (attempt ${e.attempt ?? "?"}/${e.maxAttempts ?? "?"}, ${delaySec}s delay)`;
       const detail = providerError?.detail || sanitizeProviderErrorDetail(errorMessage);
       options.emitter.status({
         ...base,
         type: "intent",
         title,
-        detail: detail || undefined,
+        detail: appendModelContext(detail || undefined),
       });
     }
 
@@ -646,15 +666,17 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
         const finalError = e.finalError || "Request failed after retries";
         const providerError = formatProviderError(finalError);
         const title = isRateLimitError(finalError)
-          ? `${describeRateLimit(finalError)} — retry budget exhausted`
-          : providerError?.category === "network" || isNetworkError(finalError)
-            ? `${providerError?.title || describeNetworkError(finalError)} — retry budget exhausted`
-            : sanitizeProviderErrorDetail(finalError) || finalError;
+          ? `${rateLimitTitle(finalError)} — retry budget exhausted`
+          : providerError
+            ? `${providerError.title} — retry budget exhausted`
+            : isNetworkError(finalError)
+              ? `${describeNetworkError(finalError)} — retry budget exhausted`
+              : sanitizeProviderErrorDetail(finalError) || finalError;
         options.emitter.status({
           ...base,
           type: "error",
           title,
-          detail: providerError?.detail || undefined,
+          detail: appendModelContext(providerError?.detail || undefined),
         });
       }
     }
@@ -674,7 +696,7 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
         : reason === "threshold" || trigger === "pre_prompt"
           ? "Shrinking recent context before continuing the turn."
           : reason === "idle" || trigger === "idle"
-            ? "Tidying context a few seconds after the turn finished."
+            ? "Tidying context after the turn finished."
             : undefined;
       options.emitter.status({
         ...base,

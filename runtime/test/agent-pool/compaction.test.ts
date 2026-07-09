@@ -64,6 +64,22 @@ test("computeAutoCompactionTokenStatus supports body-after-prefix growth plus ha
   expect(hardCeiling.tokenLimitReached).toBe(true);
 });
 
+test("computeAutoCompactionTokenStatus caps threshold tokens for huge-context models", () => {
+  const status = computeAutoCompactionTokenStatus({
+    activeContextTokens: 250_000,
+    contextWindow: 1_000_000,
+    thresholdPercent: 60,
+    hardCeilingPercent: 95,
+    overheadTokens: 4_000,
+    maxThresholdTokens: 240_000,
+    scope: "total",
+  });
+
+  expect(status.autoCompactionScopeLimit).toBe(240_000);
+  expect(status.fullContextWindowLimit).toBe(946_200);
+  expect(status.tokenLimitReached).toBe(true);
+});
+
 test("shared session token status supports mid-turn scoped checks and hard ceiling", () => {
   const previousScope = process.env.PICLAW_AUTO_COMPACTION_SCOPE;
   const previousThreshold = process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT;
@@ -233,13 +249,22 @@ test("maybeAutoCompactSessionBeforePrompt uses pending input projection", async 
   }
 });
 
-test("estimateContextTokensFromSession trusts native usage before compaction", () => {
+test("estimateContextTokensFromSession trusts native usage before compaction when it is higher", () => {
   const session = makeSession([
     { role: "user", content: [{ type: "text", text: "hello" }] },
     { role: "assistant", content: [{ type: "text", text: "hi" }] },
   ], 123_456);
 
   expect(estimateContextTokensFromSession(session)).toBe(123_456);
+});
+
+test("estimateContextTokensFromSession does not let stale native usage undercount current context", () => {
+  const session = makeSession([
+    { role: "user", content: [{ type: "text", text: "small prompt" }] },
+    { role: "toolResult", content: [{ type: "text", text: "x".repeat(20_000) }] },
+  ], 100);
+
+  expect(estimateContextTokensFromSession(session)).toBeGreaterThan(4_000);
 });
 
 test("runCompactionWithTimeout preserves extension-recorded cancellation reasons", async () => {

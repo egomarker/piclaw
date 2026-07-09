@@ -15,6 +15,9 @@ import {
   getAzureResponsesReasoningConfig,
   getAzureResponsesTextConfig,
   normalizeAzureOpenAIBaseUrl,
+  parseAzureDeploymentNameMap,
+  resolveAzureDeploymentName,
+  formatAzureOpenAIError,
 } from "../../extensions/integrations/azure-openai.ts";
 
 describe("Slice 1: Responses-only routing", () => {
@@ -77,6 +80,44 @@ describe("Slice 1: Responses-only routing", () => {
     expect(payload.stream).toBe(true);
   });
 
+  test("Azure Responses stream payload honors AOAI deployment-name mapping", async () => {
+    const previous = process.env.AOAI_DEPLOYMENT_NAME_MAP;
+    try {
+      const providers: Array<{ name: string; config: any }> = [];
+      registerAzureProviders((name, config) => providers.push({ name, config }), "test-token");
+
+      const azureProvider = providers.find(p => p.name === "azure-openai")!;
+      const model = azureProvider.config.models[0];
+      process.env.AOAI_DEPLOYMENT_NAME_MAP = `${model.id}=deployment-for-${model.id}`;
+
+      const controller = new AbortController();
+      controller.abort();
+      let payload: any;
+      azureProvider.config.streamSimple(
+        {
+          ...model,
+          provider: "azure-openai",
+          baseUrl: azureProvider.config.baseUrl,
+          headers: {},
+        },
+        { messages: [], tools: [] },
+        {
+          signal: controller.signal,
+          onPayload: (next: unknown) => { payload = next; },
+        },
+      );
+
+      expect(payload).toBeTruthy();
+      expect(payload.model).toBe(`deployment-for-${model.id}`);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AOAI_DEPLOYMENT_NAME_MAP;
+      } else {
+        process.env.AOAI_DEPLOYMENT_NAME_MAP = previous;
+      }
+    }
+  });
+
   test("Foundry text models use the completions API, not Responses", () => {
     const providers: Array<{ name: string; config: any }> = [];
     registerAzureProviders((name, config) => providers.push({ name, config }), "test-token");
@@ -118,6 +159,20 @@ describe("Slice 3: Foundry compat flags", () => {
       // Azure OpenAI models should not have Foundry-specific compat
       expect(model.compat).toBeUndefined();
     }
+  });
+});
+
+describe("Azure deployment-name mapping", () => {
+  test("parses comma-separated model=deployment mappings", () => {
+    expect(Array.from(parseAzureDeploymentNameMap("gpt-5=dep-a, gpt-5-mini=dep-b").entries())).toEqual([
+      ["gpt-5", "dep-a"],
+      ["gpt-5-mini", "dep-b"],
+    ]);
+  });
+
+  test("resolves mapped deployment names and falls back to the model id", () => {
+    expect(resolveAzureDeploymentName("gpt-5", "gpt-5=dep-a")).toBe("dep-a");
+    expect(resolveAzureDeploymentName("gpt-4o", "gpt-5=dep-a")).toBe("gpt-4o");
   });
 });
 
@@ -256,6 +311,28 @@ describe("Slice 2: Tool-flow reasoning cap", () => {
 
   test("unknown model at high is NOT capped", () => {
     expect(capToolFlowReasoning("gpt-99", "high", true)).toBe("high");
+  });
+});
+
+describe("Azure OpenAI error formatting", () => {
+  test("preserves already user-facing Azure request failures", () => {
+    expect(formatAzureOpenAIError(new Error("Azure request failed: rate limit"))).toBe("Azure request failed: rate limit");
+  });
+
+  test("formats structured provider errors with status, code, and type", () => {
+    const error = {
+      status: 400,
+      response: {
+        data: {
+          error: {
+            code: "invalid_request_error",
+            type: "bad_request",
+            message: "messages are invalid",
+          },
+        },
+      },
+    };
+    expect(formatAzureOpenAIError(error)).toBe("Azure OpenAI API error (400) [invalid_request_error/bad_request]: messages are invalid");
   });
 });
 

@@ -12,6 +12,10 @@ import { expect, test, describe, mock } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
 import "../helpers.js";
+import {
+    isFirefoxUserAgent,
+    shouldDisableWhitespaceMarkersForPerformance,
+} from "../../extensions/viewers/editor/editor-safety.ts";
 
 // ── Inline types (browser modules can't be imported in bun test) ────
 
@@ -82,6 +86,40 @@ describe("Editor status footer", () => {
         expect(source).toContain("referenceBtn.textContent = 'Reference'");
         expect(source.indexOf("actionsDiv.appendChild(saveBtn);")).toBeGreaterThan(source.indexOf("actionsDiv.appendChild(vimBtn);"));
         expect(source.indexOf("actionsDiv.appendChild(referenceBtn);")).toBeGreaterThan(source.indexOf("actionsDiv.appendChild(saveBtn);"));
+    });
+
+    test("removes the whitespace feature in Firefox without disabling rich editor features", () => {
+        expect(isFirefoxUserAgent("Mozilla/5.0 Firefox/140.0")).toBe(true);
+        expect(isFirefoxUserAgent("Mozilla/5.0 Chrome/126.0 Safari/537.36")).toBe(false);
+        expect(shouldDisableWhitespaceMarkersForPerformance({
+            userAgent: "Mozilla/5.0 Firefox/140.0",
+            docLength: 100,
+        })).toBe(true);
+        expect(shouldDisableWhitespaceMarkersForPerformance({
+            userAgent: "Mozilla/5.0 Chrome/126.0 Safari/537.36",
+            docLength: 100,
+        })).toBe(false);
+        expect(shouldDisableWhitespaceMarkersForPerformance({
+            userAgent: "Mozilla/5.0 Chrome/126.0 Safari/537.36",
+            docLength: 100,
+            livePreviewActive: true,
+        })).toBe(true);
+        expect(shouldDisableWhitespaceMarkersForPerformance({
+            userAgent: "Mozilla/5.0 Chrome/126.0 Safari/537.36",
+            docLength: 100,
+            largeDocumentMode: true,
+        })).toBe(true);
+
+        const source = readFileSync(join(import.meta.dir, "../../extensions/viewers/editor/editor-extension.ts"), "utf8");
+        expect(source).toContain("const enableRichFeatures = !this.largeDocumentMode");
+        expect(source).toContain("return !this.largeDocumentMode && !this.isDiffMode() && this.supportsMarkdownLivePreview()");
+        expect(source).toContain("this.wrappingCompartment.of(enableRichFeatures ? EditorView.lineWrapping : [])");
+        expect(source).toContain("...(enableRichFeatures ? [autocompletion({ activateOnTyping: false })] : [])");
+        expect(source).toContain("this.languageCompartment.of(lang || [])");
+        expect(source).toContain("handleFirefoxMarkdownTypingBurst()");
+        expect(source).toContain("restoreMarkdownLanguageAfterTyping()");
+        expect(source).toContain("this._wsBtn.hidden = firefox");
+        expect(source).toContain("Whitespace is unavailable in Firefox");
     });
 });
 

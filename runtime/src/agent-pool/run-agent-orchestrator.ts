@@ -18,6 +18,7 @@ import {
   decideAutomaticRecovery,
   getAutomaticRecoveryConfig,
   getAutomaticRecoveryDelayMs,
+  isLengthStopFailure,
   type RecoveryAttemptSnapshot,
   type RecoveryClassifier,
   type RecoveryStrategy,
@@ -42,11 +43,11 @@ import {
   getAutoCompactionTokenStatusForSession,
   getCompactionContextReport,
   isCompactionCancellationError,
+  maybeAutoCompactSessionAfterTurn,
   maybeAutoCompactSessionBeforePrompt,
   noteCompactionFailure,
   noteCompactionSuccess,
   runCompactionWithTimeout,
-  scheduleIdleAutoCompaction,
 } from "./compaction.js";
 import { buildPiclawCompactionEventFields, type PiclawCompactionTriggerMetadata } from "./compaction-trigger-context.js";
 import {
@@ -536,6 +537,13 @@ function resolveToolBudgetSoftStopThreshold(budget: number): number {
 
 function isAbortFailureText(errorText: string): boolean {
   return /\b(?:aborterror|aborted|operation was aborted|request was aborted)\b/i.test(errorText);
+}
+
+function buildLengthStopError(partialText: string | null | undefined): string {
+  const partialDetail = partialText && partialText.trim()
+    ? " The partial answer was preserved; ask me to continue to resume from it."
+    : " Ask me to continue and I will retry with a shorter final answer.";
+  return `Provider stopped because it hit the maximum output length before finalization (finish reason: length).${partialDetail}`;
 }
 
 function findToolBudgetDiagnostic(diagnostics: AgentRecoveryDiagnosticEntry[]): AgentRecoveryDiagnosticEntry | null {
@@ -1344,6 +1352,13 @@ async function runPromptAttempt(
       output = { status: "error", result: null, error: turnError.errorMessage };
     } else if (latentStateError) {
       output = { status: "error", result: null, error: latentStateError };
+    } else if (lastAssistantState?.stopReason === "length" || isLengthStopFailure(lastAssistantState?.errorMessage)) {
+      output = {
+        status: "error",
+        result: null,
+        error: buildLengthStopError(finalText),
+        ...(finalUsage ? { usage: finalUsage } : {}),
+      };
     } else {
       const blankTurnDelta = inspectBlankTurnSessionDelta(session, sessionEntryBaseline);
       if (!finalText && finalAttachments.length === 0 && !hadCompletedTurnOutput) {
@@ -1956,8 +1971,16 @@ export async function runAgentPrompt(
       }
     });
 
-    if (runOptions.scheduleIdleAutoCompaction && runResult.status === "success") {
-      scheduleIdleAutoCompaction(session, chatJid, options, runOptions.onEvent);
+    if (runOptions.scheduleIdleAutoCompaction && (runResult.status === "success" || runResult.status === "tool_complete")) {
+      await maybeAutoCompactSessionAfterTurn(session, chatJid, options, (event) => {
+        const eventAny = event as { type?: string };
+        if (eventAny.type === "compaction_start") {
+          heartbeatTrackedPhase(chatJid, "preprompt_compaction", { eventType: "post_turn_compaction_start" });
+        } else if (eventAny.type === "compaction_end") {
+          heartbeatTrackedPhase(chatJid, "prompt", { eventType: "post_turn_compaction_end" });
+        }
+        runOptions.onEvent?.(event);
+      });
     }
 
     return runResult;

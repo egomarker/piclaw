@@ -1,4 +1,5 @@
 import { html, useState, useEffect, useCallback, useMemo } from '../../vendor/preact-htm.js';
+import { t, useTranslation } from '../../utils/i18n.js';
 import {
     deleteSessionRecording,
     getSessionRecording,
@@ -18,9 +19,9 @@ function formatDateTime(iso) {
 }
 
 function modeLabel(mode) {
-    if (mode === 'full') return 'full / trusted';
-    if (mode === 'metadata') return 'metadata only';
-    return 'redacted';
+    if (mode === 'full') return t('settings.recordings.modeFull');
+    if (mode === 'metadata') return t('settings.recordings.modeMetadata');
+    return t('settings.recordings.modeRedacted');
 }
 
 function RecordingPill({ children, type = 'neutral' }) {
@@ -37,7 +38,8 @@ function parseList(value) {
 }
 
 function RecordingDetail({ recording, details, onDelete, onRefresh }) {
-    if (!recording) return html`<div class="settings-task-detail-empty">Select a recording to inspect, replay, export, or delete it.</div>`;
+    const { t: tr } = useTranslation();
+    if (!recording) return html`<div class="settings-task-detail-empty">${tr('settings.recordings.selectPrompt')}</div>`;
     const meta = details?.meta || recording;
     const events = Array.isArray(details?.events) ? details.events : [];
     const redactionCount = events.reduce((count, event) => count + (Array.isArray(event.redactions) ? event.redactions.length : 0), 0);
@@ -54,33 +56,33 @@ function RecordingDetail({ recording, details, onDelete, onRefresh }) {
                     <code>${meta.id}</code>
                 </div>
                 <div class="settings-task-detail-actions">
-                    <button onClick=${() => window.open(sessionRecordingPlaybackUrl(meta.id), '_blank', 'noopener,noreferrer')}>Playback</button>
-                    <button onClick=${onRefresh}>Refresh</button>
-                    <button class="danger" onClick=${() => onDelete(meta)}>Delete</button>
+                    <button onClick=${() => window.open(sessionRecordingPlaybackUrl(meta.id), '_blank', 'noopener,noreferrer')}>${tr('settings.recordings.playback')}</button>
+                    <button onClick=${onRefresh}>${tr('settings.recordings.refresh')}</button>
+                    <button class="danger" onClick=${() => onDelete(meta)}>${tr('settings.recordings.delete')}</button>
                 </div>
             </div>
             <div class="settings-task-detail-grid">
-                <span>Status</span><strong>${meta.status || '—'}</strong>
-                <span>Mode</span><strong>${modeLabel(meta.mode)}</strong>
-                <span>Chat</span><code>${meta.chatJid || '—'}</code>
-                <span>Started</span><strong>${formatDateTime(meta.startedAt)}</strong>
-                <span>Ended</span><strong>${formatDateTime(meta.endedAt)}</strong>
-                <span>Events</span><strong>${meta.eventCount ?? events.length}</strong>
-                <span>Redactions</span><strong>${redactionCount}</strong>
+                <span>${tr('settings.recordings.status')}</span><strong>${meta.status || '—'}</strong>
+                <span>${tr('settings.recordings.mode')}</span><strong>${modeLabel(meta.mode)}</strong>
+                <span>${tr('settings.recordings.chat')}</span><code>${meta.chatJid || '—'}</code>
+                <span>${tr('settings.recordings.started')}</span><strong>${formatDateTime(meta.startedAt)}</strong>
+                <span>${tr('settings.recordings.ended')}</span><strong>${formatDateTime(meta.endedAt)}</strong>
+                <span>${tr('settings.recordings.events')}</span><strong>${meta.eventCount ?? events.length}</strong>
+                <span>${tr('settings.recordings.redactions')}</span><strong>${redactionCount}</strong>
             </div>
             <div class="settings-recording-export-row">
-                <a href=${sessionRecordingExportUrl(meta.id, 'json')}>Export JSON</a>
-                <a href=${sessionRecordingExportUrl(meta.id, 'jsonl')}>Export JSONL</a>
-                <a href=${sessionRecordingExportUrl(meta.id, 'html')}>Export standalone HTML</a>
+                <a href=${sessionRecordingExportUrl(meta.id, 'json')}>${tr('settings.recordings.exportJson')}</a>
+                <a href=${sessionRecordingExportUrl(meta.id, 'jsonl')}>${tr('settings.recordings.exportJsonl')}</a>
+                <a href=${sessionRecordingExportUrl(meta.id, 'html')}>${tr('settings.recordings.exportHtml')}</a>
             </div>
-            <h4>Event summary</h4>
-            ${events.length === 0 && html`<p class="settings-hint">Open or refresh details to inspect trace events.</p>`}
+            <h4>${tr('settings.recordings.eventSummary')}</h4>
+            ${events.length === 0 && html`<p class="settings-hint">${tr('settings.recordings.inspectHint')}</p>`}
             ${events.length > 0 && html`
                 <div class="settings-recording-event-summary">
                     ${Object.entries(eventKinds).map(([kind, count]) => html`<${RecordingPill}>${kind}: ${count}<//>`)}
                 </div>
                 <div class="settings-task-command-block">
-                    <strong>First events</strong>
+                    <strong>${tr('settings.recordings.firstEvents')}</strong>
                     <pre>${JSON.stringify(events.slice(0, 5), null, 2)}</pre>
                 </div>
             `}
@@ -89,6 +91,7 @@ function RecordingDetail({ recording, details, onDelete, onRefresh }) {
 }
 
 export function RecordingsSection({ filter = '', setStatus }) {
+    const { t: tr } = useTranslation();
     const [recordings, setRecordings] = useState([]);
     const [active, setActive] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -127,7 +130,7 @@ export function RecordingsSection({ filter = '', setStatus }) {
             if (nextSelected?.id) setDetails(await getSessionRecording(nextSelected.id));
             else setDetails(null);
         } catch (e) {
-            setError(e?.message || 'Failed to load recordings.');
+            setError(e?.message || tr('settings.recordings.loadFailed'));
         } finally {
             setLoading(false);
         }
@@ -148,7 +151,7 @@ export function RecordingsSection({ filter = '', setStatus }) {
         setDetails(null);
         if (!item?.id) return;
         try { setDetails(await getSessionRecording(item.id)); }
-        catch (e) { setStatus?.(e?.message || 'Failed to load recording.', 'error'); }
+        catch (e) { setStatus?.(e?.message || tr('settings.recordings.loadOneFailed'), 'error'); }
     }, [setStatus]);
 
     const start = useCallback(async () => {
@@ -167,10 +170,10 @@ export function RecordingsSection({ filter = '', setStatus }) {
                 timeline_snapshot_limit: 80,
                 redaction,
             });
-            setStatus?.(`Recording started for ${chatJid}.`, 'success');
+            setStatus?.(tr('settings.recordings.startedToast', { chat: chatJid }), 'success');
             await load(payload?.recording?.id);
         } catch (e) {
-            setStatus?.(e?.message || 'Failed to start recording.', 'error');
+            setStatus?.(e?.message || tr('settings.recordings.startFailed'), 'error');
         } finally {
             setActing(false);
         }
@@ -181,10 +184,10 @@ export function RecordingsSection({ filter = '', setStatus }) {
         setActing(true);
         try {
             const payload = await stopSessionRecording({ id: target.id });
-            setStatus?.(`Recording stopped for ${target.chatJid}.`, 'success');
+            setStatus?.(tr('settings.recordings.stoppedToast', { chat: target.chatJid }), 'success');
             await load(payload?.recording?.id);
         } catch (e) {
-            setStatus?.(e?.message || 'Failed to stop recording.', 'error');
+            setStatus?.(e?.message || tr('settings.recordings.stopFailed'), 'error');
         } finally {
             setActing(false);
         }
@@ -192,14 +195,14 @@ export function RecordingsSection({ filter = '', setStatus }) {
 
     const remove = useCallback(async (item) => {
         if (!item || acting) return;
-        if (!window.confirm(`Delete recording ${item.id}?\n\n${item.title || ''}`)) return;
+        if (!window.confirm(tr('settings.recordings.deleteConfirm', { id: item.id }) + `\n\n${item.title || ''}`)) return;
         setActing(true);
         try {
             await deleteSessionRecording(item.id);
-            setStatus?.('Recording deleted.', 'success');
+            setStatus?.(tr('settings.recordings.deletedToast'), 'success');
             await load(null);
         } catch (e) {
-            setStatus?.(e?.message || 'Failed to delete recording.', 'error');
+            setStatus?.(e?.message || tr('settings.recordings.deleteFailed'), 'error');
         } finally {
             setActing(false);
         }
@@ -211,55 +214,55 @@ export function RecordingsSection({ filter = '', setStatus }) {
             const payload = await previewSessionRecordingRedaction(parsed, { mode, redaction: { keys: parseList(customKeys), patterns: parseList(customPatterns) } });
             setPreviewResult(payload.preview);
         } catch (e) {
-            setPreviewResult({ error: e?.message || 'Preview failed.' });
+            setPreviewResult({ error: e?.message || tr('settings.recordings.previewFailed') });
         }
     }, [customKeys, customPatterns, mode, previewInput]);
 
     return html`
         <div class="settings-section settings-recordings-section">
             <div class="settings-recording-start-card">
-                <h3>Session Recording</h3>
-                <p class="settings-hint">Opt-in trace capture for deterministic playback and screen-recording exports. Playback never calls live agent or tool endpoints.</p>
+                <h3>${tr('settings.recordings.heading')}</h3>
+                <p class="settings-hint">${tr('settings.recordings.intro')}</p>
                 <div class="settings-recording-form-grid">
-                    <label>Chat JID<input value=${chatJid} onInput=${e => setChatJid(e.target.value)} /></label>
-                    <label>Title<input placeholder="Demo recording" value=${title} onInput=${e => setTitle(e.target.value)} /></label>
-                    <label>Mode<select value=${mode} onChange=${e => setMode(e.target.value)}><option value="redacted">Redacted</option><option value="metadata">Metadata only</option><option value="full">Full / trusted local</option></select></label>
-                    <label class="settings-recording-checkbox"><input type="checkbox" checked=${includeSnapshot} onChange=${e => setIncludeSnapshot(e.target.checked)} /> Include timeline snapshot</label>
+                    <label>${tr('settings.recordings.chatJid')}<input value=${chatJid} onInput=${e => setChatJid(e.target.value)} /></label>
+                    <label>${tr('settings.recordings.title')}<input placeholder=${tr('settings.recordings.titlePlaceholder')} value=${title} onInput=${e => setTitle(e.target.value)} /></label>
+                    <label>${tr('settings.recordings.modeLabelField')}<select value=${mode} onChange=${e => setMode(e.target.value)}><option value="redacted">${tr('settings.recordings.optRedacted')}</option><option value="metadata">${tr('settings.recordings.optMetadata')}</option><option value="full">${tr('settings.recordings.optFull')}</option></select></label>
+                    <label class="settings-recording-checkbox"><input type="checkbox" checked=${includeSnapshot} onChange=${e => setIncludeSnapshot(e.target.checked)} /> ${tr('settings.recordings.includeSnapshot')}</label>
                 </div>
                 <div class="settings-recording-form-grid settings-recording-redaction-grid">
-                    <label>Extra redacted keys<textarea rows="2" placeholder="customer_id\ninternal_code" value=${customKeys} onInput=${e => setCustomKeys(e.target.value)} /></label>
-                    <label>Extra regex patterns<textarea rows="2" placeholder="ACME-[0-9]+" value=${customPatterns} onInput=${e => setCustomPatterns(e.target.value)} /></label>
+                    <label>${tr('settings.recordings.extraKeys')}<textarea rows="2" placeholder="customer_id\ninternal_code" value=${customKeys} onInput=${e => setCustomKeys(e.target.value)} /></label>
+                    <label>${tr('settings.recordings.extraPatterns')}<textarea rows="2" placeholder="ACME-[0-9]+" value=${customPatterns} onInput=${e => setCustomPatterns(e.target.value)} /></label>
                 </div>
                 <div class="settings-task-detail-actions">
                     ${activeForChat
-                        ? html`<button onClick=${() => stop(activeForChat)} disabled=${acting}>Stop current chat recording</button>`
-                        : html`<button onClick=${start} disabled=${acting}>Start recording</button>`}
-                    <button onClick=${() => load()} disabled=${loading}>Refresh</button>
+                        ? html`<button onClick=${() => stop(activeForChat)} disabled=${acting}>${tr('settings.recordings.stopCurrent')}</button>`
+                        : html`<button onClick=${start} disabled=${acting}>${tr('settings.recordings.start')}</button>`}
+                    <button onClick=${() => load()} disabled=${loading}>${tr('settings.recordings.refresh')}</button>
                 </div>
                 ${active.length > 0 && html`<div class="settings-recording-active-row">${active.map(item => html`<${RecordingPill} type="active">REC ${item.chatJid}<//>`)}</div>`}
             </div>
 
             <details class="settings-recording-preview">
-                <summary>Redaction preview</summary>
+                <summary>${tr('settings.recordings.redactionPreview')}</summary>
                 <textarea rows="4" value=${previewInput} onInput=${e => setPreviewInput(e.target.value)} />
-                <div class="settings-task-detail-actions"><button onClick=${runPreview}>Preview redaction</button></div>
+                <div class="settings-task-detail-actions"><button onClick=${runPreview}>${tr('settings.recordings.previewRedaction')}</button></div>
                 ${previewResult && html`<pre>${JSON.stringify(previewResult, null, 2)}</pre>`}
             </details>
 
-            ${loading && html`<div class="settings-loading settings-loading-pane"><span class="settings-spinner"></span><span>Loading recordings…</span></div>`}
+            ${loading && html`<div class="settings-loading settings-loading-pane"><span class="settings-spinner"></span><span>${tr('settings.recordings.loading')}</span></div>`}
             ${error && html`<div class="settings-error-state">${error}</div>`}
-            ${!loading && !error && recordings.length === 0 && html`<div class="settings-empty-state"><strong>No recordings yet.</strong><p>Start a recording above, then use playback/export for deterministic screen capture.</p></div>`}
+            ${!loading && !error && recordings.length === 0 && html`<div class="settings-empty-state"><strong>${tr('settings.recordings.noneYet')}</strong><p>${tr('settings.recordings.noneYetHint')}</p></div>`}
             ${!loading && !error && recordings.length > 0 && html`
                 <div class="settings-task-layout">
-                    <div class="settings-task-list" role="listbox" aria-label="Session recordings">
+                    <div class="settings-task-list" role="listbox" aria-label=${tr('settings.recordings.listLabel')}>
                         ${filteredRecordings.map(item => html`
                             <button class=${`settings-task-row ${item.id === selectedId ? 'active' : ''}`} onClick=${() => selectRecording(item)}>
                                 <span class="settings-task-row-main"><strong>${item.title || item.id}</strong><span>${item.chatJid} · ${formatDateTime(item.startedAt)}</span></span>
                                 <span class="settings-task-row-meta"><${RecordingPill} type=${item.status === 'recording' ? 'active' : 'completed'}>${item.status}<//><${RecordingPill}>${modeLabel(item.mode)}<//></span>
-                                <span class="settings-task-row-times">${item.eventCount || 0} events</span>
+                                <span class="settings-task-row-times">${tr('settings.recordings.eventsCount', { count: item.eventCount || 0 })}</span>
                             </button>
                         `)}
-                        ${filteredRecordings.length === 0 && html`<p class="settings-hint">No recordings match “${filter}”.</p>`}
+                        ${filteredRecordings.length === 0 && html`<p class="settings-hint">${tr('settings.recordings.noMatch', { filter })}</p>`}
                     </div>
                     <${RecordingDetail} recording=${selected} details=${details} onDelete=${remove} onRefresh=${() => selected && selectRecording(selected)} />
                 </div>

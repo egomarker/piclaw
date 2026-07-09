@@ -1,4 +1,5 @@
 import { html, useCallback, useEffect, useMemo, useRef, useState } from '../vendor/preact-htm.js';
+import { useTranslation } from '../utils/i18n.js';
 import { addToWhitelist, getWorkspaceBranch, respondToAgentRequest } from '../api.js';
 import { renderThinkingMarkdown } from '../markdown.js';
 import { getTurnColor } from '../ui/agent-utils.js';
@@ -339,6 +340,7 @@ function formatElapsed(isoString, nowMs = Date.now()) {
 }
 
 export function AgentStatus({ status, draft, plan, thought, pendingRequest, intent, extensionPanels = [], pendingPanelActions = new Set(), onExtensionPanelAction, turnId, steerQueued, onPanelToggle, showCorePanels = true, showExtensionPanels = true }) {
+    const { t } = useTranslation();
     const THOUGHT_MAX_LINES = 9;
     const DRAFT_MAX_LINES = 9;
     const TOOL_OUTPUT_MAX_LINES = 6;
@@ -770,7 +772,7 @@ export function AgentStatus({ status, draft, plan, thought, pendingRequest, inte
         return html`
             <div class="agent-series-chart agent-series-chart-combined">
                 <div class="agent-series-chart-header">
-                    <span class="agent-series-chart-title">Tracked variables</span>
+                    <span class="agent-series-chart-title">${t('status.trackedVariables')}</span>
                     <span class="agent-series-chart-value">${normalized.length} series</span>
                 </div>
                 <div class="agent-series-chart-plot">
@@ -947,8 +949,8 @@ export function AgentStatus({ status, draft, plan, thought, pendingRequest, inte
                             <div class="agent-thinking-autoresearch-meta-stack">
                                 ${experimentElapsed && html`
                                     <div class="agent-thinking-autoresearch-elapsed">
-                                        <span title="Experiment duration">⏱ ${experimentElapsed}</span>
-                                        ${panel?.last_activity_at && panel?.state === 'running' && html`<span title="Since last activity">⟳ ${formatElapsed(panel.last_activity_at)} ago</span>`}
+                                        <span title=${t('status.experimentDuration')}>⏱ ${experimentElapsed}</span>
+                                        ${panel?.last_activity_at && panel?.state === 'running' && html`<span title=${t('status.sinceLastActivity')}>⟳ ${formatElapsed(panel.last_activity_at)} ago</span>`}
                                     </div>
                                 `}
                                 ${detailText && html`
@@ -960,15 +962,15 @@ export function AgentStatus({ status, draft, plan, thought, pendingRequest, inte
                                 ${tmuxCommand && html`
                                     <div class="agent-series-chart-command">
                                         <div class="agent-series-chart-command-header">
-                                            <span>Attach to session</span>
+                                            <span>${t('status.attachToSession')}</span>
                                         </div>
                                         <div class="agent-series-chart-command-shell">
                                             <pre class="agent-series-chart-command-code">${tmuxCommand}</pre>
                                             <button
                                                 type="button"
                                                 class="agent-series-chart-command-copy"
-                                                aria-label="Copy tmux command"
-                                                title="Copy tmux command"
+                                                aria-label=${t('status.copyTmux')}
+                                                title=${t('status.copyTmux')}
                                                 onClick=${() => onExtensionPanelAction?.(panel, { key: 'copy_tmux', action_type: 'autoresearch.copy_tmux', label: 'Copy tmux' })}
                                             >
                                                 ${COPY_ICON_SVG}
@@ -1087,6 +1089,7 @@ export function AgentStatus({ status, draft, plan, thought, pendingRequest, inte
 
 /** Preact component: modal for agent confirmation/input requests. */
 export function AgentRequestModal({ request, onRespond }) {
+    const { t } = useTranslation();
     if (!request) return null;
 
     const { request_id, tool_call, options, chat_jid } = request;
@@ -1149,7 +1152,7 @@ export function AgentRequestModal({ request, onRespond }) {
                         `}
                         ${uniquePaths.length > 0 && html`
                             <div class="agent-request-files">
-                                <div class="agent-request-subtitle">Files</div>
+                                <div class="agent-request-subtitle">${t('status.files')}</div>
                                 <ul>
                                     ${uniquePaths.map((path, idx) => html`<li key=${idx}>${path}</li>`)}
                                 </ul>
@@ -1160,7 +1163,7 @@ export function AgentRequestModal({ request, onRespond }) {
                         `}
                         ${diff && html`
                             <details class="agent-request-diff">
-                                <summary>Proposed diff</summary>
+                                <summary>${t('status.proposedDiff')}</summary>
                                 <pre>${diff}</pre>
                             </details>
                         `}

@@ -1,18 +1,20 @@
 import { html, useState, useEffect, useCallback } from '../../vendor/preact-htm.js';
 import { getAgentModels, sendAgentMessage } from '../../api.js';
+import { useTranslation } from '../../utils/i18n.js';
 
 const EFFORT_DISPLAY = { off: 'off', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'max' };
 const DEFAULT_DISPLAY = { off: 'off', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh' };
 function isEffortProvider(p) { return typeof p === 'string' && p.toLowerCase() === 'anthropic'; }
 
 function ThinkingSlider({ thinkingLevel, supportsThinking, provider, availableLevels, onSetLevel, disabled }) {
+    const { t } = useTranslation();
     const displayMap = isEffortProvider(provider) ? EFFORT_DISPLAY : DEFAULT_DISPLAY;
     const levels = (availableLevels && availableLevels.length > 1) ? availableLevels : ['off', 'minimal', 'low', 'medium', 'high'];
     const idx = Math.max(0, levels.indexOf(thinkingLevel ?? 'off'));
-    if (!supportsThinking) return html`<div class="settings-thinking-slider"><label>Thinking level</label><p class="settings-hint" style="margin:4px 0 0">Current model does not support thinking.</p></div>`;
+    if (!supportsThinking) return html`<div class="settings-thinking-slider"><label>${t('settings.models.thinkingLevel')}</label><p class="settings-hint" style="margin:4px 0 0">${t('settings.models.noThinking')}</p></div>`;
     return html`
         <div class="settings-thinking-slider">
-            <label>Thinking level: <strong>${displayMap[levels[idx]] || levels[idx]}</strong></label>
+            <label>${t('settings.models.thinkingLevelLabel')} <strong>${displayMap[levels[idx]] || levels[idx]}</strong></label>
             <div class="settings-slider-track">
                 <input type="range" min="0" max=${levels.length - 1} step="1" value=${idx} disabled=${disabled}
                     onInput=${(e) => onSetLevel(levels[parseInt(e.target.value, 10)])} />
@@ -25,6 +27,7 @@ function ThinkingSlider({ thinkingLevel, supportsThinking, provider, availableLe
 }
 
 export function ModelsSection({ filter = '' }) {
+    const { t } = useTranslation();
     const [models, setModels] = useState(null);
     const [switching, setSwitching] = useState(false);
     const [thinkingLevel, setThinkingLevel] = useState('off');
@@ -99,7 +102,7 @@ export function ModelsSection({ filter = '' }) {
         finally { setThinkingBusy(false); }
     }, [thinkingBusy, loadModels]);
 
-    if (!models) return html`<div class="settings-loading">Loading models\u2026</div>`;
+    if (!models) return html`<div class="settings-loading">${t('settings.models.loading')}</div>`;
     const options = models.model_options || [];
     const current = models.current;
     const currentOption = options.find(m => m.label === current);
@@ -109,22 +112,22 @@ export function ModelsSection({ filter = '' }) {
 
     return html`
         <div class="settings-models-split">
-            <div class="settings-models-summary settings-hint">Model and provider names may wrap in narrow panes to avoid clipping.</div>
+            <div class="settings-models-summary settings-hint">${t('settings.models.summary')}</div>
             <div class="settings-row" style="padding:0 0 10px 0; align-items:flex-start">
-                <label>Scoped models only</label>
+                <label>${t('settings.models.scopedOnly')}</label>
                 <div style="display:flex; flex-direction:column; gap:4px; min-width:0">
                     <label style="display:flex; align-items:center; gap:8px; font-weight:500">
                         <input type="checkbox" checked=${scopedModelsOnly} disabled=${scopedBusy} onChange=${(e) => setScopedModels(e.target.checked)} />
-                        Use Pi <code>enabledModels</code> for Piclaw model lists
+                        ${t('settings.models.scopedCheckboxPre')} <code>enabledModels</code> ${t('settings.models.scopedCheckboxPost')}
                     </label>
                     <span class="settings-hint" style="margin:0">
-                        Filters this picker and the <code>list_models</code> tool. TUI model selection remains unchanged.
+                        ${t('settings.models.scopedHintPre')} <code>list_models</code> ${t('settings.models.scopedHintPost')}
                     </span>
                 </div>
             </div>
             <div class="settings-models-list">
                 <table class="settings-table settings-borderless settings-models-table">
-                    <thead><tr><th style="width:32px"></th><th>Model</th><th>Provider</th><th>Context</th><th style="text-align:center">Reasoning</th></tr></thead>
+                    <thead><tr><th style="width:32px"></th><th>${t('settings.models.colModel')}</th><th>${t('settings.models.colProvider')}</th><th>${t('settings.models.colContext')}</th><th style="text-align:center">${t('settings.models.colReasoning')}</th></tr></thead>
                     <tbody>
                         ${filtered.map(m => html`
                             <tr class=${m.label === current ? 'settings-row-active' : ''}>
@@ -134,7 +137,7 @@ export function ModelsSection({ filter = '' }) {
                                 <td style="text-align:center">${m.reasoning ? '\ud83e\udde0' : '\u2014'}</td>
                             </tr>
                         `)}
-                        ${filtered.length === 0 && html`<tr><td colspan="5" class="settings-empty">No models match "${filter}"</td></tr>`}
+                        ${filtered.length === 0 && html`<tr><td colspan="5" class="settings-empty">${t('settings.models.noMatch', { filter })}</td></tr>`}
                     </tbody>
                 </table>
             </div>

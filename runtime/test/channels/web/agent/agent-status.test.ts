@@ -137,6 +137,7 @@ describe("web agent status helpers", () => {
         latest: {
           input_tokens: 1000,
           output_tokens: 300,
+          reasoning_tokens: 40,
           cache_read_tokens: 3000,
           cache_write_tokens: 1000,
           total_tokens: 5300,
@@ -150,6 +151,7 @@ describe("web agent status helpers", () => {
         totals: {
           input_tokens: 2000,
           output_tokens: 600,
+          reasoning_tokens: 80,
           cache_read_tokens: 6000,
           cache_write_tokens: 2000,
           total_tokens: 10600,
@@ -168,6 +170,7 @@ describe("web agent status helpers", () => {
         latest: {
           inputTokens: 1000,
           outputTokens: 300,
+          reasoningTokens: 40,
           cacheReadTokens: 3000,
           cacheWriteTokens: 1000,
           totalTokens: 5300,
@@ -184,6 +187,7 @@ describe("web agent status helpers", () => {
         totals: {
           inputTokens: 2000,
           outputTokens: 600,
+          reasoningTokens: 80,
           cacheReadTokens: 6000,
           cacheWriteTokens: 2000,
           totalTokens: 10600,

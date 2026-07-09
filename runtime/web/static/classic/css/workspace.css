@@ -375,6 +375,39 @@
     background: var(--border-color);
 }
 
+.workspace-menu-language {
+    padding: 6px 10px;
+}
+
+.language-switcher {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.language-switcher-label {
+    color: var(--text-secondary);
+}
+
+.language-switcher-select {
+    min-height: 30px;
+    padding: 4px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font: inherit;
+    cursor: pointer;
+}
+
+.language-switcher-select:focus {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 1px;
+}
+
 .timeline-menu-dropdown .workspace-menu-scale-control {
     min-height: 30px;
     padding: 5px 10px;

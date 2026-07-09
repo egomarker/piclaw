@@ -13,6 +13,7 @@ import { userAvatarUrl, assistantAvatarUrl } from "../../api/identity";
 import { AvatarPopover } from "../AvatarPopover";
 import { AdaptiveCardRenderer, extractCardBlocks } from "./AdaptiveCardRenderer";
 import { CopyButton } from "../CopyButton";
+import { ThinkingVisibilityPill } from "./ThinkingVisibilityPill";
 import type { ContentBlock, Interaction } from "./types";
 import { safeParseJSON, safeSetItem } from "../../utils/storage";
 import { parseUserContent } from "../../utils/attachments";
@@ -373,6 +374,20 @@ export function MessageItem({
             ))}
           </div>
         )}
+        {!isUser && interaction.content_blocks?.find(
+          (b: Record<string, unknown>) => b.type === "thinking_ref"
+        ) && (() => {
+          const ref = interaction.content_blocks!.find(
+            (b: Record<string, unknown>) => b.type === "thinking_ref"
+          ) as Record<string, unknown>;
+          return (
+            <ThinkingVisibilityPill
+              messageId={interaction.id}
+              lines={(ref.lines as number) || 0}
+              durationMs={(ref.duration_ms as number) || 0}
+            />
+          );
+        })()}
         {interaction.content_blocks && extractCardBlocks(interaction.content_blocks).length > 0 && (
           <AdaptiveCardRenderer
             blocks={interaction.content_blocks}

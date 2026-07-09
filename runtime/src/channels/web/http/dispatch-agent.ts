@@ -29,7 +29,7 @@ import {
 import { getQuickActionsSettingsData, saveQuickActionsSettings } from "../handlers/quick-actions-settings.js";
 import { handleScheduledTasksManagementAction, handleScheduledTasksManagementList } from "../handlers/scheduled-tasks-management.js";
 import { getWorkspaceSettingsData, saveWorkspaceSettings } from "../handlers/workspace-settings.js";
-import { getServerUiState, setServerUiMetersConfig, setServerUiThemeConfig } from "../ui-state.js";
+import { getServerUiState, setServerUiMetersConfig, setServerUiOutputConfig, setServerUiThemeConfig } from "../ui-state.js";
 import {
   clearEnvironmentOverride,
   getEnvironmentSettingsData,
@@ -51,6 +51,7 @@ import {
   handleWebPushSubscriptionUpsert,
   handleWebPushVapidPublicKey,
 } from "../push/web-push-routes.js";
+import { getThinkingContentForChat } from "../../../db/messages.js";
 
 interface ExactAgentRoute {
   method: string;
@@ -72,6 +73,34 @@ const EXACT_AGENT_ROUTES: ExactAgentRoute[] = [
     method: "POST",
     path: "/agent/thought/visibility",
     handle: (channel, req) => channel.handleThoughtVisibility(req),
+  },
+  {
+    method: "GET",
+    path: "/agent/thinking",
+    handle: (_channel, _req, url) => {
+      const messageId = url.searchParams.get("message_id");
+      const chatJid = url.searchParams.get("chat_jid");
+      if (!messageId || !chatJid) {
+        return new Response(JSON.stringify({ error: "Missing message_id or chat_jid" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      // Single validated lookup: message must exist in chat_jid, be a bot
+      // reply, and carry a thinking_ref content block. 404 is returned
+      // uniformly for any failure to avoid distinguishing why (no
+      // enumeration oracle for message_ids across chats).
+      const result = getThinkingContentForChat(chatJid, messageId);
+      if (!result) {
+        return new Response(JSON.stringify({ error: "Not found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify(result), {
+        headers: { "Content-Type": "application/json" },
+      });
+    },
   },
   {
     method: "GET",
@@ -331,6 +360,15 @@ const EXACT_AGENT_ROUTES: ExactAgentRoute[] = [
         response.ui_meters = nextMeters;
         channel.broadcastEvent("ui_meters", { mode: "set", ...nextMeters });
       }
+      if (body?.ui_output && typeof body.ui_output === "object") {
+        const outputBody = body.ui_output as Record<string, unknown>;
+        const parsedPad = Number(outputBody.outputPad ?? outputBody.output_pad);
+        const nextOutput = setServerUiOutputConfig({
+          ...(Number.isFinite(parsedPad) ? { outputPad: parsedPad } : {}),
+        });
+        response.ui_output = nextOutput;
+        channel.broadcastEvent("ui_theme", { outputPad: nextOutput.outputPad });
+      }
       return channel.json(response, 200);
     },
   },
@@ -427,7 +465,7 @@ const EXACT_AGENT_ROUTES: ExactAgentRoute[] = [
       try {
         const body = await req.json().catch(() => ({}));
         const saved = await saveGeneralSettings((body && typeof body === "object") ? body as Record<string, unknown> : {});
-        channel.broadcastEvent("ui_theme", { theme: saved.uiTheme, tint: saved.uiTint });
+        channel.broadcastEvent("ui_theme", { theme: saved.uiTheme, tint: saved.uiTint, outputPad: saved.outputPad });
         channel.broadcastEvent("profile_update", buildGeneralSettingsProfileUpdate(saved));
         return channel.json({ ok: true, settings: saved });
       } catch (error) {

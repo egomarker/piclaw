@@ -117,4 +117,12 @@ describe("OpenAI-completions reasoning_details preservation", () => {
 
     expect(getAssistantPayload(mockState.payloads[1])?.reasoning_details).toEqual([reasoningDetail]);
   });
+
+  test("inherits upstream failure when a stream ends without finish_reason", async () => {
+    mockState.chunkSets = [[chunk({ content: "partial answer" })]];
+
+    const assistantMessage = await runOpenAICompletionsStream();
+    expect(assistantMessage.stopReason).toBe("error");
+    expect(assistantMessage.errorMessage).toContain("finish_reason");
+  });
 });

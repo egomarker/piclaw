@@ -121,6 +121,12 @@ function getBooleanField(data: JsonRecord, key: string): boolean | undefined {
   return undefined;
 }
 
+function normalizeNotifyOnComplete(data: JsonRecord): boolean {
+  if (getBooleanField(data, "muted") === true || getBooleanField(data, "no_nudge") === true) return false;
+  if (getBooleanField(data, "notify") === false || getBooleanField(data, "notify_on_complete") === false) return false;
+  return true;
+}
+
 function normalizeMediaContentType(value: string | undefined): string {
   if (!value) return "";
   return value.split(";")[0].trim().toLowerCase();
@@ -416,6 +422,7 @@ export async function processTaskCommand(data: JsonRecord, deps: IpcDeps): Promi
           command: validated.command || null,
           cwd: cwdResult.cwd,
           timeout_sec: getFiniteNumberField(data, "timeout_sec") ?? null,
+          notify_on_complete: normalizeNotifyOnComplete(data),
           schedule_type: scheduleTypeValue,
           schedule_value: String(scheduleValue),
           next_run: nextRun,
@@ -455,6 +462,7 @@ export async function processTaskCommand(data: JsonRecord, deps: IpcDeps): Promi
         command: null,
         cwd: null,
         timeout_sec: null,
+        notify_on_complete: normalizeNotifyOnComplete(data),
         schedule_type: scheduleTypeValue,
         schedule_value: String(scheduleValue),
         next_run: nextRun,
@@ -479,6 +487,16 @@ export async function processTaskCommand(data: JsonRecord, deps: IpcDeps): Promi
       if (!taskId) return;
       const t = getTaskById(taskId);
       if (t) updateTask(taskId, { status: "active" });
+      break;
+    }
+
+    // --- Mute/unmute task Pushover nudges while keeping chat delivery active ---
+    case "mute_task":
+    case "unmute_task": {
+      const taskId = getStringField(data, "taskId");
+      if (!taskId) return;
+      const t = getTaskById(taskId);
+      if (t) updateTask(taskId, { notify_on_complete: commandType !== "mute_task" });
       break;
     }
 
@@ -530,6 +548,19 @@ export async function processTaskCommand(data: JsonRecord, deps: IpcDeps): Promi
 
       const timeoutSec = getFiniteNumberField(data, "timeout_sec");
       if (timeoutSec !== undefined) updates.timeout_sec = timeoutSec;
+
+      const notify = getBooleanField(data, "notify");
+      if (notify !== undefined) updates.notify_on_complete = notify;
+
+      const notifyOnComplete = getBooleanField(data, "notify_on_complete");
+      if (notifyOnComplete !== undefined) updates.notify_on_complete = notifyOnComplete;
+
+      const muted = getBooleanField(data, "muted");
+      if (muted === true) updates.notify_on_complete = false;
+      else if (muted === false) updates.notify_on_complete = true;
+
+      const noNudge = getBooleanField(data, "no_nudge");
+      if (noNudge === true) updates.notify_on_complete = false;
 
       const modelInput = getStringField(data, "model");
       if (typeof modelInput === "string") {

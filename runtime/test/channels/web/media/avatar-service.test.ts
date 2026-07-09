@@ -256,3 +256,98 @@ test('buildAvatarResponse supports rasterized PNG size variants for install surf
     ws.cleanup();
   }
 });
+
+test('buildAvatarResponse loads uploaded image avatars from /media id sources', () => {
+  const ws = createTempWorkspace('piclaw-avatar-media-test-');
+
+  try {
+    const script = `
+      const db = await import('./src/db.js');
+      db.initDatabase();
+      const avatarService = await import('./src/channels/web/media/avatar-service.js');
+      const png = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn1s3sAAAAASUVORK5CYII=',
+        'base64',
+      );
+      const id = db.createMedia('avatar.png', 'image/png', png, null, { test: true });
+      const source = '/media/' + id + '?cache=1#avatar';
+      const response = await avatarService.buildAvatarResponse(
+        'user',
+        source,
+        new Request('https://example.com/avatar/user'),
+      );
+      if (!response) {
+        console.log(JSON.stringify({ ok: false, id }));
+        process.exit(0);
+      }
+      const body = new Uint8Array(await response.arrayBuffer());
+      console.log(JSON.stringify({
+        ok: true,
+        id,
+        status: response.status,
+        contentType: response.headers.get('Content-Type'),
+        cacheControl: response.headers.get('Cache-Control'),
+        bodyLength: body.length,
+      }));
+    `;
+
+    const result = spawnSync(process.execPath, ['-e', script], {
+      cwd: resolve(import.meta.dir, '..', '..', '..', '..'),
+      env: {
+        ...process.env,
+        PICLAW_WORKSPACE: ws.workspace,
+        PICLAW_STORE: ws.store,
+        PICLAW_DATA: ws.data,
+        PICLAW_DB_IN_MEMORY: '1',
+      },
+      encoding: 'utf8',
+    });
+
+    expect(result.status).toBe(0);
+    const output = JSON.parse(result.stdout.trim().split('\n').filter(Boolean).pop() || '{}');
+    expect(output.ok).toBe(true);
+    expect(output.status).toBe(200);
+    expect(String(output.contentType).startsWith('image/')).toBe(true);
+    expect(output.cacheControl).toBe('no-store');
+    expect(output.bodyLength).toBeGreaterThan(0);
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test('buildAvatarResponse rejects non-image media avatar sources', () => {
+  const ws = createTempWorkspace('piclaw-avatar-media-reject-test-');
+
+  try {
+    const script = `
+      const db = await import('./src/db.js');
+      db.initDatabase();
+      const avatarService = await import('./src/channels/web/media/avatar-service.js');
+      const id = db.createMedia('note.txt', 'text/plain', new TextEncoder().encode('not an image'), null, { test: true });
+      const response = await avatarService.buildAvatarResponse(
+        'agent',
+        '/media/' + id,
+        new Request('https://example.com/avatar/agent'),
+      );
+      console.log(JSON.stringify({ ok: response === null, id }));
+    `;
+
+    const result = spawnSync(process.execPath, ['-e', script], {
+      cwd: resolve(import.meta.dir, '..', '..', '..', '..'),
+      env: {
+        ...process.env,
+        PICLAW_WORKSPACE: ws.workspace,
+        PICLAW_STORE: ws.store,
+        PICLAW_DATA: ws.data,
+        PICLAW_DB_IN_MEMORY: '1',
+      },
+      encoding: 'utf8',
+    });
+
+    expect(result.status).toBe(0);
+    const output = JSON.parse(result.stdout.trim().split('\n').filter(Boolean).pop() || '{}');
+    expect(output.ok).toBe(true);
+  } finally {
+    ws.cleanup();
+  }
+});

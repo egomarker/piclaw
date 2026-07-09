@@ -1,6 +1,7 @@
 import { html, useCallback, useEffect, useMemo, useRef, useState } from '../vendor/preact-htm.js';
+import { useTranslation } from '../utils/i18n.js';
 import { getMediaInfo, getMediaUrl, getThumbnailUrl, submitAdaptiveCardAction } from '../api.js';
-import { renderMarkdown, renderMermaidDiagrams, sanitizeUrl } from '../markdown.js';
+import { renderMarkdown, renderMermaidDiagrams, renderThinkingMarkdown, sanitizeUrl } from '../markdown.js';
 import { formatCount, formatFileSize, formatTime, formatTimestamp } from '../utils/format.js';
 import { buildPostMarkdownCopyPayload } from '../utils/post-copy-markdown.js';
 import { DEFAULT_AGENT_NAME, getAvatarInfo } from '../ui/agent-utils.js';
@@ -136,13 +137,15 @@ export function formatAgentTokenStats(usage) {
     if (!usage || typeof usage !== 'object') return null;
     const input = readUsageNumber(usage, 'input_tokens');
     const output = readUsageNumber(usage, 'output_tokens');
+    const reasoning = readUsageNumber(usage, 'reasoning_tokens');
     const cacheRead = readUsageNumber(usage, 'cache_read_tokens');
     const cacheWrite = readUsageNumber(usage, 'cache_write_tokens');
     const total = readUsageNumber(usage, 'total_tokens') || input + output + cacheRead + cacheWrite;
-    if (!total && !input && !output && !cacheRead && !cacheWrite) return null;
+    if (!total && !input && !output && !reasoning && !cacheRead && !cacheWrite) return null;
     const parts = [`${formatCount(total)} total`];
     if (input) parts.push(`${formatCount(input)} in`);
     if (output) parts.push(`${formatCount(output)} out`);
+    if (reasoning) parts.push(`${formatCount(reasoning)} reasoning`);
     const cache = cacheRead + cacheWrite;
     if (cache) parts.push(`${formatCount(cache)} cache`);
     return `Tokens ${parts.join(' · ')}`;
@@ -278,6 +281,122 @@ function OutcomePill({ marker }) {
                 <div class="post-outcome-pill-detail">
                     ${title && html`<div><strong>${title}</strong></div>`}
                     ${detail && detail !== title && html`<div>${detail}</div>`}
+                </div>
+            `}
+        </div>
+    `;
+}
+
+function ThinkingVisibilityPill({ messageId, chatJid, lines, durationMs }) {
+    const [expanded, setExpanded] = useState(false);
+    const [text, setText] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(false);
+    const [copied, setCopied] = useState(false);
+    const [fetchedDuration, setFetchedDuration] = useState(null);
+    const detailRef = useRef(null);
+
+    const toggle = useCallback((e) => {
+        e.stopPropagation();
+        setExpanded(v => {
+            const next = !v;
+            if (next && !text && !loading && !error) {
+                setLoading(true);
+                const url = `/agent/thinking?message_id=${encodeURIComponent(messageId)}&chat_jid=${encodeURIComponent(chatJid || '')}`;
+                fetch(url)
+                    .then(r => {
+                        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                        return r.json();
+                    })
+                    .then(d => {
+                        if (d?.text) setText(d.text);
+                        else setError(true);
+                        if (d?.duration_ms) setFetchedDuration(d.duration_ms);
+                    })
+                    .catch(err => {
+                        console.warn('[post] Failed to load thinking content:', err);
+                        setError(true);
+                    })
+                    .finally(() => setLoading(false));
+            }
+            return next;
+        });
+    }, [text, loading, error, messageId, chatJid]);
+
+    const copyThinking = useCallback((e) => {
+        e.stopPropagation();
+        if (!text) return;
+        navigator.clipboard.writeText(text).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        }).catch(err => { console.warn('[post] Failed to copy thinking content:', err); });
+    }, [text]);
+
+    // Render thinking text via the thinking-specific renderer so the persisted
+    // pill displays identically to the live thought panel (status.ts /
+    // btw-panel.ts both use renderThinkingMarkdown). This matters because:
+    //   - renderThinkingMarkdown escapes all <> first then restores only
+    //     allowed tags (stricter than generic sanitiseHtml)
+    //   - it disables LaTeX math rendering so shell content like $PATH does
+    //     not get mangled as math expressions
+    //   - it skips hashtag linkification (thinking is internal reasoning,
+    //     not a chat message)
+    const renderedHtml = useMemo(() => {
+        if (!text) return null;
+        try { return { __html: renderThinkingMarkdown(text) }; }
+        catch { return null; }
+    }, [text]);
+
+    const ms = fetchedDuration || durationMs || 0;
+    const durationLabel = ms > 0
+        ? `Thought for ${ms < 1000 ? Math.round(ms) + 'ms' : ms < 60000 ? Math.round(ms / 1000) + 's' : Math.floor(ms / 60000) + 'm ' + (Math.round(ms / 1000) % 60) + 's'}`
+        : `Thinking · ${lines} line${lines !== 1 ? 's' : ''}`;
+
+    // Stable detail id so the header button can declare aria-controls — needed
+    // for screen readers to announce the relationship between the toggle and
+    // the expandable region.
+    const detailId = `post-thinking-visibility-detail-${messageId}`;
+
+    return html`
+        <div class="post-thinking-visibility">
+            <div class="post-thinking-visibility-controls">
+                <button
+                    type="button"
+                    class="post-thinking-visibility-header"
+                    onClick=${toggle}
+                    aria-expanded=${expanded ? 'true' : 'false'}
+                    aria-controls=${detailId}
+                    aria-label=${`${expanded ? 'Collapse' : 'Expand'} reasoning trace, ${durationLabel}`}
+                >
+                    <span class="post-thinking-visibility-toggle" aria-hidden="true">
+                        ${renderDisclosureTriangle(expanded ? 'down' : 'right')}
+                    </span>
+                    <span class="post-thinking-visibility-label">${durationLabel}</span>
+                </button>
+                ${expanded && text && html`
+                    <button
+                        type="button"
+                        class="post-thinking-visibility-copy"
+                        onClick=${copyThinking}
+                        aria-label="Copy reasoning trace to clipboard"
+                        title="Copy reasoning trace"
+                    >
+                        ${copied ? '✓' : '⧉'}
+                    </button>
+                `}
+            </div>
+            ${expanded && html`
+                <div
+                    id=${detailId}
+                    class="post-thinking-visibility-detail"
+                    ref=${detailRef}
+                    role="region"
+                    aria-live="polite"
+                    aria-label="Reasoning trace"
+                >
+                    ${loading ? html`<span class="post-thinking-visibility-loading">Loading reasoning trace…</span>` : null}
+                    ${error ? html`<span class="post-thinking-visibility-error">Could not load reasoning trace.</span>` : null}
+                    ${renderedHtml ? html`<div dangerouslySetInnerHTML=${renderedHtml} />` : (!loading && !error && text ? text : null)}
                 </div>
             `}
         </div>
@@ -1042,6 +1161,7 @@ function highlightHtml(html, query) {
  * Single post component
  */
 export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMessage, agentName, agentAvatarUrl, userName, userAvatarUrl, userAvatarBackground, onDelete, isThreadReply, isThreadPrev, isThreadNext, isRemoving, highlightQuery, onFileRef, onOpenWidget, onOpenAttachmentPreview }) {
+    const { t } = useTranslation();
     const [zoomedImage, setZoomedImage] = useState(null);
     const [annotatingImage, setAnnotatingImage] = useState(null);
     const [annotationResult, setAnnotationResult] = useState(null); // { id, url } after Done
@@ -1125,6 +1245,7 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
     const outcomeMarker = outcomeMarkerBlocks[0] || null;
     const agentTimingBlock = extractAgentTimingBlock(blocks);
     const postTimeTooltip = buildPostTimeTooltip(post, agentTimingBlock);
+    const thinkingRef = blocks.find(b => b?.type === 'thinking_ref');
     const singleCardFallback = directCardBlocks.length === 1 && typeof directCardBlocks[0]?.fallback_text === 'string'
         ? directCardBlocks[0].fallback_text.trim()
         : '';
@@ -1149,12 +1270,13 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
     const speakableText = useMemo(() => buildSpeakablePostText(post), [post]);
     const isSpeakingThisPost = Boolean(speechPlaybackState.speaking && speechPlaybackState.activePostId === post.id);
 
-    const handleImageClick = (e, mediaId) => {
+    const handleImageClick = (e, mediaId, mimeType) => {
         e.stopPropagation();
+        const src = getMediaUrl(mediaId);
         if (canAnnotate()) {
-            setAnnotatingImage(getMediaUrl(mediaId));
+            setAnnotatingImage({ src, mimeType });
         } else {
-            setZoomedImage(getMediaUrl(mediaId));
+            setZoomedImage(src);
         }
     };
 
@@ -1535,8 +1657,8 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
                     <button
                         class="post-action-btn post-delete-btn"
                         type="button"
-                        title="Delete message"
-                        aria-label="Delete message"
+                        title=${t('post.deleteMessage')}
+                        aria-label=${t('post.deleteMessage')}
                         onClick=${handleDeleteClick}
                     >
                         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -1602,9 +1724,10 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
                 ${outcomeMarker && html`
                     <${OutcomePill} marker=${outcomeMarker} />
                 `}
+                ${isAgent && thinkingRef && html`<${ThinkingVisibilityPill} messageId=${post.id} chatJid=${post.chat_jid} lines=${thinkingRef.lines || 0} durationMs=${thinkingRef.duration_ms || 0} />`}
                 ${isHardTruncated && truncatedInfo && html`
                     <div class="post-content truncated">
-                        <div class="truncated-title">Message too large to display.</div>
+                        <div class="truncated-title">${t('post.tooLarge')}</div>
                         <div class="truncated-meta">
                             Original length: ${formatCount(truncatedInfo.originalLength)} chars
                             ${truncatedInfo.maxLength ? html` • Display limit: ${formatCount(truncatedInfo.maxLength)} chars` : ''}
@@ -1613,7 +1736,7 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
                 `}
                 ${isPreview && truncatedInfo && html`
                     <div class="post-content preview">
-                        <div class="truncated-title">Preview truncated.</div>
+                        <div class="truncated-title">${t('post.previewTruncated')}</div>
                         <div class="truncated-meta">
                             Showing first ${formatCount(truncatedInfo.maxLength)} of ${formatCount(truncatedInfo.originalLength)} chars. Download full text below.
                         </div>
@@ -1711,7 +1834,7 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
                                     <div class="adaptive-card-submission-header">
                                         <span class="adaptive-card-submission-icon" aria-hidden="true">✓</span>
                                         <div class="adaptive-card-submission-title-wrap">
-                                            <span class="adaptive-card-submission-title">Submitted</span>
+                                            <span class="adaptive-card-submission-title">${t('post.submitted')}</span>
                                             <span class="adaptive-card-submission-title-action">${meta.title}</span>
                                         </div>
                                     </div>
@@ -1763,7 +1886,7 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
                                     alt="Media"
                                     loading="lazy"
                                     decoding="async"
-                                    onClick=${(e) => handleImageClick(e, id)}
+                                    onClick=${(e) => handleImageClick(e, id, mimeType)}
                                 />
                             `;
                         })}
@@ -1814,7 +1937,8 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
         ${annotatingImage && html`
             <div class="post-inline-annotator">
                 <${ImageAnnotator}
-                    src=${annotatingImage}
+                    src=${annotatingImage.src}
+                    mimeType=${annotatingImage.mimeType}
                     onSave=${handleAnnotationSave}
                     onCancel=${() => setAnnotatingImage(null)}
                 />
@@ -1828,7 +1952,7 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                         Send
                     </button>
-                    <button class="post-annotation-discard-btn" onClick=${handleAnnotationDiscard}>Discard</button>
+                    <button class="post-annotation-discard-btn" onClick=${handleAnnotationDiscard}>${t('post.discard')}</button>
                 </div>
             </div>
         `}
@@ -1849,7 +1973,7 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
                 <button
                     class="post-aside-add-btn"
                     onClick=${(e) => { e.preventDefault(); e.stopPropagation(); handleAddAside(); }}
-                    title="Add note"
+                    title=${t('post.addNote')}
                 >✎</button>
             </div>
         `}
@@ -1860,7 +1984,7 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
             >
                 <textarea
                     class="post-aside-textarea"
-                    placeholder="Add a note…"
+                    placeholder=${t('post.addNotePlaceholder')}
                     value=${asideText}
                     onInput=${(e) => setAsideText(e.currentTarget.value)}
                     onKeyDown=${(e) => {
@@ -1870,8 +1994,8 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
                     ref=${(el) => el && requestAnimationFrame(() => el.focus())}
                 />
                 <div class="post-aside-input-actions">
-                    <button class="post-aside-save-btn" onClick=${handleSaveAside} disabled=${!asideText.trim()}>Save</button>
-                    <button class="post-aside-cancel-btn" onClick=${handleCancelAside}>Cancel</button>
+                    <button class="post-aside-save-btn" onClick=${handleSaveAside} disabled=${!asideText.trim()}>${t('post.save')}</button>
+                    <button class="post-aside-cancel-btn" onClick=${handleCancelAside}>${t('post.cancel')}</button>
                 </div>
             </div>
         `}

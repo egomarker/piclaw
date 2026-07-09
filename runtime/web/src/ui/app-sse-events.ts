@@ -1,4 +1,4 @@
-import { applyThemeFromEvent } from './theme.js';
+import { applyOutputPad, applyThemeFromEvent } from './theme.js';
 import { applyMetersFromEvent } from './meters.js';
 import {
   applyDraftDeltaBuffer,
@@ -254,7 +254,9 @@ export function handleAppSseEvent(
     if (data?.ui_theme) {
       const serverTheme = data.ui_theme.theme || 'default';
       const serverTint = data.ui_theme.tint || null;
-      applyThemeFromEvent({ theme: serverTheme, tint: serverTint });
+      applyThemeFromEvent({ theme: serverTheme, tint: serverTint, outputPad: data?.ui_output?.outputPad ?? data?.ui_output?.output_pad });
+    } else if (data?.ui_output) {
+      applyOutputPad(data.ui_output.outputPad ?? data.ui_output.output_pad);
     }
     if (data?.ui_meters) {
       applyMetersFromEvent(data.ui_meters);

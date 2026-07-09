@@ -53,7 +53,7 @@ describe("agent message store", () => {
       },
     });
 
-    expect(ok).toBe(true);
+    expect(typeof ok === "number" && ok > 0).toBe(true);
     expect(deliveries).toHaveLength(1);
     await Promise.resolve();
     expect(pushCalls).toEqual([interaction]);
@@ -88,7 +88,7 @@ describe("agent message store", () => {
       },
     });
 
-    expect(ok).toBe(true);
+    expect(typeof ok === "number" && ok > 0).toBe(true);
     await Promise.resolve();
     expect(pushCalls).toEqual([]);
   });
@@ -109,7 +109,7 @@ describe("agent message store", () => {
       isTerminalAgentReply: true,
     });
 
-    expect(ok).toBe(true);
+    expect(typeof ok === "number" && ok > 0).toBe(true);
     const warning = sinkRecords.find((record) => record.operation === "web.agent_message_store.svg_source_guardrail");
     expect(warning).toBeTruthy();
     expect(warning?.level).toBe("warn");

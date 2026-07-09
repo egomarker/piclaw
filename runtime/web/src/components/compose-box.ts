@@ -1,4 +1,5 @@
 import { html, useRef, useState, useEffect, useCallback, useMemo } from '../vendor/preact-htm.js';
+import { useTranslation } from '../utils/i18n.js';
 import { findPopupTypeaheadMatch, isPopupTypeaheadKey, resolvePopupTypeaheadMatch, updatePopupTypeaheadBuffer } from '../ui/popup-typeahead.js';
 import { getAgentModels, sendAgentMessage, uploadMedia } from '../api.js';
 import { getLocalStorageItem, setLocalStorageItem } from '../utils/storage.js';
@@ -931,6 +932,7 @@ export function QueuedFollowupStack({
     onReturnQueuedFollowup,
     onOpenFilePill,
 }) {
+    const { t } = useTranslation();
     if (!Array.isArray(items) || items.length === 0) return null;
     return html`
         <div class="compose-queue-stack">
@@ -992,14 +994,14 @@ export function QueuedFollowupStack({
                                 </div>
                             `}
                         </div>
-                        <div class="compose-queue-stack-actions" role="group" aria-label="Queued follow-up controls">
+                        <div class="compose-queue-stack-actions" role="group" aria-label=${t('compose.queueControls')}>
                             ${items.length > 1 && html`
                                 <button
                                     class="compose-queue-stack-move-btn"
                                     data-action="move-up"
                                     type="button"
-                                    title="Move up"
-                                    aria-label="Move up in queue"
+                                    title=${t('compose.moveUp')}
+                                    aria-label=${t('compose.moveUpQueue')}
                                     disabled=${!canMoveUp}
                                     onClick=${() => canMoveUp && onMoveQueuedFollowup?.(index, index - 1)}
                                 >
@@ -1011,8 +1013,8 @@ export function QueuedFollowupStack({
                                     class="compose-queue-stack-move-btn"
                                     data-action="move-down"
                                     type="button"
-                                    title="Move down"
-                                    aria-label="Move down in queue"
+                                    title=${t('compose.moveDown')}
+                                    aria-label=${t('compose.moveDownQueue')}
                                     disabled=${!canMoveDown}
                                     onClick=${() => canMoveDown && onMoveQueuedFollowup?.(index, index + 1)}
                                 >
@@ -1026,8 +1028,8 @@ export function QueuedFollowupStack({
                                     class="compose-queue-stack-move-btn queue-edit"
                                     data-action="edit"
                                     type="button"
-                                    title="Edit in compose"
-                                    aria-label="Return queued message to editor"
+                                    title=${t('compose.editInCompose')}
+                                    aria-label=${t('compose.returnToEditor')}
                                     onClick=${(e) => { e.stopPropagation(); onReturnQueuedFollowup?.(item); }}
                                 >
                                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -1039,22 +1041,22 @@ export function QueuedFollowupStack({
                             <button
                                 class="compose-queue-stack-steer-btn"
                                 type="button"
-                                title="Inject queued follow-up as steer"
-                                aria-label="Inject queued follow-up as steer"
+                                title=${t('compose.injectSteer')}
+                                aria-label=${t('compose.injectSteer')}
                                 onClick=${() => onInjectQueuedFollowup?.(item)}
                             >
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                                     <path d="M4 20h12a2 2 0 0 0 2-2V8" />
                                     <polyline points="14 12 18 8 22 12" />
                                 </svg>
-                                <span>Steer</span>
+                                <span>${t('compose.steer')}</span>
                             </button>
                             <button
                                 class="compose-queue-stack-close-btn queue-remove"
                                 data-action="remove"
                                 type="button"
-                                title="Cancel queued message"
-                                aria-label="Cancel queued message"
+                                title=${t('compose.cancelQueued')}
+                                aria-label=${t('compose.cancelQueued')}
                                 onClick=${() => onRemoveQueuedFollowup?.(item)}
                             >
                                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -1135,6 +1137,7 @@ export function ComposeBox({
     prefillRequest = null,
 }) {
     const [content, setContent] = useState('');
+    const { t } = useTranslation();
     const [searchText, setSearchText] = useState('');
     const [searchFilterImages, setSearchFilterImages] = useState(false);
     const [searchFilterAttachments, setSearchFilterAttachments] = useState(false);
@@ -3080,8 +3083,8 @@ export function ComposeBox({
                 class="compose-resize-handle"
                 role="separator"
                 aria-orientation="horizontal"
-                aria-label="Resize message input"
-                title="Drag to resize message input"
+                aria-label=${t('compose.resizeInput')}
+                title=${t('compose.resizeInputHint')}
                 onMouseDown=${handleComposeResizeMouseDown}
                 onTouchStart=${handleComposeResizeTouchStart}
             ></div>
@@ -3225,17 +3228,17 @@ export function ComposeBox({
                                 type="button"
                                 class="compose-clear-attachments-btn"
                                 onClick=${clearAllAttachmentRefs}
-                                title="Clear all attachments and references"
-                                aria-label="Clear all attachments and references"
+                                title=${t('compose.clearAllTitle')}
+                                aria-label=${t('compose.clearAllTitle')}
                             >
-                                Clear all
+                                ${t('compose.clearAll')}
                             </button>
                         </div>
                     `}
                     <textarea
                         ref=${textareaRef}
                         data-testid="compose-input"
-                        placeholder=${searchMode ? "Search (Enter to run)..." : "Message (Enter to send, Shift+Enter for newline)..."}
+                        placeholder=${searchMode ? t('compose.searchPlaceholder') : t('compose.placeholder')}
                         value=${searchMode ? searchText : content}
                         onInput=${handleInput}
                         onKeyDown=${handleKeyDown}
@@ -3277,13 +3280,13 @@ export function ComposeBox({
                     `}
                     ${showModelPopup && !searchMode && html`
                         <div class="compose-model-popup" ref=${modelPopupRef} tabIndex="-1" onKeyDown=${handlePopupKeyboardEvent}>
-                            <div class="compose-model-popup-title">Select model</div>
-                            <div class="compose-model-popup-menu" role="menu" aria-label="Model picker">
+                            <div class="compose-model-popup-title">${t('compose.selectModel')}</div>
+                            <div class="compose-model-popup-menu" role="menu" aria-label=${t('compose.modelPicker')}>
                                 ${loadingModels && html`
-                                    <div class="compose-model-popup-empty">Loading models…</div>
+                                    <div class="compose-model-popup-empty">${t('compose.loadingModels')}</div>
                                 `}
                                 ${!loadingModels && modelOptions.length === 0 && html`
-                                    <div class="compose-model-popup-empty">No models available.</div>
+                                    <div class="compose-model-popup-empty">${t('compose.noModels')}</div>
                                 `}
                                 ${!loadingModels && modelOptions.map((modelOption, index) => {
                                     const modelLabel = typeof modelOption?.label === 'string' ? modelOption.label : '';
@@ -3315,17 +3318,17 @@ export function ComposeBox({
                                     onClick=${() => { void handleCycleModel(); }}
                                     disabled=${switchingModel}
                                 >
-                                    Next model
+                                    ${t('compose.nextModel')}
                                 </button>
                             </div>
                         </div>
                     `}
                     ${showSessionPopup && !searchMode && html`
                         <div class="compose-model-popup" data-testid="session-popup" ref=${sessionPopupRef} tabIndex="-1" onKeyDown=${handlePopupKeyboardEvent}>
-                            <div class="compose-model-popup-title">Manage sessions & agents</div>
-                            <div class="compose-model-popup-menu" role="menu" aria-label="Sessions and agents">
+                            <div class="compose-model-popup-title">${t('compose.manageSessions')}</div>
+                            <div class="compose-model-popup-menu" role="menu" aria-label=${t('compose.sessionsAndAgents')}>
                                 ${!hasSwitchableChatAgents && html`
-                                    <div class="compose-model-popup-empty">No other sessions yet.</div>
+                                    <div class="compose-model-popup-empty">${t('compose.noSessions')}</div>
                                 `}
                                 ${hasSwitchableChatAgents && switchableChatAgents.map((chat, listIndex) => {
                                     const archived = Boolean(chat.archived_at);
@@ -3460,9 +3463,9 @@ export function ComposeBox({
                                             type="button"
                                             class=${`compose-model-popup-btn primary${sessionPopupEntries.findIndex((entry) => entry.key === 'action:new') === sessionPopupIndex ? ' active' : ''}`}
                                             onClick=${() => { void handleCreateSession(); }}
-                                            title="Create a new branch from this chat"
+                                            title=${t('compose.newBranchTitle')}
                                         >
-                                            New branch
+                                            ${t('compose.newBranch')}
                                         </button>
                                     `}
                                     ${canCreateRootSession && html`
@@ -3470,9 +3473,9 @@ export function ComposeBox({
                                             type="button"
                                             class=${`compose-model-popup-btn${sessionPopupEntries.findIndex((entry) => entry.key === 'action:new-root') === sessionPopupIndex ? ' active' : ''}`}
                                             onClick=${() => { void handleCreateRootSession(); }}
-                                            title="Create a clean root session such as web:ops"
+                                            title=${t('compose.newRootTitle')}
                                         >
-                                            New root…
+                                            ${t('compose.newRoot')}
                                         </button>
                                     `}
                                     ${currentRollupParent?.chat_jid && html`
@@ -3480,10 +3483,10 @@ export function ComposeBox({
                                             type="button"
                                             class=${`compose-model-popup-btn${sessionPopupEntries.findIndex((entry) => entry.key === 'action:rollup') === sessionPopupIndex ? ' active' : ''}`}
                                             onClick=${() => { void handleRollupSession(); }}
-                                            title=${canRollupSession ? `Merge this branch into ${currentRollupParent.agent_name ? `@${currentRollupParent.agent_name}` : currentRollupParent.chat_jid}` : 'This branch cannot be merged while active or while it has children'}
+                                            title=${canRollupSession ? t('compose.mergeInto', { target: currentRollupParent.agent_name ? `@${currentRollupParent.agent_name}` : currentRollupParent.chat_jid }) : t('compose.mergeBlocked')}
                                             disabled=${!canRollupSession}
                                         >
-                                            Merge current w/ parent
+                                            ${t('compose.mergeCurrent')}
                                         </button>
                                     `}
                                     ${canRenameSession && html`
@@ -3491,10 +3494,10 @@ export function ComposeBox({
                                             type="button"
                                             class=${`compose-model-popup-btn${sessionPopupEntries.findIndex((entry) => entry.key === 'action:rename') === sessionPopupIndex ? ' active' : ''}`}
                                             onClick=${(e) => { void handleRenameSession(e); }}
-                                            title="Rename the current session"
+                                            title=${t('compose.renameSessionTitle')}
                                             disabled=${renameInProgress}
                                         >
-                                            Rename current…
+                                            ${t('compose.renameCurrent')}
                                         </button>
                                     `}
                                     ${canDeleteSession && html`
@@ -3502,9 +3505,9 @@ export function ComposeBox({
                                             type="button"
                                             class=${`compose-model-popup-btn danger${sessionPopupEntries.findIndex((entry) => entry.key === 'action:delete') === sessionPopupIndex ? ' active' : ''}`}
                                             onClick=${() => { void handleDeleteSession(); }}
-                                            title="Delete (prune) current agent/session branch"
+                                            title=${t('compose.pruneSessionTitle')}
                                         >
-                                            Delete current…
+                                            ${t('compose.deleteCurrent')}
                                         </button>
                                     `}
                                 </div>
@@ -3528,7 +3531,7 @@ export function ComposeBox({
                                         type="button"
                                         class="compose-model-hint compose-model-hint-btn"
                                         title=${modelHintTitle}
-                                        aria-label="Open model picker"
+                                        aria-label=${t('compose.openModelPicker')}
                                         onClick=${toggleModelPopup}
                                         disabled=${switchingModel}
                                     >
@@ -3556,25 +3559,25 @@ export function ComposeBox({
                     `}
                     <div class="compose-actions ${searchMode ? 'search-mode' : ''}">
                     ${searchMode && html`
-                        <label class="compose-search-scope-wrap" title="Search scope">
-                            <span class="compose-search-scope-label">Scope</span>
+                        <label class="compose-search-scope-wrap" title=${t('compose.searchScope')}>
+                            <span class="compose-search-scope-label">${t('compose.scope')}</span>
                             <select
                                 class="compose-search-scope-select"
                                 value=${searchScope}
                                 onChange=${(e) => onSearchScopeChange?.(e.currentTarget.value)}
                             >
-                                <option value="current">Current</option>
-                                <option value="root">Branch family</option>
-                                <option value="all">All chats</option>
+                                <option value="current">${t('compose.scopeCurrent')}</option>
+                                <option value="root">${t('compose.scopeBranchFamily')}</option>
+                                <option value="all">${t('compose.scopeAll')}</option>
                             </select>
                         </label>
-                        <label class="compose-search-filter-wrap" title="Only show messages with images">
+                        <label class="compose-search-filter-wrap" title=${t('compose.filterImagesTitle')}>
                             <input type="checkbox" checked=${searchFilterImages} onChange=${() => setSearchFilterImages(v => !v)} />
-                            <span class="compose-search-filter-label">Images</span>
+                            <span class="compose-search-filter-label">${t('compose.filterImages')}</span>
                         </label>
-                        <label class="compose-search-filter-wrap" title="Only show messages with attachments">
+                        <label class="compose-search-filter-wrap" title=${t('compose.filterAttachmentsTitle')}>
                             <input type="checkbox" checked=${searchFilterAttachments} onChange=${() => setSearchFilterAttachments(v => !v)} />
-                            <span class="compose-search-filter-label">Attachments</span>
+                            <span class="compose-search-filter-label">${t('compose.filterAttachments')}</span>
                         </label>
                         <button
                             class=${`compose-search-match-toggle ${searchMatchMode === 'and' ? 'active' : ''}`}
@@ -3596,7 +3599,7 @@ export function ComposeBox({
                     <button
                         class="icon-btn search-toggle"
                         onClick=${searchMode ? onExitSearch : onEnterSearch}
-                        title=${searchMode ? "Close search" : "Search"}
+                        title=${searchMode ? t('compose.closeSearch') : t('compose.search')}
                     >
                         ${searchMode ? html`
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -3613,7 +3616,7 @@ export function ComposeBox({
                         <button
                             class="icon-btn location-btn"
                             onClick=${handleLocation}
-                            title="Share location"
+                            title=${t('compose.shareLocation')}
                             type="button"
                             disabled=${false}
                         >
@@ -3668,7 +3671,7 @@ export function ComposeBox({
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
                             </button>
                         `}
-                        <label class="icon-btn" title="Attach file">
+                        <label class="icon-btn" title=${t('compose.attachFile')}>
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
                             <input type="file" multiple hidden onChange=${handleFileChange} />
                         </label>

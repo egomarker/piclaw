@@ -1,6 +1,6 @@
 /**
  * scheduled-tasks – registers /tasks and /scheduled commands plus the unified
- * scheduled_tasks tool surface for create/list/get/pause/resume/delete.
+ * scheduled_tasks tool surface for create/list/get/pause/resume/mute/unmute/delete.
  */
 import { Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
@@ -18,7 +18,7 @@ import { validateShellCommand, validateShellCwd } from "../utils/task-validation
 type TaskStatus = ScheduledTask["status"];
 type TaskKind = Exclude<ScheduledTask["task_kind"], "internal"> | "internal";
 type ScheduleType = ScheduledTask["schedule_type"];
-type ScheduledTasksAction = "create" | "list" | "get" | "pause" | "resume" | "delete";
+type ScheduledTasksAction = "create" | "list" | "get" | "pause" | "resume" | "mute" | "unmute" | "delete";
 
 type ScheduledTaskToolParams = {
   action?: ScheduledTasksAction;
@@ -28,6 +28,9 @@ type ScheduledTaskToolParams = {
   limit?: number;
   include_latest_run_log?: boolean;
   allow_internal?: boolean;
+  notify?: boolean;
+  muted?: boolean;
+  no_nudge?: boolean;
   schedule_type?: ScheduleType;
   schedule_value?: string | number;
   prompt?: string;
@@ -68,15 +71,22 @@ function normalizeScheduleType(value: unknown): ScheduleType | null {
   return value === "cron" || value === "interval" || value === "once" ? value : null;
 }
 
+function normalizeNotifyOnComplete(params: Pick<ScheduledTaskToolParams, "notify" | "muted" | "no_nudge">): boolean {
+  if (params.muted === true || params.no_nudge === true) return false;
+  if (params.notify === false) return false;
+  return true;
+}
+
 function formatTask(row: ScheduledTaskInspectionRecord): string {
   const next = row.next_run ? `next ${row.next_run}` : "next n/a";
   const model = row.model ? ` model ${row.model}` : "";
+  const muted = row.muted ? " muted" : "";
   const kind = row.task_kind === "shell"
     ? "shell"
     : row.task_kind === "internal"
       ? "internal"
       : "agent";
-  return `• ${row.id} (${row.status}) — ${kind} ${row.schedule_type} ${row.schedule_value}, ${next}${model} — ${row.summary}`;
+  return `• ${row.id} (${row.status}${muted}) — ${kind} ${row.schedule_type} ${row.schedule_value}, ${next}${model} — ${row.summary}`;
 }
 
 function listTasks(filter: string | null): { summary: string; lines: string[] } {
@@ -120,6 +130,9 @@ const ScheduleTaskSchema = Type.Object({
   command: Type.Optional(Type.String({ description: "Shell command to execute using the host shell (bash/sh on POSIX, PowerShell/cmd on Windows)." })),
   cwd: Type.Optional(Type.String({ description: "Working directory for shell tasks (relative to workspace)." })),
   timeout_sec: Type.Optional(Type.Integer({ description: "Shell timeout in seconds.", minimum: 1, maximum: 3600 })),
+  notify: Type.Optional(Type.Boolean({ description: "Whether successful task output should trigger a Pushover nudge. Defaults true." })),
+  muted: Type.Optional(Type.Boolean({ description: "Set true to suppress Pushover nudges for this task." })),
+  no_nudge: Type.Optional(Type.Boolean({ description: "Compatibility alias for muted=true." })),
 });
 
 const ScheduledTaskToolSchema = Type.Object({
@@ -129,9 +142,11 @@ const ScheduledTaskToolSchema = Type.Object({
     Type.Literal("get"),
     Type.Literal("pause"),
     Type.Literal("resume"),
+    Type.Literal("mute"),
+    Type.Literal("unmute"),
     Type.Literal("delete"),
   ], { description: "Scheduled task action." })),
-  id: Type.Optional(Type.String({ description: "Specific task ID for get/pause/resume/delete." })),
+  id: Type.Optional(Type.String({ description: "Specific task ID for get/pause/resume/mute/unmute/delete." })),
   chat_jid: Type.Optional(Type.String({ description: "Optional chat JID filter or create target." })),
   status: Type.Optional(Type.Union([
     Type.Literal("active"),
@@ -140,7 +155,10 @@ const ScheduledTaskToolSchema = Type.Object({
   ], { description: "Optional task status filter for list/get." })),
   limit: Type.Optional(Type.Integer({ description: "Max tasks to return for action=list (1-50).", minimum: 1, maximum: 50 })),
   include_latest_run_log: Type.Optional(Type.Boolean({ description: "Include the most recent task run log summary when available." })),
-  allow_internal: Type.Optional(Type.Boolean({ description: "Allow pause/resume/delete for builtin internal tasks." })),
+  allow_internal: Type.Optional(Type.Boolean({ description: "Allow pause/resume/delete/mute/unmute for builtin internal tasks." })),
+  notify: Type.Optional(Type.Boolean({ description: "For action=create, whether successful task output should trigger a Pushover nudge. Defaults true." })),
+  muted: Type.Optional(Type.Boolean({ description: "For action=create, set true to suppress Pushover nudges for this task." })),
+  no_nudge: Type.Optional(Type.Boolean({ description: "For action=create, compatibility alias for muted=true." })),
   schedule_type: Type.Optional(ScheduleTypeSchema),
   schedule_value: Type.Optional(ScheduleValueSchema),
   prompt: Type.Optional(Type.String({ description: "Agent prompt (for action=create and task_kind=agent)." })),
@@ -163,6 +181,7 @@ function formatTaskDetail(row: ScheduledTaskInspectionRecord): string {
     `last_result: ${row.last_result ?? "n/a"}`,
     `created_at: ${row.created_at}`,
     `model: ${row.model ?? "n/a"}`,
+    `notify_on_complete: ${row.notify_on_complete ? "true" : "false"}`,
     `summary: ${row.summary}`,
   ];
   if (row.latest_run_log) {
@@ -242,6 +261,7 @@ function createScheduledTask(params: ScheduledTaskToolParams): AgentToolResult<R
       command: null,
       cwd: null,
       timeout_sec: null,
+      notify_on_complete: normalizeNotifyOnComplete(params),
       schedule_type: scheduleType,
       schedule_value: scheduleValue,
       next_run: nextRun,
@@ -256,6 +276,7 @@ function createScheduledTask(params: ScheduledTaskToolParams): AgentToolResult<R
         task_kind: "agent",
         next_run: nextRun,
         chat_jid: chatJid,
+        notify_on_complete: normalizeNotifyOnComplete(params),
       }),
     );
   }
@@ -291,6 +312,7 @@ function createScheduledTask(params: ScheduledTaskToolParams): AgentToolResult<R
     command: validated.command || null,
     cwd: cwdResult.cwd,
     timeout_sec: params.timeout_sec ?? null,
+    notify_on_complete: normalizeNotifyOnComplete(params),
     schedule_type: scheduleType,
     schedule_value: scheduleValue,
     next_run: nextRun,
@@ -305,11 +327,12 @@ function createScheduledTask(params: ScheduledTaskToolParams): AgentToolResult<R
       task_kind: "shell",
       next_run: nextRun,
       chat_jid: chatJid,
+      notify_on_complete: normalizeNotifyOnComplete(params),
     }),
   );
 }
 
-function getTaskForMutation(action: "pause" | "resume" | "delete", params: ScheduledTaskToolParams):
+function getTaskForMutation(action: "pause" | "resume" | "mute" | "unmute" | "delete", params: ScheduledTaskToolParams):
   | { task: ScheduledTask; id: string; allowInternal: boolean }
   | AgentToolResult<Record<string, unknown>> {
   const id = typeof params.id === "string" ? params.id.trim() : "";
@@ -432,6 +455,43 @@ function resumeTask(params: ScheduledTaskToolParams): AgentToolResult<Record<str
   );
 }
 
+function muteTask(params: ScheduledTaskToolParams, muted: boolean): AgentToolResult<Record<string, unknown>> {
+  const action = muted ? "mute" : "unmute";
+  const loaded = getTaskForMutation(action, params);
+  if ("content" in loaded) return loaded;
+
+  const { task, id } = loaded;
+  const oldNotify = task.notify_on_complete !== false && task.notify_on_complete !== 0;
+  const nextNotify = !muted;
+  if (oldNotify === nextNotify) {
+    return makeTextResult(
+      `Task ${id} is already ${muted ? "muted" : "unmuted"}.`,
+      successDetails(action, {
+        id,
+        found: true,
+        noop: true,
+        task_kind: asTaskKind(task),
+        old_notify_on_complete: oldNotify,
+        new_notify_on_complete: nextNotify,
+      }),
+    );
+  }
+
+  updateTask(id, { notify_on_complete: nextNotify });
+  const updated = getTaskById(id)!;
+  const updatedNotify = updated.notify_on_complete !== false && updated.notify_on_complete !== 0;
+  return makeTextResult(
+    `${muted ? "Muted" : "Unmuted"} task ${id}.`,
+    successDetails(action, {
+      id,
+      found: true,
+      task_kind: asTaskKind(updated),
+      old_notify_on_complete: oldNotify,
+      new_notify_on_complete: updatedNotify,
+    }),
+  );
+}
+
 function deleteScheduledTask(params: ScheduledTaskToolParams): AgentToolResult<Record<string, unknown>> {
   const loaded = getTaskForMutation("delete", params);
   if ("content" in loaded) return loaded;
@@ -516,6 +576,10 @@ function executeScheduledTasks(params: ScheduledTaskToolParams): AgentToolResult
       return pauseTask(params);
     case "resume":
       return resumeTask(params);
+    case "mute":
+      return muteTask(params, true);
+    case "unmute":
+      return muteTask(params, false);
     case "delete":
       return deleteScheduledTask(params);
     case "get":
@@ -556,8 +620,8 @@ export const scheduledTasks: ExtensionFactory = (pi: ExtensionAPI) => {
   pi.registerTool({
     name: "scheduled_tasks",
     label: "scheduled_tasks",
-    description: "Unified scheduled task management: create, list, inspect, pause, resume, and delete scheduled tasks. For recurring or deferred local work only — not for remote command execution (use ssh + bash for that).",
-    promptSnippet: "scheduled_tasks: create/list/get/pause/resume/delete structured scheduled task records. Not for remote execution — use ssh + bash instead.",
+    description: "Unified scheduled task management: create, list, inspect, pause, resume, mute/unmute Pushover nudges, and delete scheduled tasks. For recurring or deferred local work only — not for remote command execution (use ssh + bash for that).",
+    promptSnippet: "scheduled_tasks: create/list/get/pause/resume/mute/unmute/delete structured scheduled task records. Use notify=false or muted=true to suppress Pushover nudges for task results. Not for remote execution — use ssh + bash instead.",
     parameters: ScheduledTaskToolSchema,
     async execute(_toolCallId, params): Promise<AgentToolResult<Record<string, unknown>>> {
       return executeScheduledTasks(params as ScheduledTaskToolParams);

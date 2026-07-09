@@ -1,6 +1,6 @@
 # Provider/model pricing reference
 
-_Reference tag (snapshot date): 2026-05-25_
+_Reference tag (snapshot date): 2026-06-24_
 
 This note documents the pricing snapshot used by the estimated provider/model cost chart.
 
@@ -11,6 +11,7 @@ This note documents the pricing snapshot used by the estimated provider/model co
 - GPT-OSS 120B fallback source: OpenRouter model pricing reference, used only as a Cerebras proxy until direct account pricing is confirmed
 - Kimi sources: Fireworks Fire Pass docs, Fireworks/Moonshot model rows, and OpenRouter provider row accessed 2026-05-25
 - MiniMax sources: MiniMax official PAYG pricing docs and OpenRouter/provider registry rows accessed 2026-05-25
+- GLM sources: Z.AI official pricing page (docs.z.ai/guides/overview/pricing) and OpenRouter API accessed 2026-06-24
 
 ## Assumptions
 
@@ -24,6 +25,7 @@ This note documents the pricing snapshot used by the estimated provider/model co
 - Fire Pass is modeled as a $49/month subscription outside token charts; the covered `kimi-k2p6-turbo` router is represented as $0/token only when that pass is active.
 - Kimi and MiniMax provider pages publish input/cached-input/output rates; cache writes are modeled as the provider-published cache-write rate when available, otherwise at normal input.
 - Kimi K2.5 is retained only for historical rows; prefer Kimi K2.6, Kimi K2.6 Turbo under Fire Pass, or MiniMax M2.7 for new routing.
+- GLM cache-write rates are modeled at the standard input rate; Z.AI shows "Limited-time Free" for cached input storage which is not modeled as a permanent discount.
 
 ## Reference rows
 
@@ -33,6 +35,7 @@ This note documents the pricing snapshot used by the estimated provider/model co
 | `claude-opus-4.6` | Claude Opus 4.6 | $5.00 | $25.00 | $0.50 | $6.25 |  |
 | `claude-opus-4.6-1m` | Claude Opus 4.6 (1M) | $5.00 | $25.00 | $0.50 | $6.25 | No long-context premium modeled |
 | `claude-opus-4.7` | Claude Opus 4.7 | $5.00 | $25.00 | $0.50 | $6.25 | Same API price as 4.6 per note |
+| `claude-opus-4.8` | Claude Opus 4.8 | $5.00 | $25.00 | $0.50 | $6.25 | Same as 4.7; Fast mode $10/$50 |
 | `claude-sonnet-4.6` | Claude Sonnet 4.6 | $3.00 | $15.00 | $0.30 | $3.75 |  |
 | `gpt-5.4` / `gpt-5-4` | GPT-5.4 | $2.50 | $15.00 | $0.25 | $2.50 | Cache write estimated at standard input |
 | `gpt-5.5` | GPT-5.5 | $5.00 | $30.00 | $0.50 | $5.00 | Estimated at 2× GPT-5.4 from Codex credit ratio |
@@ -57,3 +60,5 @@ This note documents the pricing snapshot used by the estimated provider/model co
 | `moonshotai/kimi-k2.6` | Kimi K2.6 (OpenRouter) | $0.75 | $3.50 | $0.15 | $0.75 | Router-specific price |
 | `kimi-k2.6` / `kimi-k2p6` | Kimi K2.6 | $0.95 | $4.00 | $0.16 | $0.95 | Native/Fireworks PAYG; cache write modeled as normal input |
 | `kimi-k2.5` / `kimi-k2p5` | Kimi K2.5 (legacy/deprecated) | $0.60 | $3.00 | $0.10 | $0.60 | Legacy/historical row; avoid for new routing |
+| `glm-5.2` / `glm-5p2` | GLM 5.2 | $1.40 | $4.40 | $0.26 | $1.40 | Z.AI native PAYG; cached input storage limited-time free |
+| `z-ai/glm-5.2` | GLM 5.2 (OpenRouter) | $0.95 | $3.00 | $0.18 | $0.95 | ~32% cheaper than z.ai native; cache write at routed input |

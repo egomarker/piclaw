@@ -49,6 +49,8 @@ export interface ScheduledTaskInspectionRecord {
   command: string | null;
   cwd: string | null;
   timeout_sec: number | null;
+  notify_on_complete: boolean;
+  muted: boolean;
   prompt_summary: string | null;
   command_summary: string | null;
   summary: string;
@@ -156,6 +158,8 @@ function mapTaskRow(row: ScheduledTask, includeLatestRunLog: boolean, includeRun
     command: row.command ?? null,
     cwd: row.cwd ?? null,
     timeout_sec: row.timeout_sec ?? null,
+    notify_on_complete: row.notify_on_complete !== false && row.notify_on_complete !== 0,
+    muted: row.notify_on_complete === false || row.notify_on_complete === 0,
     prompt_summary: summary.prompt_summary,
     command_summary: summary.command_summary,
     summary: summary.summary,

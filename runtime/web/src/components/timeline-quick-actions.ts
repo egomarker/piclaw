@@ -1,4 +1,5 @@
 import { html, useCallback, useEffect, useMemo, useRef, useState } from '../vendor/preact-htm.js';
+import { t } from '../utils/i18n.js';
 import { getAgentCommands, getQuickActionsSettings } from '../api.js';
 import { isPopupTypeaheadKey } from '../ui/popup-typeahead.js';
 import { KEYBOARD_SHORTCUT_ACTIONS, matchesKeyboardShortcutAction } from '../ui/keyboard-shortcuts.ts';
@@ -70,15 +71,15 @@ function buildWorkspaceCommands(options) {
     };
 
     add('toggle-workspace', {
-        label: options.workspaceOpen ? 'Hide workspace' : 'Show workspace',
-        description: options.workspaceOpen ? 'Hide the workspace sidebar.' : 'Show the workspace sidebar.',
+        label: options.workspaceOpen ? t('palette.hideWorkspace') : t('palette.showWorkspace'),
+        description: options.workspaceOpen ? t('palette.hideWorkspaceDesc') : t('palette.showWorkspaceDesc'),
     });
     if (!options.workspaceOpen && !options.chatOnlyMode) {
         add('open-explorer');
     }
     add('toggle-chat-only', {
-        label: options.chatOnlyMode ? 'Exit chat-only mode' : 'Chat-only mode',
-        description: options.chatOnlyMode ? 'Return to the split workspace layout.' : 'Switch to the chat-only layout.',
+        label: options.chatOnlyMode ? t('palette.exitChatOnly') : t('palette.chatOnly'),
+        description: options.chatOnlyMode ? t('palette.exitChatOnlyDesc') : t('palette.chatOnlyDesc'),
     });
     if (typeof options.onOpenTerminalTab === 'function') add('open-terminal-tab');
     if (typeof options.onOpenVncTab === 'function') add('open-vnc-tab');
@@ -87,9 +88,9 @@ function buildWorkspaceCommands(options) {
 }
 
 function sectionLabel(kind) {
-    if (kind === 'agent') return 'Agents';
-    if (kind === 'workspace') return 'Workspace';
-    return 'Slash commands';
+    if (kind === 'agent') return t('palette.groupAgents');
+    if (kind === 'workspace') return t('palette.groupWorkspace');
+    return t('palette.groupSlash');
 }
 
 function renderQuickActionMedia(item) {
@@ -327,17 +328,17 @@ export function TimelineQuickActions({
                                 class="timeline-quick-actions-input"
                                 type="text"
                                 value=${query}
-                                placeholder="Type to jump to an agent, workspace action, or slash command…"
+                                placeholder=${t('palette.placeholder')}
                                 onInput=${(event) => {
                                     setQuery(event.currentTarget?.value || '');
                                     setHighlightIndex(0);
                                 }}
                             />
                             <div class="timeline-quick-actions-hints" aria-hidden="true">
-                                ${renderKeyboardHint('Move', '↑↓')}
-                                ${renderKeyboardHint('Select', '↵')}
-                                ${renderKeyboardHint('Pop out', 'Alt+↵')}
-                                ${renderKeyboardHint('Close', 'Esc')}
+                                ${renderKeyboardHint(t('palette.hintMove'), '↑↓')}
+                                ${renderKeyboardHint(t('palette.hintSelect'), '↵')}
+                                ${renderKeyboardHint(t('palette.hintPopOut'), 'Alt+↵')}
+                                ${renderKeyboardHint(t('palette.hintClose'), 'Esc')}
                             </div>
                         </div>
                     </div>

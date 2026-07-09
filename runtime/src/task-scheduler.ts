@@ -260,6 +260,7 @@ export async function runScheduledTask(task: ScheduledTask, deps: SchedulerDeps)
   // Re-check task status (may have been paused/cancelled while queued).
   const fresh = getTaskById(task.id);
   if (!fresh || fresh.status !== "active") return;
+  const notifyOnComplete = fresh.notify_on_complete !== false && fresh.notify_on_complete !== 0;
 
   const appendRecoverySummary = (text: string | null, recoverySummary: string | null): string | null => {
     const normalizedText = typeof text === "string" && text.trim() ? text.trim() : "";
@@ -312,7 +313,7 @@ export async function runScheduledTask(task: ScheduledTask, deps: SchedulerDeps)
           const t = formatOutbound(result, detectChannel(task.chat_jid));
           if (t) {
             await deps.sendMessage(task.chat_jid, t, { forceRoot: true, source: "scheduled" });
-            await deps.sendNudge?.(t);
+            if (notifyOnComplete) await deps.sendNudge?.(t);
           }
         }
       }
@@ -344,7 +345,7 @@ export async function runScheduledTask(task: ScheduledTask, deps: SchedulerDeps)
               const t = formatOutbound(result, detectChannel(task.chat_jid));
               if (t) {
                 await deps.sendMessage(task.chat_jid, t, { forceRoot: true, source: "scheduled" });
-                await deps.sendNudge?.(t);
+                if (notifyOnComplete) await deps.sendNudge?.(t);
               }
             }
           }

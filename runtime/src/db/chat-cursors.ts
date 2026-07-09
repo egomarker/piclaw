@@ -40,6 +40,7 @@
  */
 
 import { getDb } from "./connection.js";
+import { deleteThinkingContentByMessageRowIds } from "./messages.js";
 
 /** Shared shape for persisted preflight / inflight run markers. */
 interface PendingRunState {
@@ -680,6 +681,18 @@ export function endChatRunWithError(chatJid: string, failed: FailedRunRecord): v
 export function rollbackChatRunWithError(chatJid: string, failed: FailedRunRecord): void {
   const db = getDb();
   db.transaction(() => {
+    // Collect the message rowids we are about to delete so we can purge their
+    // associated thinking_content (no FK cascade is possible — see I2 in the
+    // PR #655 issues tracker). Must capture before the messages DELETE since
+    // the helper queries messages to map rowids → thinking rows.
+    const doomedRowIds = (db.prepare(
+      `SELECT rowid FROM messages
+       WHERE chat_jid = ?
+         AND timestamp > ?
+         AND is_bot_message = 1
+         AND COALESCE(is_terminal_agent_reply, 0) = 0`
+    ).all(chatJid, failed.prevTs) as Array<{ rowid: number }>).map((r) => r.rowid);
+
     db.prepare(`
       DELETE FROM message_media
       WHERE message_rowid IN (
@@ -690,6 +703,8 @@ export function rollbackChatRunWithError(chatJid: string, failed: FailedRunRecor
           AND COALESCE(is_terminal_agent_reply, 0) = 0
       )
     `).run(chatJid, failed.prevTs);
+
+    deleteThinkingContentByMessageRowIds(doomedRowIds);
 
     db.prepare(`
       DELETE FROM messages
@@ -984,6 +999,16 @@ export function rollbackInflightRun(chatJid: string, prevTs: string): void {
   // before publishing a terminal reply, those partial bot messages must be
   // discarded before the user turn is replayed. Terminal assistant replies are
   // preserved by the recovery gate and never reach this rollback path.
+  // Capture rowids first so we can purge associated thinking_content (no FK
+  // cascade is possible — see I2 in the PR #655 issues tracker).
+  const doomedRowIds = (db.prepare(
+    `SELECT rowid FROM messages
+     WHERE chat_jid = ?
+       AND timestamp > ?
+       AND is_bot_message = 1
+       AND COALESCE(is_terminal_agent_reply, 0) = 0`
+  ).all(chatJid, prevTs) as Array<{ rowid: number }>).map((r) => r.rowid);
+
   db.prepare(`
     DELETE FROM message_media
     WHERE message_rowid IN (
@@ -994,6 +1019,8 @@ export function rollbackInflightRun(chatJid: string, prevTs: string): void {
         AND COALESCE(is_terminal_agent_reply, 0) = 0
     )
   `).run(chatJid, prevTs);
+
+  deleteThinkingContentByMessageRowIds(doomedRowIds);
 
   db.prepare(`
     DELETE FROM messages

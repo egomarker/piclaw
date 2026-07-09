@@ -4,6 +4,7 @@ import {
     WORKSPACE_QUICK_ACTIONS_CATALOG,
     normalizeTimelineQuickActionsSettingsData,
 } from '../../ui/timeline-quick-actions.js';
+import { useTranslation } from '../../utils/i18n.js';
 
 function hasFilterMatch(filter, ...parts) {
     const query = String(filter || '').trim().toLowerCase();
@@ -17,6 +18,7 @@ function buildSelectionSet(values) {
 }
 
 export function QuickActionsSection({ filter = '', setStatus, mergeSettingsData }) {
+    const { t } = useTranslation();
     const [workspaceCommands, setWorkspaceCommands] = useState(() => WORKSPACE_QUICK_ACTIONS_CATALOG.map((command) => command.id));
     const [slashCommands, setSlashCommands] = useState([]);
     const [availableSlashCommands, setAvailableSlashCommands] = useState([]);
@@ -89,7 +91,7 @@ export function QuickActionsSection({ filter = '', setStatus, mergeSettingsData 
     const save = useCallback(async () => {
         if (saving) return;
         setSaving(true);
-        setStatus?.('Saving quick actions…', 'info');
+        setStatus?.(t('settings.quickActions.savingToast'), 'info');
         try {
             const payload = await saveQuickActionsSettings({
                 workspaceCommands,
@@ -98,7 +100,7 @@ export function QuickActionsSection({ filter = '', setStatus, mergeSettingsData 
             const settings = normalizeTimelineQuickActionsSettingsData(payload?.settings);
             mergeSettingsData?.({ quickActions: settings });
             window.dispatchEvent(new CustomEvent('piclaw:quick-actions-settings-updated', { detail: { settings } }));
-            setStatus?.('Quick Actions saved.', 'success');
+            setStatus?.(t('settings.quickActions.savedToast'), 'success');
         } catch (error) {
             setStatus?.(String(error?.message || error), 'error');
         } finally {
@@ -107,24 +109,24 @@ export function QuickActionsSection({ filter = '', setStatus, mergeSettingsData 
     }, [mergeSettingsData, saving, setStatus, slashCommands, workspaceCommands]);
 
     if (loading) {
-        return html`<div class="settings-loading">Loading…</div>`;
+        return html`<div class="settings-loading">${t('settings.quickActions.loading')}</div>`;
     }
 
     return html`
         <div class="settings-section">
-            <h3>Timeline Quick Actions</h3>
+            <h3>${t('settings.quickActions.heading')}</h3>
             <p class="settings-hint">
-                Choose which actions appear in the timeline typeahead. Agents are always pinned first, then workspace commands, then slash commands.
+                ${t('settings.quickActions.intro')}
             </p>
 
             <div class="settings-row" style="align-items:center; gap:10px; margin-bottom:12px;">
-                <button class="settings-addon-btn" onClick=${resetDefaults} disabled=${saving}>Enable all</button>
+                <button class="settings-addon-btn" onClick=${resetDefaults} disabled=${saving}>${t('settings.quickActions.enableAll')}</button>
                 <button class="settings-addon-btn settings-addon-btn-install" onClick=${save} disabled=${saving}>
-                    ${saving ? 'Saving…' : 'Save & apply'}
+                    ${saving ? t('settings.quickActions.saving') : t('settings.quickActions.saveApply')}
                 </button>
             </div>
 
-            <h3 style="margin-top:8px;">Workspace commands</h3>
+            <h3 style="margin-top:8px;">${t('settings.quickActions.workspaceCommands')}</h3>
             <div class="settings-subsection-list">
                 ${visibleWorkspaceCommands.map((command) => {
                     const checked = workspaceSelection ? workspaceSelection.has(command.id.toLowerCase()) : true;
@@ -138,10 +140,10 @@ export function QuickActionsSection({ filter = '', setStatus, mergeSettingsData 
                         </label>
                     `;
                 })}
-                ${visibleWorkspaceCommands.length === 0 && html`<div class="settings-hint">No workspace commands match this filter.</div>`}
+                ${visibleWorkspaceCommands.length === 0 && html`<div class="settings-hint">${t('settings.quickActions.noWorkspaceMatch')}</div>`}
             </div>
 
-            <h3 style="margin-top:20px;">Slash commands</h3>
+            <h3 style="margin-top:20px;">${t('settings.quickActions.slashCommands')}</h3>
             <div class="settings-subsection-list">
                 ${visibleSlashCommands.map((command) => {
                     const name = String(command?.name || '').trim();
@@ -151,12 +153,12 @@ export function QuickActionsSection({ filter = '', setStatus, mergeSettingsData 
                             <input type="checkbox" checked=${checked} onChange=${() => toggleSlashCommand(name)} />
                             <div>
                                 <div><code>${name}</code></div>
-                                <div class="settings-hint" style="margin:2px 0 0 0;">${command?.description || 'slash command'}</div>
+                                <div class="settings-hint" style="margin:2px 0 0 0;">${command?.description || t('settings.quickActions.slashFallback')}</div>
                             </div>
                         </label>
                     `;
                 })}
-                ${visibleSlashCommands.length === 0 && html`<div class="settings-hint">No slash commands match this filter.</div>`}
+                ${visibleSlashCommands.length === 0 && html`<div class="settings-hint">${t('settings.quickActions.noSlashMatch')}</div>`}
             </div>
         </div>
     `;

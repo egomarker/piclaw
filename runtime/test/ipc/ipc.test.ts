@@ -377,6 +377,29 @@ test("IPC schedule_task creates a due agent task", async () => {
   expect(due[0].task_kind ?? "agent").toBe("agent");
 });
 
+test("IPC schedule_task and mute_task can suppress Pushover nudges", async () => {
+  await ipc.processTaskCommand({
+    type: "schedule_task",
+    chatJid: "web:default",
+    prompt: "quiet",
+    muted: true,
+    schedule_type: "once",
+    schedule_value: "2020-01-01T00:00:00.000Z",
+  }, deps);
+
+  const created = db.getDb()
+    .prepare("SELECT id, notify_on_complete FROM scheduled_tasks WHERE prompt = ? ORDER BY rowid DESC LIMIT 1")
+    .get("quiet") as { id: string; notify_on_complete: number } | undefined;
+
+  expect(created?.notify_on_complete).toBe(0);
+
+  await ipc.processTaskCommand({ type: "unmute_task", taskId: created!.id }, deps);
+  expect(db.getTaskById(created!.id)?.notify_on_complete).toBe(1);
+
+  await ipc.processTaskCommand({ type: "mute_task", taskId: created!.id }, deps);
+  expect(db.getTaskById(created!.id)?.notify_on_complete).toBe(0);
+});
+
 test("IPC schedule_task creates a due shell task", async () => {
   await ipc.processTaskCommand({
     type: "schedule_task",

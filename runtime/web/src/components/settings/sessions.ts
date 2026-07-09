@@ -3,6 +3,7 @@
  */
 import { html, useState, useEffect, useCallback, useMemo, useRef } from '../../vendor/preact-htm.js';
 import { NumberStepper } from './number-stepper.js';
+import { useTranslation } from '../../utils/i18n.js';
 
 function normalizeSessionSettings(data: Record<string, any> = {}) {
     return {
@@ -16,6 +17,7 @@ function normalizeSessionSettings(data: Record<string, any> = {}) {
 }
 
 export function SessionsSection({ settingsData, setStatus, mergeSettingsData }) {
+    const { t } = useTranslation();
     const [sessionAutoRotate, setSessionAutoRotate] = useState(true);
     const [sessionMaxSizeMb, setSessionMaxSizeMb] = useState(16);
     const [sessionMaxLines, setSessionMaxLines] = useState(4000);
@@ -82,18 +84,18 @@ export function SessionsSection({ settingsData, setStatus, mergeSettingsData }) 
         <div class="settings-section">
             ${appliedHint && html`
                 <div class="settings-general-applied-notice" role="status" aria-live="polite">
-                    Settings applied. Changes take effect on the next turn.
+                    ${t('settings.appliedNotice')}
                 </div>
             `}
-            <h3>Session Lifecycle</h3>
+            <h3>${t('settings.sessions.lifecycle')}</h3>
             <div class="settings-row">
-                <label>Auto-rotate sessions</label>
+                <label>${t('settings.sessions.autoRotate')}</label>
                 <input type="checkbox" checked=${sessionAutoRotate} onChange=${e => setSessionAutoRotate(e.target.checked)} />
             </div>
             <div class="settings-row">
-                <label>Max session size (MB)</label>
+                <label>${t('settings.sessions.maxSize')}</label>
                 <${NumberStepper}
-                    label="max session size"
+                    label=${t('settings.sessions.maxSizeAria')}
                     value=${sessionMaxSizeMb}
                     min=${1}
                     max=${256}
@@ -103,11 +105,11 @@ export function SessionsSection({ settingsData, setStatus, mergeSettingsData }) 
                 />
             </div>
 
-            <h3 style="margin-top:20px">Agent Behaviour</h3>
+            <h3 style="margin-top:20px">${t('settings.sessions.agentBehaviour')}</h3>
             <div class="settings-row">
-                <label>Tool use budget</label>
+                <label>${t('settings.sessions.toolBudget')}</label>
                 <${NumberStepper}
-                    label="tool use budget"
+                    label=${t('settings.sessions.toolBudgetAria')}
                     value=${toolUseBudget}
                     min=${8}
                     max=${512}
@@ -115,14 +117,14 @@ export function SessionsSection({ settingsData, setStatus, mergeSettingsData }) 
                     width="80px"
                     onChange=${setToolUseBudget}
                 />
-                <span class="settings-hint" style="margin:0">max tool-call messages per turn</span>
+                <span class="settings-hint" style="margin:0">${t('settings.sessions.toolBudgetHint')}</span>
             </div>
             <div class="settings-row">
-                <label>Session isolation</label>
+                <label>${t('settings.sessions.isolation')}</label>
                 <select value=${sessionIsolation} onChange=${e => setSessionIsolation(e.target.value)}>
-                    <option value="none">None — full cross-session visibility</option>
-                    <option value="summary">Summary — tools visible, no arguments</option>
-                    <option value="full">Full — sessions cannot see each other</option>
+                    <option value="none">${t('settings.sessions.isolationNone')}</option>
+                    <option value="summary">${t('settings.sessions.isolationSummary')}</option>
+                    <option value="full">${t('settings.sessions.isolationFull')}</option>
                 </select>
             </div>
         </div>

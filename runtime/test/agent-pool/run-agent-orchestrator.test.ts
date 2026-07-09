@@ -1205,9 +1205,9 @@ test("runAgentPrompt clears compaction backoff after a successful compaction", a
   }
 });
 
-test("runAgentPrompt schedules idle auto-compaction after a successful turn when enabled", async () => {
+test("runAgentPrompt runs idle auto-compaction before returning after a successful turn when enabled", async () => {
   const restoreEnv = setEnv({
-    PICLAW_IDLE_AUTO_COMPACTION_DELAY_MS: "5",
+    PICLAW_IDLE_AUTO_COMPACTION_DELAY_MS: "5000",
   });
   const chatJid = `web:idle-compact-${Date.now()}`;
 
@@ -1267,10 +1267,6 @@ test("runAgentPrompt schedules idle auto-compaction after a successful turn when
     });
 
     expect(result.status).toBe("success");
-    expect(session.calls).toEqual(["prompt"]);
-
-    await Bun.sleep(30);
-
     expect(session.calls).toEqual(["prompt", "compact"]);
     expect(events).toEqual([
       { type: "compaction_start", reason: "idle" },
@@ -1281,11 +1277,96 @@ test("runAgentPrompt schedules idle auto-compaction after a successful turn when
   }
 });
 
-test("runAgentPrompt cancels an older idle auto-compaction when a new turn starts", async () => {
+test("runAgentPrompt runs post-turn idle auto-compaction after terminal tool completion when enabled", async () => {
   const restoreEnv = setEnv({
-    PICLAW_IDLE_AUTO_COMPACTION_DELAY_MS: "40",
+    PICLAW_IDLE_AUTO_COMPACTION_DELAY_MS: "5000",
   });
-  const chatJid = `web:idle-cancel-${Date.now()}`;
+  const chatJid = `web:idle-tool-complete-${Date.now()}`;
+
+  class StubSession {
+    calls: string[] = [];
+    private listeners: Array<(event: any) => void> = [];
+    private entries: Array<{ type: string; message?: { role: string } }> = [{ type: "message", message: { role: "user" } }];
+    sessionManager = {
+      getLeafId: () => "leaf-idle-tool-complete",
+      getEntries: () => this.entries,
+      buildSessionContext: () => ({ messages: [{ role: "user", content: "x".repeat(200) }] }),
+    };
+    settingsManager = {
+      getCompactionSettings: () => ({ ...DEFAULT_COMPACTION_SETTINGS, enabled: true, reserveTokens: 10 }),
+    };
+    model = { contextWindow: 20, provider: "test", id: "model" };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => {
+        this.listeners = this.listeners.filter((entry) => entry !== listener);
+      };
+    }
+    async prompt() {
+      this.calls.push("prompt");
+      this.entries.push({ type: "message", message: { role: "toolResult" } });
+      for (const listener of this.listeners) {
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "toolUse",
+            content: [{ type: "toolCall", id: "card-1", name: "send_adaptive_card", arguments: {} }],
+          },
+        });
+        listener({ type: "tool_execution_start", toolCallId: "card-1", toolName: "send_adaptive_card", args: {} });
+        listener({ type: "tool_execution_end", toolCallId: "card-1", toolName: "send_adaptive_card", isError: false, durationMs: 1 });
+        listener({ type: "message_end", message: { role: "assistant", stopReason: "stop", content: [] } });
+      }
+    }
+    async compact() {
+      this.calls.push("compact");
+    }
+    async abort() {}
+  }
+
+  const session = new StubSession();
+  const events: Array<{ type: string; reason?: string }> = [];
+
+  try {
+    const result = await runAgentPrompt("test", chatJid, {
+      timeoutMs: 0,
+      skipPrePromptCompaction: true,
+      scheduleIdleAutoCompaction: true,
+      onEvent: (event) => {
+        if (event.type === "compaction_start" || event.type === "compaction_end") {
+          events.push({ type: String(event.type), reason: typeof (event as any).reason === "string" ? (event as any).reason : undefined });
+        }
+      },
+    }, {
+      getOrCreateRuntime: async () => createRuntime(session) as any,
+      turnCoordinator: new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} }),
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+    });
+
+    expect(result.status).toBe("tool_complete");
+    expect(session.calls).toEqual(["prompt", "compact"]);
+    expect(events).toEqual([
+      { type: "compaction_start", reason: "idle" },
+      { type: "compaction_end", reason: "idle" },
+    ]);
+  } finally {
+    restoreEnv();
+  }
+});
+
+test("runAgentPrompt runs post-turn idle auto-compaction after each successful turn that still exceeds the threshold", async () => {
+  const restoreEnv = setEnv({
+    PICLAW_IDLE_AUTO_COMPACTION_DELAY_MS: "5000",
+  });
+  const chatJid = `web:idle-repeat-${Date.now()}`;
 
   class StubSession {
     promptCalls = 0;
@@ -1345,11 +1426,8 @@ test("runAgentPrompt cancels an older idle auto-compaction when a new turn start
 
     expect(first.status).toBe("success");
     expect(second.status).toBe("success");
-
-    await Bun.sleep(80);
-
     expect(session.promptCalls).toBe(2);
-    expect(session.compactCalls).toBe(1);
+    expect(session.compactCalls).toBe(2);
   } finally {
     restoreEnv();
   }
@@ -2860,6 +2938,61 @@ test("runAgentPrompt surfaces provider error instead of returning null result", 
   expect(result.error).toContain("invalid_request_error");
   expect(result.error).toContain("extra usage");
   expect(result.result).toBeNull();
+});
+
+test("runAgentPrompt treats provider length stop as an error with preserved partial draft", async () => {
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    sessionManager = { getLeafId: () => "leaf-1" };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => {
+        this.listeners = this.listeners.filter((entry) => entry !== listener);
+      };
+    }
+    async prompt() {
+      for (const listener of this.listeners) {
+        listener({
+          type: "message_update",
+          assistantMessageEvent: {
+            type: "text_delta",
+            delta: "partial answer",
+            contentIndex: 0,
+            partial: { content: [{ type: "text" }] },
+          },
+        });
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "length",
+            content: [{ type: "text", text: "partial answer" }],
+          },
+        });
+      }
+    }
+    async abort() {}
+  }
+
+  const session = new StubSession();
+  const result = await runAgentPrompt("hello", "web:default", { timeoutMs: 0 }, {
+    getOrCreateRuntime: async () => createRuntime(session) as any,
+    turnCoordinator: new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} }),
+    clearAttachments: () => {},
+    takeAttachments: () => [],
+    logsDir: createTestLogsDir(),
+    setActiveForkBaseLeaf: () => {},
+    clearActiveForkBaseLeaf: () => {},
+  });
+
+  expect(result.status).toBe("error");
+  expect(result.result).toBeNull();
+  expect(result.error).toContain("maximum output length");
+  expect(result.error).toContain("partial answer was preserved");
+  expect(result.recovery?.lastClassifier).toBe("length_stop");
 });
 
 test("runAgentPrompt surfaces latent session state errors when no final text is emitted", async () => {

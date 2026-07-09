@@ -80,6 +80,7 @@
     --chat-surface-inline-gap: 6px;
     --chat-surface-control-height: 30px;
     --chat-surface-stack-gap: 4px;
+    --output-pad: 0px;
 
     /* Shadows */
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);

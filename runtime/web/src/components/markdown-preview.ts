@@ -10,6 +10,7 @@
  */
 
 import { html, useEffect, useRef, useState } from '../vendor/preact-htm.js';
+import { useTranslation } from '../utils/i18n.js';
 import { renderMarkdown, renderMermaidDiagrams } from '../markdown.js';
 import { readStoredPanelHeight, writeStoredPanelHeight } from './markdown-preview-storage.js';
 
@@ -34,6 +35,7 @@ function getStoredHeight() {
  * @param {() => void} props.onClose - Close the preview.
  */
 export function MarkdownPreview({ getContent, subscribeContentChange, path, onClose }) {
+    const { t } = useTranslation();
     const [renderedHtml, setRenderedHtml] = useState('');
     const [height, setHeight] = useState(getStoredHeight);
     const previewRef = useRef(null);
@@ -78,7 +80,7 @@ export function MarkdownPreview({ getContent, subscribeContentChange, path, onCl
                 const h = renderMarkdown(text, null);
                 setRenderedHtml(h);
             } catch {
-                setRenderedHtml('<p style="color:var(--text-secondary)">Preview unavailable</p>');
+                setRenderedHtml(`<p style="color:var(--text-secondary)">${t('mdpreview.unavailable')}</p>`);
             }
         };
 
@@ -196,7 +198,7 @@ export function MarkdownPreview({ getContent, subscribeContentChange, path, onCl
         <div class="md-preview-panel" ref=${panelRef} style=${{ height: height + 'px' }}>
             <div class="md-preview-header">
                 <span class="md-preview-title">Preview</span>
-                <button class="md-preview-close" onClick=${onClose} title="Close preview" aria-label="Close preview">
+                <button class="md-preview-close" onClick=${onClose} title=${t('mdpreview.close')} aria-label=${t('mdpreview.close')}>
                     <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
                         <line x1="4" y1="4" x2="12" y2="12"/>
                         <line x1="12" y1="4" x2="4" y2="12"/>

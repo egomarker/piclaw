@@ -32,6 +32,7 @@ export type RecoveryClassifier =
   | "context_pressure"
   | "tool_history_pressure"
   | "thinking_only_stop"
+  | "length_stop"
   | "transient"
   | "compaction_failure"
   | "unknown";
@@ -132,6 +133,11 @@ export function isTransientFailure(errorText: string | null | undefined): boolea
   return /timed out|timeout|before finalization|connection (?:error|ended|closed|lost)|websocket.*(?:closed|ended|1006)|fetch failed|socket hang up|econnreset|econnrefused|etimedout|enotfound|502|503|504|temporary|temporarily unavailable|try again|rate limit|too many requests|\b429\b|overloaded|server error/i.test(errorText);
 }
 
+export function isLengthStopFailure(errorText: string | null | undefined): boolean {
+  if (!errorText || isContextPressureFailure(errorText)) return false;
+  return /finish[_ -]?reason\s*:?\s*length|stop\s*reason\s*:?\s*length|\bstopReason\s*:?\s*length|max(?:imum)? output (?:tokens?|length)|output token limit|hit (?:the )?(?:maximum )?output/i.test(errorText);
+}
+
 export function isProviderAuthConfigFailure(errorText: string | null | undefined): boolean {
   if (!errorText) return false;
   return /no api key for provider|no api key found|token refresh failed\s*:\s*401|authentication failed|credentials may have expired|re-authenticate|unauthorized|\b401\b|\b403\b|invalid.*api.*key|api.*key.*invalid|token.*expired|oauth.*expired|refresh.*token|provider login required|auth.*expired|missing provider credential|missing provider config/i.test(errorText);
@@ -200,6 +206,15 @@ export function decideAutomaticRecovery(input: RecoveryDecisionInput): RecoveryD
       classifier: "budget_exhausted",
       strategy: null,
       reason: "Automatic recovery budget exhausted.",
+    };
+  }
+
+  if (isLengthStopFailure(errorText)) {
+    return {
+      recover: false,
+      classifier: "length_stop",
+      strategy: null,
+      reason: "Provider hit the output length limit; preserve the partial answer and wait for an explicit continue.",
     };
   }
 

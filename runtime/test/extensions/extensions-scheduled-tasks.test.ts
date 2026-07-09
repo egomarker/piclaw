@@ -181,6 +181,57 @@ describe("scheduled-tasks extension", () => {
     expect(res.content?.[0]?.text).toContain("t-inspect");
   });
 
+  test("scheduled_tasks tool exposes and toggles muted Pushover nudges", async () => {
+    insertTask({ id: "t-muted", prompt: "Quiet check", notify_on_complete: 0 });
+    const tool = fake.tools.get("scheduled_tasks");
+
+    await fake.commands.get("tasks")!.handler("");
+    expect(fake.messages[0].content).toContain("t-muted (active muted)");
+
+    const getRes = await tool.execute("call-get-muted", { action: "get", id: "t-muted" });
+    expect(getRes.details.task).toMatchObject({
+      id: "t-muted",
+      notify_on_complete: false,
+      muted: true,
+    });
+    expect(getRes.content?.[0]?.text).toContain("notify_on_complete: false");
+
+    const unmuteRes = await tool.execute("call-unmute", { action: "unmute", id: "t-muted" });
+    expect(unmuteRes.details).toMatchObject({
+      action: "unmute",
+      old_notify_on_complete: false,
+      new_notify_on_complete: true,
+    });
+
+    const muteRes = await tool.execute("call-mute", { action: "mute", id: "t-muted" });
+    expect(muteRes.details).toMatchObject({
+      action: "mute",
+      old_notify_on_complete: true,
+      new_notify_on_complete: false,
+    });
+  });
+
+  test("scheduled_tasks tool creates muted tasks", async () => {
+    const tool = fake.tools.get("scheduled_tasks");
+    const res = await tool.execute("call-create-muted", {
+      action: "create",
+      chat_jid: "test@chat",
+      prompt: "Quiet scheduled check",
+      muted: true,
+      schedule_type: "once",
+      schedule_value: new Date(Date.now() + 60_000).toISOString(),
+    });
+
+    expect(res.details).toMatchObject({
+      action: "create",
+      task_kind: "agent",
+      notify_on_complete: false,
+    });
+    const tasks = getDb().query("SELECT * FROM scheduled_tasks WHERE prompt = ?").all("Quiet scheduled check") as any[];
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].notify_on_complete).toBe(0);
+  });
+
   test("scheduled_tasks tool gets latest run summary", async () => {
     insertTask({ id: "t-run", status: "active", prompt: "Run me" });
     logTaskRun({

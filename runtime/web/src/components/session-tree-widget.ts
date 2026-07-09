@@ -1,4 +1,5 @@
 import { html, useEffect, useMemo, useRef, useState } from '../vendor/preact-htm.js';
+import { useTranslation } from '../utils/i18n.js';
 
 function buildTreeFromFlat(flatNodes) {
     const byId = new Map();
@@ -211,6 +212,7 @@ export function describeSessionTreeHostUpdate(update) {
 }
 
 export function SessionTreeWidget({ widget, onWidgetEvent }) {
+    const { t } = useTranslation();
     const initialTree = widget?.artifact?.tree && typeof widget.artifact.tree === 'object' ? widget.artifact.tree : null;
     const chatJid = (typeof widget?.originChatJid === 'string' && widget.originChatJid.trim()) ? widget.originChatJid.trim() : null;
     const runtimeState = widget?.runtimeState && typeof widget.runtimeState === 'object' ? widget.runtimeState : null;
@@ -311,7 +313,7 @@ export function SessionTreeWidget({ widget, onWidgetEvent }) {
                 <div class="session-tree-toolbar-left">
                     <button class="session-tree-btn" type="button" onClick=${() => loadTree()} disabled=${state.loading}>${state.loading ? 'Loading\u2026' : 'Refresh'}</button>
                     <input ref=${searchInputRef}
-                        class="st-search-input" type="text" placeholder="Filter\u2026"
+                        class="st-search-input" type="text" placeholder=${t('tree.filter')}
                         value=${searchFilter}
                         onInput=${(e) => setSearchFilter(e.currentTarget.value)}
                         onKeyDown=${(e) => { if (e.key === 'Escape') { setSearchFilter(''); e.currentTarget.blur(); } }}
@@ -327,7 +329,7 @@ export function SessionTreeWidget({ widget, onWidgetEvent }) {
             </div>
 
             <div class="session-tree-content">
-                <div class="session-tree-list" role="tree" aria-label="Session tree">
+                <div class="session-tree-list" role="tree" aria-label=${t('tree.sessionTree')}>
                     ${state.loading && filteredRows.length === 0 && !searchFilter && html`<div class="session-tree-empty">Loading session tree\u2026</div>`}
                     ${!state.loading && filteredRows.length === 0 && !searchFilter && html`<div class="session-tree-empty">Session tree is empty.</div>`}
                     ${!state.loading && filteredRows.length === 0 && searchFilter && html`<div class="session-tree-empty">No entries match \u201c${searchFilter}\u201d</div>`}

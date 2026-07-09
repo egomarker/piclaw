@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   applySessionCorrelationHeaders,
   buildBaseOptions,
+  clampAzureMaxTokensToContext,
   processResponsesStream,
   resolveCacheRetention,
   resolveCacheSessionId,
@@ -139,7 +140,7 @@ test("buildBaseOptions preserves session/cache-affinity fields for downstream re
   const headers = { existing: "value" };
   const metadata = { phase: "commentary" };
 
-  expect(buildBaseOptions({ maxTokens: 64000 }, {
+  expect(buildBaseOptions({ maxTokens: 64000, contextWindow: 128000 }, { messages: [] }, {
     temperature: 0.2,
     maxTokens: 4096,
     signal,
@@ -189,7 +190,7 @@ test("resolveCacheSessionId suppresses session affinity when cache retention is 
 
 
 test("buildBaseOptions falls back to model maxTokens and options apiKey when bootstrap key is absent", () => {
-  expect(buildBaseOptions({ maxTokens: 12000 }, {
+  expect(buildBaseOptions({ maxTokens: 12000, contextWindow: 128000 }, { messages: [] }, {
     apiKey: "token-from-options",
     sessionId: "sess_xyz",
   }, undefined)).toEqual({
@@ -204,6 +205,14 @@ test("buildBaseOptions falls back to model maxTokens and options apiKey when boo
     maxRetryDelayMs: undefined,
     metadata: undefined,
   });
+});
+
+test("buildBaseOptions clamps maxTokens to the remaining context window", () => {
+  const messages = [{ role: "user", content: "x".repeat(36_000) }];
+  expect(clampAzureMaxTokensToContext({ contextWindow: 12000 }, { messages }, 8000)).toBeLessThan(8000);
+  expect(buildBaseOptions({ maxTokens: 16000, contextWindow: 12000 }, { messages }, {
+    maxTokens: 8000,
+  }, "token").maxTokens).toBeLessThan(8000);
 });
 
 test("processResponsesStream reroutes commentary-phase output_text into thinking events", async () => {

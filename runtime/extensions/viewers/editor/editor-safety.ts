@@ -1,3 +1,17 @@
+export function isFirefoxUserAgent(userAgent: string | null | undefined): boolean {
+  return /\bFirefox\//i.test(String(userAgent || ""));
+}
+
+export function shouldDisableWhitespaceMarkersForPerformance(input: {
+  userAgent?: string | null;
+  docLength: number;
+  largeDocumentMode?: boolean;
+  livePreviewActive?: boolean;
+}): boolean {
+  if (input.largeDocumentMode || input.livePreviewActive) return true;
+  return isFirefoxUserAgent(input.userAgent);
+}
+
 export function getLocalBoolWithFallback(
   getStorage: () => Pick<Storage, "getItem"> | null | undefined,
   key: string,

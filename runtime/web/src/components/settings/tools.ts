@@ -1,4 +1,5 @@
 import { html, useState, useCallback, useMemo } from '../../vendor/preact-htm.js';
+import { useTranslation } from '../../utils/i18n.js';
 
 // Toolset icons derived from the tool-status-hints SVG vocabulary
 const TOOLSET_ICONS = {
@@ -41,6 +42,7 @@ const KIND_BADGE = { 'read-only': '\ud83d\udd0d', 'mutating': '\u270f\ufe0f', 'm
 const DEFAULT_ICON = html`<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`;
 
 export function ToolsSection({ toolsets, filter = '', settingsData, mergeSettingsData }) {
+    const { t: tr } = useTranslation();
     const groups = toolsets || [];
     const [enabledGroups, setEnabledGroups] = useState(() => { const m = {}; for (const g of groups) m[g.name] = true; return m; });
     const toggleGroup = useCallback((name) => { setEnabledGroups(prev => ({ ...prev, [name]: !prev[name] })); }, []);
@@ -104,20 +106,20 @@ export function ToolsSection({ toolsets, filter = '', settingsData, mergeSetting
         }).filter(Boolean);
     }, [groups, lf]);
 
-    if (groups.length === 0) return html`<div class="settings-section"><p class="settings-hint">Tool data not available.</p></div>`;
+    if (groups.length === 0) return html`<div class="settings-section"><p class="settings-hint">${tr('settings.tools.unavailable')}</p></div>`;
 
     return html`
         <div class="settings-section">
             <div class="settings-search-options">
-                <h4 style="margin:0 0 8px 0">Search</h4>
+                <h4 style="margin:0 0 8px 0">${tr('settings.tools.search')}</h4>
                 <div class="settings-row">
-                    <label>Match mode</label>
+                    <label>${tr('settings.tools.matchMode')}</label>
                     <div style="display:flex; align-items:center; gap:10px;">
                         <input type="checkbox" checked=${searchMatchMode === 'and'} onChange=${toggleSearchMode} />
                         <span class="settings-hint" style="margin:0">
                             ${searchMatchMode === 'or'
-                                ? 'Any keyword (OR) — results match at least one search term'
-                                : 'All keywords (AND) — results must match every search term'}
+                                ? tr('settings.tools.orMode')
+                                : tr('settings.tools.andMode')}
                         </span>
                     </div>
                 </div>
@@ -134,12 +136,12 @@ export function ToolsSection({ toolsets, filter = '', settingsData, mergeSetting
                     </div>
                     ${enabled && html`<div class="settings-tool-list">
                         <div class="settings-tool-row settings-tool-row-header" aria-hidden="true">
-                            <span class="settings-tool-status-header">Enabled</span>
-                            <span class="settings-tool-name">Tool</span>
-                            <span class="settings-tool-compact-header">Compact</span>
-                            <span class="settings-tool-kind">Kind</span>
-                            <span class="settings-tool-summary">Summary</span>
-                            <span class="settings-tool-source">Source</span>
+                            <span class="settings-tool-status-header">${tr('settings.tools.colEnabled')}</span>
+                            <span class="settings-tool-name">${tr('settings.tools.colTool')}</span>
+                            <span class="settings-tool-compact-header">${tr('settings.tools.colCompact')}</span>
+                            <span class="settings-tool-kind">${tr('settings.tools.colKind')}</span>
+                            <span class="settings-tool-summary">${tr('settings.tools.colSummary')}</span>
+                            <span class="settings-tool-source">${tr('settings.tools.colSource')}</span>
                         </div>
                         ${g.tools.map(t => {
                             const normalizedToolName = String(t.name || '').trim().toLowerCase();
@@ -153,7 +155,7 @@ export function ToolsSection({ toolsets, filter = '', settingsData, mergeSetting
                                             type="checkbox"
                                             checked=${compactChecked}
                                             onChange=${() => toggleToolCompaction(t.name)}
-                                            title=${compactChecked ? 'Disable tool-result compaction for this tool' : 'Enable tool-result compaction for this tool'}
+                                            title=${compactChecked ? tr('settings.tools.disableCompaction') : tr('settings.tools.enableCompaction')}
                                         />
                                     </span>
                                     <span class="settings-tool-kind" title=${t.kind}>${KIND_BADGE[t.kind] || '?'}</span>
@@ -166,8 +168,8 @@ export function ToolsSection({ toolsets, filter = '', settingsData, mergeSetting
                     </div>`}
                 </div>
             `; })}
-            ${filteredGroups.length === 0 && html`<p class="settings-hint">No tools match "${filter}"</p>`}
-            <p class="settings-hint">Tool activation is managed by the agent runtime. Group checkboxes collapse/expand; the “Compact” column controls tool-result compaction eligibility.</p>
+            ${filteredGroups.length === 0 && html`<p class="settings-hint">${tr('settings.tools.noMatch', { filter })}</p>`}
+            <p class="settings-hint">${tr('settings.tools.footer')}</p>
         </div>
     `;
 }

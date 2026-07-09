@@ -280,7 +280,7 @@ test('parseQueuedContent normalizes backtick-wrapped file refs from Files blocks
 
 test('QueuedFollowupStack renders move-up before move-down controls', () => {
   const source = readFileSync(join(import.meta.dir, '../../web/src/components/compose-box.ts'), 'utf8');
-  const controlsStart = source.indexOf('aria-label="Queued follow-up controls"');
+  const controlsStart = source.indexOf("aria-label=${t('compose.queueControls')}");
   expect(controlsStart).toBeGreaterThan(-1);
   const moveUpIndex = source.indexOf('data-action="move-up"', controlsStart);
   const moveDownIndex = source.indexOf('data-action="move-down"', controlsStart);

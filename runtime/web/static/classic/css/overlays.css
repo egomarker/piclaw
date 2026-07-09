@@ -770,6 +770,19 @@
     pointer-events: none;
 }
 
+.image-annotator-source-hidden {
+    display: none;
+}
+
+.image-annotator-source-raster-canvas {
+    display: block;
+    max-width: calc(100vw - 48px);
+    max-height: calc(100vh - 148px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
 .image-annotator-draw-canvas,
 .image-annotator-preview-canvas {
     position: absolute;
@@ -911,7 +924,8 @@
         padding: 8px;
     }
 
-    .image-annotator-source {
+    .image-annotator-source,
+    .image-annotator-source-raster-canvas {
         max-width: calc(100vw - 32px);
         max-height: calc(100vh - 164px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
     }

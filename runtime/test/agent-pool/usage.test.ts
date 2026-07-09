@@ -23,6 +23,7 @@ describe("recordMessageUsage", () => {
       usage: {
         input: 100,
         output: 50,
+        reasoningTokens: 11,
         cacheRead: 10,
         cacheWrite: 5,
         totalTokens: 165,
@@ -44,6 +45,7 @@ describe("recordMessageUsage", () => {
     expect(row).toBeDefined();
     expect(row.input_tokens).toBe(100);
     expect(row.output_tokens).toBe(50);
+    expect(row.reasoning_tokens).toBe(11);
     expect(row.total_tokens).toBe(165);
     expect(row.model).toBe("gpt-4o");
     expect(row.run_at).toBe("2025-06-01T12:00:00.000Z");

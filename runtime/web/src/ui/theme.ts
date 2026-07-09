@@ -523,6 +523,14 @@ function applyCssVariables(palette, mode) {
     });
 }
 
+export function applyOutputPad(value) {
+    if (typeof document === 'undefined') return;
+    const parsed = Number(value);
+    const clamped = Number.isFinite(parsed) ? Math.min(24, Math.max(0, Math.round(parsed))) : 0;
+    document.documentElement.style.setProperty('--output-pad', `${clamped}px`);
+    document.documentElement.dataset.outputPad = String(clamped);
+}
+
 function clearCssVariables() {
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
@@ -692,6 +700,13 @@ export function initTheme() {
 
 export function applyThemeFromEvent(payload) {
     if (!payload || typeof payload !== 'object') return;
+    if (payload.outputPad !== undefined || payload.output_pad !== undefined) {
+        applyOutputPad(payload.outputPad ?? payload.output_pad);
+    }
+    const hasThemeValue = payload.theme !== undefined || payload.name !== undefined || payload.colorTheme !== undefined;
+    const hasTintValue = payload.tint !== undefined;
+    if (!hasThemeValue && !hasTintValue) return;
+
     const currentChatJid = resolveCurrentChatJid();
     const eventChatJid = payload.chat_jid || payload.chatJid || null;
     const theme = payload.theme ?? payload.name ?? payload.colorTheme;

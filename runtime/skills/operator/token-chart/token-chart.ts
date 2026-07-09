@@ -113,6 +113,7 @@ const dayDates: Date[] = [];
 const totals = new Map<string, number>();
 const inputs = new Map<string, number>();
 const outputs = new Map<string, number>();
+const reasonings = new Map<string, number>();
 const cacheReads = new Map<string, number>();
 const cacheWrites = new Map<string, number>();
 const costs = new Map<string, number>();
@@ -249,6 +250,7 @@ for (let i = 0; i < targetDays; i += 1) {
   totals.set(key, 0);
   inputs.set(key, 0);
   outputs.set(key, 0);
+  reasonings.set(key, 0);
   cacheReads.set(key, 0);
   cacheWrites.set(key, 0);
   costs.set(key, 0);
@@ -272,6 +274,7 @@ function addTokens(
   ts: Date,
   input: number,
   output: number,
+  reasoning: number,
   cacheRead: number,
   cacheWrite: number,
   totalTokens: number,
@@ -285,6 +288,7 @@ function addTokens(
   totals.set(key, (totals.get(key) || 0) + totalTokens);
   inputs.set(key, (inputs.get(key) || 0) + input);
   outputs.set(key, (outputs.get(key) || 0) + output);
+  reasonings.set(key, (reasonings.get(key) || 0) + reasoning);
   cacheReads.set(key, (cacheReads.get(key) || 0) + cacheRead);
   cacheWrites.set(key, (cacheWrites.get(key) || 0) + cacheWrite);
   costs.set(key, (costs.get(key) || 0) + costTotal);
@@ -316,6 +320,9 @@ function addUsage(record: any) {
   const usage = msg.usage || {};
   const input = typeof usage.input === "number" ? usage.input : 0;
   const output = typeof usage.output === "number" ? usage.output : 0;
+  const reasoning = typeof usage.reasoningTokens === "number"
+    ? usage.reasoningTokens
+    : (typeof usage.reasoning_tokens === "number" ? usage.reasoning_tokens : 0);
   const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
   const cacheWrite = typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0;
   const totalTokens =
@@ -336,7 +343,7 @@ function addUsage(record: any) {
       ? record.source
       : (typeof msg?.metadata?.source === "string" ? msg.metadata.source : null);
 
-  addTokens(ts, input, output, cacheRead, cacheWrite, totalTokens, costTotal, classifyUsageBucket(sourceValue));
+  addTokens(ts, input, output, reasoning, cacheRead, cacheWrite, totalTokens, costTotal, classifyUsageBucket(sourceValue));
 }
 
 function scanFile(filePath: string) {
@@ -387,9 +394,10 @@ function loadFromDb(): boolean {
     const endIso = now.toISOString();
     const tokenUsageColumns = db.prepare("PRAGMA table_info(token_usage)").all() as Array<{ name?: string }>;
     const hasSourceColumn = tokenUsageColumns.some((column) => column.name === "source");
+    const hasReasoningColumn = tokenUsageColumns.some((column) => column.name === "reasoning_tokens");
     const rows = db
       .query(
-        `SELECT run_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens,
+        `SELECT run_at, input_tokens, output_tokens, ${hasReasoningColumn ? "reasoning_tokens" : "0 AS reasoning_tokens"}, cache_read_tokens, cache_write_tokens, total_tokens,
                 cost_input, cost_output, cost_cache_read, cost_cache_write, cost_total,
                 ${hasSourceColumn ? "source" : "NULL AS source"}
          FROM token_usage
@@ -403,6 +411,7 @@ function loadFromDb(): boolean {
 
       const input = typeof row.input_tokens === "number" ? row.input_tokens : 0;
       const output = typeof row.output_tokens === "number" ? row.output_tokens : 0;
+      const reasoning = typeof row.reasoning_tokens === "number" ? row.reasoning_tokens : 0;
       const cacheRead = typeof row.cache_read_tokens === "number" ? row.cache_read_tokens : 0;
       const cacheWrite = typeof row.cache_write_tokens === "number" ? row.cache_write_tokens : 0;
       const totalTokens = typeof row.total_tokens === "number" ? row.total_tokens : input + output + cacheRead + cacheWrite;
@@ -413,7 +422,7 @@ function loadFromDb(): boolean {
           (typeof row.cost_cache_read === "number" ? row.cost_cache_read : 0) +
           (typeof row.cost_cache_write === "number" ? row.cost_cache_write : 0);
 
-      addTokens(ts, input, output, cacheRead, cacheWrite, totalTokens, costTotal, classifyUsageBucket(row.source));
+      addTokens(ts, input, output, reasoning, cacheRead, cacheWrite, totalTokens, costTotal, classifyUsageBucket(row.source));
     }
     return true;
   } catch (err) {
@@ -446,6 +455,7 @@ const rawMaxValue = Math.max(0, ...values);
 const sumValue = values.reduce((a, b) => a + b, 0);
 const sumInput = dayKeys.reduce((acc, key) => acc + (inputs.get(key) || 0), 0);
 const sumOutput = dayKeys.reduce((acc, key) => acc + (outputs.get(key) || 0), 0);
+const sumReasoning = dayKeys.reduce((acc, key) => acc + (reasonings.get(key) || 0), 0);
 const sumCacheRead = dayKeys.reduce((acc, key) => acc + (cacheReads.get(key) || 0), 0);
 const sumCacheWrite = dayKeys.reduce((acc, key) => acc + (cacheWrites.get(key) || 0), 0);
 const sumCost = dayKeys.reduce((acc, key) => acc + (costs.get(key) || 0), 0);
@@ -627,7 +637,7 @@ if (outputSvg) {
 
 const summaryLines = [
   `Token usage (all chats) — last ${targetDays} days, total ${formatCompact(sumValue)}`,
-  `Input ${formatCompact(sumInput)} • Output ${formatCompact(sumOutput)} • Cache read ${formatCompact(sumCacheRead)} • Cache write ${formatCompact(sumCacheWrite)} (${cachedPct}% cached)`,
+  `Input ${formatCompact(sumInput)} • Output ${formatCompact(sumOutput)} • Reasoning ${formatCompact(sumReasoning)} • Cache read ${formatCompact(sumCacheRead)} • Cache write ${formatCompact(sumCacheWrite)} (${cachedPct}% cached)`,
   `Normal ${formatCompact(normalTotal)} tokens • cached ${formatCompact(normalCachedTotal)} • uncached ${formatCompact(normalUncachedTotal)}`,
   `Autoresearch ${formatCompact(autoresearchTotal)} tokens • cached ${formatCompact(autoresearchCachedTotal)} • uncached ${formatCompact(autoresearchUncachedTotal)}`,
   ...dayDates.map((d, i) => {

@@ -4,6 +4,7 @@
  * Revealing requires the master password and optionally a TOTP code.
  */
 import { html, useState, useEffect, useCallback, useRef, useMemo } from '../../vendor/preact-htm.js';
+import { useTranslation } from '../../utils/i18n.js';
 
 function formatDate(iso) {
     if (!iso) return '—';
@@ -16,6 +17,7 @@ function formatDate(iso) {
 const TYPE_OPTIONS = ['secret', 'token', 'password', 'basic'];
 
 export function KeychainSection({ filter = '' }) {
+    const { t: tr } = useTranslation();
     const [entries, setEntries] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -45,10 +47,10 @@ export function KeychainSection({ filter = '' }) {
             if (data?.ok) {
                 setEntries(data.entries || []);
             } else {
-                setError(data?.error || 'Failed to load keychain.');
+                setError(data?.error || tr('settings.keychain.loadFailed'));
             }
         } catch (e) {
-            setError('Failed to load keychain.');
+            setError(tr('settings.keychain.loadFailed'));
         } finally {
             setLoading(false);
         }
@@ -78,8 +80,8 @@ export function KeychainSection({ filter = '' }) {
             if (data?.ok) {
                 setAddName(''); setAddSecret(''); setAddUsername(''); setAddUserNote(''); setAddAgentNote(''); setAddType('secret'); setShowAdd(false);
                 await fetchEntries();
-            } else { setError(data?.error || 'Failed to add entry.'); }
-        } catch { setError('Failed to add entry.'); }
+            } else { setError(data?.error || tr('settings.keychain.addFailed')); }
+        } catch { setError(tr('settings.keychain.addFailed')); }
         finally { setSaving(false); }
     }, [addName, addSecret, addUsername, addUserNote, addAgentNote, addType, fetchEntries]);
 
@@ -95,8 +97,8 @@ export function KeychainSection({ filter = '' }) {
                 setConfirmDelete(null);
                 setRevealState(s => s?.name === name ? null : s);
                 await fetchEntries();
-            } else { setError(data?.error || 'Failed to delete entry.'); }
-        } catch { setError('Failed to delete entry.'); }
+            } else { setError(data?.error || tr('settings.keychain.deleteFailed')); }
+        } catch { setError(tr('settings.keychain.deleteFailed')); }
     }, [fetchEntries]);
 
     const handleSaveNotes = useCallback(async (entry) => {
@@ -120,8 +122,8 @@ export function KeychainSection({ filter = '' }) {
                     return next;
                 });
                 await fetchEntries();
-            } else { setError(data?.error || 'Failed to save notes.'); }
-        } catch { setError('Failed to save notes.'); }
+            } else { setError(data?.error || tr('settings.keychain.saveNotesFailed')); }
+        } catch { setError(tr('settings.keychain.saveNotesFailed')); }
         finally { setSavingNote(null); }
     }, [noteDrafts, fetchEntries]);
 
@@ -158,10 +160,10 @@ export function KeychainSection({ filter = '' }) {
                 }));
                 requestAnimationFrame(() => totpRef.current?.focus());
             } else {
-                setRevealState({ name, phase: 'error', error: data?.error || 'Failed to reveal.' });
+                setRevealState({ name, phase: 'error', error: data?.error || tr('settings.keychain.revealFailed') });
             }
         } catch {
-            setRevealState({ name, phase: 'error', error: 'Failed to reveal.' });
+            setRevealState({ name, phase: 'error', error: tr('settings.keychain.revealFailed') });
         }
     }, []);
 
@@ -209,7 +211,7 @@ export function KeychainSection({ filter = '' }) {
         );
     }, [entries, lf]);
 
-    if (loading) return html`<div class="settings-section"><div class="settings-loading">Loading keychain…</div></div>`;
+    if (loading) return html`<div class="settings-section"><div class="settings-loading">${tr('settings.keychain.loading')}</div></div>`;
 
     return html`
         <div class="settings-section">
@@ -221,24 +223,24 @@ export function KeychainSection({ filter = '' }) {
             `}
             <div class="settings-keychain-toolbar" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
                 <span class="settings-hint" style="margin:0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                    <span>${filtered.length} entr${filtered.length === 1 ? 'y' : 'ies'}${lf ? ` matching "${filter}"` : ''}, encrypted at rest.</span>
+                    <span>${filtered.length === 1 ? tr('settings.keychain.entryCountSingular', { count: filtered.length }) : tr('settings.keychain.entryCountPlural', { count: filtered.length })}${lf ? tr('settings.keychain.matchingFilter', { filter }) : ''}${tr('settings.keychain.encryptedSuffix')}</span>
                     <span style="display:inline-flex; align-items:center; gap:6px;">
-                        <span>Click</span>
+                        <span>${tr('settings.keychain.clickPrefix')}</span>
                         <span aria-hidden="true" style="display:inline-flex; width:18px; height:18px; align-items:center; justify-content:center; border-radius:999px; border:1px solid var(--border-color, rgba(120,120,120,.22)); background:var(--panel-bg, rgba(255,255,255,.04));">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                         </span>
-                        <span>to reveal.</span>
+                        <span>${tr('settings.keychain.revealSuffix')}</span>
                     </span>
                 </span>
                 <button class="settings-keychain-add-btn" onClick=${() => setShowAdd(!showAdd)}>
-                    ${showAdd ? 'Cancel' : '+ Add entry'}
+                    ${showAdd ? tr('settings.keychain.cancel') : tr('settings.keychain.addEntry')}
                 </button>
             </div>
 
             ${showAdd && html`
                 <div class="settings-keychain-add-form">
                     <div class="settings-keychain-add-row">
-                        <input ref=${nameRef} type="text" placeholder="Entry name (e.g. github/my-token)"
+                        <input ref=${nameRef} type="text" placeholder=${tr('settings.keychain.namePlaceholder')}
                             value=${addName} onInput=${e => setAddName(e.target.value)}
                             class="settings-keychain-input" />
                         <select value=${addType} onChange=${e => setAddType(e.target.value)}
@@ -247,22 +249,22 @@ export function KeychainSection({ filter = '' }) {
                         </select>
                     </div>
                     <div class="settings-keychain-add-row">
-                        <input type="password" placeholder="Secret value"
+                        <input type="password" placeholder=${tr('settings.keychain.secretPlaceholder')}
                             value=${addSecret} onInput=${e => setAddSecret(e.target.value)}
                             class="settings-keychain-input settings-keychain-secret" />
-                        <input type="text" placeholder="Username (optional)"
+                        <input type="text" placeholder=${tr('settings.keychain.usernamePlaceholder')}
                             value=${addUsername} onInput=${e => setAddUsername(e.target.value)}
                             class="settings-keychain-input" style="max-width:200px" />
                         <button class="settings-keychain-save-btn" onClick=${handleAdd}
                             disabled=${saving || !addName.trim() || !addSecret}>
-                            ${saving ? 'Saving…' : 'Save'}
+                            ${saving ? tr('settings.keychain.saving') : tr('settings.keychain.save')}
                         </button>
                     </div>
                     <div class="settings-keychain-add-row" style="align-items:stretch">
-                        <textarea placeholder="User note (visible in this UI only)"
+                        <textarea placeholder=${tr('settings.keychain.userNotePlaceholder')}
                             value=${addUserNote} onInput=${e => setAddUserNote(e.target.value)}
                             class="settings-keychain-input" rows="2" style="resize:vertical; min-height:56px"></textarea>
-                        <textarea placeholder="Agent note (safe to expose to agents)"
+                        <textarea placeholder=${tr('settings.keychain.agentNotePlaceholder')}
                             value=${addAgentNote} onInput=${e => setAddAgentNote(e.target.value)}
                             class="settings-keychain-input" rows="2" style="resize:vertical; min-height:56px"></textarea>
                     </div>
@@ -283,7 +285,7 @@ export function KeychainSection({ filter = '' }) {
                     <tbody>
                         ${filtered.length === 0 && html`
                             <tr><td colspan="5" class="settings-keychain-empty">
-                                ${lf ? 'No entries match the filter.' : 'No keychain entries.'}
+                                ${lf ? tr('settings.keychain.noMatchFilter') : tr('settings.keychain.noEntries')}
                             </td></tr>
                         `}
                         ${filtered.map(e => {
@@ -306,7 +308,7 @@ export function KeychainSection({ filter = '' }) {
                                 <td class="settings-keychain-actions">
                                     <button class=${`settings-keychain-reveal-btn${isRevealed ? ' active' : ''}`}
                                         onClick=${() => handleRevealClick(e.name)}
-                                        title=${isRevealed ? 'Hide secret' : 'Reveal secret'}>
+                                        title=${isRevealed ? tr('settings.keychain.hideSecret') : tr('settings.keychain.revealSecret')}>
                                         ${isRevealed
                                             ? html`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`
                                             : html`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`
@@ -314,12 +316,12 @@ export function KeychainSection({ filter = '' }) {
                                     </button>
                                     ${confirmDelete === e.name
                                         ? html`
-                                            <span class="settings-keychain-confirm">Delete?
-                                                <button class="settings-keychain-confirm-yes" onClick=${() => handleDelete(e.name)}>Yes</button>
-                                                <button class="settings-keychain-confirm-no" onClick=${() => setConfirmDelete(null)}>No</button>
+                                            <span class="settings-keychain-confirm">${tr('settings.keychain.deleteQ')}
+                                                <button class="settings-keychain-confirm-yes" onClick=${() => handleDelete(e.name)}>${tr('settings.keychain.yes')}</button>
+                                                <button class="settings-keychain-confirm-no" onClick=${() => setConfirmDelete(null)}>${tr('settings.keychain.no')}</button>
                                             </span>
                                         `
-                                        : html`<button class="settings-keychain-delete-btn" onClick=${() => setConfirmDelete(e.name)} title="Delete">🗑</button>`
+                                        : html`<button class="settings-keychain-delete-btn" onClick=${() => setConfirmDelete(e.name)} title=${tr('settings.keychain.deleteTitle')}>🗑</button>`
                                     }
                                 </td>
                             </tr>
@@ -327,19 +329,19 @@ export function KeychainSection({ filter = '' }) {
                                 <td colspan="5">
                                     <div style="display:grid; grid-template-columns:1fr 1fr auto; gap:8px; align-items:start; padding:8px 0 10px 0;">
                                         <label style="display:flex; flex-direction:column; gap:4px; min-width:0;">
-                                            <span class="settings-hint" style="margin:0">User note</span>
-                                            <textarea class="settings-keychain-input" rows="2" style="resize:vertical; min-height:52px; width:100%;" placeholder="Human/UI note only"
+                                            <span class="settings-hint" style="margin:0">${tr('settings.keychain.userNote')}</span>
+                                            <textarea class="settings-keychain-input" rows="2" style="resize:vertical; min-height:52px; width:100%;" placeholder=${tr('settings.keychain.userNoteHint')}
                                                 value=${userNote}
                                                 onInput=${ev => setNoteDraft(e.name, 'userNote', ev.target.value)}></textarea>
                                         </label>
                                         <label style="display:flex; flex-direction:column; gap:4px; min-width:0;">
-                                            <span class="settings-hint" style="margin:0">Agent-readable note</span>
-                                            <textarea class="settings-keychain-input" rows="2" style="resize:vertical; min-height:52px; width:100%;" placeholder="Safe guidance for agents"
+                                            <span class="settings-hint" style="margin:0">${tr('settings.keychain.agentNote')}</span>
+                                            <textarea class="settings-keychain-input" rows="2" style="resize:vertical; min-height:52px; width:100%;" placeholder=${tr('settings.keychain.agentNoteHint')}
                                                 value=${agentNote}
                                                 onInput=${ev => setNoteDraft(e.name, 'agentNote', ev.target.value)}></textarea>
                                         </label>
                                         <button class="settings-keychain-save-btn" style="margin-top:20px" disabled=${!notesDirty || notesSaving} onClick=${() => handleSaveNotes(e)}>
-                                            ${notesSaving ? 'Saving…' : 'Save notes'}
+                                            ${notesSaving ? tr('settings.keychain.saving') : tr('settings.keychain.saveNotes')}
                                         </button>
                                     </div>
                                 </td>
@@ -348,17 +350,17 @@ export function KeychainSection({ filter = '' }) {
                                 <tr class="settings-keychain-prompt-row" key=${e.name + '-pw'}>
                                     <td colspan="5">
                                         <div class="settings-keychain-prompt">
-                                            <span class="settings-keychain-prompt-label">Master password:</span>
+                                            <span class="settings-keychain-prompt-label">${tr('settings.keychain.masterPassword')}</span>
                                             <input ref=${passwordRef} type="password" autocomplete="off"
-                                                placeholder="Enter keychain master password"
+                                                placeholder=${tr('settings.keychain.masterPasswordPlaceholder')}
                                                 class="settings-keychain-prompt-input"
                                                 value=${rs?.masterPassword || ''}
                                                 onInput=${ev => setRevealState(s => ({ ...s, masterPassword: ev.target.value }))}
                                                 onKeyDown=${ev => { if (ev.key === 'Enter') handlePasswordSubmit(e.name); if (ev.key === 'Escape') setRevealState(null); }}
                                             />
                                             <button class="settings-keychain-prompt-submit" onClick=${() => handlePasswordSubmit(e.name)}
-                                                disabled=${!(rs?.masterPassword)}>Unlock</button>
-                                            <button class="settings-keychain-prompt-cancel" onClick=${() => setRevealState(null)}>Cancel</button>
+                                                disabled=${!(rs?.masterPassword)}>${tr('settings.keychain.unlock')}</button>
+                                            <button class="settings-keychain-prompt-cancel" onClick=${() => setRevealState(null)}>${tr('settings.keychain.cancel')}</button>
                                             ${rs?.error && html`<span class="settings-keychain-prompt-error">${rs.error}</span>`}
                                         </div>
                                     </td>
@@ -368,7 +370,7 @@ export function KeychainSection({ filter = '' }) {
                                 <tr class="settings-keychain-prompt-row" key=${e.name + '-totp'}>
                                     <td colspan="5">
                                         <div class="settings-keychain-prompt">
-                                            <span class="settings-keychain-prompt-label">TOTP code:</span>
+                                            <span class="settings-keychain-prompt-label">${tr('settings.keychain.totpCode')}</span>
                                             <input ref=${totpRef} type="text" inputmode="numeric" autocomplete="one-time-code"
                                                 maxlength="6" placeholder="000000"
                                                 class="settings-keychain-prompt-input" style="width:90px;text-align:center;letter-spacing:0.15em"
@@ -377,8 +379,8 @@ export function KeychainSection({ filter = '' }) {
                                                 onKeyDown=${ev => { if (ev.key === 'Enter') handleTotpSubmit(e.name); if (ev.key === 'Escape') setRevealState(null); }}
                                             />
                                             <button class="settings-keychain-prompt-submit" onClick=${() => handleTotpSubmit(e.name)}
-                                                disabled=${(rs?.totpCode || '').length < 6}>Verify</button>
-                                            <button class="settings-keychain-prompt-cancel" onClick=${() => setRevealState(null)}>Cancel</button>
+                                                disabled=${(rs?.totpCode || '').length < 6}>${tr('settings.keychain.verify')}</button>
+                                            <button class="settings-keychain-prompt-cancel" onClick=${() => setRevealState(null)}>${tr('settings.keychain.cancel')}</button>
                                             ${rs?.error && html`<span class="settings-keychain-prompt-error">${rs.error}</span>`}
                                         </div>
                                     </td>
@@ -390,17 +392,17 @@ export function KeychainSection({ filter = '' }) {
                                         <div class="settings-keychain-reveal-panel">
                                             ${rs.username && html`
                                                 <div class="settings-keychain-reveal-field">
-                                                    <span class="settings-keychain-reveal-label">Username</span>
+                                                    <span class="settings-keychain-reveal-label">${tr('settings.keychain.username')}</span>
                                                     <code class="settings-keychain-reveal-value">${rs.username}</code>
-                                                    <button class="settings-keychain-copy-btn" onClick=${() => copyToClipboard(rs.username)} title="Copy username">
+                                                    <button class="settings-keychain-copy-btn" onClick=${() => copyToClipboard(rs.username)} title=${tr('settings.keychain.copyUsername')}>
                                                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                                                     </button>
                                                 </div>
                                             `}
                                             <div class="settings-keychain-reveal-field">
-                                                <span class="settings-keychain-reveal-label">Secret</span>
+                                                <span class="settings-keychain-reveal-label">${tr('settings.keychain.secret')}</span>
                                                 <code class="settings-keychain-reveal-value">${rs.secret}</code>
-                                                <button class="settings-keychain-copy-btn" onClick=${() => copyToClipboard(rs.secret)} title="Copy secret">
+                                                <button class="settings-keychain-copy-btn" onClick=${() => copyToClipboard(rs.secret)} title=${tr('settings.keychain.copySecret')}>
                                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                                                 </button>
                                             </div>

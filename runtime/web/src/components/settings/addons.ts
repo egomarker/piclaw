@@ -1,6 +1,8 @@
 import { html, useState, useEffect, useCallback } from '../../vendor/preact-htm.js';
+import { useTranslation } from '../../utils/i18n.js';
 
 export function AddonsSection({ setStatus, filter = '' }) {
+    const { t: tr } = useTranslation();
     const [addons, setAddons] = useState(null);
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(null);
@@ -55,14 +57,14 @@ export function AddonsSection({ setStatus, filter = '' }) {
     const installAddon = useCallback(async (slug) => {
         if (busy) return;
         setBusy({ slug, action: 'install' });
-        setStatus?.(`Installing ${slug}\u2026`, 'info');
+        setStatus?.(tr('settings.addons.installing', { slug }), 'info');
         try {
             const resp = await fetch(`/agent/addons/install${devParams()}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug }) });
             const data = await resp.json();
             if (data.error) { setStatus?.(data.error, 'error'); return; }
             setRestartRequired(true);
             const summary = [data.message, data.warning].filter(Boolean).join(' ');
-            setStatus?.(summary || 'Add-on installed.', 'success'); await loadAddons();
+            setStatus?.(summary || tr('settings.addons.installedToast'), 'success'); await loadAddons();
         } catch (e) { setStatus?.(String(e.message || e), 'error'); }
         finally { setBusy(null); }
     }, [busy, loadAddons, setStatus]);
@@ -70,14 +72,14 @@ export function AddonsSection({ setStatus, filter = '' }) {
     const uninstallAddon = useCallback(async (slug) => {
         if (busy) return;
         setBusy({ slug, action: 'remove' });
-        setStatus?.(`Removing ${slug}\u2026`, 'info');
+        setStatus?.(tr('settings.addons.removing', { slug }), 'info');
         try {
             const resp = await fetch(`/agent/addons/uninstall${devParams()}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug }) });
             const data = await resp.json();
             if (data.error) { setStatus?.(data.error, 'error'); return; }
             setRestartRequired(true);
             const summary = [data.message, data.warning].filter(Boolean).join(' ');
-            setStatus?.(summary || 'Add-on removed.', 'success'); await loadAddons();
+            setStatus?.(summary || tr('settings.addons.removedToast'), 'success'); await loadAddons();
         } catch (e) { setStatus?.(String(e.message || e), 'error'); }
         finally { setBusy(null); }
     }, [busy, loadAddons, setStatus]);
@@ -85,12 +87,12 @@ export function AddonsSection({ setStatus, filter = '' }) {
     const restartRuntime = useCallback(async () => {
         if (busy) return;
         setBusy({ slug: null, action: 'restart' });
-        setStatus?.('Restarting piclaw\u2026', 'info');
+        setStatus?.(tr('settings.addons.restarting'), 'info');
         try {
             const resp = await fetch('/agent/addons/restart', { method: 'POST' });
             const data = await resp.json();
             if (data.error) { setStatus?.(data.error, 'error'); setBusy(null); return; }
-            setStatus?.(data.message || 'Restarting piclaw\u2026', 'success');
+            setStatus?.(data.message || tr('settings.addons.restarting'), 'success');
             setRestartRequired(false);
             // Poll until backend is back, then refresh the addon list
             const pollUntilReady = async (maxAttempts = 30, intervalMs = 2000) => {
@@ -101,13 +103,13 @@ export function AddonsSection({ setStatus, filter = '' }) {
                         if (probe.ok) {
                             await loadAddons();
                             setBusy(null);
-                            setStatus?.('Restart complete \u2014 add-ons refreshed.', 'success');
+                            setStatus?.(tr('settings.addons.restartComplete'), 'success');
                             return;
                         }
                     } catch (e) { void e; /* backend not ready yet */ }
                 }
                 setBusy(null);
-                setStatus?.('Backend did not return in time. Reload the page manually.', 'warning');
+                setStatus?.(tr('settings.addons.restartTimeout'), 'warning');
             };
             void pollUntilReady();
         } catch (e) {
@@ -116,18 +118,18 @@ export function AddonsSection({ setStatus, filter = '' }) {
         }
     }, [busy, setStatus, loadAddons]);
 
-    if (loading) return html`<div class="settings-loading">Fetching add-ons\u2026</div>`;
-    if (!addons) return html`<div class="settings-section"><p class="settings-hint">Could not load add-ons.</p></div>`;
+    if (loading) return html`<div class="settings-loading">${tr('settings.addons.fetching')}</div>`;
+    if (!addons) return html`<div class="settings-section"><p class="settings-hint">${tr('settings.addons.loadFailed')}</p></div>`;
 
     const lf = filter.toLowerCase();
     const filtered = lf ? addons.filter(a => a.slug.toLowerCase().includes(lf) || (a.description || '').toLowerCase().includes(lf) || (a.tags || []).some(t => t.toLowerCase().includes(lf))) : addons;
     const busySlug = busy?.slug || null;
     const busyLabel = busy
         ? (busy.action === 'remove'
-            ? `Removing ${busy.slug}\u2026`
+            ? tr('settings.addons.removing', { slug: busy.slug })
             : busy.action === 'restart'
-                ? 'Restarting piclaw\u2026'
-                : `Installing ${busy.slug}\u2026`)
+                ? tr('settings.addons.restarting')
+                : tr('settings.addons.installing', { slug: busy.slug }))
         : '';
 
     return html`
@@ -136,19 +138,21 @@ export function AddonsSection({ setStatus, filter = '' }) {
                 <div>
                     <p class="settings-hint">
                         ${catalogSources.length <= 1
-                            ? html`Catalog from <a href="https://github.com/rcarmo/piclaw-addons" target="_blank">rcarmo/piclaw-addons</a>.`
-                            : html`${catalogSources.length} catalog sources merged.`}
-                        ${' '}Package-first install via Bun; restart required after install/uninstall.
+                            ? html`${tr('settings.addons.catalogFromPre')} <a href="https://github.com/rcarmo/piclaw-addons" target="_blank">rcarmo/piclaw-addons</a>.`
+                            : html`${tr('settings.addons.catalogMerged', { count: catalogSources.length })}`}
+                        ${' '}${tr('settings.addons.installNote')}
                     </p>
                     ${failedSources.length > 0 && html`
                         <div class="settings-addon-error" role="alert">
-                            Failed to fetch ${failedSources.length} catalog source${failedSources.length > 1 ? 's' : ''}:
+                            ${failedSources.length > 1
+                                ? tr('settings.addons.failedFetchPlural', { count: failedSources.length })
+                                : tr('settings.addons.failedFetchSingular', { count: failedSources.length })}
                             ${failedSources.map(u => html` <code style="font-size:0.82em;word-break:break-all">${u}</code>`)}
                         </div>
                     `}
                     ${catalogSources.length > 1 && html`
                         <details class="settings-hint" style="margin-top:4px">
-                            <summary style="cursor:pointer">Active catalog sources (${catalogSources.length})</summary>
+                            <summary style="cursor:pointer">${tr('settings.addons.activeSources', { count: catalogSources.length })}</summary>
                             <ul style="margin:4px 0 0 16px;font-size:0.82em">
                                 ${catalogSources.map(u => html`<li style="word-break:break-all"><code>${u}</code></li>`)}
                             </ul>
@@ -156,7 +160,7 @@ export function AddonsSection({ setStatus, filter = '' }) {
                     `}
                     ${platformInfo.windowsNative && html`
                         <div class="settings-addon-error" role="alert">
-                            Native Windows add-on installs are higher risk: Bun package installs, symlink cleanup, locked files, and restart timing can all be less predictable than in Linux/WSL. Prefer WSL or a container when possible.
+                            ${tr('settings.addons.windowsWarning')}
                         </div>
                     `}
                 </div>
@@ -173,7 +177,7 @@ export function AddonsSection({ setStatus, filter = '' }) {
                 ${filtered.map(a => {
                     const hasSkills = (a.skills || []).length > 0;
                     const isExtension = a.type === 'extension';
-                    const typeLabel = hasSkills && isExtension ? 'extension + skill' : hasSkills ? 'skill' : 'extension';
+                    const typeLabel = hasSkills && isExtension ? tr('settings.addons.typeExtSkill') : hasSkills ? tr('settings.addons.typeSkill') : tr('settings.addons.typeExt');
                     const typeCls = hasSkills && !isExtension ? 'settings-tag-skill' : '';
                     const homepage = typeof a.homepage === 'string' && a.homepage.trim() ? a.homepage.trim() : '';
                     return html`
@@ -188,10 +192,10 @@ export function AddonsSection({ setStatus, filter = '' }) {
                             ${a.hasUpdate && html`<span class="settings-tag settings-tag-skill">\u2191 ${a.version}</span>`}
                             <div class="settings-addon-actions">
                                 ${a.installed ? html`
-                                    ${a.hasUpdate && html`<button class="settings-addon-btn settings-addon-btn-upgrade" disabled=${Boolean(busy)} onClick=${() => installAddon(a.slug)}>${busySlug === a.slug ? '\u2026' : 'Update'}</button>`}
-                                    <button class="settings-addon-btn settings-addon-btn-remove" disabled=${Boolean(busy)} onClick=${() => uninstallAddon(a.slug)}>${busySlug === a.slug ? '\u2026' : 'Remove'}</button>
+                                    ${a.hasUpdate && html`<button class="settings-addon-btn settings-addon-btn-upgrade" disabled=${Boolean(busy)} onClick=${() => installAddon(a.slug)}>${busySlug === a.slug ? '\u2026' : tr('settings.addons.update')}</button>`}
+                                    <button class="settings-addon-btn settings-addon-btn-remove" disabled=${Boolean(busy)} onClick=${() => uninstallAddon(a.slug)}>${busySlug === a.slug ? '\u2026' : tr('settings.addons.remove')}</button>
                                 ` : html`
-                                    <button class="settings-addon-btn settings-addon-btn-install" disabled=${Boolean(busy)} onClick=${() => installAddon(a.slug)}>${busySlug === a.slug ? '\u2026' : 'Install'}</button>
+                                    <button class="settings-addon-btn settings-addon-btn-install" disabled=${Boolean(busy)} onClick=${() => installAddon(a.slug)}>${busySlug === a.slug ? '\u2026' : tr('settings.addons.install')}</button>
                                 `}
                             </div>
                         </div>
@@ -201,12 +205,12 @@ export function AddonsSection({ setStatus, filter = '' }) {
                         </div>
                     </div>
                 `; })}
-                ${filtered.length === 0 && html`<p class="settings-hint">No add-ons match "${filter}"</p>`}
+                ${filtered.length === 0 && html`<p class="settings-hint">${tr('settings.addons.noMatch', { filter })}</p>`}
             </div>
             ${restartRequired && html`
                 <div class="settings-addon-restart-notice" role="status" aria-live="polite">
-                    <span>Extension changes are installed but inactive until piclaw restarts.</span>
-                    <button class="settings-addon-btn settings-addon-btn-restart-now" type="button" disabled=${Boolean(busy)} onClick=${restartRuntime}>Restart Now</button>
+                    <span>${tr('settings.addons.restartNotice')}</span>
+                    <button class="settings-addon-btn settings-addon-btn-restart-now" type="button" disabled=${Boolean(busy)} onClick=${restartRuntime}>${tr('settings.addons.restartNow')}</button>
                 </div>
             `}
         </div>

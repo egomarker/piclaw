@@ -1,5 +1,7 @@
 import { html, useCallback, useEffect, useMemo, useRef, useState } from '../vendor/preact-htm.js';
 import { renderDisclosureTriangle } from '../ui/disclosure-triangle.js';
+import { useTranslation } from '../utils/i18n.js';
+import { LanguageSwitcher } from './language-switcher.js';
 import { getLocalStorageBoolean, getLocalStorageItem, getLocalStorageNumber, setLocalStorageItem } from '../utils/storage.js';
 import {
     createWorkspaceFile,
@@ -619,6 +621,7 @@ export function WorkspaceExplorer({
     onOpenTerminalTab,
     onOpenVncTab,
 }) {
+    const { t } = useTranslation();
     const [tree,          setTree]          = useState(null);
     const [expanded,      setExpanded]      = useState(new Set(['.']));
     const [selectedPath,  setSelectedPath]  = useState(null);
@@ -2328,8 +2331,8 @@ export function WorkspaceExplorer({
                                 e.stopPropagation();
                                 setHeaderMenuOpen((prev) => !prev);
                             }}
-                            title="Workspace actions"
-                            aria-label="Workspace actions"
+                            title=${t('workspace.actions')}
+                            aria-label=${t('workspace.actions')}
                             aria-haspopup="menu"
                             aria-expanded=${headerMenuOpen ? 'true' : 'false'}
                         >
@@ -2342,14 +2345,14 @@ export function WorkspaceExplorer({
                         </button>
                         ${headerMenuOpen && html`
                             <div class="workspace-menu-dropdown" ref=${headerMenuRef} role="menu" aria-label="Workspace options">
-                                <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuCreateFile} disabled=${uploading}>New file</button>
-                                <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuUploadFiles} disabled=${uploading}>Upload files</button>
+                                <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuCreateFile} disabled=${uploading}>${t('workspace.newFile')}</button>
+                                <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuUploadFiles} disabled=${uploading}>${t('workspace.uploadFiles')}</button>
                                 ${(() => {
                                     const recent = getRecentFiles();
                                     if (recent.length === 0) return null;
                                     return html`
                                         <div class="workspace-menu-separator"></div>
-                                        <div class="workspace-menu-submenu-label">Open Recent</div>
+                                        <div class="workspace-menu-submenu-label">${t('menu.openRecent')}</div>
                                         ${recent.map((path) => {
                                             const label = path.split('/').pop() || path;
                                             return html`
@@ -2359,15 +2362,15 @@ export function WorkspaceExplorer({
                                     `;
                                 })()}
                                 <div class="workspace-menu-separator"></div>
-                                <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuRefresh}>Refresh tree</button>
+                                <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuRefresh}>${t('menu.refreshTree')}</button>
                                 <button class="workspace-menu-item" role="menuitem" onClick=${() => runMenuAction(() => handleWorkspaceReindex())} disabled=${workspaceReindexing}>
-                                    ${workspaceReindexing ? 'Reindexing workspace…' : 'Reindex workspace'}
+                                    ${workspaceReindexing ? t('workspace.reindexing') : t('menu.reindex')}
                                 </button>
                                 <button class=${`workspace-menu-item${showHidden ? ' active' : ''}`} role="menuitem" onClick=${handleMenuToggleHidden}>
-                                    ${showHidden ? 'Hide hidden files' : 'Show hidden files'}
+                                    ${showHidden ? t('menu.hideHidden') : t('menu.showHidden')}
                                 </button>
                                 <div class="workspace-menu-scale-control" role="none">
-                                    <label for="workspace-pwa-display-scale">Scale</label>
+                                    <label for="workspace-pwa-display-scale">${t('menu.scale')}</label>
                                     <div class="workspace-menu-scale-input-wrap">
                                         <input
                                             id="workspace-pwa-display-scale"
@@ -2392,52 +2395,56 @@ export function WorkspaceExplorer({
                                 ${(onOpenTerminalTab || onOpenVncTab) && html`<div class="workspace-menu-separator"></div>`}
                                 ${onOpenTerminalTab && html`
                                     <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuOpenTerminalTab}>
-                                        Open terminal in tab
+                                        ${t('menu.openTerminal')}
                                     </button>
                                 `}
                                 ${onOpenVncTab && html`
                                     <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuOpenVncTab}>
-                                        Open VNC in tab
+                                        ${t('menu.openVnc')}
                                     </button>
                                 `}
                                 <div class="workspace-menu-separator"></div>
-                                <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuOpenSettings}>Settings</button>
+                                <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuOpenSettings}>${t('menu.settings')}</button>
 
                                 ${selectedPath && html`<div class="workspace-menu-separator"></div>`}
                                 ${selectedHasOpenableTab && html`
-                                    <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuOpenTab}>Open in tab</button>
+                                    <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuOpenTab}>${t('workspace.openInTab')}</button>
                                 `}
                                 ${selectedPath && !selectedIsDir && html`
-                                    <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuOpenEditor} disabled=${!canEdit}>Open in editor</button>
+                                    <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuOpenEditor} disabled=${!canEdit}>${t('workspace.openInEditor')}</button>
                                 `}
                                 ${selectedCanRename && html`
-                                    <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuRename}>Rename selected</button>
+                                    <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuRename}>${t('workspace.renameSelected')}</button>
                                 `}
                                 ${selectedCanDownload && html`
-                                    <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuDownload}>Download selected file</button>
+                                    <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuDownload}>${t('workspace.downloadSelectedFile')}</button>
                                 `}
                                 ${selectedFolderDownloadUrl && html`
-                                    <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuDownloadFolder}>Download selected folder (zip)</button>
+                                    <button class="workspace-menu-item" role="menuitem" onClick=${handleMenuDownloadFolder}>${t('workspace.downloadSelectedFolder')}</button>
                                 `}
                                 ${selectedCanDelete && html`
-                                    <button class="workspace-menu-item danger" role="menuitem" onClick=${handleMenuDelete}>Delete selected file</button>
+                                    <button class="workspace-menu-item danger" role="menuitem" onClick=${handleMenuDelete}>${t('workspace.deleteSelectedFile')}</button>
                                 `}
                                 <div class="workspace-menu-separator"></div>
-                                <button class="workspace-menu-item" role="menuitem" onClick=${() => { setHeaderMenuOpen(false); window.dispatchEvent(new CustomEvent('piclaw:open-settings', { detail: { section: 'workspace' } })); }}>Settings</button>
+                                <button class="workspace-menu-item" role="menuitem" onClick=${() => { setHeaderMenuOpen(false); window.dispatchEvent(new CustomEvent('piclaw:open-settings', { detail: { section: 'workspace' } })); }}>${t('menu.settings')}</button>
+                                <div class="workspace-menu-separator"></div>
+                                <div class="workspace-menu-language" role="none">
+                                    <${LanguageSwitcher} variant="menu" />
+                                </div>
                             </div>
                         `}
                     </div>
-                    <span>Workspace</span>
+                    <span>${t('workspace.title')}</span>
                 </div>
                 <div class="workspace-header-actions">
-                    <button class="workspace-create" onClick=${handleCreateFileClick} title="New file" disabled=${uploading}>
+                    <button class="workspace-create" onClick=${handleCreateFileClick} title=${t('workspace.newFile')} disabled=${uploading}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <line x1="12" y1="5" x2="12" y2="19" />
                             <line x1="5" y1="12" x2="19" y2="12" />
                         </svg>
                     </button>
-                    <button class="workspace-refresh" onClick=${handleRefreshClick} title="Refresh tree">
+                    <button class="workspace-refresh" onClick=${handleRefreshClick} title=${t('menu.refreshTree')}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
                             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <circle cx="12" cy="12" r="8.5" stroke-dasharray="42 12" stroke-dashoffset="6"
@@ -2549,7 +2556,7 @@ export function WorkspaceExplorer({
                                         <button
                                             class="workspace-folder-upload"
                                             data-folder-hint-target=${node.path}
-                                            title="Add folder hint to compose"
+                                            title=${t('workspace.addFolderHint')}
                                             aria-label=${`Add folder hint for ${node.path}`}
                                             onClick=${handleFolderHintClick}
                                         >
@@ -2563,7 +2570,7 @@ export function WorkspaceExplorer({
                                         <button
                                             class="workspace-folder-upload"
                                             data-upload-target=${node.path}
-                                            title="Upload files to this folder"
+                                            title=${t('workspace.uploadToFolder')}
                                             onClick=${handleFolderUploadClick}
                                             disabled=${uploading}
                                         >
@@ -2587,7 +2594,7 @@ export function WorkspaceExplorer({
                     <div class="workspace-preview-header">
                         <span class="workspace-preview-title">${selectedPath}</span>
                         <div class="workspace-preview-actions">
-                            <button class="workspace-create" onClick=${handleCreateFileClick} title="New file" disabled=${uploading}>
+                            <button class="workspace-create" onClick=${handleCreateFileClick} title=${t('workspace.newFile')} disabled=${uploading}>
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <line x1="12" y1="5" x2="12" y2="19" />
@@ -2610,7 +2617,7 @@ export function WorkspaceExplorer({
                                 <button
                                     class="workspace-download workspace-delete"
                                     onClick=${handleDeleteFile}
-                                    title="Delete file"
+                                    title=${t('workspace.deleteFile')}
                                 >
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                                         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -2628,7 +2635,7 @@ export function WorkspaceExplorer({
                                         class="workspace-download"
                                         data-folder-hint-target=${selectedPath}
                                         onClick=${handleFolderHintClick}
-                                        title="Add folder hint to compose"
+                                        title=${t('workspace.addFolderHint')}
                                         aria-label=${`Add folder hint for ${selectedPath}`}
                                     >
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -2639,7 +2646,7 @@ export function WorkspaceExplorer({
                                         </svg>
                                     </button>
                                     <button class="workspace-download" onClick=${handleUploadButtonClick}
-                                        title="Upload files to this folder" disabled=${uploading}>
+                                        title=${t('workspace.uploadToFolder')} disabled=${uploading}>
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                                             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -2648,7 +2655,7 @@ export function WorkspaceExplorer({
                                         </svg>
                                     </button>
                                     <a class="workspace-download" href=${getWorkspaceDownloadUrl(selectedPath, showHidden)} download
-                                        title="Download folder as zip" onClick=${(e) => e.stopPropagation()}>
+                                        title=${t('workspace.downloadZip')} onClick=${(e) => e.stopPropagation()}>
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                                             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -2657,7 +2664,7 @@ export function WorkspaceExplorer({
                                         </svg>
                                     </a>`
                                 : html`<a class="workspace-download" href=${getWorkspaceFileDownloadUrl(selectedPath)} download
-                                        title="Download" onClick=${(e) => e.stopPropagation()}>
+                                        title=${t('workspace.download')} onClick=${(e) => e.stopPropagation()}>
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                                         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>

@@ -22,7 +22,7 @@ interface ProviderModelPricingRule extends ProviderModelPricingReference {
 
 // Tag this reference snapshot with the commit date that introduced it so future
 // updates can track pricing provenance without guessing.
-export const PROVIDER_MODEL_PRICING_REFERENCE_TAG = "2026-05-25";
+export const PROVIDER_MODEL_PRICING_REFERENCE_TAG = "2026-06-24";
 
 const PRIMARY_SOURCE = "exports/ai-provider-pricing-2026-04.docx";
 const GPT4O_FALLBACK_SOURCE = "projects/openviktor/apps/bot/src/agent/pricing.ts";
@@ -70,6 +70,17 @@ const PRICING_RULES: ProviderModelPricingRule[] = [
     cacheReadPerMTok: 0.5,
     cacheWritePerMTok: 6.25,
     notes: "Pricing note says Opus 4.7 matches Opus 4.6 API pricing.",
+  },
+  {
+    id: "claude-opus-4.8",
+    models: ["claude-opus-4.8"],
+    canonicalModel: "Claude Opus 4.8",
+    basis: "Anthropic pricing page (platform.claude.com/docs/en/about-claude/pricing), accessed 2026-06-24",
+    inputPerMTok: 5,
+    outputPerMTok: 25,
+    cacheReadPerMTok: 0.5,
+    cacheWritePerMTok: 6.25,
+    notes: "Same standard rates as Opus 4.7; 5m cache writes $6.25, 1h cache writes $10; Fast mode (research preview) at $10/$50.",
   },
   {
     id: "claude-sonnet-4.6",
@@ -334,6 +345,28 @@ const PRICING_RULES: ProviderModelPricingRule[] = [
     cacheWritePerMTok: 0.4,
     notes: "Older 1M-context MiniMax row retained for historical/router usage; M2.7 is the preferred MiniMax row for new coding comparisons.",
   },
+  {
+    id: "glm-5.2",
+    models: ["glm-5.2", "glm-5p2"],
+    canonicalModel: "GLM 5.2",
+    basis: "Z.AI official pricing page (docs.z.ai/guides/overview/pricing), accessed 2026-06-24",
+    inputPerMTok: 1.4,
+    outputPerMTok: 4.4,
+    cacheReadPerMTok: 0.26,
+    cacheWritePerMTok: 1.4,
+    notes: "Z.AI native PAYG pricing; cached input storage is limited-time free; cache write modeled at standard input rate.",
+  },
+  {
+    id: "glm-5.2-openrouter",
+    models: ["z-ai/glm-5.2"],
+    canonicalModel: "GLM 5.2 (OpenRouter)",
+    basis: "OpenRouter API /api/v1/models, accessed 2026-06-24",
+    inputPerMTok: 0.95,
+    outputPerMTok: 3.0,
+    cacheReadPerMTok: 0.18,
+    cacheWritePerMTok: 0.95,
+    notes: "OpenRouter-routed GLM 5.2; ~32% cheaper than z.ai native pricing; cache write modeled at routed input rate.",
+  },
 ];
 
 function normalizeModel(model: string): string {
@@ -360,6 +393,9 @@ function normalizeModel(model: string): string {
     "minimax-m2p5": "minimax-m2.5",
     "accounts/fireworks/models/minimax-m2p5": "minimax-m2.5",
     "fireworks/minimax-m2p5": "minimax-m2.5",
+    "glm-5p2": "glm-5.2",
+    "zhipu/glm-5.2": "glm-5.2",
+    "z-ai/glm-5.2": "z-ai/glm-5.2",
   };
   return aliasMap[trimmed] || trimmed;
 }

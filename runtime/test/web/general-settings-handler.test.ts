@@ -14,6 +14,8 @@ test('saveGeneralSettings persists and applies general settings immediately', as
     const handler = await importFresh<typeof import('../../src/channels/web/handlers/general-settings.js')>(
       '../src/channels/web/handlers/general-settings.js',
     );
+    const db = await importFresh<typeof import('../../src/db.js')>('../src/db.js');
+    db.initDatabase();
     const config = await import('../../src/core/config.js');
     config.setUserAvatarBackground('');
 
@@ -30,6 +32,7 @@ test('saveGeneralSettings persists and applies general settings immediately', as
       toolUseBudget: 23,
       uiTheme: 'dracula',
       uiTint: '#7c3aed',
+      outputPad: 12,
     });
 
     expect(saved).toMatchObject({
@@ -45,6 +48,7 @@ test('saveGeneralSettings persists and applies general settings immediately', as
       toolUseBudget: 23,
       uiTheme: 'dracula',
       uiTint: '#7c3aed',
+      outputPad: 12,
     });
     expect(saved.instanceTotp.configured).toBe(false);
     expect(handler.getGeneralSettingsData()).toMatchObject(saved);
@@ -101,5 +105,44 @@ test('saveGeneralSettings prepares uploaded avatar data for immediate /avatar se
     expect(response?.headers.get('Cache-Control')).toBe('no-store');
     expect(response?.headers.get('Content-Type')?.startsWith('image/')).toBe(true);
     expect(handler.buildGeneralSettingsProfileUpdate(saved, 'avatar-test').user_avatar).toBe('/avatar/user?v=avatar-test');
+  });
+});
+
+test('saveGeneralSettings accepts uploaded media avatar references', async () => {
+  await withTempWorkspaceEnv('piclaw-general-settings-media-avatar-', {}, async () => {
+    const db = await importFresh<typeof import('../../src/db.js')>('../src/db.js');
+    db.initDatabase();
+    const handler = await importFresh<typeof import('../../src/channels/web/handlers/general-settings.js')>(
+      '../src/channels/web/handlers/general-settings.js',
+    );
+    const avatar = await importFresh<typeof import('../../src/channels/web/media/avatar-service.js')>(
+      '../src/channels/web/media/avatar-service.js',
+    );
+
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn1s3sAAAAASUVORK5CYII=',
+      'base64',
+    );
+    const userMediaId = db.createMedia('user-avatar.png', 'image/png', png, null, { test: true });
+    const agentMediaId = db.createMedia('agent-avatar.png', 'image/png', png, null, { test: true });
+
+    const saved = await handler.saveGeneralSettings({
+      userAvatar: `/media/${userMediaId}`,
+      assistantAvatar: `/media/${agentMediaId}`,
+    });
+
+    expect(saved.userAvatar).toBe(`/media/${userMediaId}`);
+    expect(saved.assistantAvatar).toBe(`/media/${agentMediaId}`);
+    expect(handler.buildGeneralSettingsProfileUpdate(saved, 'media-avatar-test')).toMatchObject({
+      agent_avatar: '/avatar/agent?v=media-avatar-test',
+      user_avatar: '/avatar/user?v=media-avatar-test',
+    });
+
+    const userResponse = await avatar.buildAvatarResponse('user', saved.userAvatar, new Request('http://localhost/avatar/user'));
+    const agentResponse = await avatar.buildAvatarResponse('agent', saved.assistantAvatar, new Request('http://localhost/avatar/agent'));
+    expect(userResponse?.status).toBe(200);
+    expect(agentResponse?.status).toBe(200);
+    expect(userResponse?.headers.get('Content-Type')?.startsWith('image/')).toBe(true);
+    expect(agentResponse?.headers.get('Content-Type')?.startsWith('image/')).toBe(true);
   });
 });

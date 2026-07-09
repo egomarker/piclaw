@@ -4,6 +4,7 @@ import {
   decideAutomaticRecovery,
   DEFAULT_AUTOMATIC_RECOVERY_CONFIG,
   isContextPressureFailure,
+  isLengthStopFailure,
   isNonRecoverableFailure,
   isProviderAuthConfigFailure,
   isTransientFailure,
@@ -79,6 +80,26 @@ test("classifies provider auth/config failures as terminal auth_config", () => {
   expect(refreshDecision.recover).toBe(false);
   expect(refreshDecision.classifier).toBe("auth_config");
   expect(refreshDecision.strategy).toBeNull();
+});
+
+test("classifies output-length stops as terminal length_stop without confusing context length", () => {
+  expect(isLengthStopFailure("Provider stopped because it hit the maximum output length before finalization (finish reason: length).")).toBe(true);
+  expect(isLengthStopFailure("maximum context length exceeded")).toBe(false);
+
+  const decision = decideAutomaticRecovery({
+    config: DEFAULT_AUTOMATIC_RECOVERY_CONFIG,
+    errorText: "Provider stopped because it hit the maximum output length before finalization (finish reason: length). The partial answer was preserved.",
+    recoveryAttemptsUsed: 0,
+    elapsedMs: 1000,
+    snapshot: {
+      hadToolActivity: false,
+      hadPartialOutput: true,
+    },
+  });
+
+  expect(decision.recover).toBe(false);
+  expect(decision.classifier).toBe("length_stop");
+  expect(decision.strategy).toBeNull();
 });
 
 test("classifies invalid-request and aborted failures as non-recoverable", () => {

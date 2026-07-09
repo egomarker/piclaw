@@ -1,4 +1,5 @@
 import { html } from '../vendor/preact-htm.js';
+import { t } from '../utils/i18n.js';
 
 export function OobePanel({
   kind = 'hidden',
@@ -8,23 +9,23 @@ export function OobePanel({
   if (kind === 'hidden') return null;
 
   const isProviderMissing = kind === 'provider-missing';
-  const title = isProviderMissing ? 'Instance needs setup' : 'Instance is configured';
+  const title = isProviderMissing ? t('oobe.needsSetupTitle') : t('oobe.configuredTitle');
   const body = isProviderMissing
-    ? 'This instance is not yet configured. Open Settings and set up AI providers/models to start sending requests.'
-    : 'This instance looks configured. Review or update provider and model settings in Settings.';
+    ? t('oobe.needsSetupBody')
+    : t('oobe.configuredBody');
   return html`
-    <section class=${`oobe-panel oobe-panel-${kind}`} aria-label="Getting started">
+    <section class=${`oobe-panel oobe-panel-${kind}`} aria-label=${t('oobe.gettingStarted')}>
       <div class="oobe-panel-copy">
-        <div class="oobe-panel-eyebrow">Getting started</div>
+        <div class="oobe-panel-eyebrow">${t('oobe.gettingStarted')}</div>
         <h2 class="oobe-panel-title">${title}</h2>
         <p class="oobe-panel-body">${body}</p>
       </div>
       <div class="oobe-panel-actions">
         <button type="button" class="oobe-panel-btn oobe-panel-btn-primary" onClick=${() => onSetupProvider?.()}>
-          Open Settings
+          ${t('oobe.openSettings')}
         </button>
         <button type="button" class="oobe-panel-btn" onClick=${() => onDismiss?.()}>
-          ${isProviderMissing ? 'Dismiss' : 'Done'}
+          ${isProviderMissing ? t('oobe.dismiss') : t('oobe.done')}
         </button>
       </div>
     </section>

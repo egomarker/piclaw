@@ -1,5 +1,6 @@
 import { html, useCallback, useEffect, useMemo, useState } from '../../vendor/preact-htm.js';
 import { getEnvironmentSettings, saveEnvironmentOverride } from '../../api.js';
+import { useTranslation } from '../../utils/i18n.js';
 
 function normalizeEnvironmentSettings(data: Record<string, any> = {}) {
     const environment = data.environmentSettings || data.settings || data.environment || {};
@@ -13,6 +14,7 @@ function normalizeEnvironmentSettings(data: Record<string, any> = {}) {
 }
 
 export function EnvironmentSection({ settingsData, filter = '', setStatus, mergeSettingsData }) {
+    const { t } = useTranslation();
     const [environment, setEnvironment] = useState(() => normalizeEnvironmentSettings(settingsData || {}));
     const [drafts, setDrafts] = useState({});
     const [newName, setNewName] = useState('');
@@ -36,7 +38,7 @@ export function EnvironmentSection({ settingsData, filter = '', setStatus, merge
         try {
             const payload = await getEnvironmentSettings();
             if (payload?.ok) applyPayload(payload.settings);
-            setStatus?.('Environment refreshed.', 'info');
+            setStatus?.(t('settings.environment.refreshedToast'), 'info');
         } catch (error) {
             setStatus?.(String(error?.message || error), 'error');
         }
@@ -49,7 +51,7 @@ export function EnvironmentSection({ settingsData, filter = '', setStatus, merge
         try {
             const payload = await saveEnvironmentOverride({ action: 'set', name: normalizedName, value: String(value ?? '') });
             if (payload?.ok) applyPayload(payload.settings);
-            setStatus?.(`Saved environment override for ${normalizedName}.`, 'info');
+            setStatus?.(t('settings.environment.savedToast', { name: normalizedName }), 'info');
             if (normalizedName === newName.trim()) {
                 setNewName('');
                 setNewValue('');
@@ -68,7 +70,7 @@ export function EnvironmentSection({ settingsData, filter = '', setStatus, merge
         try {
             const payload = await saveEnvironmentOverride({ action: 'clear', name: normalizedName });
             if (payload?.ok) applyPayload(payload.settings);
-            setStatus?.(`Cleared environment override for ${normalizedName}.`, 'info');
+            setStatus?.(t('settings.environment.clearedToast', { name: normalizedName }), 'info');
         } catch (error) {
             setStatus?.(String(error?.message || error), 'error');
         } finally {
@@ -94,16 +96,16 @@ export function EnvironmentSection({ settingsData, filter = '', setStatus, merge
         <div class="settings-section">
             <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px;">
                 <div>
-                    <h3 style="margin-top:0">Environment</h3>
+                    <h3 style="margin-top:0">${t('settings.environment.heading')}</h3>
                     <p class="settings-hint" style="margin-top:4px">
-                        Showing non-keychain environment variables only. Overrides are stored in extension KV and applied to <code>process.env</code>, so subsequent tool calls inherit them.
+                        ${t('settings.environment.introPre')} <code>process.env</code>${t('settings.environment.introPost')}
                     </p>
                 </div>
-                <button type="button" class="settings-secondary-btn" onClick=${refresh}>Refresh</button>
+                <button type="button" class="settings-secondary-btn" onClick=${refresh}>${t('settings.environment.refresh')}</button>
             </div>
 
             <div class="settings-row" style="align-items:flex-start; gap:10px;">
-                <label>Add override</label>
+                <label>${t('settings.environment.addOverride')}</label>
                 <div style="display:grid; grid-template-columns:minmax(180px, 0.7fr) minmax(240px, 1fr) auto; gap:8px; flex:1;">
                     <input
                         type="text"
@@ -115,7 +117,7 @@ export function EnvironmentSection({ settingsData, filter = '', setStatus, merge
                     <input
                         type="text"
                         value=${newValue}
-                        placeholder="value"
+                        placeholder=${t('settings.environment.valuePlaceholder')}
                         spellcheck="false"
                         onInput=${e => setNewValue(e.target.value)}
                     />
@@ -123,12 +125,12 @@ export function EnvironmentSection({ settingsData, filter = '', setStatus, merge
                         type="button"
                         disabled=${!newName.trim() || savingName === newName.trim()}
                         onClick=${() => saveOverride(newName, newValue)}
-                    >Save</button>
+                    >${t('settings.environment.save')}</button>
                 </div>
             </div>
 
             <p class="settings-hint">
-                ${environment.count} variables visible • ${environment.overrideCount} overrides active • ${environment.keychainEnvNames.length} keychain-injected variables hidden
+                ${t('settings.environment.countLine', { count: environment.count, overrides: environment.overrideCount, keychain: environment.keychainEnvNames.length })}
             </p>
 
             <div class="settings-tool-list" style="max-height:58vh; overflow:auto;">
@@ -147,17 +149,17 @@ export function EnvironmentSection({ settingsData, filter = '', setStatus, merge
                                 onInput=${e => setDraft(name, e.target.value)}
                                 style="min-width:0; width:100%; font-family:var(--font-mono, monospace);"
                             />
-                            <span class="settings-tool-kind" title=${row.overridden ? 'Overridden in KV' : 'Inherited from process environment'}>
-                                ${row.overridden ? 'override' : 'process'}
+                            <span class="settings-tool-kind" title=${row.overridden ? t('settings.environment.overridden') : t('settings.environment.inherited')}>
+                                ${row.overridden ? t('settings.environment.kindOverride') : t('settings.environment.kindProcess')}
                             </span>
                             <span style="display:flex; gap:6px; justify-content:flex-end;">
-                                <button type="button" disabled=${saving || !dirty} onClick=${() => saveOverride(name, draft)}>Save</button>
-                                <button type="button" disabled=${saving || !row.overridden} onClick=${() => clearOverride(name)}>Clear</button>
+                                <button type="button" disabled=${saving || !dirty} onClick=${() => saveOverride(name, draft)}>${t('settings.environment.save')}</button>
+                                <button type="button" disabled=${saving || !row.overridden} onClick=${() => clearOverride(name)}>${t('settings.environment.clear')}</button>
                             </span>
                         </div>
                     `;
                 })}
-                ${filteredVariables.length === 0 && html`<p class="settings-hint">No environment variables match "${filter}".</p>`}
+                ${filteredVariables.length === 0 && html`<p class="settings-hint">${t('settings.environment.noMatch', { filter })}</p>`}
             </div>
         </div>
     `;

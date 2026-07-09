@@ -2,7 +2,9 @@
 
 ![PiClaw](docs/icon-256.png)
 
-PiClaw packages the [Pi Coding Agent](https://github.com/badlogic/pi-mono) into a self-hosted workspace with a streaming web UI, persistent state, multi-provider LLM support, and a practical built-in toolset that includes [many add-ons](https://rcarmo.github.io/piclaw-addons/).
+Languages: **English** · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
+
+PiClaw packages the [Pi Coding Agent](https://github.com/badlogic/pi-mono) into a self-hosted workspace with a trilingual streaming web UI, persistent state, multi-provider LLM support, and a practical built-in toolset that includes [many add-ons](https://rcarmo.github.io/piclaw-addons/).
 
 It is for people who want one stateful agent workspace they can run locally or in a container without stitching together half a dozen separate services.
 
@@ -33,7 +35,7 @@ docker run -d \
   ghcr.io/rcarmo/piclaw:latest
 ```
 
-Open `http://localhost:8080` and type `/login` to configure your LLM provider, including custom OpenAI-compatible endpoints when you are not using one of the built-in hosted providers.
+Open `http://localhost:8080` and type `/login` to configure your LLM provider, including custom OpenAI-compatible endpoints when you are not using one of the built-in hosted providers. The web UI currently ships with English, Simplified Chinese, and Japanese strings; use the Settings language switcher when English is not the hill you want to die on today.
 
 > [!TIP]
 > Keep `--init` enabled for `docker run` / `podman run` so the runtime inserts a tiny init process for signal forwarding and zombie reaping. The bundled `docker-compose.yml` now sets the equivalent `init: true` flag.
@@ -69,6 +71,7 @@ PiClaw is single-user, mobile-friendly, and streams updates over SSE.
 | Area | Highlights |
 |---|---|
 | Chat | Thought/draft panels, steering, queued follow-ups, Adaptive Cards, `/btw`, link previews, threaded turns, recovery/timeout chips |
+| Language | English, Simplified Chinese, and Japanese UI strings with a Settings language switcher |
 | Status UX | Tool/intended status stays visible during silence probing, recent activity restores useful context, and tool rows can show compact `x ago` hints in the meta row |
 | Workspace | Sidebar browser, drag-and-drop uploads, file-reference pills, explorer search/reindex status |
 | Editor | CodeMirror 6, search/replace, dirty-state tracking, syntax highlighting, lazy local bundle |
@@ -134,7 +137,7 @@ See [docs/development.md](docs/development.md).
 | Runtime internals | [Architecture](docs/architecture.md), [Runtime flows](docs/runtime-flows.md), [Runtime stream sessions](docs/runtime-stream-sessions.md), [Storage model](docs/storage.md), [Observability](docs/observability.md) |
 | UI extension model | [Web pane extensions](docs/web-pane-extensions.md), [Extension UI contract](docs/extension-ui-contract.md), [Vendored widget libraries](docs/vendored-widget-libraries.md) |
 | Agent capabilities | [Tools and skills](docs/tools-and-skills.md), [Visual artifact generator](docs/visual-artifact-generator.md), [MCP via pi-mcp-adapter](docs/mcp.md), [Keychain](docs/keychain.md) |
-| Other references | [Dream memory system](docs/dream-memory.md), [Web notification delivery policy](docs/web-notification-delivery-policy.md), [iOS PWA reference](docs/PWA.md), [WhatsApp](docs/whatsapp.md), [Cross-instance interop](docs/cross-instance-ipc.md), [Experimental M365 extension](docs/m365-experimental-extension.md), [Development](docs/development.md) |
+| Other references | [Dream memory system](docs/dream-memory.md), [Thinking persistence](docs/thinking-persistence.md), [Web notification delivery policy](docs/web-notification-delivery-policy.md), [iOS PWA reference](docs/PWA.md), [WhatsApp](docs/whatsapp.md), [Cross-instance interop](docs/cross-instance-ipc.md), [Experimental M365 extension](docs/m365-experimental-extension.md), [Development](docs/development.md) |
 | Platform study | [Azure Functions feasibility study](docs/azure/azure-functions-feasibility-study-2026-04-17.md) |
 
 ## Contributing
@@ -145,7 +148,7 @@ Work items and bug reports are tracked in **[GitHub Issues](https://github.com/r
 - [Ask a question](https://github.com/rcarmo/piclaw/issues/new?template=question.md)
 - [View the project board](https://github.com/users/rcarmo/projects/13)
 
-See [WORKITEMS.md](WORKITEMS.md) for board lane definitions and label taxonomy.
+Use the issue templates and project board labels for lane definitions and triage taxonomy.
 
 ## Credits
 

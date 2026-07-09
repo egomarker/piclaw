@@ -14,6 +14,8 @@ import {
     readStoredPwaDisplayScalePercent,
 } from '../ui/pwa-display-scale.js';
 import { getRecentFiles } from '../ui/recent-files.js';
+import { LanguageSwitcher } from './language-switcher.js';
+import { useTranslation } from '../utils/i18n.js';
 
 export function TimelineMenu({
     workspaceOpen,
@@ -23,6 +25,7 @@ export function TimelineMenu({
     onOpenTerminalTab,
     onOpenVncTab,
 }) {
+    const { t } = useTranslation();
     const [open, setOpen] = useState(false);
     const [pwaDisplayScalePercent, setPwaDisplayScalePercent] = useState(() => readStoredPwaDisplayScalePercent());
     const [pwaDisplayScaleDraft, setPwaDisplayScaleDraft] = useState(() => String(readStoredPwaDisplayScalePercent()));
@@ -162,7 +165,7 @@ export function TimelineMenu({
 
     const content = html`
         <button ref=${btnRef} class=${`timeline-menu-btn${open ? ' active' : ''}`} data-testid="hamburger"
-            onClick=${() => setOpen(v => !v)} title="Menu" aria-label="Menu"
+            onClick=${() => setOpen(v => !v)} title=${t('menu.title')} aria-label=${t('menu.title')}
             aria-haspopup="menu" aria-expanded=${open ? 'true' : 'false'}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -174,29 +177,29 @@ export function TimelineMenu({
         ${open && html`
             <div class="workspace-menu-dropdown timeline-menu-dropdown" ref=${menuRef} role="menu">
                 <button class="workspace-menu-item" role="menuitem" onClick=${() => run(toggleWorkspace)}>
-                    ${workspaceOpen ? 'Hide workspace' : 'Show workspace'}
+                    ${workspaceOpen ? t('menu.hideWorkspace') : t('menu.showWorkspace')}
                 </button>
                 ${!workspaceOpen && !chatOnlyMode && html`
                     <button class="workspace-menu-item" role="menuitem" onClick=${() => run(() => { toggleWorkspace(); })}>
-                        Open explorer
+                        ${t('menu.openExplorer')}
                     </button>
                 `}
                 <button class=${`workspace-menu-item${chatOnlyMode ? ' active' : ''}`} role="menuitem" onClick=${() => run(toggleChatOnly)}>
-                    ${chatOnlyMode ? 'Exit chat-only mode' : 'Chat-only mode'}
+                    ${chatOnlyMode ? t('menu.exitChatOnly') : t('menu.chatOnly')}
                 </button>
 
                 ${(onOpenTerminalTab || onOpenVncTab) && html`<div class="workspace-menu-separator"></div>`}
-                ${onOpenTerminalTab && html`<button class="workspace-menu-item" role="menuitem" onClick=${() => run(onOpenTerminalTab)}>Open terminal in tab</button>`}
-                ${onOpenVncTab && html`<button class="workspace-menu-item" role="menuitem" onClick=${() => run(onOpenVncTab)}>Open VNC in tab</button>`}
+                ${onOpenTerminalTab && html`<button class="workspace-menu-item" role="menuitem" onClick=${() => run(onOpenTerminalTab)}>${t('menu.openTerminal')}</button>`}
+                ${onOpenVncTab && html`<button class="workspace-menu-item" role="menuitem" onClick=${() => run(onOpenVncTab)}>${t('menu.openVnc')}</button>`}
 
                 <div class="workspace-menu-separator"></div>
-                <button class="workspace-menu-item" role="menuitem" disabled=${!workspaceOpen} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'new-file' } })))}>New file</button>
+                <button class="workspace-menu-item" role="menuitem" disabled=${!workspaceOpen} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'new-file' } })))}>${t('menu.newFile')}</button>
                 ${(() => {
                     const recent = getRecentFiles();
                     if (recent.length === 0) return null;
                     return html`
                         <div class="workspace-menu-separator"></div>
-                        <div class="workspace-menu-submenu-label">Open Recent</div>
+                        <div class="workspace-menu-submenu-label">${t('menu.openRecent')}</div>
                         ${recent.map((path) => {
                             const label = path.split('/').pop() || path;
                             return html`
@@ -206,18 +209,18 @@ export function TimelineMenu({
                     `;
                 })()}
                 <div class="workspace-menu-separator"></div>
-                <button class="workspace-menu-item" role="menuitem" disabled=${!workspaceOpen} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'refresh' } })))}>Refresh tree</button>
-                <button class="workspace-menu-item" role="menuitem" disabled=${!workspaceOpen} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'reindex' } })))}>Reindex workspace</button>
+                <button class="workspace-menu-item" role="menuitem" disabled=${!workspaceOpen} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'refresh' } })))}>${t('menu.refreshTree')}</button>
+                <button class="workspace-menu-item" role="menuitem" disabled=${!workspaceOpen} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'reindex' } })))}>${t('menu.reindex')}</button>
                 <button class=${`workspace-menu-item${showHidden ? ' active' : ''}`} role="menuitem" disabled=${!workspaceOpen} onClick=${() => run(() => {
                     const next = !showHidden;
                     setShowHidden(next);
                     try { localStorage.setItem('workspaceShowHidden', String(next)); } catch { setShowHidden(next); }
                     window.dispatchEvent(new CustomEvent('piclaw:toggle-hidden-files', { detail: { showHidden: next } }));
                 })}>
-                    ${showHidden ? 'Hide hidden files' : 'Show hidden files'}
+                    ${showHidden ? t('menu.hideHidden') : t('menu.showHidden')}
                 </button>
                 <div class="workspace-menu-scale-control" role="none">
-                    <label for="timeline-pwa-display-scale">Scale</label>
+                    <label for="timeline-pwa-display-scale">${t('menu.scale')}</label>
                     <div class="workspace-menu-scale-input-wrap">
                         <input
                             id="timeline-pwa-display-scale"
@@ -238,7 +241,11 @@ export function TimelineMenu({
                         <span aria-hidden="true">%</span>
                     </div>
                 </div>
-                <button class="workspace-menu-item" role="menuitem" onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:open-settings')))}>Settings</button>
+                <button class="workspace-menu-item" role="menuitem" onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:open-settings')))}>${t('menu.settings')}</button>
+                <div class="workspace-menu-separator"></div>
+                <div class="workspace-menu-language" role="none">
+                    <${LanguageSwitcher} variant="menu" />
+                </div>
             </div>
         `}
     `;

@@ -2584,6 +2584,122 @@ body {
   padding-bottom: 2px;
 }
 
+/* ===== Thinking Visibility Pill ===== */
+.thinking-visibility-pill {
+  margin: 4px 0 8px 0;
+  font-size: 12px;
+}
+
+/* Flex container so the disclosure button and copy button sit inline
+ * (a11y rework split them into siblings so they could be real <button>
+ * elements — nesting buttons is invalid HTML). */
+.thinking-visibility-pill__controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.thinking-visibility-pill__header {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px 3px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-soft, var(--text-secondary, #71767b));
+  background: var(--tint-accent-08, color-mix(in srgb, var(--accent, #58a6ff) 8%, transparent));
+  border: 1px solid var(--tint-accent-15, color-mix(in srgb, var(--accent, #58a6ff) 15%, transparent));
+  font-family: inherit;
+  font-size: 12px;
+  user-select: none;
+  transition: background 0.15s, color 0.15s;
+  /* Button reset: native <button> defaults that don't fit the pill style. */
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.thinking-visibility-pill__header:focus-visible {
+  outline: 2px solid var(--accent, #58a6ff);
+  outline-offset: 2px;
+}
+
+.thinking-visibility-pill__header:hover {
+  background: var(--tint-accent-14, color-mix(in srgb, var(--accent, #58a6ff) 14%, transparent));
+  color: var(--text-primary, #e7e9ea);
+}
+
+.thinking-visibility-pill__toggle {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.thinking-visibility-pill__label {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.thinking-visibility-pill__copy {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 13px;
+  color: var(--text-soft, var(--text-secondary, #71767b));
+  opacity: 0.6;
+  transition: opacity 0.15s;
+  line-height: 1;
+}
+
+.thinking-visibility-pill__copy:hover {
+  opacity: 1;
+}
+
+.thinking-visibility-pill__detail {
+  margin-top: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--bg-code, color-mix(in srgb, var(--accent, #58a6ff) 5%, transparent));
+  border: 1px solid var(--border);
+  color: var(--text-soft, var(--text-secondary, #71767b));
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+  line-height: 1.4;
+  max-height: 400px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.thinking-visibility-pill__content {
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.thinking-visibility-pill__content p {
+  margin: 0.25em 0;
+}
+
+.thinking-visibility-pill__content ol,
+.thinking-visibility-pill__content ul {
+  padding-left: 2em;
+  margin: 0.25em 0;
+  list-style-position: outside;
+}
+
+.thinking-visibility-pill__content pre,
+.thinking-visibility-pill__content code {
+  white-space: pre-wrap;
+}
+
+.thinking-visibility-pill__loading,
+.thinking-visibility-pill__error {
+  font-style: italic;
+  opacity: 0.7;
+}
+
 /* ===== Panel Placeholder ===== */
 .panel-placeholder {
   padding: 12px;

@@ -1,4 +1,5 @@
 import { html, useEffect, useMemo, useRef, useState } from '../vendor/preact-htm.js';
+import { useTranslation } from '../utils/i18n.js';
 import { BodyPortal } from './body-portal.js';
 import { getMediaBlob, getMediaUrl } from '../api.js';
 import { renderMarkdown, renderMermaidDiagrams } from '../markdown.js';
@@ -118,6 +119,7 @@ function buildFrameUrl(mediaId, filename, previewKind) {
 }
 
 export function AttachmentPreviewModal({ mediaId, info, onClose }) {
+    const { t } = useTranslation();
     const filename = info?.filename || `attachment-${mediaId}`;
     const addonPreview = useMemo(() => resolveAddonAttachmentPreview(info?.content_type, filename), [info?.content_type, filename]);
     const previewKind = useMemo(() => getAttachmentPreviewKind(info?.content_type, filename), [info?.content_type, filename]);
@@ -265,11 +267,11 @@ export function AttachmentPreviewModal({ mediaId, info, onClose }) {
                             >
                                 Download
                             </a>
-                            <button class="attachment-preview-close" type="button" onClick=${onClose}>Close</button>
+                            <button class="attachment-preview-close" type="button" onClick=${onClose}>${t('preview.close')}</button>
                         </div>
                     </div>
                     <div class="attachment-preview-body">
-                        ${loading && html`<div class="attachment-preview-state">Loading preview…</div>`}
+                        ${loading && html`<div class="attachment-preview-state">${t('preview.loading')}</div>`}
                         ${!loading && error && html`<div class="attachment-preview-state">${error}</div>`}
                         ${!loading && !error && previewKind === 'image' && html`
                             <img class="attachment-preview-image" src=${getMediaUrl(mediaId)} alt=${filename} />
@@ -320,19 +322,19 @@ export function AttachmentPreviewModal({ mediaId, info, onClose }) {
                             <div class="attachment-preview-archive">
                                 <div class="attachment-preview-archive-summary">
                                     <div class="attachment-preview-archive-card">
-                                        <span class="attachment-preview-archive-card-label">Files</span>
+                                        <span class="attachment-preview-archive-card-label">${t('preview.files')}</span>
                                         <strong class="attachment-preview-archive-card-value">${archivePreview.summary.fileCount}</strong>
                                     </div>
                                     <div class="attachment-preview-archive-card">
-                                        <span class="attachment-preview-archive-card-label">Folders</span>
+                                        <span class="attachment-preview-archive-card-label">${t('preview.folders')}</span>
                                         <strong class="attachment-preview-archive-card-value">${archivePreview.summary.directoryCount}</strong>
                                     </div>
                                     <div class="attachment-preview-archive-card">
-                                        <span class="attachment-preview-archive-card-label">Compressed</span>
+                                        <span class="attachment-preview-archive-card-label">${t('preview.compressed')}</span>
                                         <strong class="attachment-preview-archive-card-value">${formatFileSize(archivePreview.summary.compressedBytes)}</strong>
                                     </div>
                                     <div class="attachment-preview-archive-card">
-                                        <span class="attachment-preview-archive-card-label">Uncompressed</span>
+                                        <span class="attachment-preview-archive-card-label">${t('preview.uncompressed')}</span>
                                         <strong class="attachment-preview-archive-card-value">${formatFileSize(archivePreview.summary.uncompressedBytes)}</strong>
                                     </div>
                                 </div>
@@ -340,11 +342,11 @@ export function AttachmentPreviewModal({ mediaId, info, onClose }) {
                                     <table class="attachment-preview-archive-table">
                                         <thead>
                                             <tr>
-                                                <th>Name</th>
-                                                <th>Type</th>
-                                                <th>Method</th>
-                                                <th>Compressed</th>
-                                                <th>Size</th>
+                                                <th>${t('preview.name')}</th>
+                                                <th>${t('preview.type')}</th>
+                                                <th>${t('preview.method')}</th>
+                                                <th>${t('preview.compressed')}</th>
+                                                <th>${t('preview.size')}</th>
                                             </tr>
                                         </thead>
                                         <tbody>

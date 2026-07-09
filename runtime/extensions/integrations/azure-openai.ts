@@ -191,7 +191,15 @@ export const AZURE_RATE_LIMIT_BACKOFF_MS = 15_000;
 function getHeaderValue(headers: unknown, key: string): string | null {
   if (!headers || typeof headers !== "object") return null;
   const lookup = key.toLowerCase();
-  for (const [headerKey, value] of Object.entries(headers as Record<string, unknown>)) {
+  const getter = (headers as { get?: unknown }).get;
+  if (typeof getter === "function") {
+    const value = getter.call(headers, key) ?? getter.call(headers, lookup);
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  const entries = typeof (headers as { entries?: unknown }).entries === "function"
+    ? Array.from((headers as { entries: () => Iterable<[string, unknown]> }).entries())
+    : Object.entries(headers as Record<string, unknown>);
+  for (const [headerKey, value] of entries) {
     if (headerKey.toLowerCase() !== lookup) continue;
     if (typeof value === "string" && value.trim()) return value.trim();
     if (Array.isArray(value)) {
@@ -212,24 +220,83 @@ export function parseRetryAfterMs(retryAfter: string | null | undefined, nowMs =
   return Math.max(0, absoluteMs - nowMs);
 }
 
+function getErrorStatus(error: unknown): number | null {
+  const err = error as { status?: unknown; response?: { status?: unknown } } | null | undefined;
+  const status = Number(err?.status ?? err?.response?.status);
+  return Number.isFinite(status) ? status : null;
+}
+
+function getErrorHeaders(error: unknown): unknown {
+  const err = error as { headers?: unknown; response?: { headers?: unknown } } | null | undefined;
+  return err?.headers ?? err?.response?.headers;
+}
+
 export function isAzureRetryableRequestError(error: unknown): boolean {
-  const status = error && typeof error === "object" && "status" in error ? Number((error as { status?: unknown }).status) : NaN;
-  if (!Number.isFinite(status)) return false;
+  const status = getErrorStatus(error);
+  if (status === null) return false;
   return status === 408 || status === 409 || status === 425 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
 
 export function resolveAzureRetryDelayMs(options: { attempt: number; error: unknown; nowMs?: number }): number | null {
   if (!isAzureRetryableRequestError(options.error)) return null;
-  const headers = options.error && typeof options.error === "object" && "headers" in options.error
-    ? (options.error as { headers?: unknown }).headers
-    : undefined;
-  const retryAfterMs = parseRetryAfterMs(getHeaderValue(headers, "retry-after"), options.nowMs);
+  const retryAfterMs = parseRetryAfterMs(getHeaderValue(getErrorHeaders(options.error), "retry-after"), options.nowMs);
   if (retryAfterMs !== null) return retryAfterMs;
-  const status = options.error && typeof options.error === "object" && "status" in options.error
-    ? Number((options.error as { status?: unknown }).status)
-    : NaN;
+  const status = getErrorStatus(options.error);
   if (status === 429 || status === 503) return AZURE_RATE_LIMIT_BACKOFF_MS;
   return Math.max(2000, (options.attempt + 1) * 2000);
+}
+
+export function parseAzureDeploymentNameMap(value?: string): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!value) return map;
+  for (const entry of value.split(",")) {
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    const [modelId, deploymentName] = trimmed.split("=", 2).map((part) => part?.trim());
+    if (!modelId || !deploymentName) continue;
+    map.set(modelId, deploymentName);
+  }
+  return map;
+}
+
+export function resolveAzureDeploymentName(modelId: string, mapValue?: string): string {
+  const effectiveMap = mapValue ?? process.env.AOAI_DEPLOYMENT_NAME_MAP ?? process.env.AZURE_OPENAI_DEPLOYMENT_NAME_MAP ?? "";
+  return parseAzureDeploymentNameMap(effectiveMap).get(modelId) || modelId;
+}
+
+export function formatAzureRetryDelay(delayMs: number | null | undefined): string | null {
+  if (typeof delayMs !== "number" || !Number.isFinite(delayMs)) return null;
+  const seconds = Math.max(0, Math.ceil(delayMs / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.ceil(seconds / 60);
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
+function hasRetryAfterHeader(error: unknown): boolean {
+  return getHeaderValue(getErrorHeaders(error), "retry-after") !== null;
+}
+
+function describeAzureModel(modelId: string, deploymentName: string): string {
+  return deploymentName && deploymentName !== modelId
+    ? `model ${modelId} (deployment ${deploymentName})`
+    : `model/deployment ${modelId}`;
+}
+
+export function formatAzureRateLimitMessage(options: {
+  modelId: string;
+  deploymentName: string;
+  retryDelayMs?: number | null;
+  retryAfterHonored?: boolean;
+  exhausted?: boolean;
+  streamingTpm?: boolean;
+}): string {
+  const wait = formatAzureRetryDelay(options.retryDelayMs);
+  const waitPart = wait
+    ? `Wait about ${wait} before retrying${options.retryAfterHonored ? " (from Azure Retry-After)" : ""}.`
+    : "Wait before retrying.";
+  const retryPart = options.exhausted ? "Retry budget exhausted. " : "";
+  const limitKind = options.streamingTpm ? "per-minute token budget" : "rate limit";
+  return `${retryPart}Azure ${limitKind} exceeded for ${describeAzureModel(options.modelId, options.deploymentName)}. ${waitPart} Reduce conversation history or switch to another model.`;
 }
 
 /**
@@ -731,6 +798,37 @@ function logStreamFailureEvent(event: any, requestSummary?: Record<string, unkno
   }
 }
 
+function getAzureErrorPayload(error: unknown): any {
+  const err = error as { response?: any; error?: any } | null | undefined;
+  return err?.response?.data?.error
+    || err?.response?.data
+    || err?.error?.error
+    || err?.error
+    || null;
+}
+
+export function formatAzureOpenAIError(error: unknown): string {
+  if (error instanceof Error && /^(Azure request failed|Azure OpenAI error):/.test(error.message)) {
+    return error.message;
+  }
+
+  const err = error as { message?: string; status?: number; code?: string; type?: string; response?: any } | null | undefined;
+  const payload = getAzureErrorPayload(error);
+  const status = err?.status ?? err?.response?.status ?? payload?.status ?? payload?.statusCode;
+  const code = payload?.code ?? err?.code;
+  const type = payload?.type ?? err?.type;
+  const message = payload?.message
+    ?? payload?.error_description
+    ?? payload?.error
+    ?? err?.message
+    ?? String(error);
+
+  const statusPart = typeof status === "number" && Number.isFinite(status) ? ` (${status})` : "";
+  const meta = [code, type].filter(Boolean).join("/");
+  const metaPart = meta ? ` [${meta}]` : "";
+  return `Azure OpenAI API error${statusPart}${metaPart}: ${message}`;
+}
+
 function logAzureError(modelId: string, error: unknown, requestSummary?: Record<string, unknown>, loggedRef?: { logged: boolean }): void {
   const err = error as { name?: string; message?: string; status?: number; code?: string; type?: string; response?: any; error?: any };
   const details = {
@@ -741,6 +839,7 @@ function logAzureError(modelId: string, error: unknown, requestSummary?: Record<
     type: err?.type,
     response: err?.response?.data,
     error: err?.error,
+    formatted: formatAzureOpenAIError(error),
   };
   console.error(`[azure-openai] Error for ${modelId}:`, JSON.stringify(details));
   if (requestSummary && loggedRef && !loggedRef.logged) {
@@ -1160,8 +1259,10 @@ function streamAzureOpenAIResponses(model: any, context: any, options: any) {
       // and trimming decisions have been applied. Everything above this point
       // mutates the reconstructed history; everything below this point should
       // treat `messages` as the request we intend to send.
+      const deploymentName = resolveAzureDeploymentName(model.id);
+      if (requestSummary) requestSummary.deploymentName = deploymentName;
       const params: Record<string, any> = {
-        model: model.id,
+        model: deploymentName,
         input: messages,
         stream: true,
         store: false,
@@ -1236,13 +1337,40 @@ function streamAzureOpenAIResponses(model: any, context: any, options: any) {
 
       // Retry strategy:
       //   - MAX_RETRIES controls total retry attempts for transient errors.
+      //   - When Azure returns an HTTP retryable error before the stream opens,
+      //     honor Retry-After when present instead of falling straight through
+      //     to an empty final error.
       //   - When a streaming response.failed arrives with error:null (the
       //     signature of Azure token-rate-limit exhaustion), use a longer
       //     backoff (RATE_LIMIT_BACKOFF_MS) because the per-minute token
       //     budget needs time to renew. Short retries only make it worse.
-      //   - Client errors (4xx, invalid_request_error) are never retried.
+      //   - Client errors (4xx except retryable 408/409/425/429, invalid_request_error)
+      //     are never retried.
       const MAX_RETRIES = 2;
       let streamStarted = false;
+
+      const pushRetryNotice = (args: { attempt: number; delayMs: number; rateLimit: boolean; retryAfterHonored?: boolean }) => {
+        if (!streamStarted) return;
+        const wait = formatAzureRetryDelay(args.delayMs) || `${Math.round(args.delayMs / 1000)}s`;
+        const retryMsg = args.rateLimit
+          ? `\n\n> ⚡ Azure rate limit hit for ${describeAzureModel(model.id, deploymentName)} — waiting ${wait} before retry ${args.attempt + 1}/${MAX_RETRIES}${args.retryAfterHonored ? " (Retry-After)" : ""}…`
+          : `\n\n> ⚠️ Azure request failed for ${describeAzureModel(model.id, deploymentName)} — retrying in ${wait} (${args.attempt + 1}/${MAX_RETRIES})…`;
+        const retryContentIndex = output.content.length;
+        output.content.push({ type: "text", text: retryMsg } as any);
+        stream.push({ type: "text_start", contentIndex: retryContentIndex, partial: output });
+        stream.push({ type: "text_delta", contentIndex: retryContentIndex, delta: retryMsg, partial: output });
+        stream.push({ type: "text_end", contentIndex: retryContentIndex, content: retryMsg, partial: output });
+      };
+
+      const createStreamWithAuthRefresh = async () => {
+        try {
+          return await createStream();
+        } catch (error) {
+          if (!isAuthError(error)) throw error;
+          if (!STATIC_API_KEY) await ensureToken(true);
+          return await createStream();
+        }
+      };
 
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         if (options?.signal?.aborted) throw new Error("Request was aborted");
@@ -1253,6 +1381,11 @@ function streamAzureOpenAIResponses(model: any, context: any, options: any) {
         output.stopReason = "stop";
         (output as any).errorMessage = undefined;
         (output as any).reasoning = undefined;
+
+        if (!streamStarted) {
+          stream.push({ type: "start", partial: output });
+          streamStarted = true;
+        }
 
         // Track whether this failure looks like a token-budget exhaustion.
         // Azure surfaces per-minute TPM overruns as response.failed with
@@ -1265,11 +1398,35 @@ function streamAzureOpenAIResponses(model: any, context: any, options: any) {
 
         let openaiStream;
         try {
-          openaiStream = await createStream();
+          openaiStream = await createStreamWithAuthRefresh();
         } catch (error) {
-          if (!isAuthError(error)) throw error;
-          if (!STATIC_API_KEY) await ensureToken(true);
-          openaiStream = await createStream();
+          const delayMs = resolveAzureRetryDelayMs({ attempt, error });
+          if (delayMs === null) throw error;
+          const status = getErrorStatus(error);
+          const retryAfterHonored = hasRetryAfterHeader(error);
+          looksLikeRateLimit = status === 429 || /rate[ -]?limit|too many requests/i.test(formatAzureOpenAIError(error));
+          streamErrorDetail = looksLikeRateLimit
+            ? formatAzureRateLimitMessage({
+                modelId: model.id,
+                deploymentName,
+                retryDelayMs: delayMs,
+                retryAfterHonored,
+                exhausted: attempt >= MAX_RETRIES,
+              })
+            : formatAzureOpenAIError(error);
+
+          if (attempt >= MAX_RETRIES) {
+            const exhaustedDetail = looksLikeRateLimit
+              ? streamErrorDetail
+              : `Retry budget exhausted for ${describeAzureModel(model.id, deploymentName)}. ${streamErrorDetail}`;
+            throw new Error(`Azure OpenAI error: ${exhaustedDetail}`);
+          }
+
+          console.error(`[azure-openai] Attempt ${attempt + 1}/${MAX_RETRIES + 1} failed before stream opened (${streamErrorDetail}), retrying in ${delayMs}ms...`);
+          pushRetryNotice({ attempt, delayMs, rateLimit: looksLikeRateLimit, retryAfterHonored });
+          loggedRef.logged = false;
+          await new Promise((r) => setTimeout(r, delayMs));
+          continue;
         }
 
         const outputPhases = new Map<string, string>();
@@ -1316,10 +1473,6 @@ function streamAzureOpenAIResponses(model: any, context: any, options: any) {
           }
         })();
 
-        if (!streamStarted) {
-          stream.push({ type: "start", partial: output });
-          streamStarted = true;
-        }
         await processResponsesStream(loggingStream, output, stream, model);
         applyPhasesToOutputMessage(output, outputPhases);
 
@@ -1344,9 +1497,15 @@ function streamAzureOpenAIResponses(model: any, context: any, options: any) {
           detail.includes("invalid_request_error");
         if (isClientError || attempt >= MAX_RETRIES) {
           const userDetail = looksLikeRateLimit
-            ? 'Azure rate limit exceeded — the model\'s per-minute token budget was exhausted. Try again in a minute, or reduce conversation history.'
+            ? formatAzureRateLimitMessage({
+                modelId: model.id,
+                deploymentName,
+                retryDelayMs: AZURE_RATE_LIMIT_BACKOFF_MS,
+                exhausted: true,
+                streamingTpm: true,
+              })
             : detail;
-          throw new Error(`Azure request failed: ${userDetail}`);
+          throw new Error(`Azure OpenAI error: ${userDetail}`);
         }
 
         // Use a longer delay for suspected rate-limit failures so the
@@ -1362,17 +1521,7 @@ function streamAzureOpenAIResponses(model: any, context: any, options: any) {
         // silent streaming failure shape looks like the model simply stalled.
         // The text block is intentionally transient and is cleared when the
         // retry resets output.content on the next attempt.
-        if (streamStarted) {
-          const delaySec = Math.round(delayMs / 1000);
-          const retryMsg = looksLikeRateLimit
-            ? `\n\n> ⚡ Azure rate limit hit — waiting ${delaySec}s before retry ${attempt + 1}/${MAX_RETRIES}\u2026`
-            : `\n\n> ⚠️ Request failed — retrying in ${delaySec}s (${attempt + 1}/${MAX_RETRIES})\u2026`;
-          const retryContentIndex = output.content.length;
-          output.content.push({ type: "text", text: retryMsg } as any);
-          stream.push({ type: "text_start", contentIndex: retryContentIndex, partial: output });
-          stream.push({ type: "text_delta", contentIndex: retryContentIndex, delta: retryMsg, partial: output });
-          stream.push({ type: "text_end", contentIndex: retryContentIndex, content: retryMsg, partial: output });
-        }
+        pushRetryNotice({ attempt, delayMs, rateLimit: looksLikeRateLimit });
 
         loggedRef.logged = false;
         await new Promise((r) => setTimeout(r, delayMs));
@@ -1384,9 +1533,12 @@ function streamAzureOpenAIResponses(model: any, context: any, options: any) {
       logAzureError(model.id, error, requestSummary, loggedRef);
       for (const block of output.content) delete (block as any).index;
       output.stopReason = options?.signal?.aborted ? "aborted" : "error";
-      // Prefer the stream-level error detail over the generic thrown message.
-      const rawMsg = error instanceof Error ? error.message : JSON.stringify(error);
-      output.errorMessage = streamErrorDetail || rawMsg;
+      // Prefer explicit user-facing Azure errors over low-level stream details;
+      // otherwise keep the stream-level diagnostic when available.
+      const formattedError = formatAzureOpenAIError(error);
+      output.errorMessage = /^(Azure request failed|Azure OpenAI error):/.test(formattedError)
+        ? formattedError
+        : streamErrorDetail || formattedError;
       stream.push({ type: "error", reason: output.stopReason, error: output });
       stream.end();
     }
@@ -1398,7 +1550,7 @@ function streamAzureOpenAIResponses(model: any, context: any, options: any) {
 // Thin adapter that converts pi-ai simple-stream options into the richer Azure
 // Responses wrapper above. Keep policy in streamAzureOpenAIResponses, not here.
 function streamSimpleAzureOpenAIResponses(model: any, context: any, options: any) {
-  const base = buildBaseOptions(model, options, options?.apiKey);
+  const base = buildBaseOptions(model, context, options, options?.apiKey);
   const reasoningEffort = getSupportedThinkingLevels(model).includes("xhigh") ? options?.reasoning : clampReasoning(options?.reasoning);
 
   return streamAzureOpenAIResponses(model, context, {

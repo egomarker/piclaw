@@ -77,6 +77,8 @@ export interface ScheduledTask {
   cwd?: string | null;
   /** Optional timeout (seconds) for shell commands. */
   timeout_sec?: number | null;
+  /** Whether successful task output should trigger a Pushover nudge. */
+  notify_on_complete?: number | boolean | null;
   /** How the task recurs: cron expression, fixed interval, or one-shot. */
   schedule_type: "cron" | "interval" | "once";
   /** The cron expression, interval duration, or ISO date for one-shot tasks. */

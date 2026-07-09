@@ -30,6 +30,7 @@ let _settingsDataCache: Record<string, unknown> | null = null;
 
 perf('module-eval-start');
 import { html, useState, useEffect, useCallback, useRef } from '../vendor/preact-htm.js';
+import { useTranslation } from '../utils/i18n.js';
 import { BodyPortal } from './body-portal.js';
 import { compareSettingsPanesAlphabetically, getRegisteredSettingsPanes } from './settings/pane-registry.js';
 import { consumeRequestedSettingsOpenState, normalizeSettingsSectionId, peekRequestedSettingsSection, requestOpenSettingsDialog } from './settings-dialog-events.js';
@@ -155,6 +156,11 @@ export function SettingsDialogContent({ onClose }) {
     const [layoutMode, setLayoutMode] = useState({ compact: false, narrow: false });
     const filterRef = useRef(null);
     const dialogRef = useRef(null);
+    const { t } = useTranslation();
+    const sectionLabel = (s) => (s?.isExtension ? s.label : t(`settings.section.${s.id}` as any));
+    const sectionPlaceholder = (s) => (s?.isExtension
+        ? (s.placeholder || t('settings.filter'))
+        : t(`settings.placeholder.${s.id}` as any));
 
     useEffect(() => {
         perf('SettingsDialogContent-mounted');
@@ -297,7 +303,7 @@ export function SettingsDialogContent({ onClose }) {
 
         const Comp = builtinSectionComponents[activeSection];
         if (!Comp || loadingSectionId === activeSection) {
-            return renderSectionLoading(`Loading ${activeMeta?.label || 'settings'}…`);
+            return renderSectionLoading(`${t('settings.loading')}`);
         }
 
         switch (activeSection) {
@@ -316,7 +322,7 @@ export function SettingsDialogContent({ onClose }) {
             case 'keychain': return html`<${Comp} filter=${filter} />`;
             case 'tools': return html`<${Comp} toolsets=${settingsData?.toolsets} filter=${filter} settingsData=${settingsData} mergeSettingsData=${mergeSettingsData} />`;
             case 'addons': return html`<${Comp} setStatus=${setStatus} filter=${filter} />`;
-            default: return renderSectionLoading('Loading settings…');
+            default: return renderSectionLoading(t('settings.loading'));
         }
     };
 
@@ -327,13 +333,13 @@ export function SettingsDialogContent({ onClose }) {
         <div class="settings-dialog-backdrop" onClick=${(e) => { if (e.target === e.currentTarget) onClose(); }}>
             <div ref=${dialogRef} data-testid="settings-dialog" class=${`settings-dialog${layoutMode.compact ? ' settings-dialog-compact' : ''}${layoutMode.narrow ? ' settings-dialog-narrow' : ''}`}>
                 <div class="settings-dialog-header">
-                    <span class="settings-dialog-title">Settings</span>
+                    <span class="settings-dialog-title">${t('settings.title')}</span>
                     ${activeMeta?.searchable && html`
                         <input ref=${filterRef} type="text" class="settings-header-filter"
-                            placeholder=${activeMeta.placeholder || 'Filter…'}
+                            placeholder=${sectionPlaceholder(activeMeta)}
                             value=${filter} onInput=${e => setFilter(e.target.value)} />
                     `}
-                    <button class="settings-dialog-close" onClick=${onClose} title="Close (Esc)">✕</button>
+                    <button class="settings-dialog-close" onClick=${onClose} title=${t('settings.close')}>✕</button>
                 </div>
                 <div class="settings-dialog-body">
                     <nav class="settings-nav">
@@ -344,13 +350,13 @@ export function SettingsDialogContent({ onClose }) {
                                 ${showSep && html`<div class="settings-nav-separator"></div>`}
                                 <button class=${`settings-nav-item ${s.id === activeSection ? 'active' : ''}`} onClick=${() => switchSection(s.id)}>
                                     <span class="settings-nav-icon">${s.icon}</span>
-                                    <span class="settings-nav-label">${s.label}</span>
+                                    <span class="settings-nav-label">${sectionLabel(s)}</span>
                                 </button>
                             `;
                         })}
                     </nav>
                     <main class="settings-content">
-                        ${showRootLoading ? renderSectionLoading('Loading settings…') : renderSection()}
+                        ${showRootLoading ? renderSectionLoading(t('settings.loading')) : renderSection()}
                     </main>
                 </div>
                 ${statusMessage && html`

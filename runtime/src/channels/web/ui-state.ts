@@ -12,10 +12,15 @@ import { extensionKvGet, extensionKvSet } from "../../db.js";
 const UI_EXTENSION_ID = "piclaw-ui";
 const THEME_KEY = "theme";
 const METERS_KEY = "meters";
+const OUTPUT_PAD_KEY = "output-pad";
 
 export interface ServerUiThemeConfig {
   theme: string;
   tint: string | null;
+}
+
+export interface ServerUiOutputConfig {
+  outputPad: number;
 }
 
 export interface ServerUiMetersConfig {
@@ -48,6 +53,18 @@ function normalizeMetersConfig(value: unknown, fallback: ServerUiMetersConfig): 
     enabled: typeof record.enabled === "boolean" ? record.enabled : fallback.enabled,
     collapsed: typeof record.collapsed === "boolean" ? record.collapsed : fallback.collapsed,
   };
+}
+
+function normalizeOutputPad(value: unknown, fallback = 0): number {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(24, Math.max(0, Math.round(parsed)));
+}
+
+function normalizeOutputConfig(value: unknown, fallback: ServerUiOutputConfig): ServerUiOutputConfig {
+  if (!value || typeof value !== "object") return fallback;
+  const record = value as Record<string, unknown>;
+  return { outputPad: normalizeOutputPad(record.outputPad ?? record.output_pad, fallback.outputPad) };
 }
 
 function kvGet<T>(key: string): T | null {
@@ -94,6 +111,17 @@ export function getServerUiMetersConfig(): ServerUiMetersConfig {
   return normalizeMetersConfig(kvGet<unknown>(METERS_KEY), { enabled: false, collapsed: false });
 }
 
+export function getServerUiOutputConfig(): ServerUiOutputConfig {
+  return normalizeOutputConfig(kvGet<unknown>(OUTPUT_PAD_KEY), { outputPad: 0 });
+}
+
+export function setServerUiOutputConfig(patch: { outputPad?: number }): ServerUiOutputConfig {
+  const current = getServerUiOutputConfig();
+  const next = { outputPad: patch.outputPad !== undefined ? normalizeOutputPad(patch.outputPad, current.outputPad) : current.outputPad };
+  kvSet(OUTPUT_PAD_KEY, next);
+  return next;
+}
+
 export function setServerUiMetersConfig(patch: Partial<ServerUiMetersConfig>): ServerUiMetersConfig {
   const current = getServerUiMetersConfig();
   const next: ServerUiMetersConfig = {
@@ -104,9 +132,10 @@ export function setServerUiMetersConfig(patch: Partial<ServerUiMetersConfig>): S
   return next;
 }
 
-export function getServerUiState(): { ui_theme: ServerUiThemeConfig; ui_meters: ServerUiMetersConfig } {
+export function getServerUiState(): { ui_theme: ServerUiThemeConfig; ui_meters: ServerUiMetersConfig; ui_output: ServerUiOutputConfig } {
   return {
     ui_theme: getServerUiThemeConfig(),
     ui_meters: getServerUiMetersConfig(),
+    ui_output: getServerUiOutputConfig(),
   };
 }

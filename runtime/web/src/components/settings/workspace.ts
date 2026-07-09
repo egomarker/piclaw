@@ -5,6 +5,7 @@ import {
     readWorkspaceClientSettings,
 } from '../../ui/workspace-settings.js';
 import { NumberStepper } from './number-stepper.js';
+import { useTranslation } from '../../utils/i18n.js';
 
 function normalizeWorkspaceSettings(data: Record<string, any> = {}) {
     const workspace = data.workspaceSettings || {};
@@ -17,6 +18,7 @@ function normalizeWorkspaceSettings(data: Record<string, any> = {}) {
 }
 
 export function WorkspaceSection({ settingsData, setStatus, mergeSettingsData }) {
+    const { t } = useTranslation();
     const [webTerminalEnabled, setWebTerminalEnabled] = useState(true);
     const [vncAllowDirect, setVncAllowDirect] = useState(true);
     const [treeMaxDepth, setTreeMaxDepth] = useState(4);
@@ -108,31 +110,31 @@ export function WorkspaceSection({ settingsData, setStatus, mergeSettingsData })
         <div class="settings-section">
             ${serverAppliedHint && html`
                 <div class="settings-general-applied-notice" role="status" aria-live="polite">
-                    Workspace settings applied. Server-side limits affect new workspace requests immediately.
+                    ${t('settings.workspace.serverApplied')}
                 </div>
             `}
             ${browserAppliedHint && html`
                 <div class="settings-general-applied-notice" role="status" aria-live="polite">
-                    Browser workspace settings applied immediately in this tab.
+                    ${t('settings.workspace.browserApplied')}
                 </div>
             `}
 
-            <h3>Access</h3>
+            <h3>${t('settings.workspace.access')}</h3>
             <div class="settings-row">
-                <label>Enable web terminal</label>
+                <label>${t('settings.workspace.enableTerminal')}</label>
                 <input type="checkbox" checked=${webTerminalEnabled} onChange=${e => setWebTerminalEnabled(e.target.checked)} />
             </div>
             <div class="settings-row">
-                <label>Allow direct VNC targets</label>
+                <label>${t('settings.workspace.allowVnc')}</label>
                 <input type="checkbox" checked=${vncAllowDirect} onChange=${e => setVncAllowDirect(e.target.checked)} />
             </div>
-            <p class="settings-hint">Terminal access updates immediately. Direct VNC target policy applies to new VNC requests.</p>
+            <p class="settings-hint">${t('settings.workspace.accessHint')}</p>
 
-            <h3 style="margin-top:20px">Server scan guardrails</h3>
+            <h3 style="margin-top:20px">${t('settings.workspace.guardrails')}</h3>
             <div class="settings-row">
-                <label>Max tree depth</label>
+                <label>${t('settings.workspace.maxDepth')}</label>
                 <${NumberStepper}
-                    label="workspace tree max depth"
+                    label=${t('settings.workspace.maxDepthAria')}
                     value=${treeMaxDepth}
                     min=${1}
                     max=${8}
@@ -140,12 +142,12 @@ export function WorkspaceSection({ settingsData, setStatus, mergeSettingsData })
                     width="80px"
                     onChange=${setTreeMaxDepth}
                 />
-                <span class="settings-hint" style="margin:0">caps all <code>/workspace/tree</code> requests</span>
+                <span class="settings-hint" style="margin:0">${t('settings.workspace.maxDepthHintPre')} <code>/workspace/tree</code> ${t('settings.workspace.maxDepthHintPost')}</span>
             </div>
             <div class="settings-row">
-                <label>Max entries per scan</label>
+                <label>${t('settings.workspace.maxEntries')}</label>
                 <${NumberStepper}
-                    label="workspace tree max entries"
+                    label=${t('settings.workspace.maxEntriesAria')}
                     value=${treeMaxEntries}
                     min=${250}
                     max=${5000}
@@ -154,14 +156,14 @@ export function WorkspaceSection({ settingsData, setStatus, mergeSettingsData })
                     width="92px"
                     onChange=${setTreeMaxEntries}
                 />
-                <span class="settings-hint" style="margin:0">truncate oversized tree walks earlier</span>
+                <span class="settings-hint" style="margin:0">${t('settings.workspace.maxEntriesHint')}</span>
             </div>
 
-            <h3 style="margin-top:20px">This browser</h3>
+            <h3 style="margin-top:20px">${t('settings.workspace.thisBrowser')}</h3>
             <div class="settings-row">
-                <label>Refresh interval (seconds)</label>
+                <label>${t('settings.workspace.refreshInterval')}</label>
                 <${NumberStepper}
-                    label="workspace refresh interval"
+                    label=${t('settings.workspace.refreshIntervalAria')}
                     value=${refreshIntervalSec}
                     min=${15}
                     max=${300}
@@ -172,9 +174,9 @@ export function WorkspaceSection({ settingsData, setStatus, mergeSettingsData })
                 />
             </div>
             <div class="settings-row">
-                <label>Folder preview scan depth</label>
+                <label>${t('settings.workspace.folderDepth')}</label>
                 <${NumberStepper}
-                    label="folder preview scan depth"
+                    label=${t('settings.workspace.folderDepthAria')}
                     value=${folderPreviewDepth}
                     min=${0}
                     max=${8}
@@ -182,9 +184,9 @@ export function WorkspaceSection({ settingsData, setStatus, mergeSettingsData })
                     width="80px"
                     onChange=${(value) => applyBrowserPatch({ folderPreviewDepth: value })}
                 />
-                <span class="settings-hint" style="margin:0">set to <code>0</code> to disable folder size preview scans</span>
+                <span class="settings-hint" style="margin:0">${t('settings.workspace.folderDepthHintPre')} <code>0</code> ${t('settings.workspace.folderDepthHintPost')}</span>
             </div>
-            <p class="settings-hint">Root and folder-expansion tree loads remain shallow; the folder size preview is the deepest workspace scan in the UI.</p>
+            <p class="settings-hint">${t('settings.workspace.footerHint')}</p>
         </div>
     `;
 }

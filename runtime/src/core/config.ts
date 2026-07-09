@@ -85,6 +85,8 @@ const envConfig = readEnvFile([
   "PICLAW_WEB_COMPOSE_UPLOAD_LIMIT_MB",
   "PICLAW_WEB_WORKSPACE_UPLOAD_LIMIT_MB",
   "PICLAW_WEB_NOTIFICATION_DEBUG_LABELS",
+  "PICLAW_WEB_PERSIST_THINKING",
+  "PICLAW_WEB_PERSIST_THINKING_MAX_CHARS",
   "PICLAW_WEB_VNC_ALLOW_DIRECT",
   "PICLAW_VNC_ALLOW_DIRECT",
   "PICLAW_WEB_VNC_TARGETS",
@@ -664,6 +666,30 @@ export function getWebRuntimeConfig(): Readonly<WebRuntimeConfig> {
   return WEB_RUNTIME_CONFIG;
 }
 
+export function isPersistThinkingEnabled(): boolean {
+  const envOverride = pickBoolean({
+    PICLAW_WEB_PERSIST_THINKING: process.env.PICLAW_WEB_PERSIST_THINKING
+      ?? envConfig.PICLAW_WEB_PERSIST_THINKING,
+  }, ["PICLAW_WEB_PERSIST_THINKING"]);
+  const configValue =
+    pickBoolean(webConfig, ["persistThinking", "persist_thinking", "PICLAW_WEB_PERSIST_THINKING"])
+    ?? pickBoolean(piclawConfig, ["webPersistThinking"]);
+  return envOverride ?? configValue ?? false;
+}
+
+export function getPersistThinkingMaxChars(): number {
+  const envOverride = pickNumber({
+    PICLAW_WEB_PERSIST_THINKING_MAX_CHARS:
+      process.env.PICLAW_WEB_PERSIST_THINKING_MAX_CHARS
+      ?? envConfig.PICLAW_WEB_PERSIST_THINKING_MAX_CHARS,
+  }, ["PICLAW_WEB_PERSIST_THINKING_MAX_CHARS"]);
+  const configValue =
+    pickNumber(webConfig, ["persistThinkingMaxChars", "persist_thinking_max_chars", "PICLAW_WEB_PERSIST_THINKING_MAX_CHARS"])
+    ?? pickNumber(piclawConfig, ["webPersistThinkingMaxChars"]);
+  const value = envOverride ?? configValue ?? 100000;
+  return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 100000;
+}
+
 /** Persist and apply the web terminal toggle so new requests see it immediately. */
 export function setWebTerminalEnabled(enabled: boolean): boolean {
   const nextEnabled = Boolean(enabled);
@@ -928,6 +954,7 @@ const PROGRESS_WATCHDOG_TIMEOUT_CONFIG_KEYS = [
 const configProgressWatchdogEnabled = pickBoolean(compactionConfig, PROGRESS_WATCHDOG_ENABLED_CONFIG_KEYS);
 const configProgressWatchdogTimeoutMs = pickNumber(compactionConfig, PROGRESS_WATCHDOG_TIMEOUT_CONFIG_KEYS);
 const configCompactionThresholdPercent = pickNumber(compactionConfig, ["thresholdPercent", "threshold_percent", "PICLAW_COMPACTION_THRESHOLD_PERCENT"]);
+const configCompactionMaxThresholdTokens = pickNumber(compactionConfig, ["maxThresholdTokens", "max_threshold_tokens", "compactionMaxThresholdTokens", "PICLAW_COMPACTION_MAX_THRESHOLD_TOKENS"]);
 const configAutoCompactionScope = pickString(compactionConfig, ["autoCompactionScope", "auto_compaction_scope", "autoCompactScope", "PICLAW_AUTO_COMPACTION_SCOPE"]);
 const configCompactionHardCeilingPercent = pickNumber(compactionConfig, ["hardCeilingPercent", "hard_ceiling_percent", "compactionHardCeilingPercent", "PICLAW_COMPACTION_HARD_CEILING_PERCENT"]);
 const configCompactionWarningThreshold = pickNumber(compactionConfig, ["warningThreshold", "warning_threshold", "repeatedWarningThreshold", "PICLAW_COMPACTION_WARNING_THRESHOLD"]);
@@ -1039,6 +1066,8 @@ export interface CompactionRuntimeConfig {
   progressWatchdogTimeoutMs: number;
   /** Context utilization % at which auto-compaction triggers (0-100). Default 75. */
   thresholdPercent: number;
+  /** Absolute cap for auto-compaction threshold tokens. 0 disables. Default 240k. */
+  maxThresholdTokens: number;
   /** Token-accounting scope for auto-compaction threshold checks. Default total. */
   autoCompactionScope: AutoCompactionScope;
   /** Full-window utilization % that always triggers compaction even for scoped growth. Default 100. */
@@ -1514,6 +1543,14 @@ const DEFAULT_COMPACTION_TIMEOUT_MS = 300_000;
 const DEFAULT_COMPACTION_BACKOFF_BASE_MS = 15 * 60_000;
 const DEFAULT_COMPACTION_BACKOFF_MAX_MS = 6 * 60 * 60_000;
 const DEFAULT_PROGRESS_WATCHDOG_TIMEOUT_MS = 120_000;
+const DEFAULT_COMPACTION_MAX_THRESHOLD_TOKENS = 240_000;
+
+function parseOptionalNonNegativeInt(value: unknown, fallback: number): number {
+  if (value === undefined || value === null || String(value).trim() === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return Math.max(0, Math.round(parsed));
+}
 
 function resolveDefaultProgressWatchdogEnabled(): boolean {
   if (envProgressWatchdogEnabled !== undefined) return envProgressWatchdogEnabled;
@@ -1539,6 +1576,7 @@ let COMPACTION_RUNTIME_CONFIG: CompactionRuntimeConfig = Object.seal({
     : DEFAULT_PROGRESS_WATCHDOG_TIMEOUT_MS,
   thresholdPercent: typeof configCompactionThresholdPercent === "number" && configCompactionThresholdPercent > 0 && configCompactionThresholdPercent <= 100
     ? configCompactionThresholdPercent : 75,
+  maxThresholdTokens: parseOptionalNonNegativeInt(configCompactionMaxThresholdTokens, DEFAULT_COMPACTION_MAX_THRESHOLD_TOKENS),
   autoCompactionScope: normalizeAutoCompactionScope(
     process.env.PICLAW_AUTO_COMPACTION_SCOPE ?? envConfig.PICLAW_AUTO_COMPACTION_SCOPE ?? configAutoCompactionScope,
     "total",
@@ -1607,6 +1645,10 @@ export function getCompactionRuntimeConfig(): Readonly<CompactionRuntimeConfig> 
         ? parsed
         : COMPACTION_RUNTIME_CONFIG.thresholdPercent;
     })(),
+    maxThresholdTokens: parseOptionalNonNegativeInt(
+      process.env.PICLAW_COMPACTION_MAX_THRESHOLD_TOKENS ?? envConfig.PICLAW_COMPACTION_MAX_THRESHOLD_TOKENS,
+      COMPACTION_RUNTIME_CONFIG.maxThresholdTokens,
+    ),
     autoCompactionScope: normalizeAutoCompactionScope(
       process.env.PICLAW_AUTO_COMPACTION_SCOPE ?? envConfig.PICLAW_AUTO_COMPACTION_SCOPE,
       COMPACTION_RUNTIME_CONFIG.autoCompactionScope,
@@ -1635,6 +1677,7 @@ export function setCompactionRuntimeConfig(patch: {
   progressWatchdogEnabled?: boolean;
   progressWatchdogTimeoutMs?: number;
   thresholdPercent?: number;
+  maxThresholdTokens?: number;
   autoCompactionScope?: AutoCompactionScope;
   hardCeilingPercent?: number;
   warningThreshold?: number;
@@ -1654,6 +1697,9 @@ export function setCompactionRuntimeConfig(patch: {
     thresholdPercent: typeof patch.thresholdPercent === "number" && patch.thresholdPercent > 0 && patch.thresholdPercent <= 100
       ? patch.thresholdPercent
       : current.thresholdPercent,
+    maxThresholdTokens: patch.maxThresholdTokens === undefined
+      ? current.maxThresholdTokens
+      : parseOptionalNonNegativeInt(patch.maxThresholdTokens, current.maxThresholdTokens),
     autoCompactionScope: patch.autoCompactionScope === undefined
       ? current.autoCompactionScope
       : normalizeAutoCompactionScope(patch.autoCompactionScope, current.autoCompactionScope),
@@ -1696,6 +1742,10 @@ export function setCompactionRuntimeConfig(patch: {
     "thresholdPercent",
     "threshold_percent",
     "PICLAW_COMPACTION_THRESHOLD_PERCENT",
+    "maxThresholdTokens",
+    "max_threshold_tokens",
+    "compactionMaxThresholdTokens",
+    "PICLAW_COMPACTION_MAX_THRESHOLD_TOKENS",
     "autoCompactionScope",
     "auto_compaction_scope",
     "autoCompactScope",
@@ -1727,6 +1777,7 @@ export function setCompactionRuntimeConfig(patch: {
   compaction.progressWatchdogEnabled = next.progressWatchdogEnabled;
   compaction.progressWatchdogTimeoutMs = next.progressWatchdogTimeoutMs;
   compaction.thresholdPercent = next.thresholdPercent;
+  compaction.maxThresholdTokens = next.maxThresholdTokens;
   compaction.autoCompactionScope = next.autoCompactionScope;
   compaction.hardCeilingPercent = next.hardCeilingPercent;
   compaction.warningThreshold = next.warningThreshold;
@@ -1740,6 +1791,7 @@ export function setCompactionRuntimeConfig(patch: {
   process.env.PICLAW_PROGRESS_WATCHDOG_ENABLED = next.progressWatchdogEnabled ? "1" : "0";
   process.env.PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS = String(next.progressWatchdogTimeoutMs);
   process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT = String(next.thresholdPercent);
+  process.env.PICLAW_COMPACTION_MAX_THRESHOLD_TOKENS = String(next.maxThresholdTokens);
   process.env.PICLAW_AUTO_COMPACTION_SCOPE = next.autoCompactionScope;
   process.env.PICLAW_COMPACTION_HARD_CEILING_PERCENT = String(next.hardCeilingPercent);
   process.env.PICLAW_COMPACTION_WARNING_THRESHOLD = String(next.warningThreshold);

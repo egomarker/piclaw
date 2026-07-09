@@ -40,6 +40,8 @@ config files, secrets, authentication, and notifications.
 | `PICLAW_WEB_VNC_TARGETS` | _(empty)_ | JSON allowlist for VNC targets (or use `PICLAW_VNC_TARGETS`). Supports array or object form. |
 | `PICLAW_WEB_VNC_ALLOW_DIRECT` | `1` on Linux/macOS/Windows | Allow or disable direct VNC targets supplied at runtime (`PICLAW_VNC_ALLOW_DIRECT` alias) |
 | `PICLAW_WEB_NOTIFICATION_DEBUG_LABELS` | `0` | Append `[Local]` / `[Web Push]` markers to notification titles for delivery debugging |
+| `PICLAW_WEB_PERSIST_THINKING` | `0` | Persist agent reasoning traces into the database so they survive page reloads. See [thinking-persistence.md](thinking-persistence.md) for privacy implications. |
+| `PICLAW_WEB_PERSIST_THINKING_MAX_CHARS` | `100000` | Per-turn cap on persisted thinking text (UTF-16 surrogate-safe). |
 | `PICLAW_WEB_TLS_CERT` | _(empty)_ | Path to TLS certificate; enables HTTPS |
 | `PICLAW_WEB_TLS_KEY` | _(empty)_ | Path to TLS private key; enables HTTPS |
 | `PICLAW_WEB_MAX_CONTENT_CHARS` | `262144` | Max message size in characters; oversized messages are truncated with metadata |
