@@ -88,7 +88,7 @@ test("telegram config reads env overrides", () => {
   expect(maskTelegramBotToken("1234567890")).toBe("1234…7890");
 });
 
-test("telegram addon allowlist includes model control command", async () => {
+test("telegram addon allowlist includes model and quota control commands", async () => {
   const manifest = await Bun.file(new URL("../../../addons/telegram/package.json", import.meta.url)).json() as {
     pi?: {
       runtime?: {
@@ -99,6 +99,7 @@ test("telegram addon allowlist includes model control command", async () => {
   const allowedCommands = manifest.pi?.runtime?.nonWebCommandPolicies?.flatMap((policy) => policy.allowedCommands || []) || [];
 
   expect(allowedCommands).toContain("model");
+  expect(allowedCommands).toContain("quota");
 });
 
 test("telegram classifier retries unknown transport failures and only stops for explicit auth/config failures", () => {

@@ -43,6 +43,7 @@
             "export-html",
             "last",
             "model",
+            "quota",
             "restart",
             "scheduled",
             "session-rotate",
