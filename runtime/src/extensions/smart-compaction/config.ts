@@ -5,7 +5,7 @@
  * ../smart-compaction.ts.
  */
 
-import { getSystemPromptOverheadTokens, getUnknownModelContextWindow } from "../../utils/context-window-budget.js";
+import { getUnknownModelContextWindow } from "../../utils/context-window-budget.js";
 
 // ---------------------------------------------------------------------------
 // Env helpers (must precede constant definitions that reference them)
@@ -60,11 +60,7 @@ export function getConfiguredCompactionReasoningEffort(phase: CompactionReasonin
 // Configuration
 // ---------------------------------------------------------------------------
 
-/** Minimum message count before selective extraction kicks in.
- *  Below this the built-in full-pass is fine. */
-export const SELECTIVE_THRESHOLD = 40;
-
-/** Hard cap on chars fed to the LLM prompt. */
+/** Default cap on progressive prompt chars; an explicit operator env override may raise it. */
 export const MAX_PROMPT_CHARS = 60_000;
 
 /** Per-tool-result truncation limit when serializing. */
@@ -89,14 +85,6 @@ export const USER_PREVIEW_MAX_CHARS = 300;
 /** Minimum acceptable summary length (chars). */
 export const MIN_SUMMARY_CHARS = 100;
 
-/**
- * Absolute prompt-token ceiling for falling through to the upstream full-pass
- * compactor. Some provider sandboxes advertise very large model context windows
- * but enforce lower prompt-token limits for summarization requests; above this
- * ceiling, use Piclaw progressive chunking instead of risking a full-pass 400.
- */
-export const FULL_PASS_FALLBACK_MAX_PROMPT_TOKENS = parsePositiveEnvInt("PICLAW_FULL_PASS_COMPACTION_MAX_PROMPT_TOKENS") ?? 200_000;
-
 /** Conservative fallback context window for models that do not publish one. */
 export const PROGRESSIVE_FALLBACK_CONTEXT_WINDOW = getUnknownModelContextWindow();
 
@@ -107,23 +95,8 @@ export const PROGRESSIVE_INPUT_CONTEXT_FRACTION = 0.42;
 export const PROGRESSIVE_CHUNK_FRACTION = 0.72;
 
 // ---------------------------------------------------------------------------
-// Overhead & safety margin constants
+// Safety margin constants
 // ---------------------------------------------------------------------------
-
-/**
- * Estimated token overhead for system prompt, AGENTS.md, tool definitions,
- * skills, memory, plan sidebar, and other per-request framing that is NOT
- * part of the conversation messages but occupies context window space.
- *
- * This overhead is invisible to estimateContextTokens (which only counts
- * messages) but counts against the model's context limit. Without accounting
- * for it, compaction can produce a summary that fits in the "message budget"
- * but overflows when combined with the system prompt.
- *
- * Conservative estimate: ~4000 tokens (AGENTS.md ~2k, tools ~1k, skills/memory ~1k).
- * Can be overridden via PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS.
- */
-export const SYSTEM_PROMPT_OVERHEAD_TOKENS = getSystemPromptOverheadTokens();
 
 /**
  * Safety margin applied to all budget calculations. Accounts for:

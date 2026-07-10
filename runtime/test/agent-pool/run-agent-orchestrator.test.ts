@@ -3046,7 +3046,7 @@ test("runAgentPrompt surfaces latent session state errors when no final text is 
   expect(result.result).toBeNull();
 });
 
-test("runAgentPrompt ignores commentary-only aborted output", async () => {
+test("runAgentPrompt returns completed commentary-only visible output", async () => {
   class StubSession {
     private listeners: Array<(event: any) => void> = [];
     sessionManager = { getLeafId: () => "leaf-1" };
@@ -3107,8 +3107,8 @@ test("runAgentPrompt ignores commentary-only aborted output", async () => {
     clearActiveForkBaseLeaf: () => {},
   });
 
-  expect(result.status).toBe("error");
-  expect(result.error).toContain("Prompt completed without emitting an assistant reply before finalization");
+  expect(result.status).toBe("success");
+  expect(result.result).toBe("progress update");
   expect(result.attachments).toBeUndefined();
 });
 

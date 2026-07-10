@@ -230,6 +230,27 @@ Practical consequences:
 
 That means most users should prefer `/login` over setting raw provider env vars by hand unless they are deliberately operating one of the packaged integration-specific paths.
 
+### GitHub Copilot live model discovery
+
+After GitHub Copilot authentication is available, Piclaw supplements Earendil's static Copilot catalog with the account's live `/models` response. The refresh runs at process boot and again when a session starts, so newly enabled account models can appear in `/model` and model selectors without waiting for a package release.
+
+The refresh:
+
+- keeps every static catalog model and merges live models by id
+- imports chat-capable Responses, chat-completions, and Anthropic-style models
+- filters known non-chat entries such as embeddings and `trajectory-compaction`
+- derives API compatibility and pricing from the closest static model template while preferring live context, output, vision, and reasoning capabilities
+- falls back to the static catalog if auth, discovery, or registration fails
+
+| Variable | Default | Purpose |
+|---|---:|---|
+| `PICLAW_GITHUB_COPILOT_DYNAMIC_MODELS` | `1` | Set to `0`, `false`, or `no` to disable live Copilot model discovery |
+| `PICLAW_GITHUB_COPILOT_MODELS_TIMEOUT_MS` | `3500` | Timeout for the Copilot `/models` request; values below 500 ms are clamped to 500 ms |
+
+Dynamic-model cost is an estimate inherited from the closest static template (and falls back to zero only when no template is available). Treat `/stats` cost for a newly discovered model as diagnostic rather than an account invoice.
+
+For the packaged Azure managed-identity/static-key path and its additional token-budget controls, see [Azure OpenAI extension](azure/azure-openai-extension.md).
+
 ## Runtime and agent
 
 | Variable | Default | Purpose |

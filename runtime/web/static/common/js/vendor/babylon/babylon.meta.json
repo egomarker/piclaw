@@ -1,7 +1,7 @@
 {
   "name": "babylonjs",
-  "version": "9.7.0",
-  "source": "https://cdn.jsdelivr.net/npm/babylonjs@9.7.0/babylon.js",
+  "version": "9.16.0",
+  "source": "https://cdn.jsdelivr.net/npm/babylonjs@9.16.0/babylon.js",
   "license": "Apache-2.0",
   "files": [
     "babylon.js"

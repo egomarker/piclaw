@@ -97,9 +97,11 @@ The extension maps piclaw reasoning controls onto Azure-compatible request field
 Behavior:
 
 - supports reasoning-enabled GPT-5-family models
+- recognizes `gpt-5.6` plus the `gpt-5.6-luna`, `gpt-5.6-sol`, and `gpt-5.6-terra` variants as 1.05M-context, 128K-output reasoning models
 - clamps unsupported reasoning levels when necessary
 - can disable reasoning globally or per model with env flags
 - caps reasoning for known unstable tool-heavy model flows
+- clamps `max_output_tokens` to the estimated remaining context window, keeps a 4,096-token safety margin, and preserves the Responses API minimum of 16 output tokens
 
 ### 5. GPT-5.3 Codex phase replay
 
@@ -150,9 +152,14 @@ Current protections:
 
 ### 9. Proactive input-budget guard
 
-The extension now applies a **preflight size guard** before sending Azure requests.
+The extension applies a **preflight size guard** before sending Azure requests. It estimates request size and trims older tool history when the reconstructed input is too large.
 
-It estimates request size and trims older tool history further when the reconstructed input is too large relative to the model's token-per-minute budget.
+Budget selection is source-aware:
+
+- when live deployment TPM data is available, the default replay ceiling is 65% of that TPM allowance, bounded by the model's usable context
+- when live TPM data is unavailable or only a baked-in fallback exists, the extension uses the registered model context instead of collapsing a long-context model to a stale 65K-style replay limit
+- the context-aware fallback defaults to 900,000 input tokens and reserves up to 65,536 tokens for output
+- `AOAI_ABSOLUTE_INPUT_TOKEN_CAP` remains the conservative fallback for models without a known context window
 
 Why this exists:
 
@@ -170,11 +177,16 @@ In some cases, the stream fails with:
 - `error: null`
 - empty output
 
-The extension treats that pattern as likely token-budget exhaustion and:
+The extension treats that pattern as likely token-budget exhaustion. For request failures before or while opening the stream, it retries `408`, `409`, `425`, `429`, `500`, `502`, `503`, `504`, and `524`, plus known socket-close and `ResourceExhausted` errors. It does **not** retry other client errors.
 
-- uses a longer retry backoff
-- emits user-visible retry feedback in the stream
-- surfaces a clearer final error if retries are exhausted
+Retry behavior:
+
+- at most two retry attempts per Azure Responses request
+- honors `Retry-After` in either integer-seconds or HTTP-date form
+- otherwise waits 15 seconds for rate-limit/503 failures and uses a short increasing delay for other transient failures
+- emits user-visible retry feedback after streaming has started
+- names both the model and deployment when `AOAI_DEPLOYMENT_NAME_MAP` maps them differently
+- surfaces an explicit retry-budget-exhausted error instead of an empty response
 
 ### 11. User-visible retry feedback
 
@@ -249,16 +261,23 @@ The extension:
 
 ### Optional behavior flags
 
-- `AOAI_DISABLE_TOOLS`
-- `AOAI_DISABLE_REASONING`
-- `AOAI_DISABLE_REASONING_MODELS`
-- `AOAI_LOG_PHASES`
-- `AOAI_MAX_TOOL_CALLS`
-- `AOAI_TOOL_CALL_SUMMARY_MAX`
-- `AOAI_TOOL_CALL_OUTPUT_CHARS`
-- `AOAI_DEDUPE_TOOL_OUTPUT_SEARCH`
-- `AOAI_MAX_TPM_SHARE`
-- `AOAI_ABSOLUTE_INPUT_TOKEN_CAP`
+| Variable | Default | Purpose |
+|---|---:|---|
+| `AOAI_DISABLE_TOOLS` | unset | Disable tools on Azure requests |
+| `AOAI_DISABLE_REASONING` | unset | Disable reasoning globally |
+| `AOAI_DISABLE_REASONING_MODELS` | empty | Comma-separated model ids that must not use reasoning |
+| `AOAI_LOG_PHASES` | unset | Log phase replay/persistence details |
+| `AOAI_MAX_TOOL_CALLS` | model-dependent | Cap replayed historical tool calls |
+| `AOAI_TOOL_CALL_SUMMARY_MAX` | runtime default | Bound the synthetic tool-history summary |
+| `AOAI_TOOL_CALL_OUTPUT_CHARS` | runtime default | Bound retained tool-output characters |
+| `AOAI_DEDUPE_TOOL_OUTPUT_SEARCH` | unset | Dedupe repeated `tool_output_search` history |
+| `AOAI_MAX_TPM_SHARE` | `0.65` | Maximum share of **live** deployment TPM used by one reconstructed input; clamped to 0.10–0.95 |
+| `AOAI_ABSOLUTE_INPUT_TOKEN_CAP` | `120000` | Conservative fallback input cap for models without known context metadata; minimum 16,000 |
+| `AOAI_CONTEXT_AWARE_INPUT_TOKEN_CAP` | `900000` | Upper bound for long-context fallback budgeting; never lower than the absolute cap |
+| `AOAI_CONTEXT_OUTPUT_RESERVE` | `65536` | Output headroom reserved when deriving the context-aware input budget; minimum 16,000 |
+| `AOAI_DEPLOYMENT_NAME_MAP` | empty | Optional comma-separated `model=deployment` mappings, for example `gpt-5.6=prod-gpt56,gpt-5.4=prod-gpt54` |
+
+`AZURE_OPENAI_DEPLOYMENT_NAME_MAP` remains accepted as a compatibility alias for `AOAI_DEPLOYMENT_NAME_MAP`.
 
 ### Foundry settings
 
@@ -337,7 +356,7 @@ Mitigation:
 
 ---
 
-## Harness and upstream Responses notes (2026-04-15)
+## Harness and upstream Responses notes
 
 ### Harness surfaces
 
@@ -363,7 +382,7 @@ The live Azure extension now mirrors the active session id into:
 
 for Azure Responses requests on the supported path.
 
-Focused Azure harness runs on the upgraded `0.67.2` stack were validated for:
+Historical live Azure harness runs on the `0.67.2` stack were validated for:
 
 - models: `gpt-5-3-codex`, `gpt-5-4`
 - cases: `json`, `tool`, `history`
@@ -387,17 +406,17 @@ and also passed focused `json` / `tool` / `history` validation on `gpt-5-3-codex
 
 - `/workspace/tmp/azure-openai-harness-0672-gpt53-xms.json`
 
-### Upstream `0.67.2` Responses impact
+### Earendil `0.80.5` compatibility
 
-The `0.67.2` pi-mono update matters for Azure because the shared Responses parser now strips `partialJson` scratch buffers when finalizing tool calls and on error paths.
-
-That matters here because this extension's wrapper imports the shared Responses implementation through `runtime/src/extensions/azure-openai-api.ts`.
+The runtime now uses the `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, and `@earendil-works/pi-coding-agent` packages at `0.80.5`. Piclaw keeps its Azure transport wrapper because Azure still needs stricter replay sanitation, context-aware output clamping, request/session correlation, and clearer retry handling than the generic Responses path supplies.
 
 Current state:
 
-- the repo is now on the `0.67.2` package set
-- focused Azure `json` / `tool` / `history` validation passed on the upgraded stack
-- the live Azure extension was updated explicitly to match the upstream-style session-correlation behavior rather than relying on the dependency bump alone
+- the shared Responses parser continues to strip `partialJson` scratch buffers when finalizing tool calls and on error paths
+- Piclaw adapts Azure `reasoning_text` and commentary-phase events into normal thinking updates, including reasoning-token usage
+- deterministic coverage verifies output-token clamping, session correlation, GPT-5.6 metadata, retryable status classification, `Retry-After` parsing, deployment-name mapping, and final error text
+- focused coverage lives in `runtime/test/extensions/azure-openai-api.test.ts`, `azure-openai-retry-after.test.ts`, and `azure-openai-routing.test.ts`
+- the older `0672` report paths above are retained as historical live-provider evidence; they are not claims that those exact report files were regenerated for `0.80.5`
 
 ## Troubleshooting checklist
 

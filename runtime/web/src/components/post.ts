@@ -1,4 +1,4 @@
-import { html, useCallback, useEffect, useMemo, useRef, useState } from '../vendor/preact-htm.js';
+import { html, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from '../vendor/preact-htm.js';
 import { useTranslation } from '../utils/i18n.js';
 import { getMediaInfo, getMediaUrl, getThumbnailUrl, submitAdaptiveCardAction } from '../api.js';
 import { renderMarkdown, renderMermaidDiagrams, renderThinkingMarkdown, sanitizeUrl } from '../markdown.js';
@@ -10,6 +10,7 @@ import { extractCardBlocks, renderAdaptiveCard } from '../ui/adaptive-card-rende
 import { buildAdaptiveCardSubmissionFallbackText, describeAdaptiveCardSubmission, extractAdaptiveCardSubmissionBlocks } from '../ui/adaptive-card-submission.js';
 import { buildGeneratedWidgetPayload, canRenderGeneratedWidget } from '../ui/generated-widget.js';
 import { disclosureTriangleSvgString, renderDisclosureTriangle } from '../ui/disclosure-triangle.js';
+import { attachHeaderAnchor } from '../ui/scroll-anchor.js';
 import { ImageModal } from './image-modal.js';
 import { ImageAnnotator, canAnnotate } from './image-annotator.js';
 import { FilePill } from './file-pill.js';
@@ -292,12 +293,43 @@ function ThinkingVisibilityPill({ messageId, chatJid, lines, durationMs }) {
     const [text, setText] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(false);
-    const [copied, setCopied] = useState(false);
+    const [copyState, setCopyState] = useState('idle');
     const [fetchedDuration, setFetchedDuration] = useState(null);
-    const detailRef = useRef(null);
+    const copyResetTimerRef = useRef(null);
+    const mountedRef = useRef(true);
+    const rootRef = useRef(null);
+    const panelRef = useRef(null);
+    const anchorRef = useRef(null);
+
+    // Keep the header visually fixed while the panel expands/collapses. No-op in
+    // browsers with native scroll anchoring (Chrome/Edge/Firefox); active only in
+    // WebKit (incl. all iOS/iPadOS browsers), which lacks `overflow-anchor`. The
+    // panel is always mounted (see render) so the ResizeObserver inside the anchor
+    // sees both expand and collapse. useLayoutEffect so the anchor is wired before
+    // any user toggle can occur.
+    useLayoutEffect(() => {
+        const scroller = rootRef.current?.closest('.timeline');
+        if (!scroller) return undefined;
+        const anchor = attachHeaderAnchor(scroller, panelRef.current);
+        anchorRef.current = anchor;
+        return () => {
+            anchor.dispose();
+            anchorRef.current = null;
+        };
+    }, []);
+
+    // Apply the compensation synchronously after each toggle re-render (before
+    // paint), covering the synchronous (cached-content) expand in addition to the
+    // ResizeObserver which covers async content growth. No-op except in Safari.
+    useLayoutEffect(() => {
+        anchorRef.current?.compensate();
+    }, [expanded, loading, text]);
 
     const toggle = useCallback((e) => {
         e.stopPropagation();
+        // Snapshot the scroll/panel state before the height change so the anchor
+        // can hold the header fixed (Safari only). Must run before setExpanded.
+        anchorRef.current?.mark();
         setExpanded(v => {
             const next = !v;
             if (next && !text && !loading && !error) {
@@ -323,14 +355,36 @@ function ThinkingVisibilityPill({ messageId, chatJid, lines, durationMs }) {
         });
     }, [text, loading, error, messageId, chatJid]);
 
+    const scheduleCopyStateReset = useCallback(() => {
+        if (copyResetTimerRef.current) clearTimeout(copyResetTimerRef.current);
+        copyResetTimerRef.current = setTimeout(() => {
+            copyResetTimerRef.current = null;
+            setCopyState('idle');
+        }, 2000);
+    }, []);
+
     const copyThinking = useCallback((e) => {
         e.stopPropagation();
         if (!text) return;
-        navigator.clipboard.writeText(text).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-        }).catch(err => { console.warn('[post] Failed to copy thinking content:', err); });
-    }, [text]);
+        // Route through the shared best-effort copy (execCommand / clipboard /
+        // textarea fallback) so it works in insecure (plain-http) contexts and
+        // older mobile browsers where navigator.clipboard is undefined.
+        copyTextToClipboard(text).then((ok) => {
+            if (!mountedRef.current) return;
+            setCopyState(ok ? 'success' : 'error');
+            scheduleCopyStateReset();
+        }).catch(err => {
+            console.warn('[post] Failed to copy thinking content:', err);
+            if (!mountedRef.current) return;
+            setCopyState('error');
+            scheduleCopyStateReset();
+        });
+    }, [text, scheduleCopyStateReset]);
+
+    useEffect(() => () => {
+        mountedRef.current = false;
+        if (copyResetTimerRef.current) clearTimeout(copyResetTimerRef.current);
+    }, []);
 
     // Render thinking text via the thinking-specific renderer so the persisted
     // pill displays identically to the live thought panel (status.ts /
@@ -358,7 +412,7 @@ function ThinkingVisibilityPill({ messageId, chatJid, lines, durationMs }) {
     const detailId = `post-thinking-visibility-detail-${messageId}`;
 
     return html`
-        <div class="post-thinking-visibility">
+        <div class="post-thinking-visibility" data-expanded=${expanded ? 'true' : 'false'} ref=${rootRef}>
             <div class="post-thinking-visibility-controls">
                 <button
                     type="button"
@@ -376,29 +430,36 @@ function ThinkingVisibilityPill({ messageId, chatJid, lines, durationMs }) {
                 ${expanded && text && html`
                     <button
                         type="button"
-                        class="post-thinking-visibility-copy"
+                        class=${`post-action-btn post-copy-btn post-thinking-visibility-copy${copyState === 'success' ? ' is-success' : copyState === 'error' ? ' is-error' : ''}`}
                         onClick=${copyThinking}
-                        aria-label="Copy reasoning trace to clipboard"
-                        title="Copy reasoning trace"
+                        aria-label=${copyState === 'success' ? 'Copied' : copyState === 'error' ? 'Copy failed' : 'Copy reasoning trace'}
+                        title=${copyState === 'success' ? 'Copied' : copyState === 'error' ? 'Copy failed' : 'Copy reasoning trace'}
                     >
-                        ${copied ? '✓' : '⧉'}
+                        ${copyState === 'success'
+                            ? html`<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 6L9 17l-5-5"></path></svg>`
+                            : copyState === 'error'
+                                ? html`<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"></circle><path d="M9 9l6 6M15 9l-6 6"></path></svg>`
+                                : html`<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="9" width="10" height="10" rx="2"></rect><path d="M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1"></path></svg>`}
                     </button>
                 `}
+                <span class="sr-only" role="status" aria-live="polite">
+                    ${copyState === 'success' ? 'Copied reasoning trace' : copyState === 'error' ? 'Copy failed' : ''}
+                </span>
+                <span class="sr-only" role="status" aria-live="polite">
+                    ${expanded ? (loading ? 'Loading reasoning trace' : error ? 'Could not load reasoning trace' : text ? 'Reasoning trace loaded' : '') : ''}
+                </span>
             </div>
-            ${expanded && html`
-                <div
-                    id=${detailId}
-                    class="post-thinking-visibility-detail"
-                    ref=${detailRef}
-                    role="region"
-                    aria-live="polite"
-                    aria-label="Reasoning trace"
-                >
+            <div
+                id=${detailId}
+                class="post-thinking-visibility-detail"
+                ref=${panelRef}
+            >
+                ${expanded ? html`
                     ${loading ? html`<span class="post-thinking-visibility-loading">Loading reasoning trace…</span>` : null}
                     ${error ? html`<span class="post-thinking-visibility-error">Could not load reasoning trace.</span>` : null}
                     ${renderedHtml ? html`<div dangerouslySetInnerHTML=${renderedHtml} />` : (!loading && !error && text ? text : null)}
-                </div>
-            `}
+                ` : null}
+            </div>
         </div>
     `;
 }

@@ -215,6 +215,14 @@ test("buildBaseOptions clamps maxTokens to the remaining context window", () => 
   }, "token").maxTokens).toBeLessThan(8000);
 });
 
+test("Responses maxTokens never falls below the API minimum of 16", () => {
+  expect(clampAzureMaxTokensToContext({ contextWindow: 128000 }, { messages: [] }, 1)).toBe(16);
+  expect(clampAzureMaxTokensToContext({ contextWindow: 4096 }, { messages: [] }, 1)).toBe(16);
+  expect(buildBaseOptions({ maxTokens: 1, contextWindow: 128000 }, { messages: [] }, {
+    maxTokens: 1,
+  }, "token").maxTokens).toBe(16);
+});
+
 test("processResponsesStream reroutes commentary-phase output_text into thinking events", async () => {
   async function* events() {
     yield {

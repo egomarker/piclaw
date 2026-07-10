@@ -8,6 +8,7 @@ import {
 import type { DecorationSet, EditorState, Extension, Range, Transaction } from '#editor-vendor/codemirror';
 import type { SyntaxNode } from '@lezer/common';
 import { normalizeLinkHref } from './link.js';
+import { livePreviewParsingSuspendedField } from './live-preview.js';
 import { treeGrowthEffect } from './tree-progress.js';
 
 export type TableAlign = 'left' | 'center' | 'right';
@@ -822,6 +823,7 @@ const editableTableField = StateField.define<DecorationSet>({
             return decorations;
         }
         const mapped = decorations.map(transaction.changes);
+        if (transaction.state.field(livePreviewParsingSuspendedField, false)) return mapped;
         if (!transactionTouchesTable(transaction, decorations)) return mapped;
         return buildEditableTableDecorations(transaction.state);
     },

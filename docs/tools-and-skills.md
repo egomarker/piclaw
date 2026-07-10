@@ -660,6 +660,17 @@ Adaptive Card and side-conversation helpers are intentionally explicit web-facin
 - `/theme`, `/tint`, and `/meters` are web-local UI commands handled without an LLM round-trip.
 - `/context` reports current context-window usage; the compose-footer indicator is refreshed on reconnect and when returning to the tab so the compaction affordance stays current.
 
+### Reading `/stats`
+
+`/stats` combines two scopes:
+
+- **Session stats** are derived from the current persisted Pi session: message/tool counts, input/output/cache token totals, and the session's model-reported cost.
+- **Tracked usage (persisted)** comes from Piclaw's `token_usage` table for the current chat and includes provider/model attribution, reasoning tokens, costs, and run counts.
+
+When a provider reports prompt-cache usage, the session table may also include **Cache re-billed**. This is an estimate of prompt tokens that were paid again after an expected cache reuse did not occur. Piclaw compares consecutive assistant requests, ignores differences of 1,024 tokens or less as noise, and resets comparison after compaction or branch-summary boundaries. Model switches are counted because the same persisted prompt is normally billed again even when cross-model cache reuse is impossible.
+
+The re-billed estimate is diagnostic rather than an invoice: it depends on provider-reported cache counters and known model pricing. The row is omitted when no material miss is detected or cache data is unavailable.
+
 ## Skill pipeline
 
 Skills create tasks via IPC JSON files. Each task can optionally specify a `model` field (e.g. `anthropic/claude-sonnet-4-20250514`) to run on a cheaper or different model than the user's current one. The scheduler handles model switching and restoration automatically.

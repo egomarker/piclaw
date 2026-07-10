@@ -44,7 +44,7 @@ Vendored libraries (served from \`/static/common/js/vendor/\`):
 
 Widgets load these on demand via \`<script src>\` inside the iframe — they are NOT pre-loaded by the host page. Each widget only pays for the libraries it actually uses.
 
-- **Babylon.js 9.x** — UMD global build (exposes \`BABYLON\` global):
+- **Babylon.js 9.16** — UMD global build (exposes \`BABYLON\` global):
   \`\`\`html
   <script src="/static/common/js/vendor/babylon/babylon.js"></script>
   <script>
@@ -57,7 +57,7 @@ Widgets load these on demand via \`<script src>\` inside the iframe — they are
   engine.runRenderLoop(function(){ scene.render(); });
   </script>
   \`\`\`
-- **ECharts 5.6** — rich charting (bar, line, pie, heatmap, treemap, radar, geo, etc.):
+- **ECharts 6.1** — rich charting (bar, line, pie, heatmap, treemap, radar, geo, etc.):
   \`\`\`html
   <script src="/static/common/js/vendor/echarts/echarts.min.js"></script>
   <div id="chart" style="width:100%;height:400px"></div>
@@ -67,7 +67,7 @@ Widgets load these on demand via \`<script src>\` inside the iframe — they are
   window.addEventListener('resize', function(){ chart.resize(); });
   </script>
   \`\`\`
-- **Three.js r184** — ESM 3D rendering (scenes, geometries, materials, loaders, post-processing):
+- **Three.js r185.1** — ESM 3D rendering (scenes, geometries, materials, loaders, post-processing):
   \`\`\`html
   <script type="module">
   import * as THREE from '/static/common/js/vendor/three/three.module.min.js';
@@ -82,7 +82,7 @@ Widgets load these on demand via \`<script src>\` inside the iframe — they are
   (function animate() { cube.rotation.x += 0.01; cube.rotation.y += 0.01; renderer.render(scene, camera); requestAnimationFrame(animate); })();
   </script>
   \`\`\`
-- **KaTeX 0.16** — math typesetting (available if the host page has loaded it; check window.katex).
+- **KaTeX 0.17** — math typesetting (available if the host page has loaded it; check window.katex).
 - **Marked 18** — markdown rendering (available if the host page has loaded it; check window.marked).`;
 
 type Params = {

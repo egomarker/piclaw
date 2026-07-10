@@ -14,16 +14,16 @@
     "adaptivecards": "git://git@github.com/microsoft/AdaptiveCards.git"
   },
   "source_entry": "web/src/vendor/adaptivecards-entry.ts",
-  "output_file": "web/static/js/vendor/adaptivecards.min.js",
+  "output_file": "web/static/common/js/vendor/adaptivecards.min.js",
   "output_files": [
     {
       "package_path": null,
-      "output_file": "web/static/js/vendor/adaptivecards.min.js",
+      "output_file": "web/static/common/js/vendor/adaptivecards.min.js",
       "sha256": "c3404b6cba966546c03ab9f81b133a2b8d9185da29806457d0adb92c107f799c",
       "size_bytes": 338474
     }
   ],
-  "metadata_file": "web/static/js/vendor/adaptivecards.meta.json",
+  "metadata_file": "web/static/common/js/vendor/adaptivecards.meta.json",
   "sha256": "c3404b6cba966546c03ab9f81b133a2b8d9185da29806457d0adb92c107f799c",
   "size_bytes": 338474,
   "build_command": [
@@ -34,6 +34,6 @@
     "--format=iife",
     "--minify",
     "--outfile",
-    "web/static/js/vendor/adaptivecards.min.js"
+    "web/static/common/js/vendor/adaptivecards.min.js"
   ]
 }

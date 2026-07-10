@@ -61,6 +61,8 @@ export async function streamComplete(opts: StreamCompleteOptions): Promise<Assis
     progressIntervalMs = SMART_COMPACTION_PROGRESS_INTERVAL_MS,
   } = opts;
 
+  if (signal.aborted) throw new Error("Compaction cancelled");
+
   const context = {
     systemPrompt,
     messages: [{ role: "user" as const, content: [{ type: "text" as const, text: userPrompt }], timestamp: Date.now() }],
@@ -77,9 +79,12 @@ export async function streamComplete(opts: StreamCompleteOptions): Promise<Assis
     ? streamFn(model, normalizedContext, streamOptions)
     : streamSimple(model, normalizedContext, streamOptions));
 
-  // If no progress callback, just collect the result directly
+  // If no progress callback, just collect the result directly. Check the
+  // caller signal again even if a custom provider resolves after cancellation.
   if (!onProgress) {
-    return stream.result();
+    const result = await stream.result();
+    if (signal.aborted) throw new Error("Compaction cancelled");
+    return result;
   }
 
   // Stream with progress reporting
@@ -87,7 +92,7 @@ export async function streamComplete(opts: StreamCompleteOptions): Promise<Assis
   let lastReportTime = 0;
 
   for await (const event of stream) {
-    if (signal.aborted) break;
+    if (signal.aborted) throw new Error("Compaction cancelled");
     if (event.type === "text_delta") {
       generatedChars += event.delta.length;
       const now = Date.now();
@@ -98,10 +103,14 @@ export async function streamComplete(opts: StreamCompleteOptions): Promise<Assis
     }
   }
 
+  if (signal.aborted) throw new Error("Compaction cancelled");
+
   // Final progress report
   if (generatedChars > 0) {
     onProgress(generatedChars);
   }
 
-  return stream.result();
+  const result = await stream.result();
+  if (signal.aborted) throw new Error("Compaction cancelled");
+  return result;
 }

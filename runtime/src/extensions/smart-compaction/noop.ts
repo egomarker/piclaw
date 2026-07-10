@@ -7,9 +7,11 @@
 
 import type { FileOperations, CompactionResult } from "@earendil-works/pi-coding-agent";
 import type { Message } from "@earendil-works/pi-ai";
+import { createLogger } from "../../utils/logger.js";
 import { KEPT_CONTEXT_BUDGET_CHARS, MIN_SUMMARY_CHARS } from "./config.js";
 import { compressFilePaths, fileListsFromOps } from "./files.js";
 import {
+  analyzeToolOutcomes,
   buildPreview,
   convertMessagesWithMetadata,
   extractText,
@@ -17,13 +19,34 @@ import {
   isRealUserSourceMessage,
   selectRecentContextBackwards,
   serializeMessage,
-  serializeToolCompact,
+  serializeToolBatchCompact,
   type SourceMessage,
+  type ToolOutcomeAnalysis,
 } from "./messages.js";
 import { formatSmartCompactionStatus } from "./context.js";
 import type { TopicShiftSignal } from "./selective-prompt.js";
 
+const log = createLogger("ext.smart-compaction.noop");
+
 // ---------------------------------------------------------------------------
+
+const HARMLESS_ACKNOWLEDGEMENTS = new Set([
+  "got it",
+  "noted",
+  "thank you",
+  "thanks",
+  "thx",
+  "understood",
+]);
+
+function isHarmlessAcknowledgement(text: string): boolean {
+  const normalized = text
+    .trim()
+    .toLowerCase()
+    .replace(/[.!]+$/g, "")
+    .replace(/\s+/g, " ");
+  return HARMLESS_ACKNOWLEDGEMENTS.has(normalized);
+}
 
 /**
  * Detect compaction windows where an LLM call is unnecessary.
@@ -35,14 +58,11 @@ import type { TopicShiftSignal } from "./selective-prompt.js";
  *    token limit mid-turn). The previous summary already describes the goal
  *    and progress; we just append a mechanical file-ops delta.
  *
- * 2. **Minimal content** — Very little user input (<100 chars) and no file
- *    modifications. The previous summary is still valid.
- *
- * A1 caveat: this optimisation is only safe when the tiny user input is *not*
- * actually a topic pivot (for example: "new topic: Azure streaming"). Reusing
- * the previous summary in that situation is exactly how stale-topic bias leaks
- * into the next turn. We therefore disable the minimal-content fast path when
- * the newest user message looks like a pivot.
+ * 2. **Harmless acknowledgement** — Every real user message is an exact match
+ *    for a narrow acknowledgement allowlist, there are no file modifications,
+ *    and no tool outcome carries new state. Shortness alone is never sufficient:
+ *    constraints, negations, paths, commands, numbers, and topic signals fall
+ *    through to summarization by default.
  *
  * Returns a `{ compaction }` result to short-circuit the LLM path, or
  * `null` to fall through to selective/built-in compaction.
@@ -58,6 +78,7 @@ export function tryNoOpCompaction(
   tokensBefore: number,
   topicShift: TopicShiftSignal | null,
   humanUserIndexes: Set<number>,
+  toolAnalysis: ToolOutcomeAnalysis,
   currentWorkHints: {
     hasKeptUserContext: boolean;
     hasTurnPrefixHumanUser: boolean;
@@ -68,30 +89,42 @@ export function tryNoOpCompaction(
 
   // We can only do no-op if there IS a previous summary to reuse
   if (!previousSummary || previousSummary.length < MIN_SUMMARY_CHARS) {
+    log.debug("Smart compaction no-op rejected", {
+      operation: "smart_compaction.noop_classification",
+      classification: "summarize",
+      reason: "missing_or_short_previous_summary",
+    });
     return null;
   }
 
   // Count real user messages (non-slash-command, non-synthetic)
   let userMessageCount = 0;
   let userTotalChars = 0;
+  const userTexts: string[] = [];
   for (let i = 0; i < llmMessages.length; i++) {
     const msg = llmMessages[i];
     if (isRealUserMessage(msg, i, humanUserIndexes)) {
       const text = extractText(msg.content);
       userMessageCount++;
       userTotalChars += text.length;
+      userTexts.push(text);
     }
   }
 
   const { readFiles, modifiedFiles } = fileListsFromOps(fileOps);
   const hasModifications = modifiedFiles.length > 0;
-  // topicShift is pre-computed by the caller.
+  // topicShift and toolAnalysis are pre-computed by the caller.
 
   // ── Pattern 1: Split-turn continuation ────────────────────────────
   // Zero user messages in the discarded window can still be unsafe if the
   // dropped prefix of the current turn contains a fresh user instruction.
-  if (preparation.isSplitTurn && userMessageCount === 0 && !currentWorkHints.hasTurnPrefixHumanUser) {
-    const delta = buildMechanicalDelta(llmMessages, modifiedFiles, readFiles);
+  if (
+    preparation.isSplitTurn
+    && userMessageCount === 0
+    && !currentWorkHints.hasTurnPrefixHumanUser
+    && toolAnalysis.safeForNoOp
+  ) {
+    const delta = buildMechanicalDelta(llmMessages, modifiedFiles, readFiles, toolAnalysis);
     const summary = appendDeltaToSummary(previousSummary, delta, fileOps);
 
     ctx.ui.setStatus?.(
@@ -102,19 +135,28 @@ export function tryNoOpCompaction(
       ),
     );
 
+    log.debug("Smart compaction no-op accepted", {
+      operation: "smart_compaction.noop_classification",
+      classification: "split_turn_continuation",
+      userMessageCount,
+      messageCount: llmMessages.length,
+      toolOutcomeCount: toolAnalysis.facts.length,
+    });
     return {
       compaction: { summary, firstKeptEntryId, tokensBefore },
     };
   }
 
-  // ── Pattern 2: Minimal content ────────────────────────────────────
-  // Tiny user input, no modifications → usually nothing new to capture.
-  // But if that tiny input is a pivot cue, we must force the LLM path so the
-  // summary can demote the stale topic and promote the new one.
+  // ── Pattern 2: Harmless acknowledgement ──────────────────────────
+  // Exact allowlisting keeps short constraints such as "don't deploy" and
+  // "use Bun" out of the lossy path. Any tool result with new state also
+  // requires summarization even when the user text itself is harmless.
   if (
-    userTotalChars < 100 &&
+    userMessageCount > 0 &&
+    userTexts.every(isHarmlessAcknowledgement) &&
     !hasModifications &&
     !topicShift &&
+    toolAnalysis.safeForNoOp &&
     !currentWorkHints.hasKeptUserContext &&
     !currentWorkHints.hasTurnPrefixHumanUser
   ) {
@@ -123,16 +165,35 @@ export function tryNoOpCompaction(
     ctx.ui.setStatus?.(
       "smart_compaction",
       formatSmartCompactionStatus(
-        `Smart compaction: reused summary for minimal-content compaction (${userTotalChars} user chars)…`,
+        `Smart compaction: reused summary for harmless acknowledgement (${userTotalChars} user chars)…`,
         92,
       ),
     );
 
+    log.debug("Smart compaction no-op accepted", {
+      operation: "smart_compaction.noop_classification",
+      classification: "harmless_acknowledgement",
+      userMessageCount,
+      userTotalChars,
+      toolOutcomeCount: toolAnalysis.facts.length,
+    });
     return {
       compaction: { summary, firstKeptEntryId, tokensBefore },
     };
   }
 
+  log.debug("Smart compaction no-op rejected", {
+    operation: "smart_compaction.noop_classification",
+    classification: "summarize",
+    reason: "meaningful_continuity_signal",
+    isSplitTurn: !!preparation.isSplitTurn,
+    userMessageCount,
+    hasModifications,
+    hasTopicShift: !!topicShift,
+    toolOutcomesSafe: toolAnalysis.safeForNoOp,
+    hasKeptUserContext: currentWorkHints.hasKeptUserContext,
+    hasTurnPrefixHumanUser: currentWorkHints.hasTurnPrefixHumanUser,
+  });
   return null;
 }
 
@@ -144,6 +205,7 @@ function buildMechanicalDelta(
   messages: Message[],
   modifiedFiles: string[],
   readFiles: string[],
+  toolAnalysis: ToolOutcomeAnalysis,
 ): string {
   // Count tool calls by type
   const toolCounts: Record<string, number> = {};
@@ -168,6 +230,19 @@ function buildMechanicalDelta(
     .map(([name, count]) => `${name}×${count}`)
     .join(", ");
   if (toolSummary) parts.push(`Tool calls: ${toolSummary}`);
+
+  const outcomeFacts = toolAnalysis.facts.slice(0, 12).map((fact) => {
+    const call = `${fact.toolName}${fact.keyArgument ? `(${fact.keyArgument})` : ""}`;
+    if (fact.missing) return `${call}: unresolved (missing result)`;
+    const state = fact.isError || fact.noChange ? "failed" : "succeeded";
+    return `${call}: ${state}${fact.outcome ? ` — ${fact.outcome}` : ""}`;
+  });
+  if (outcomeFacts.length > 0) {
+    parts.push(`Tool outcomes:\n${outcomeFacts.map((fact) => `- ${fact}`).join("\n")}`);
+    if (toolAnalysis.facts.length > outcomeFacts.length) {
+      parts.push(`Additional tool outcomes omitted: ${toolAnalysis.facts.length - outcomeFacts.length}`);
+    }
+  }
 
   if (modifiedFiles.length > 0) {
     const shown = modifiedFiles.slice(0, 10);
@@ -241,6 +316,19 @@ export function appendFileLists(base: string, fileOps: FileOperations): string {
   return parts.join("\n");
 }
 
+/** Append each deterministic file block that a validated model summary omitted. */
+export function appendMissingFileLists(base: string, fileOps: FileOperations): string {
+  const { readFiles, modifiedFiles } = fileListsFromOps(fileOps);
+  const parts: string[] = [base];
+  if (readFiles.length > 0 && !/<read-files>[\s\S]*?<\/read-files>/i.test(base)) {
+    parts.push(`\n<read-files>\n${compressFilePaths(readFiles)}\n</read-files>`);
+  }
+  if (modifiedFiles.length > 0 && !/<modified-files>[\s\S]*?<\/modified-files>/i.test(base)) {
+    parts.push(`\n<modified-files>\n${compressFilePaths(modifiedFiles)}\n</modified-files>`);
+  }
+  return parts.join("\n");
+}
+
 function normalizeSerializedLine(line: string): string {
   return line.replace(/^\[\d+\|([^\]]+)\]:\s*/, "[$1]: ");
 }
@@ -249,22 +337,26 @@ function compactInlineText(text: string, maxChars = 240): string {
   return buildPreview(text.replace(/\s+/g, " ").trim(), maxChars);
 }
 
-function serializeKeptEntryMessage(message: SourceMessage, nextMessage?: SourceMessage): string[] {
+function serializeKeptEntryMessage(message: SourceMessage, followingToolResults: SourceMessage[] = []): string[] {
   const lines: string[] = [];
 
   if (message.role === "assistant") {
-    const assistantCtx = convertMessagesWithMetadata([message]);
-    const assistantLlm = assistantCtx.llmMessages[0];
+    const batchCtx = convertMessagesWithMetadata([message, ...followingToolResults]);
+    const assistantLlm = batchCtx.llmMessages[0];
     const hasToolCalls = Array.isArray((assistantLlm as any)?.content) &&
       ((assistantLlm as any).content as any[]).some((b: any) => b.type === "toolCall");
 
     if (assistantLlm && hasToolCalls) {
-      let resultLlm: Message | null = null;
-      if (nextMessage?.role === "toolResult") {
-        resultLlm = convertMessagesWithMetadata([nextMessage]).llmMessages[0] ?? null;
+      const analysis = analyzeToolOutcomes(batchCtx.llmMessages);
+      const compact = serializeToolBatchCompact(batchCtx.llmMessages, 0, analysis);
+      if (compact) lines.push(normalizeSerializedLine(compact));
+      for (const orphanIndex of analysis.orphanResultIndexes) {
+        const orphan = batchCtx.llmMessages[orphanIndex];
+        if (!orphan) continue;
+        const line = serializeMessage(orphan, orphanIndex, batchCtx.humanUserIndexes);
+        if (line) lines.push(normalizeSerializedLine(line));
       }
-      const compact = serializeToolCompact(assistantLlm, resultLlm, 0);
-      if (compact) return [normalizeSerializedLine(compact)];
+      return lines;
     }
   }
 
@@ -301,16 +393,21 @@ export function extractKeptMessagesSummary(
       const message = entry.message as SourceMessage;
       if (isRealUserSourceMessage(message)) hasHumanUser = true;
 
-      const nextMessage =
-        entry.message?.role === "assistant" &&
-        branchEntries[i + 1]?.type === "message" &&
-        branchEntries[i + 1]?.message?.role === "toolResult"
-          ? (branchEntries[i + 1].message as SourceMessage)
-          : undefined;
+      const followingToolResults: SourceMessage[] = [];
+      const hasToolCalls = message.role === "assistant"
+        && Array.isArray((message as any).content)
+        && ((message as any).content as any[]).some((block: any) => block.type === "toolCall");
+      if (hasToolCalls) {
+        for (let resultIndex = i + 1; resultIndex < branchEntries.length; resultIndex++) {
+          const resultEntry = branchEntries[resultIndex];
+          if (resultEntry?.type !== "message" || resultEntry.message?.role !== "toolResult") break;
+          followingToolResults.push(resultEntry.message as SourceMessage);
+        }
+      }
 
-      const serialized = serializeKeptEntryMessage(message, nextMessage);
+      const serialized = serializeKeptEntryMessage(message, followingToolResults);
       if (serialized.length > 0) lines.push(...serialized);
-      if (nextMessage) i++;
+      i += followingToolResults.length;
       continue;
     }
 
@@ -354,17 +451,41 @@ export function buildTurnPrefixSummary(
     turnPrefixMessages,
     humanUserIndexes,
   );
-  const sorted = [...included].sort((a, b) => a - b);
-  const lines: string[] = [];
-  let chars = 0;
-
-  for (const idx of sorted) {
+  const rendered = new Map<number, string>();
+  for (const idx of included) {
     const line = compactOverrides.get(idx) ?? serializeMessage(turnPrefixMessages[idx], idx, humanUserIndexes);
-    if (!line) continue;
-    lines.push(line);
-    chars += line.length;
-    if (chars >= 4_000) break;
+    if (line) rendered.set(idx, line);
   }
 
-  return lines.join("\n");
+  const nearestHumanUserIndex = [...included]
+    .filter((idx) => humanUserIndexes.has(idx) && rendered.has(idx))
+    .sort((a, b) => b - a)[0];
+  const selected = new Set<number>();
+  let chars = 0;
+  if (nearestHumanUserIndex !== undefined) {
+    selected.add(nearestHumanUserIndex);
+    chars += rendered.get(nearestHumanUserIndex)!.length;
+  }
+  for (const idx of [...included].sort((a, b) => b - a)) {
+    if (selected.has(idx)) continue;
+    const line = rendered.get(idx);
+    if (!line) continue;
+    if (selected.size > 0 && chars + line.length > KEPT_CONTEXT_BUDGET_CHARS) {
+      const remaining = KEPT_CONTEXT_BUDGET_CHARS - chars;
+      if (remaining < 256) continue;
+      const notice = "… [older batch detail trimmed; newest outcomes follow] …\n";
+      rendered.set(idx, `${notice}${line.slice(-(remaining - notice.length))}`);
+      selected.add(idx);
+      chars = KEPT_CONTEXT_BUDGET_CHARS;
+      continue;
+    }
+    selected.add(idx);
+    chars += line.length;
+  }
+
+  return [...selected]
+    .sort((a, b) => a - b)
+    .map((idx) => rendered.get(idx))
+    .filter((line): line is string => !!line)
+    .join("\n");
 }

@@ -1,6 +1,9 @@
 import { expect, test } from 'bun:test';
 
-import { getWorkspaceTouchStartIntent } from '../../web/src/components/workspace-explorer.ts';
+import {
+  getWorkspaceTouchStartIntent,
+  mergeWorkspaceTreeUpdates,
+} from '../../web/src/components/workspace-explorer.ts';
 
 function createRowTarget(options: { path?: string; type?: string; isDragHandle?: boolean } = {}) {
   const row = {
@@ -55,4 +58,57 @@ test('workspace touch start ignores rows that are being renamed', () => {
   }, '/workspace/demo.md');
 
   expect(intent).toBeNull();
+});
+
+test('workspace root updates preserve descendants loaded beyond the watcher depth', () => {
+  const previous = {
+    path: '.', type: 'dir', children: [{
+      path: 'notes', type: 'dir', children: [{
+        path: 'notes/days', type: 'dir', children: [{
+          path: 'notes/days/2026', type: 'dir', children: [{
+            path: 'notes/days/2026/07', type: 'dir', children: [
+              { path: 'notes/days/2026/07/09.md', type: 'file' },
+            ],
+          }],
+        }],
+      }],
+    }],
+  };
+  const watcherRoot = {
+    path: '.', type: 'dir', children: [{
+      path: 'notes', type: 'dir', children: [{
+        path: 'notes/days', type: 'dir', children: [{
+          path: 'notes/days/2026', type: 'dir', children: [{
+            path: 'notes/days/2026/07', type: 'dir',
+          }],
+        }],
+      }],
+    }],
+  };
+
+  const merged = mergeWorkspaceTreeUpdates(previous, [{ path: '.', root: watcherRoot, truncated: false }]);
+
+  expect(merged.children[0].children[0].children[0].children[0].children).toEqual([
+    { path: 'notes/days/2026/07/09.md', type: 'file' },
+  ]);
+});
+
+test('truncated workspace updates defer replacement until a targeted reload', () => {
+  const previous = {
+    path: '.', type: 'dir', children: [
+      { path: 'a', type: 'dir', children: [] },
+      { path: 'b', type: 'dir', children: [] },
+      { path: 'c', type: 'dir', children: [] },
+    ],
+  };
+  const partialRoot = {
+    path: '.', type: 'dir', children: [
+      { path: 'a', type: 'dir', children: [] },
+    ],
+  };
+
+  const merged = mergeWorkspaceTreeUpdates(previous, [{ path: '.', root: partialRoot, truncated: true }]);
+
+  expect(merged).toBe(previous);
+  expect(merged.children.map((child) => child.path)).toEqual(['a', 'b', 'c']);
 });

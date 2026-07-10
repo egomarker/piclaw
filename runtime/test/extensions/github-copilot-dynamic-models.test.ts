@@ -55,6 +55,7 @@ describe("github-copilot dynamic models extension", () => {
   });
 
   test("filters live model IDs to chat-capable non-embedding model IDs", () => {
+    expect(shouldImportGitHubCopilotLiveModelId("gpt-5.6")).toBe(true);
     expect(shouldImportGitHubCopilotLiveModelId("gpt-5.5")).toBe(true);
     expect(shouldImportGitHubCopilotLiveModelId("claude-opus-4.7-high")).toBe(true);
     expect(shouldImportGitHubCopilotLiveModelId("mai-code-1-flash-internal")).toBe(true);
@@ -83,6 +84,7 @@ describe("github-copilot dynamic models extension", () => {
     ];
 
     const merged = mergeGitHubCopilotDynamicModels(existing, [
+      makeLiveModel("gpt-5.6"),
       makeLiveModel("claude-opus-4.7-high", {
         supported_endpoints: ["/v1/messages", "/chat/completions"],
         capabilities: { limits: { max_context_window_tokens: 200000, max_output_tokens: 64000, vision: {} }, supports: {} },
@@ -98,6 +100,7 @@ describe("github-copilot dynamic models extension", () => {
     ]);
 
     const ids = merged.map((model) => model.id);
+    expect(ids).toContain("gpt-5.6");
     expect(ids).toContain("gpt-5.5");
     expect(ids).toContain("gpt-4.1");
     expect(ids).toContain("gemini-3.5-flash");
@@ -106,6 +109,12 @@ describe("github-copilot dynamic models extension", () => {
     expect(ids).toContain("mai-code-1-flash-internal");
     expect(ids).toContain("grok-code-fast-1");
     expect(ids).not.toContain("trajectory-compaction");
+
+    const gpt56 = merged.find((model) => model.id === "gpt-5.6")!;
+    expect(gpt56.api).toBe("openai-responses");
+    expect(gpt56.reasoning).toBe(true);
+    expect(gpt56.contextWindow).toBe(1050000);
+    expect(gpt56.maxTokens).toBe(128000);
 
     const claude = merged.find((model) => model.id === "claude-opus-4.7-high")!;
     expect(claude.api).toBe("anthropic-messages");

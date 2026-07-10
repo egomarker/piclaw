@@ -1,0 +1,94 @@
+import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { ModelRegistry, SessionEntry } from "@earendil-works/pi-coding-agent";
+
+const NOISE_FLOOR_TOKENS = 1024;
+
+type PreviousRequest = {
+  promptTokens: number;
+  modelKey: string;
+  timestamp: number;
+  reportedCache: boolean;
+};
+
+export interface PromptCacheMiss {
+  missedTokens: number;
+  missedCost: number;
+  idleMs: number;
+  modelChanged: boolean;
+}
+
+export interface PromptCacheWaste {
+  missedTokens: number;
+  missedCost: number;
+  missCount: number;
+}
+
+function detectMiss(
+  previous: PreviousRequest | undefined,
+  message: AssistantMessage,
+  models: ModelRegistry,
+): PromptCacheMiss | undefined {
+  const usage = message.usage;
+  const promptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+  if (!previous || promptTokens <= 0 || (usage.cacheRead + usage.cacheWrite === 0 && !previous.reportedCache)) {
+    return undefined;
+  }
+
+  const missedTokens = Math.min(previous.promptTokens, promptTokens) - usage.cacheRead;
+  if (missedTokens <= NOISE_FLOOR_TOKENS) return undefined;
+
+  const paidTokens = usage.input + usage.cacheWrite;
+  const paidPerToken = paidTokens > 0
+    ? (usage.cost.input + usage.cost.cacheWrite) / paidTokens
+    : 0;
+  const readPerToken = usage.cacheRead > 0
+    ? usage.cost.cacheRead / usage.cacheRead
+    : (models.find(message.provider, message.model)?.cost.cacheRead ?? 0) / 1_000_000;
+
+  return {
+    missedTokens,
+    missedCost: missedTokens * Math.max(0, paidPerToken - readPerToken),
+    idleMs: Math.max(0, message.timestamp - previous.timestamp),
+    modelChanged: `${message.provider}/${message.model}` !== previous.modelKey,
+  };
+}
+
+function asPreviousRequest(message: AssistantMessage, reportedCache: boolean): PreviousRequest | undefined {
+  const usage = message.usage;
+  const promptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+  if (promptTokens <= 0) return undefined;
+  return {
+    promptTokens,
+    modelKey: `${message.provider}/${message.model}`,
+    timestamp: message.timestamp,
+    reportedCache: reportedCache || usage.cacheRead + usage.cacheWrite > 0,
+  };
+}
+
+/** Derive cumulative prompt-cache misses from persisted session entries. */
+export function computePromptCacheWaste(entries: SessionEntry[], models: ModelRegistry): PromptCacheWaste {
+  let previous: PreviousRequest | undefined;
+  const totals: PromptCacheWaste = { missedTokens: 0, missedCost: 0, missCount: 0 };
+
+  for (const entry of entries) {
+    if (entry.type === "compaction" || entry.type === "branch_summary") {
+      // The context legitimately changed, so the next prompt is new content.
+      // Model switches are intentionally counted because they re-bill the same
+      // persisted prompt even though cross-model cache reuse is impossible.
+      previous = undefined;
+      continue;
+    }
+    if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+
+    const message = entry.message as AssistantMessage;
+    const miss = detectMiss(previous, message, models);
+    if (miss) {
+      totals.missedTokens += miss.missedTokens;
+      totals.missedCost += miss.missedCost;
+      totals.missCount += 1;
+    }
+    previous = asPreviousRequest(message, previous?.reportedCache ?? false) ?? previous;
+  }
+
+  return totals;
+}

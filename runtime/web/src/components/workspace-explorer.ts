@@ -90,7 +90,7 @@ function treeSignature(node, expanded, showHidden) {
  * Deep-merge two tree snapshots, preserving object identity for unchanged
  * subtrees so Preact's keyed diffing can skip unchanged rows entirely.
  */
-function mergeTree(prev, next) {
+function mergeTree(prev, next, options = {}) {
     if (!next) return null;
     if (!prev) return next;
     if (prev.path !== next.path || prev.type !== next.type) return next;
@@ -102,27 +102,57 @@ function mergeTree(prev, next) {
     if (!nextKids) return prev;
 
     const prevMap = prevKids ? new Map(prevKids.map(c => [c?.path, c])) : new Map();
+    const nextPaths = new Set(nextKids.map(child => child?.path));
     let changed = !prevKids || prevKids.length !== nextKids.length;
     const merged = nextKids.map(child => {
-        const m = mergeTree(prevMap.get(child.path), child);
+        const m = mergeTree(prevMap.get(child.path), child, options);
         if (m !== prevMap.get(child.path)) changed = true;
         return m;
     });
+
+    // A truncated snapshot is not authoritative about absent siblings. Keep
+    // previously loaded nodes that the server omitted rather than collapsing
+    // the visible tree to the partial response.
+    if (options.preserveMissing && prevKids) {
+        for (const child of prevKids) {
+            if (!nextPaths.has(child?.path)) merged.push(child);
+        }
+    }
+
     return changed ? { ...next, children: merged } : prev;
 }
 
 // Replace a subtree at path with a new node (merged to preserve identity).
-function replaceNodeAtPath(node, targetPath, nextNode) {
+function replaceNodeAtPath(node, targetPath, nextNode, options = {}) {
     if (!node) return node;
-    if (node.path === targetPath) return mergeTree(node, nextNode);
+    if (node.path === targetPath) return mergeTree(node, nextNode, options);
     if (!Array.isArray(node.children)) return node;
     let changed = false;
     const children = node.children.map(child => {
-        const updated = replaceNodeAtPath(child, targetPath, nextNode);
+        const updated = replaceNodeAtPath(child, targetPath, nextNode, options);
         if (updated !== child) changed = true;
         return updated;
     });
     return changed ? { ...node, children } : node;
+}
+
+export function mergeWorkspaceTreeUpdates(prev, updates) {
+    let next = prev;
+    for (const update of Array.isArray(updates) ? updates : []) {
+        if (!update?.root) continue;
+        // A truncated watcher snapshot cannot distinguish omitted entries from
+        // deletions. Keep the current tree until a shallow targeted reload
+        // provides an authoritative sibling list.
+        if (update.truncated && next) continue;
+        if (!next) {
+            next = update.root;
+        } else if (update.path === '.' || !update.path) {
+            next = mergeTree(next, update.root);
+        } else {
+            next = replaceNodeAtPath(next, update.path, update.root);
+        }
+    }
+    return next;
 }
 
 const STARBURST_MAX_DEPTH = 4;
@@ -658,8 +688,10 @@ export function WorkspaceExplorer({
     const expandedRef     = useRef(expanded);
     const lastSigRef      = useRef('');
     const pendingRootRef  = useRef(null);
+    const rootRequestRef  = useRef(0);
+    const treeRevisionRef = useRef(0);
     const rafRef          = useRef(0);
-    const pendingSubtreeRef = useRef(new Set());
+    const pendingSubtreeRef = useRef(new Map());
     // KEY FIX: keep a ref to the latest loadTree so the setInterval never
     // holds a stale closure over the initial tree=null state.
     const loadTreeFnRef   = useRef(null);
@@ -864,6 +896,9 @@ export function WorkspaceExplorer({
             const next = Boolean(e?.detail?.showHidden);
             setShowHidden(next);
             showHiddenRef.current = next;
+            treeRevisionRef.current += 1;
+            rootRequestRef.current += 1;
+            pendingSubtreeRef.current.clear();
             setWorkspaceVisibility(true, next).catch(() => { setShowHidden(next); });
             lastSigRef.current = '';
             loadTreeFnRef.current?.();
@@ -1004,29 +1039,36 @@ export function WorkspaceExplorer({
     // ── loadTree ──────────────────────────────────────────────────────────────
     const loadTree = async () => {
         if (!visibleRef.current) return;
+        const requestId = ++rootRequestRef.current;
+        const requestRevision = treeRevisionRef.current;
+        const requestShowHidden = showHiddenRef.current;
         try {
             // Use depth 1 for root to avoid scanning huge workspaces upfront.
             // Individual folders are expanded on-demand via loadSubtree().
-            const data = await getWorkspaceTree('', 1, showHiddenRef.current);
-            const sig = treeSignature(data.root, expandedRef.current, showHiddenRef.current);
+            const data = await getWorkspaceTree('', 1, requestShowHidden);
+            if (requestId !== rootRequestRef.current || requestRevision !== treeRevisionRef.current) return;
+            const sig = treeSignature(data.root, expandedRef.current, requestShowHidden);
             if (sig === lastSigRef.current) {
                 // Structure unchanged – just clear the initial spinner if needed.
                 setInitialLoad(false);
                 return;
             }
-            lastSigRef.current = sig;
-            pendingRootRef.current = data.root;
+            pendingRootRef.current = { root: data.root, sig, requestId, requestRevision, truncated: Boolean(data.truncated) };
             // Batch the DOM update into a single rAF; coalesce rapid calls.
             if (!rafRef.current) {
                 rafRef.current = requestAnimationFrame(() => {
                     rafRef.current = 0;
+                    const pending = pendingRootRef.current;
+                    if (!pending || pending.requestId !== rootRequestRef.current || pending.requestRevision !== treeRevisionRef.current) return;
+                    lastSigRef.current = pending.sig;
                     // mergeTree returns prev unchanged when content is identical,
                     // so Preact skips diffing rows that didn't change.
-                    setTree(prev => mergeTree(prev, pendingRootRef.current));
+                    setTree(prev => mergeTree(prev, pending.root, { preserveMissing: pending.truncated }));
                     setInitialLoad(false);
                 });
             }
         } catch (err) {
+            if (requestId !== rootRequestRef.current || requestRevision !== treeRevisionRef.current) return;
             setError(err.message || 'Failed to load workspace');
             setInitialLoad(false);
         }
@@ -1034,15 +1076,20 @@ export function WorkspaceExplorer({
 
     const loadSubtree = async (path) => {
         if (!path) return;
-        if (pendingSubtreeRef.current.has(path)) return;
-        pendingSubtreeRef.current.add(path);
+        const revision = treeRevisionRef.current;
+        const requestToken = Symbol(path);
+        pendingSubtreeRef.current.set(path, requestToken);
         try {
             const data = await getWorkspaceTree(path, 1, showHiddenRef.current);
-            setTree(prev => replaceNodeAtPath(prev, path, data.root));
+            if (revision !== treeRevisionRef.current || pendingSubtreeRef.current.get(path) !== requestToken) return;
+            setTree(prev => replaceNodeAtPath(prev, path, data.root, { preserveMissing: Boolean(data.truncated) }));
         } catch (err) {
+            if (revision !== treeRevisionRef.current || pendingSubtreeRef.current.get(path) !== requestToken) return;
             setError(err.message || 'Failed to load workspace');
         } finally {
-            pendingSubtreeRef.current.delete(path);
+            if (pendingSubtreeRef.current.get(path) === requestToken) {
+                pendingSubtreeRef.current.delete(path);
+            }
         }
     };
     loadSubtreeRef.current = loadSubtree;
@@ -1280,22 +1327,28 @@ export function WorkspaceExplorer({
         const handler = (event) => {
             const updates = event?.detail?.updates || [];
             if (!Array.isArray(updates) || updates.length === 0) return;
+            treeRevisionRef.current += 1;
+            rootRequestRef.current += 1;
+            pendingSubtreeRef.current.clear();
             setTree(prev => {
-                let next = prev;
-                for (const update of updates) {
-                    if (!update?.root) continue;
-                    if (!next || update.path === '.' || !update.path) {
-                        next = update.root;
-                    } else {
-                        next = replaceNodeAtPath(next, update.path, update.root);
-                    }
-                }
+                const next = mergeWorkspaceTreeUpdates(prev, updates);
                 if (next) {
                     lastSigRef.current = treeSignature(next, expandedRef.current, showHiddenRef.current);
                 }
                 setInitialLoad(false);
                 return next;
             });
+
+            for (const update of updates) {
+                if (!update?.truncated) continue;
+                const path = update.path || '.';
+                if (path === '.') {
+                    lastSigRef.current = '';
+                    loadTreeFnRef.current?.();
+                } else {
+                    loadSubtreeRef.current?.(path);
+                }
+            }
 
             const selected = selectedPathRef.current;
             const shouldRefreshStarburst = Boolean(selected) && updates.some((update) => {
@@ -1685,6 +1738,9 @@ export function WorkspaceExplorer({
     // Refresh button: force-invalidate signature so a changed tree is picked up
     // even if the visible signature hasn't changed (e.g. mtime-only updates).
     const handleRefreshClick = useRef(() => {
+        treeRevisionRef.current += 1;
+        rootRequestRef.current += 1;
+        pendingSubtreeRef.current.clear();
         lastSigRef.current = '';
         loadTreeFnRef.current();
         loadWorkspaceIndexStatusRef.current?.();
@@ -1707,6 +1763,9 @@ export function WorkspaceExplorer({
                 setLocalStorageItem('workspaceShowHidden', String(next));
             }
             showHiddenRef.current = next;
+            treeRevisionRef.current += 1;
+            rootRequestRef.current += 1;
+            pendingSubtreeRef.current.clear();
             setWorkspaceVisibility(true, next).catch((error) => {
                 console.debug('[workspace-explorer] Workspace visibility refresh after toggling hidden files failed.', error, {
                     showHidden: next,

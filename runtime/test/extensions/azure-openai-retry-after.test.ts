@@ -4,6 +4,7 @@ import {
   AZURE_RATE_LIMIT_BACKOFF_MS,
   formatAzureRateLimitMessage,
   formatAzureRetryDelay,
+  isAzureRateLimitRequestError,
   isAzureRetryableRequestError,
   parseRetryAfterMs,
   resolveAzureRetryDelayMs,
@@ -16,10 +17,23 @@ test("parseRetryAfterMs accepts delta-seconds and HTTP dates", () => {
   expect(parseRetryAfterMs("Fri, 17 Apr 2026 00:00:05 GMT", nowMs)).toBe(5000);
 });
 
-test("isAzureRetryableRequestError treats HTTP 429 as retryable", () => {
+test("isAzureRateLimitRequestError recognizes Azure quota errors", () => {
+  expect(isAzureRateLimitRequestError({ status: 429 })).toBe(true);
+  expect(isAzureRateLimitRequestError({ code: "ResourceExhausted" })).toBe(true);
+  expect(isAzureRateLimitRequestError({ name: "ResourceExhausted", message: "quota temporarily unavailable" })).toBe(true);
+  expect(isAzureRateLimitRequestError(new Error("too many requests"))).toBe(true);
+  expect(isAzureRateLimitRequestError({ status: 503 })).toBe(false);
+});
+
+test("isAzureRetryableRequestError treats transient statuses and transports as retryable", () => {
   expect(isAzureRetryableRequestError({ status: 429 })).toBe(true);
   expect(isAzureRetryableRequestError({ status: 503 })).toBe(true);
+  expect(isAzureRetryableRequestError({ status: 524 })).toBe(true);
+  expect(isAzureRetryableRequestError(new Error("The socket connection was closed unexpectedly"))).toBe(true);
+  expect(isAzureRetryableRequestError({ code: "ResourceExhausted" })).toBe(true);
+  expect(isAzureRetryableRequestError({ name: "ResourceExhausted", message: "quota temporarily unavailable" })).toBe(true);
   expect(isAzureRetryableRequestError({ status: 400 })).toBe(false);
+  expect(isAzureRetryableRequestError(new Error("invalid request"))).toBe(false);
 });
 
 test("resolveAzureRetryDelayMs respects Retry-After before fallback backoff", () => {
@@ -57,6 +71,15 @@ test("resolveAzureRetryDelayMs falls back to Azure rate-limit backoff for 429s w
     attempt: 1,
     error: { status: 429 },
   })).toBe(AZURE_RATE_LIMIT_BACKOFF_MS);
+});
+
+test("resolveAzureRetryDelayMs backs off for 524 and transport-shaped failures", () => {
+  expect(resolveAzureRetryDelayMs({ attempt: 0, error: { status: 524 } })).toBe(2000);
+  expect(resolveAzureRetryDelayMs({ attempt: 1, error: new Error("socket connection was closed unexpectedly") })).toBe(4000);
+});
+
+test("resolveAzureRetryDelayMs treats ResourceExhausted as quota exhaustion", () => {
+  expect(resolveAzureRetryDelayMs({ attempt: 2, error: { code: "ResourceExhausted" } })).toBe(AZURE_RATE_LIMIT_BACKOFF_MS);
 });
 
 if (typeof Headers !== "undefined") {

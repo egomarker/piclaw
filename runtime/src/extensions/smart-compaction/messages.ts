@@ -93,6 +93,223 @@ export function buildPreview(text: string, maxChars = USER_PREVIEW_MAX_CHARS): s
   return text.length > maxChars ? text.slice(0, maxChars) + "..." : text;
 }
 
+const TOOL_OUTCOME_MAX_CHARS = 180;
+const TOOL_NAME_MAX_CHARS = 60;
+const TOOL_BATCH_MAX_CHARS = 20_000;
+const FAILURE_OUTCOME_REGEX = /\b(error|failed|failure|exception|permission denied|timed? out|not found|unable to|cannot|could not)\b/i;
+const ZERO_FAILURE_OUTCOME_REGEX = /\b(?:0|no)\s+(?:tests?\s+)?(?:failed|failures?|errors?|exceptions?)\b/gi;
+const NO_CHANGE_OUTCOME_REGEX = /\b(?:applied\s*:\s*0|no changes? (?:applied|made)|nothing (?:changed|written)|replacement (?:text )?was not found)\b/i;
+const SIGNIFICANT_OUTCOME_REGEX = /\b(?:tests?|passed|warning|critical|blocked|disk\s+(?:is\s+)?full|deploy|restart|deleted)\b/i;
+const LOW_INFORMATION_MUTATION_SUCCESS_REGEX = /\b(?:ok|done|success(?:ful(?:ly)?)?|applied|created|updated|edited|wrote|written)\b/i;
+const LOW_INFORMATION_MUTATION_TOOLS = new Set(["edit", "write"]);
+const MUTATION_STATUS_TOOLS = new Set(["edit", "write"]);
+const COMMAND_STATUS_TOOLS = new Set(["bash", "exec", "shell"]);
+const COMMAND_FAILURE_OUTCOME_REGEX = /(?:\b(?:exit|status|code)\s*[:=]?\s*[1-9]\d*\b|\bcommand failed\b|\b[1-9]\d*\s+(?:tests?\s+)?failed\b|\bfatal:\s)/i;
+const LOW_INFORMATION_READ_RESULT_REGEX = /^(?:read\s+)?ok[.!]?$/i;
+
+export interface ToolOutcomeFact {
+  callId: string;
+  toolName: string;
+  assistantIndex: number;
+  resultIndex: number | null;
+  keyArgument: string;
+  pathArgument: string;
+  outcome: string;
+  isError: boolean;
+  missing: boolean;
+  noChange: boolean;
+  significant: boolean;
+  lowInformationSuccess: boolean;
+}
+
+export interface ToolOutcomeAnalysis {
+  facts: ToolOutcomeFact[];
+  matchedResultIndexes: Set<number>;
+  orphanResultIndexes: number[];
+  hasAssistantNarrative: boolean;
+  hasFailure: boolean;
+  hasMissing: boolean;
+  hasSignificantOutcome: boolean;
+  safeForNoOp: boolean;
+}
+
+function compactToolOutcome(text: string): string {
+  const compact = text.replace(/\s+/g, " ").trim();
+  return buildPreview(compact, TOOL_OUTCOME_MAX_CHARS);
+}
+
+function hasFailureOutcome(text: string): boolean {
+  // Successful test summaries often contain phrases such as "0 failed" or
+  // "no errors". Remove only those zero-count clauses before looking for real
+  // failure evidence so prompt serialization never labels a passing run ERROR.
+  return FAILURE_OUTCOME_REGEX.test(text.replace(ZERO_FAILURE_OUTCOME_REGEX, ""));
+}
+
+function toolCallKeyArgument(block: any): string {
+  const args = block?.arguments ?? {};
+  const value = args.path ?? args.command ?? args.pattern ?? args.query ?? "";
+  return typeof value === "string" ? buildPreview(value.replace(/\s+/g, " ").trim(), 100) : "";
+}
+
+/** Providers may append an opaque `|...` signature to one side of a tool ID pair. */
+function baseToolCallId(value: string): string {
+  return value.split("|", 1)[0]?.trim() || value;
+}
+
+function toolCallIdsMatch(callId: string, resultId: string): boolean {
+  return callId === resultId || baseToolCallId(callId) === baseToolCallId(resultId);
+}
+
+/**
+ * Reconcile assistant tool-call batches with all consecutive matching results.
+ * Outcome text is normalized and capped so callers never copy unbounded tool output.
+ */
+export function analyzeToolOutcomes(messages: Message[]): ToolOutcomeAnalysis {
+  const facts: ToolOutcomeFact[] = [];
+  const matchedResultIndexes = new Set<number>();
+  let hasAssistantNarrative = false;
+
+  for (let assistantIndex = 0; assistantIndex < messages.length; assistantIndex++) {
+    const assistant = messages[assistantIndex];
+    if (assistant.role !== "assistant" || !Array.isArray(assistant.content)) continue;
+    const blocks = assistant.content as any[];
+    const calls = blocks.filter((block) => block?.type === "toolCall" && typeof block.id === "string");
+    if (blocks.some((block) => block?.type === "text" && block.text?.trim())) hasAssistantNarrative = true;
+    if (calls.length === 0) continue;
+
+    const consecutiveResults: Array<{ message: Message; index: number; toolCallId: string }> = [];
+    for (let resultIndex = assistantIndex + 1; resultIndex < messages.length; resultIndex++) {
+      const result = messages[resultIndex] as any;
+      if (result.role !== "toolResult") break;
+      if (typeof result.toolCallId === "string") {
+        consecutiveResults.push({ message: result, index: resultIndex, toolCallId: result.toolCallId });
+      }
+    }
+    const claimedResultIndexes = new Set<number>();
+
+    for (const call of calls) {
+      // Prefer an exact ID, then accept the provider's base-ID/signed-ID form.
+      // Claim each result once so two calls sharing a base cannot both consume it.
+      const matched = consecutiveResults.find((result) =>
+        !claimedResultIndexes.has(result.index) && result.toolCallId === call.id,
+      ) ?? consecutiveResults.find((result) =>
+        !claimedResultIndexes.has(result.index) && toolCallIdsMatch(call.id, result.toolCallId),
+      );
+      const rawOutcome = matched ? extractText(matched.message.content).trim() : "";
+      const outcome = compactToolOutcome(rawOutcome);
+      const toolName = typeof call.name === "string" ? call.name : "?";
+      const isError = !!(matched?.message as any)?.isError
+        || (MUTATION_STATUS_TOOLS.has(toolName) && hasFailureOutcome(rawOutcome))
+        || (COMMAND_STATUS_TOOLS.has(toolName) && COMMAND_FAILURE_OUTCOME_REGEX.test(rawOutcome));
+      const missing = !matched;
+      const noChange = NO_CHANGE_OUTCOME_REGEX.test(rawOutcome);
+      const lowInformationSuccess = !!matched
+        && !isError
+        && !noChange
+        && !SIGNIFICANT_OUTCOME_REGEX.test(rawOutcome)
+        && rawOutcome.length <= 500
+        && (
+          (LOW_INFORMATION_MUTATION_TOOLS.has(toolName) && LOW_INFORMATION_MUTATION_SUCCESS_REGEX.test(rawOutcome))
+          || (toolName === "read" && LOW_INFORMATION_READ_RESULT_REGEX.test(rawOutcome.trim()))
+        );
+      const significant = missing
+        || isError
+        || noChange
+        || !lowInformationSuccess
+        || SIGNIFICANT_OUTCOME_REGEX.test(rawOutcome);
+
+      if (matched) {
+        matchedResultIndexes.add(matched.index);
+        claimedResultIndexes.add(matched.index);
+      }
+      facts.push({
+        callId: call.id,
+        toolName,
+        assistantIndex,
+        resultIndex: matched?.index ?? null,
+        keyArgument: toolCallKeyArgument(call),
+        pathArgument: typeof call.arguments?.path === "string" ? call.arguments.path : "",
+        outcome,
+        isError,
+        missing,
+        noChange,
+        significant,
+        lowInformationSuccess,
+      });
+    }
+  }
+
+  const orphanResultIndexes: number[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i].role === "toolResult" && !matchedResultIndexes.has(i)) orphanResultIndexes.push(i);
+  }
+  const hasFailure = facts.some((fact) => fact.isError || fact.noChange) || orphanResultIndexes.length > 0;
+  const hasMissing = facts.some((fact) => fact.missing);
+  const hasSignificantOutcome = facts.some((fact) => fact.significant) || orphanResultIndexes.length > 0;
+
+  return {
+    facts,
+    matchedResultIndexes,
+    orphanResultIndexes,
+    hasAssistantNarrative,
+    hasFailure,
+    hasMissing,
+    hasSignificantOutcome,
+    safeForNoOp: !hasAssistantNarrative && !hasFailure && !hasMissing && !hasSignificantOutcome,
+  };
+}
+
+/** Serialize a complete assistant tool batch with each matched result exactly once. */
+export function serializeToolBatchCompact(
+  messages: Message[],
+  assistantIndex: number,
+  analysis = analyzeToolOutcomes(messages),
+): string {
+  const facts = analysis.facts.filter((fact) => fact.assistantIndex === assistantIndex);
+  if (facts.length === 0) return "";
+  const assistantMessage = messages[assistantIndex];
+  const narrative = assistantMessage?.role === "assistant" && Array.isArray(assistantMessage.content)
+    ? (assistantMessage.content as any[])
+        .filter((block: any) => block.type === "text" && typeof block.text === "string" && block.text.trim())
+        .map((block: any) => block.text.trim())
+        .join(" ")
+        .replace(/\s+/g, " ")
+    : "";
+  const rendered = facts.map((fact) => {
+    const call = `${buildPreview(fact.toolName, TOOL_NAME_MAX_CHARS)}(${fact.keyArgument})`;
+    if (fact.missing) return `${call} → MISSING RESULT`;
+    const state = fact.isError || fact.noChange ? "ERROR: " : "";
+    return fact.outcome ? `${call} → ${state}${fact.outcome}` : `${call} → (empty result)`;
+  });
+  if (narrative) rendered.unshift(`Assistant: ${buildPreview(narrative, 400)}`);
+  const prefix = `[${assistantIndex}|Tool]: `;
+  const joined = `${prefix}${rendered.join(" | ")}`;
+  if (joined.length <= TOOL_BATCH_MAX_CHARS) return joined;
+
+  // Pathological batches still need a deterministic ceiling. Put failed,
+  // missing, and no-change outcomes first before slicing so tail failures can
+  // never disappear merely because many successful calls preceded them.
+  const prioritized = facts
+    .map((fact, index) => ({ fact, rendered: rendered[index + (narrative ? 1 : 0)] }))
+    .sort((a, b) => Number(b.fact.isError || b.fact.missing || b.fact.noChange) - Number(a.fact.isError || a.fact.missing || a.fact.noChange));
+  const prioritizedParts = narrative
+    ? [rendered[0], ...prioritized.map((item) => item.rendered)]
+    : prioritized.map((item) => item.rendered);
+  const included: string[] = [];
+  let usedChars = prefix.length;
+  for (const part of prioritizedParts) {
+    const separatorChars = included.length > 0 ? 3 : 0;
+    const remainingCount = prioritizedParts.length - included.length;
+    const trailer = ` | (+${remainingCount} outcomes omitted)`;
+    if (usedChars + separatorChars + part.length + trailer.length > TOOL_BATCH_MAX_CHARS) break;
+    included.push(part);
+    usedChars += separatorChars + part.length;
+  }
+  const omitted = prioritizedParts.length - included.length;
+  const trailer = omitted > 0 ? ` | (+${omitted} outcomes omitted)` : "";
+  return `${prefix}${included.join(" | ")}${trailer}`;
+}
+
 /** Serialize one LLM message to a compact readable line. */
 export function serializeMessage(msg: Message, idx: number, humanUserIndexes?: Set<number>): string {
   if (msg.role === "user") {
@@ -131,46 +348,10 @@ export function serializeMessage(msg: Message, idx: number, humanUserIndexes?: S
         ? text.slice(0, TOOL_RESULT_MAX_CHARS) +
           `\n… (${text.length - TOOL_RESULT_MAX_CHARS} chars truncated)`
         : text;
-    return `[${idx}|ToolResult:${(msg as any).toolName ?? "?"}]: ${trunc}`;
+    const status = (msg as any).isError ? "ERROR:" : "";
+    return `[${idx}|ToolResult:${status}${(msg as any).toolName ?? "?"}]: ${trunc}`;
   }
   return "";
-}
-
-/**
- * Compress a tool call + result pair into a single compact outcome line.
- * Keeps tool name and key arg, plus a brief outcome summary.
- */
-export function serializeToolCompact(assistantMsg: Message, resultMsg: Message | null, idx: number): string {
-  const calls: string[] = [];
-  for (const block of (assistantMsg.content as any[])) {
-    if (block.type === "toolCall") {
-      const args = block.arguments ?? {};
-      const keyArg = args.path ?? args.command ?? args.pattern ?? args.query ?? null;
-      const argStr = typeof keyArg === "string"
-        ? (keyArg.length > 80 ? keyArg.slice(0, 77) + "..." : keyArg)
-        : "";
-      calls.push(`${block.name}(${argStr})`);
-    }
-    if (block.type === "text" && block.text?.trim()) {
-      const t = block.text.trim();
-      calls.push(t.length > 150 ? t.slice(0, 147) + "..." : t);
-    }
-  }
-  if (calls.length === 0) return "";
-
-  let outcome = "";
-  if (resultMsg) {
-    const text = extractText(resultMsg.content).trim();
-    if (text) {
-      // Extract just the first meaningful line or error indicator
-      const firstLine = text.split("\n").find(l => l.trim().length > 0) || "";
-      outcome = firstLine.length > 120 ? firstLine.slice(0, 117) + "..." : firstLine;
-    }
-  }
-
-  return outcome
-    ? `[${idx}|Tool]: ${calls.join("; ")} → ${outcome}`
-    : `[${idx}|Tool]: ${calls.join("; ")}`;
 }
 
 /**
@@ -186,11 +367,33 @@ export function selectRecentContextBackwards(
 ): { included: Set<number>; compactOverrides: Map<number, string> } {
   const included = new Set<number>();
   const compactOverrides = new Map<number, string>();
+  const toolAnalysis = analyzeToolOutcomes(messages);
+  const orphanResultIndexes = new Set(toolAnalysis.orphanResultIndexes);
   let budget = RECENT_CONTEXT_BUDGET_CHARS;
+
+  // Reserve the nearest real human turn before walking backwards. Otherwise a
+  // large final tool batch can consume the full budget and erase the active
+  // instruction that initiated it (especially in split-turn compaction).
+  let reservedUserIndex = -1;
+  for (let candidate = messages.length - 1; candidate >= 0; candidate -= 1) {
+    if (!isRealUserMessage(messages[candidate], candidate, humanUserIndexes)) continue;
+    const line = serializeMessage(messages[candidate], candidate, humanUserIndexes);
+    if (line) {
+      reservedUserIndex = candidate;
+      included.add(candidate);
+      budget -= line.length;
+    }
+    break;
+  }
 
   let i = messages.length - 1;
   while (i >= 0 && budget > 0) {
     const msg = messages[i];
+
+    if (i === reservedUserIndex) {
+      i--;
+      continue;
+    }
 
     if (msg.role === "user") {
       if (isSyntheticUserMessage(msg)) {
@@ -213,15 +416,14 @@ export function selectRecentContextBackwards(
         (msg.content as any[]).some((b: any) => b.type === "text" && b.text?.trim());
 
       if (hasToolCalls) {
-        // Find the corresponding tool result ahead
-        const resultIdx = i + 1 < messages.length && messages[i + 1].role === "toolResult" ? i + 1 : null;
-        const compact = serializeToolCompact(msg, resultIdx !== null ? messages[resultIdx] : null, i);
+        const compact = serializeToolBatchCompact(messages, i, toolAnalysis);
         if (compact) {
           included.add(i);
           compactOverrides.set(i, compact);
-          if (resultIdx !== null) {
-            included.add(resultIdx); // mark result as consumed
-            compactOverrides.set(resultIdx, ""); // skip separate rendering
+          for (const fact of toolAnalysis.facts) {
+            if (fact.assistantIndex !== i || fact.resultIndex === null) continue;
+            included.add(fact.resultIndex);
+            compactOverrides.set(fact.resultIndex, "");
           }
           budget -= compact.length;
         }
@@ -240,9 +442,16 @@ export function selectRecentContextBackwards(
     }
 
     if (msg.role === "toolResult") {
-      // Orphaned tool result not yet consumed by assistant handler above.
-      // Skip — it will be captured when the backwards walk reaches the
-      // assistant message that issued the call.
+      // Matched results are emitted with their assistant batch. An orphan has
+      // no issuing assistant in this context, so preserve its bounded outcome
+      // explicitly rather than silently dropping anomalous execution state.
+      if (orphanResultIndexes.has(i)) {
+        const line = serializeMessage(msg, i, humanUserIndexes);
+        if (line) {
+          included.add(i);
+          budget -= line.length;
+        }
+      }
       i--;
       continue;
     }

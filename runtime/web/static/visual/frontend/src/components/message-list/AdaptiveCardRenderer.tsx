@@ -42,7 +42,7 @@ async function ensureSdk(): Promise<void> {
   sdkLoadPromise = new Promise<void>((resolve, reject) => {
     // Check again after a tick — the script tag may still be loading.
     const existing = document.querySelector<HTMLScriptElement>(
-      'script[src="/static/js/vendor/adaptivecards.min.js"]',
+      'script[src="/static/common/js/vendor/adaptivecards.min.js"]',
     );
     if (existing) {
       // Already in DOM; wait for it to finish.
@@ -57,7 +57,7 @@ async function ensureSdk(): Promise<void> {
     }
     // Inject it ourselves.
     const script = document.createElement("script");
-    script.src = "/static/js/vendor/adaptivecards.min.js";
+    script.src = "/static/common/js/vendor/adaptivecards.min.js";
     script.onload = () => {
       sdkLoaded = true;
       resolve();

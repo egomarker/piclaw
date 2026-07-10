@@ -1,7 +1,7 @@
 {
   "name": "three",
-  "version": "0.184.0",
-  "source": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/",
+  "version": "0.185.1",
+  "source": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/",
   "license": "MIT",
   "files": [
     "three.module.min.js",

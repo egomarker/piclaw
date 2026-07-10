@@ -1312,12 +1312,17 @@ async function runPromptAttempt(
     unsub();
   }
 
-  const finalText = tracker.getFinalText();
+  const trackedFinalText = tracker.getFinalText();
   const finalUsage = tracker.getFinalUsage();
-  hadPartialOutput = hadPartialOutput || !!finalText;
+  hadPartialOutput = hadPartialOutput || !!trackedFinalText;
   const finalAttachments = options.takeAttachments(chatJid);
   const timedOut = timedOutRef.value;
   const lastAssistantState = tracker.getLastAssistantState();
+  // A completed message with authoritative text is a normal final result.
+  // Streamed text omitted from message_end remains eligible for intermediate
+  // turn flushing and handler draft fallback, but it must not reclassify an
+  // otherwise tool-only terminal stop from tool_complete to success.
+  const finalText = lastAssistantState && !lastAssistantState.hadTextContent ? "" : trackedFinalText;
   const sawThinkingOnlyStop = Boolean(
     lastAssistantState?.stopReason === "stop"
       && lastAssistantState?.hadThinkingContent

@@ -158,6 +158,7 @@ function findTemplate(existing: Model<Api>[], id: string): Model<Api> | undefine
   if (id.startsWith("claude-opus-4.7")) candidates.push("claude-opus-4.7");
   if (id.startsWith("claude-opus-4.8")) candidates.push("claude-opus-4.8");
   if (id.startsWith("claude-sonnet-4.6")) candidates.push("claude-sonnet-4.6");
+  if (id.startsWith("gpt-5.6")) candidates.push("gpt-5.6");
   if (id.startsWith("gpt-5.5")) candidates.push("gpt-5.5");
   if (id.startsWith("gpt-5.4")) candidates.push("gpt-5.4");
   if (id.startsWith("gpt-5.3")) candidates.push("gpt-5.3-codex");
@@ -358,7 +359,8 @@ async function refreshGitHubCopilotDynamicModels(ctx: GitHubCopilotDynamicModels
   const existingModels = getGithubCopilotModels(ctx);
   if (existingModels.length === 0) return;
 
-  const seedModel = existingModels.find((model) => model.id === "gpt-5.5")
+  const seedModel = existingModels.find((model) => model.id === "gpt-5.6")
+    ?? existingModels.find((model) => model.id === "gpt-5.5")
     ?? existingModels.find((model) => model.id.startsWith("gpt"))
     ?? existingModels[0];
   const auth = await ctx.modelRegistry.getApiKeyAndHeaders(seedModel);
@@ -418,7 +420,8 @@ export async function refreshGitHubCopilotDynamicModelsAtBoot(agentPool: {
   const existingModels = registry.getAll().filter((model) => model.provider === PROVIDER && model.id);
   if (existingModels.length === 0) return;
 
-  const seedModel = existingModels.find((model) => model.id === "gpt-5.5")
+  const seedModel = existingModels.find((model) => model.id === "gpt-5.6")
+    ?? existingModels.find((model) => model.id === "gpt-5.5")
     ?? existingModels.find((model) => model.id.startsWith("gpt"))
     ?? existingModels[0];
   const auth = await registry.getApiKeyAndHeaders(seedModel);

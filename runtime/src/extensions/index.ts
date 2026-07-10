@@ -24,6 +24,7 @@
  *   - contextPrune: context_prune/context_tree_query for recoverable tool-result pruning.
  *   - providerRequestSanitizer: defensive provider payload cleanup before HTTP requests.
  *   - llmContextNormalizer: defensive LLM message-shape cleanup before provider conversion.
+ *   - mcpTimeoutPatch: Piclaw-compatible outer timeout/abort guard for MCP tools.
  *   - githubCopilotDynamicModels: Piclaw-private GitHub Copilot live /models catalog merge.
  *   - localLitePromptProfile: compact prompt/tool profile for local OpenAI-compatible models.
  *

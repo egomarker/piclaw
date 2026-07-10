@@ -5,7 +5,7 @@
  * ../smart-compaction.ts.
  */
 
-import { applyTokenEstimateSafetyMultiplier, getContextWindowFromModel, getSystemPromptOverheadTokens } from "../../utils/context-window-budget.js";
+import { applyTokenEstimateSafetyMultiplier, getCompactionRequestOverheadTokens, getContextWindowFromModel } from "../../utils/context-window-budget.js";
 
 // ---------------------------------------------------------------------------
 // Live context usage estimates
@@ -31,7 +31,7 @@ export function estimateTokensFromChars(text: string): number {
 }
 
 export function estimateCompactionPromptTokens(promptText: string): number {
-  return applyTokenEstimateSafetyMultiplier(estimateTokensFromChars(promptText)) + getSystemPromptOverheadTokens();
+  return applyTokenEstimateSafetyMultiplier(estimateTokensFromChars(promptText)) + getCompactionRequestOverheadTokens();
 }
 
 export function normalizeCompletionPercent(value: number | null | undefined): number | null {
@@ -104,10 +104,10 @@ export function publishContextEstimate(
   ctx: SmartCompactionUiContext,
   tokens: number | null,
   phase: string,
-  options: { completionPercent?: number | null } = {},
+  options: { completionPercent?: number | null; contextWindow?: number | null } = {},
 ): void {
   if (typeof ctx.ui.setStatus !== "function") return;
-  const contextWindow = getContextWindowEstimate(ctx);
+  const contextWindow = options.contextWindow ?? getContextWindowEstimate(ctx);
   if (!contextWindow) return;
   const normalizedTokens = typeof tokens === "number" && Number.isFinite(tokens) && tokens >= 0
     ? Math.round(tokens)

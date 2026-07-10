@@ -285,6 +285,29 @@ test("runCompactionWithTimeout preserves extension-recorded cancellation reasons
   }
 });
 
+test("runCompactionWithTimeout disposes its timeout after successful completion", async () => {
+  const previousTimeout = process.env.PICLAW_COMPACTION_TIMEOUT_MS;
+  process.env.PICLAW_COMPACTION_TIMEOUT_MS = "5";
+  try {
+    let aborts = 0;
+    const session = {
+      ...makeSession([]),
+      abortCompaction: () => {
+        aborts += 1;
+      },
+    };
+
+    const result = await runCompactionWithTimeout(session, "web:timer-disposal", {}, async () => "done");
+    expect(result).toEqual({ ok: true, result: "done" });
+
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    expect(aborts).toBe(0);
+  } finally {
+    if (previousTimeout === undefined) delete process.env.PICLAW_COMPACTION_TIMEOUT_MS;
+    else process.env.PICLAW_COMPACTION_TIMEOUT_MS = previousTimeout;
+  }
+});
+
 test("runCompactionWithTimeout joins concurrent compaction calls for the same chat", async () => {
   const previousTimeout = process.env.PICLAW_COMPACTION_TIMEOUT_MS;
   process.env.PICLAW_COMPACTION_TIMEOUT_MS = "5000";

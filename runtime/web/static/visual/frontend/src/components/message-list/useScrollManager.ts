@@ -1,6 +1,7 @@
 import { useRef, useCallback, useEffect } from "preact/hooks";
 import { buildChatUrl } from "../../api/chat-jid";
 import { copyToClipboard } from "../../utils/clipboard";
+import { isAnchorScrolling } from "../../utils/scroll-anchor";
 import { renderMermaidDiagrams } from "../../utils/mermaid-render";
 import { normalizePost } from "./helpers";
 import type { Interaction } from "./types";
@@ -44,6 +45,9 @@ export function useScrollManager(
     const el = listRef.current;
     if (!el) return;
     const handleScroll = () => {
+      // Ignore the thinking-pill anchor's own compensation writes (WebKit only) —
+      // they must not be mistaken for a user scroll and disengage auto-follow.
+      if (isAnchorScrolling(el)) return;
       // column-reverse: scrollTop 0 = visual bottom, scrolling up goes negative
       const atBottom = Math.abs(el.scrollTop) < 60;
       userScrolledRef.current = !atBottom;

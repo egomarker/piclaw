@@ -312,6 +312,13 @@ Use this EXACT format:
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`;
 
+function capPromptContext(value: string | undefined, maxChars: number, label: string): string | undefined {
+  const text = value?.trim();
+  if (!text) return undefined;
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}\n\n… (${label} truncated by ${text.length - maxChars} chars to keep the selective prompt bounded)`;
+}
+
 interface SelectivePromptInput {
   tokensBefore: number;
   previousSummary?: string;
@@ -338,6 +345,10 @@ export function buildSelectivePrompt(
   const shift = topicShift ?? null;
   const complaints = findUserComplaints(allMessages, humanUserIndexes);
   const { readFiles, modifiedFiles } = fileListsFromOps(input.fileOps);
+  const keptMessagesSummary = capPromptContext(input.keptMessagesSummary, 8_000, "kept messages");
+  const turnPrefixSummary = capPromptContext(input.turnPrefixSummary, 4_000, "split-turn prefix");
+  const previousSummary = capPromptContext(input.previousSummary, 12_000, "previous summary");
+  const boundedCustomInstructions = capPromptContext(customInstructions, 2_000, "user compaction note");
 
   // A1 requirement: always preserve enough context to distinguish the newest
   // active topic from older background material.
@@ -423,17 +434,17 @@ export function buildSelectivePrompt(
   // survive compaction and will follow the summary in context). This is
   // critical: messagesToSummarize only contains what's being discarded,
   // so without this section the LLM has no visibility into the most recent work.
-  if (input.keptMessagesSummary) {
+  if (keptMessagesSummary) {
     sec.push(`\n## Kept Messages (survive compaction — these represent the CURRENT work)`);
     sec.push(`The following excerpts are in the kept window and will remain in context after compaction. They represent what the user is CURRENTLY working on now, including surviving user turns, assistant/tool progress, and other retained context:`);
-    sec.push(input.keptMessagesSummary);
+    sec.push(keptMessagesSummary);
     sec.push(`\nIMPORTANT: The summary you produce must reflect this current work as the active topic, not older topics from the messages being discarded.`);
   }
 
-  if (input.turnPrefixSummary) {
+  if (turnPrefixSummary) {
     sec.push(`\n## Split Turn Prefix (discarded prefix of the CURRENT turn)`);
     sec.push(`The compacted window cut through an in-progress turn. The following excerpt is the dropped prefix of that current turn and is needed to understand the kept suffix:`);
-    sec.push(input.turnPrefixSummary);
+    sec.push(turnPrefixSummary);
   }
 
   sec.push(`\n## Historical / Background Context Handling`);
@@ -450,28 +461,28 @@ export function buildSelectivePrompt(
 
   sec.push(`\n## Files Modified (verified from tool results)`);
   if (modifiedFiles.length > 0) {
-    sec.push(compressFilePaths(modifiedFiles));
+    sec.push(capPromptContext(compressFilePaths(modifiedFiles), 6_000, "modified file list")!);
   } else {
     sec.push(`- (none)`);
   }
 
   sec.push(`\n## Files Read (not modified)`);
   if (readFiles.length > 0) {
-    sec.push(compressFilePaths(readFiles));
+    sec.push(capPromptContext(compressFilePaths(readFiles), 6_000, "read file list")!);
   } else {
     sec.push(`- (none)`);
   }
 
-  if (input.previousSummary) {
+  if (previousSummary) {
     sec.push(`\n## Previous Summary (merge new information into this)`);
     sec.push(`(Note: the following is the PREVIOUS compaction summary. Its "Current Active Topic" may be outdated — use the Detected Active Topic section above to determine the actual active topic.)`);
-    sec.push(input.previousSummary);
+    sec.push(previousSummary);
   }
 
-  if (customInstructions?.trim()) {
+  if (boundedCustomInstructions) {
     sec.push(`\n## User Compaction Note`);
     sec.push(`The user passed this instruction to /compact. Use it to guide focus, but don't treat it as the session's main goal.`);
-    sec.push(`"${customInstructions.trim()}"`);
+    sec.push(`"${boundedCustomInstructions}"`);
   }
 
   sec.push(`\n## Conversation Excerpts`);
@@ -481,33 +492,34 @@ export function buildSelectivePrompt(
     }, and key decisions)\n`,
   );
 
+  const instruction = shift
+    ? `A recent topic shift was detected. Update the summary so the newest topic becomes the Current Active Topic. Move older work that is not reaffirmed after message ${shift.current.index} into Historical / Background Context instead of keeping it as the Goal or current in-progress work.`
+    : previousSummary
+      ? `Update the previous summary with the new information from these conversation excerpts. Preserve existing information and add new progress, decisions, and context.`
+      : `Summarize these conversation excerpts into a structured context checkpoint. Focus on what matters for continuing the work.`;
+
   const sorted = [...included].sort((a, b) => a - b);
   let lastIdx = -1;
-  let chars = 0;
+  let chars = sec.join("\n").length + instruction.length + 300;
 
   for (const idx of sorted) {
-    if (chars > MAX_PROMPT_CHARS) {
+    const gap = lastIdx >= 0 && idx > lastIdx + 1
+      ? `\n--- [${idx - lastIdx - 1} messages omitted] ---\n`
+      : "";
+    const override = compactOverrides.get(idx);
+    const line = override !== undefined ? override : serializeMessage(allMessages[idx], idx, humanUserIndexes);
+    const addition = `${gap}${line || ""}`;
+    if (line && chars + addition.length > MAX_PROMPT_CHARS) {
       sec.push(`\n\u2026 (prompt limit reached, ${sorted.length - sorted.indexOf(idx)} more selected messages omitted)`);
       break;
     }
-    if (lastIdx >= 0 && idx > lastIdx + 1) {
-      sec.push(`\n--- [${idx - lastIdx - 1} messages omitted] ---\n`);
-    }
-    // Use compact override if available (compressed tool pairs)
-    const override = compactOverrides.get(idx);
-    const line = override !== undefined ? override : serializeMessage(allMessages[idx], idx, humanUserIndexes);
+    if (gap) sec.push(gap);
     if (line) {
       sec.push(line);
-      chars += line.length;
+      chars += addition.length;
     }
     lastIdx = idx;
   }
-
-  const instruction = shift
-    ? `A recent topic shift was detected. Update the summary so the newest topic becomes the Current Active Topic. Move older work that is not reaffirmed after message ${shift.current.index} into Historical / Background Context instead of keeping it as the Goal or current in-progress work.`
-    : input.previousSummary
-      ? `Update the previous summary with the new information from these conversation excerpts. Preserve existing information and add new progress, decisions, and context.`
-      : `Summarize these conversation excerpts into a structured context checkpoint. Focus on what matters for continuing the work.`;
 
   return sec.join("\n") + `\n\n---\n\n${instruction}`;
 }

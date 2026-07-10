@@ -127,7 +127,7 @@ function ensureMermaidLoaded(): Promise<void> {
   if (loadPromise) return loadPromise;
   loadPromise = new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/static/js/vendor/beautiful-mermaid.js";
+    script.src = "/static/common/js/vendor/beautiful-mermaid.js";
     script.onload = () => resolve();
     script.onerror = () => reject(new Error("Failed to load mermaid vendor bundle"));
     document.head.appendChild(script);

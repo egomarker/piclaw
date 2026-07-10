@@ -1,5 +1,6 @@
 import { html, useCallback, useEffect, useRef, useState } from '../vendor/preact-htm.js';
 import { Post } from './post.js';
+import { isAnchorScrolling } from '../ui/scroll-anchor.js';
 import { getAgentAvatarUrl, getAgentName } from '../ui/agent-utils.js';
 
 /**
@@ -21,6 +22,8 @@ export function Timeline({ posts, hasMore, onLoadMore, onPostClick, onHashtagCli
     }, [hasMore, loadingMore, onLoadMore]);
 
     const handleScroll = useCallback((e) => {
+        // Ignore the thinking-pill anchor's own compensation writes (WebKit only).
+        if (isAnchorScrolling(e.target)) return;
         const { scrollTop, scrollHeight, clientHeight } = e.target;
         const distanceFromTop = reverse ? (scrollHeight - clientHeight - scrollTop) : scrollTop;
         const prefetchThreshold = Math.max(300, clientHeight);

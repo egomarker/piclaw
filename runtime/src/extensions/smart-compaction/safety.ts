@@ -15,7 +15,7 @@ import {
   type CompactionReasoningPhase,
   getConfiguredCompactionReasoningEffort,
 } from "./config.js";
-import { applyTokenEstimateSafetyMultiplier, getEffectiveContextWindow, getSystemPromptOverheadTokens } from "../../utils/context-window-budget.js";
+import { applyTokenEstimateSafetyMultiplier, getCompactionRequestOverheadTokens, getEffectiveContextWindow, getSystemPromptOverheadTokens } from "../../utils/context-window-budget.js";
 import { estimateCompactionPromptTokens, estimateTokensFromChars, getModelContextWindow } from "./context.js";
 
 
@@ -110,7 +110,7 @@ export function getCompactionModelContextWindow(model: unknown): number {
 
 export function getCompactionRetryPromptTokenTarget(model: unknown, fraction = 0.65): number {
   const contextWindow = getCompactionModelContextWindow(model);
-  const effectiveWindow = getEffectiveContextWindow(contextWindow, getSystemPromptOverheadTokens());
+  const effectiveWindow = getEffectiveContextWindow(contextWindow, getCompactionRequestOverheadTokens());
   return Math.max(MIN_COMPACTION_OUTPUT_TOKENS, Math.floor(effectiveWindow * fraction));
 }
 
@@ -163,12 +163,4 @@ export function getCompactionReasoningEffort(
   return supported
     .slice()
     .sort((a, b) => compactionReasoningRank(a) - compactionReasoningRank(b))[0];
-}
-
-export interface ProgressiveCompactionBudget {
-  contextWindow: number;
-  promptBudgetChars: number;
-  chunkBudgetChars: number;
-  mergeBudgetChars: number;
-  forceProgressive: boolean;
 }

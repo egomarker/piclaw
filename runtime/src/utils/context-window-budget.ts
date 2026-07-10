@@ -8,6 +8,7 @@
  */
 
 const DEFAULT_SYSTEM_PROMPT_OVERHEAD_TOKENS = 4_000;
+const DEFAULT_COMPACTION_REQUEST_OVERHEAD_TOKENS = 1_000;
 const DEFAULT_UNKNOWN_MODEL_CONTEXT_WINDOW = 64_000;
 const DEFAULT_TOKEN_ESTIMATE_SAFETY_MULTIPLIER = 1.1;
 
@@ -18,6 +19,18 @@ function parsePositiveInt(value: unknown, fallback: number): number {
 
 export function getSystemPromptOverheadTokens(): number {
   return parsePositiveInt(process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS, DEFAULT_SYSTEM_PROMPT_OVERHEAD_TOKENS);
+}
+
+/**
+ * Overhead for the isolated compaction side request (its system instruction and
+ * provider framing). This is deliberately separate from the full agent-system
+ * overhead used to validate the context that will remain after compaction.
+ */
+export function getCompactionRequestOverheadTokens(): number {
+  return parsePositiveInt(
+    process.env.PICLAW_COMPACTION_REQUEST_OVERHEAD_TOKENS,
+    DEFAULT_COMPACTION_REQUEST_OVERHEAD_TOKENS,
+  );
 }
 
 export function getUnknownModelContextWindow(): number {

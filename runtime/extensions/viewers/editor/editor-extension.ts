@@ -14,6 +14,7 @@ import {
     EditorState,
     EditorView,
     Compartment,
+    StateEffect,
     minimalSetup,
     lineNumbers,
     highlightActiveLine,
@@ -312,6 +313,10 @@ export class StandaloneEditorInstance implements PaneInstance {
     private contentChangeTimer: number | null = null;
     private markdownLanguageRestoreTimer: number | null = null;
     private markdownLanguageSuspended = false;
+    private livePreviewTypingEffects: {
+        setParsingSuspended: (suspended: boolean) => StateEffect<boolean>;
+        forceRebuild: () => StateEffect<void>;
+    } | null = null;
     private diffMode: 'saved' | null = null;
     private vimEnabledRef: { current: boolean };
 
@@ -783,9 +788,24 @@ export class StandaloneEditorInstance implements PaneInstance {
         const wrapEffect = this.wrappingCompartment.reconfigure(this.largeDocumentMode ? [] : EditorView.lineWrapping);
 
         if (enabled) {
+            const targetView = this.view;
             try {
-                const { markdownLivePreview } = await import('./markdown/index.js');
-                if (this.disposed || !this.view || this.isDiffMode()) return;
+                const {
+                    forceLivePreviewRebuild,
+                    markdownLivePreview,
+                    setLivePreviewParsingSuspended,
+                } = await import('./markdown/index.js');
+                if (
+                    this.disposed
+                    || !this.view
+                    || this.view !== targetView
+                    || !this.livePreviewEnabled
+                    || !this.isLivePreviewAvailable()
+                ) return;
+                this.livePreviewTypingEffects = {
+                    setParsingSuspended: (suspended) => setLivePreviewParsingSuspended.of(suspended),
+                    forceRebuild: () => forceLivePreviewRebuild.of(),
+                };
                 this.view.dispatch({
                     effects: [
                         this.livePreviewCompartment.reconfigure(markdownLivePreview),
@@ -804,6 +824,7 @@ export class StandaloneEditorInstance implements PaneInstance {
                     wrapEffect,
                 ],
             });
+            this.livePreviewTypingEffects = null;
         }
     }
 
@@ -978,7 +999,7 @@ export class StandaloneEditorInstance implements PaneInstance {
             && this.isMarkdownFile()
             && !this.largeDocumentMode
             && !this.isDiffMode()
-            && !this.isLivePreview()
+            && (!this.isLivePreview() || this.livePreviewTypingEffects !== null)
             && this.getCurrentDocLength() >= FIREFOX_MARKDOWN_TYPING_LANGUAGE_MIN_CHARS;
     }
 
@@ -986,7 +1007,15 @@ export class StandaloneEditorInstance implements PaneInstance {
         if (!this.view || this.disposed || !this.shouldSuspendMarkdownLanguageWhileTyping()) return;
         if (!this.markdownLanguageSuspended) {
             this.markdownLanguageSuspended = true;
-            this.view.dispatch({ effects: this.languageCompartment.reconfigure([]) });
+            const livePreviewEffects = this.isLivePreview() ? this.livePreviewTypingEffects : null;
+            this.view.dispatch({
+                effects: livePreviewEffects
+                    ? [
+                        this.languageCompartment.reconfigure([]),
+                        livePreviewEffects.setParsingSuspended(true),
+                    ]
+                    : this.languageCompartment.reconfigure([]),
+            });
         }
         this.clearMarkdownLanguageRestoreTimer();
         this.markdownLanguageRestoreTimer = this.ownerWindow.setTimeout(() => this.restoreMarkdownLanguageAfterTyping(), FIREFOX_MARKDOWN_TYPING_LANGUAGE_RESTORE_MS);
@@ -997,7 +1026,17 @@ export class StandaloneEditorInstance implements PaneInstance {
         if (!this.markdownLanguageSuspended) return;
         this.markdownLanguageSuspended = false;
         if (!this.view || this.disposed || this.largeDocumentMode || this.isDiffMode()) return;
-        this.view.dispatch({ effects: this.languageCompartment.reconfigure(languageForPath(this.path) || []) });
+        const languageEffect = this.languageCompartment.reconfigure(languageForPath(this.path) || []);
+        const livePreviewEffects = this.isLivePreview() ? this.livePreviewTypingEffects : null;
+        this.view.dispatch({
+            effects: livePreviewEffects
+                ? [
+                    languageEffect,
+                    livePreviewEffects.setParsingSuspended(false),
+                    livePreviewEffects.forceRebuild(),
+                ]
+                : languageEffect,
+        });
     }
 
     private scheduleContentChangeCallback(): void {

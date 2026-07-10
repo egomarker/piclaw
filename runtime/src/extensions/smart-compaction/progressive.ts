@@ -12,7 +12,6 @@ import {
   BUDGET_SAFETY_MARGIN,
   MAX_PROGRESSIVE_CHUNKS,
   MAX_PROMPT_CHARS,
-  MIN_SUMMARY_CHARS,
   PROGRESSIVE_CHUNK_FRACTION,
   PROGRESSIVE_COMPACTION_CONCURRENCY,
   PROGRESSIVE_INPUT_CONTEXT_FRACTION,
@@ -21,12 +20,20 @@ import {
   type CompactionReasoningEffort,
   parsePositiveEnvInt,
 } from "./config.js";
-import { getEffectiveContextWindow, getSystemPromptOverheadTokens } from "../../utils/context-window-budget.js";
+import { getCompactionRequestOverheadTokens, getEffectiveContextWindow } from "../../utils/context-window-budget.js";
 import { estimateCompactionPromptTokens, estimateSmartCompactionCompletionPercent, formatProgressCount, formatProgressRange, formatSmartCompactionStatus } from "./context.js";
 import { compressFilePaths, fileListsFromOps } from "./files.js";
-import { serializeMessage, serializeToolCompact } from "./messages.js";
-import { getCompactionModelContextWindow, getCompactionReasoningEffort, getCompactionRetryPromptTokenTarget, getSafeCompactionMaxTokens } from "./safety.js";
+import { analyzeToolOutcomes, serializeMessage, serializeToolBatchCompact } from "./messages.js";
+import { getCompactionModelContextWindow, getCompactionReasoningEffort, getSafeCompactionMaxTokens } from "./safety.js";
+import { createLogger } from "../../utils/logger.js";
 import { SYSTEM_PROMPT } from "./selective-prompt.js";
+import { buildCompactionRepairInstruction, validateCompactionSummaryResponse, type CompactionSummarySchema } from "./summary-validation.js";
+
+const log = createLogger("ext.smart-compaction.progressive");
+
+const CHUNK_SYSTEM_PROMPT = `You are producing one structured intermediate checkpoint for progressive conversation compaction.
+Preserve exact user intent, constraints, decisions, paths, commands, tool outcomes, progress, open questions, and continuity facts from the supplied material.
+Use only the eight requested chunk headings, exactly once and in order. Do not use the final-compaction heading schema and do not add commentary before or after the checkpoint.`;
 
 export interface ProgressiveCompactionBudget {
   contextWindow: number;
@@ -51,6 +58,7 @@ export interface ProgressiveCompactionResult {
   totalChunkCount: number;
   nextUnprocessedMessageIndex?: number;
   nextUnprocessedSourceMessageIndex?: number;
+  nextUnprocessedEntryId?: string;
   partialReason?: string;
 }
 
@@ -68,7 +76,7 @@ export function getProgressiveCompactionBudget(model: unknown): ProgressiveCompa
   // Subtract system prompt overhead before computing input budgets.
   // The overhead (AGENTS.md, tools, skills, memory) is invisible to message
   // token estimates but eats real context space.
-  const effectiveWindow = getEffectiveContextWindow(contextWindow, getSystemPromptOverheadTokens());
+  const effectiveWindow = getEffectiveContextWindow(contextWindow, getCompactionRequestOverheadTokens());
   const envBudget = parsePositiveEnvInt("PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS");
   const computedPromptBudget = Math.floor(effectiveWindow * 4 * PROGRESSIVE_INPUT_CONTEXT_FRACTION);
   const rawPromptBudget = envBudget ?? Math.min(MAX_PROMPT_CHARS, Math.max(2_000, computedPromptBudget));
@@ -90,20 +98,26 @@ function serializeProgressiveSourceLines(
   humanUserIndexes?: Set<number>,
 ): Array<{ startMessageIndex: number; endMessageIndex: number; text: string }> {
   const lines: Array<{ startMessageIndex: number; endMessageIndex: number; text: string }> = [];
+  const toolAnalysis = analyzeToolOutcomes(messages);
   for (let i = 0; i < messages.length; i++) {
+    // Matched tool results are rendered once with their assistant batch. An
+    // orphan result remains a standalone line so unexpected state is visible.
+    if (toolAnalysis.matchedResultIndexes.has(i)) continue;
+
     const msg = messages[i];
     if (msg.role === "assistant" && Array.isArray((msg as any).content)) {
       const hasToolCalls = ((msg as any).content as any[]).some((b: any) => b?.type === "toolCall");
       if (hasToolCalls) {
-        const resultIdx = i + 1 < messages.length && messages[i + 1].role === "toolResult" ? i + 1 : null;
-        const compact = serializeToolCompact(msg, resultIdx !== null ? messages[resultIdx] : null, i);
+        const compact = serializeToolBatchCompact(messages, i, toolAnalysis);
         if (compact) {
+          const resultIndexes = toolAnalysis.facts
+            .filter((fact) => fact.assistantIndex === i && fact.resultIndex !== null)
+            .map((fact) => fact.resultIndex as number);
           lines.push({
             startMessageIndex: i,
-            endMessageIndex: resultIdx ?? i,
+            endMessageIndex: resultIndexes.length > 0 ? Math.max(...resultIndexes) : i,
             text: compact,
           });
-          if (resultIdx !== null) i = resultIdx;
           continue;
         }
       }
@@ -141,16 +155,21 @@ export function buildProgressiveCompactionChunks(
   };
 
   for (const line of sourceLines) {
-    const nextChars = line.text.length + (current.length > 0 ? 1 : 0);
-    if (current.length > 0 && chars + nextChars > budgetChars) {
-      flush();
-      startMessageIndex = line.startMessageIndex;
-    } else if (current.length === 0) {
-      startMessageIndex = line.startMessageIndex;
+    const segments = line.text.length > budgetChars
+      ? Array.from({ length: Math.ceil(line.text.length / budgetChars) }, (_, index) => line.text.slice(index * budgetChars, (index + 1) * budgetChars))
+      : [line.text];
+    for (const segment of segments) {
+      const nextChars = segment.length + (current.length > 0 ? 1 : 0);
+      if (current.length > 0 && chars + nextChars > budgetChars) {
+        flush();
+        startMessageIndex = line.startMessageIndex;
+      } else if (current.length === 0) {
+        startMessageIndex = line.startMessageIndex;
+      }
+      current.push(segment);
+      chars += nextChars;
+      endMessageIndex = line.endMessageIndex;
     }
-    current.push(line.text);
-    chars += nextChars;
-    endMessageIndex = line.endMessageIndex;
   }
   flush();
   return chunks;
@@ -277,11 +296,24 @@ function sourceIndexForLlmIndex(sourceIndexesByLlmIndex: number[] | undefined, l
   return undefined;
 }
 
+function sourceEntryIdForLlmIndex(sourceEntryIdsByLlmIndex: Array<string | undefined> | undefined, llmIndex: number | undefined): string | undefined {
+  if (!sourceEntryIdsByLlmIndex || llmIndex == null) return undefined;
+  for (let idx = Math.max(0, llmIndex); idx < sourceEntryIdsByLlmIndex.length; idx += 1) {
+    const entryId = sourceEntryIdsByLlmIndex[idx];
+    if (entryId) return entryId;
+  }
+  return undefined;
+}
+
 function buildDeterministicProgressiveSummary(input: {
   summaries: string[];
   chunks: ProgressiveCompactionChunk[];
   complete: boolean;
   reason?: string;
+  previousSummary?: string;
+  keptMessagesSummary?: string;
+  turnPrefixSummary?: string;
+  customInstructions?: string;
 }): string {
   const firstChunk = input.chunks[0];
   const lastChunk = input.chunks[input.summaries.length - 1];
@@ -294,6 +326,17 @@ function buildDeterministicProgressiveSummary(input: {
   const statusLine = input.complete
     ? `All ${totalChunks} progressive chunks were summarized; final LLM merge was skipped because ${reason}.`
     : `${processedChunks}/${totalChunks} progressive chunks were summarized; remaining messages are retained verbatim by moving the first kept entry to the first unsummarized chunk.`;
+  const escapeEmbeddedFileTag = (line: string): string =>
+    line.replace(/<(\/?)(read-files|modified-files)>/gi, "[$1$2]");
+  const preserveContinuity = (label: string, value: string | undefined): string[] => {
+    const text = value?.trim();
+    if (!text) return [];
+    return [
+      "",
+      `### ${label}`,
+      ...text.split("\n").map((line) => `- ${escapeEmbeddedFileTag(line || "(blank line)")}`),
+    ];
+  };
 
   return [
     "## Goal",
@@ -326,26 +369,20 @@ function buildDeterministicProgressiveSummary(input: {
     "1. Use the retained messages after the compaction boundary as authoritative current context.",
     "",
     "## Critical Context",
-    ...input.summaries.map((summary, index) => `\n### Completed Progressive Chunk ${index + 1}/${totalChunks}\n${summary.trim()}`),
+    ...preserveContinuity("Previous Compaction Summary", input.previousSummary),
+    ...preserveContinuity("Kept Messages That Survive Compaction", input.keptMessagesSummary),
+    ...preserveContinuity("Split Turn Prefix Context", input.turnPrefixSummary),
+    ...preserveContinuity("User Compaction Note", input.customInstructions),
+    ...input.summaries.map((summary, index) => {
+      const preservedLines = summary
+        .trim()
+        .split("\n")
+        .filter((line) => line.trim())
+        .map((line) => `- ${escapeEmbeddedFileTag(line)}`)
+        .join("\n");
+      return `\n### Completed Progressive Chunk ${index + 1}/${totalChunks}\n${preservedLines}`;
+    }),
   ].join("\n").trim();
-}
-
-export function buildTrimmedProgressiveMergeRetryPrompt(promptText: string, targetPromptTokens: number): string | null {
-  const targetChars = Math.max(8_000, Math.floor(targetPromptTokens * 4));
-  if (promptText.length <= targetChars) return null;
-  const marker = "\n## Ordered Intermediate Summaries";
-  const markerIndex = promptText.indexOf(marker);
-  const notice = "\n\n… (older/less relevant progressive merge material trimmed after context-overflow; preserve current task continuity and newest active work from the remaining summaries) …\n\n";
-  if (markerIndex < 0) {
-    const headChars = Math.min(Math.floor(targetChars * 0.35), Math.floor(promptText.length * 0.35));
-    const tailChars = Math.max(1_000, targetChars - headChars - notice.length);
-    return `${promptText.slice(0, headChars)}${notice}${promptText.slice(-tailChars)}`;
-  }
-  const headEnd = Math.min(promptText.length, markerIndex + marker.length + 512);
-  const head = promptText.slice(0, headEnd);
-  const tailChars = targetChars - head.length - notice.length;
-  if (tailChars < 1_000) return null;
-  return `${head}${notice}${promptText.slice(-tailChars)}`;
 }
 
 function hasSafeCompactionOutputRoom(model: any, promptText: string, maxTokens: number): boolean {
@@ -363,18 +400,19 @@ async function completeCompactionPrompt(
   model: any,
   auth: { apiKey?: string; headers?: Record<string, string>; env?: Record<string, string> },
   promptText: string,
+  schema: CompactionSummarySchema,
   maxTokens: number,
   abortSignal: AbortSignal,
   streamFn?: CompactionStreamFn,
   onProgress?: (generatedChars: number) => void,
   reasoning?: CompactionReasoningEffort,
 ): Promise<string> {
-  const runOnce = async (activePromptText: string): Promise<string> => {
+  const runOnce = async (activePromptText: string, retryCount: number): Promise<string> => {
     if (abortSignal.aborted) throw new Error("Compaction cancelled");
     const safeOutput = getSafeCompactionMaxTokens(model, activePromptText, maxTokens);
     const response = await streamComplete({
       model,
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt: schema === "chunk" ? CHUNK_SYSTEM_PROMPT : SYSTEM_PROMPT,
       userPrompt: activePromptText,
       maxTokens: safeOutput.maxTokens,
       signal: abortSignal,
@@ -385,30 +423,59 @@ async function completeCompactionPrompt(
       streamFn,
       onProgress,
     });
-    if ((response as any).stopReason === "error") {
-      throw new Error((response as any).errorMessage || "Progressive compaction LLM error");
-    }
-    const summary = response.content
-      .filter((c: any) => c.type === "text")
-      .map((c: any) => c.text)
-      .join("\n")
-      .trim();
-    if (summary.length < MIN_SUMMARY_CHARS) {
-      throw new Error("Progressive compaction summary too short");
+    const validation = validateCompactionSummaryResponse(response, schema, safeOutput.maxTokens * 4);
+    if (!validation.ok) {
+      log.debug("Progressive compaction output validation failed", {
+        operation: "smart_compaction.progressive_output_invalid",
+        schema,
+        stopReason: validation.stopReason,
+        validationFailure: validation.code,
+        retryCount,
+      });
+      const providerError = response?.stopReason === "error" && typeof response?.errorMessage === "string"
+        ? `: ${response.errorMessage}`
+        : "";
+      const error = new Error(`Progressive compaction output invalid (${validation.code}): ${validation.reason}${providerError}`) as Error & {
+        retryableOutput?: boolean;
+        validationReason?: string;
+      };
+      error.retryableOutput = validation.retryable;
+      error.validationReason = validation.reason;
+      throw error;
     }
     if (abortSignal.aborted) throw new Error("Compaction cancelled");
-    return summary;
+    return validation.text;
   };
 
   try {
-    return await runOnce(promptText);
+    return await runOnce(promptText, 0);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    const trimmedPrompt = isCompactionInputOverflow(message)
-      ? buildTrimmedProgressiveMergeRetryPrompt(promptText, getCompactionRetryPromptTokenTarget(model))
-      : null;
-    if (!trimmedPrompt || trimmedPrompt === promptText || abortSignal.aborted) throw err;
-    return await runOnce(trimmedPrompt);
+    const retryableOutput = !!(err as { retryableOutput?: boolean })?.retryableOutput;
+    const inputOverflow = isCompactionInputOverflow(message);
+    if ((!retryableOutput && !inputOverflow) || abortSignal.aborted) throw err;
+
+    // Never trim source-bearing progressive prompts after provider input
+    // overflow: doing so would claim coverage for omitted content. Chunks are
+    // split before submission; a hidden provider cap therefore cancels safely.
+    if (inputOverflow && !retryableOutput) throw err;
+
+    const repairReason = (err as { validationReason?: string })?.validationReason ?? message;
+    const repairInstruction = buildCompactionRepairInstruction(schema, repairReason);
+    // Every progressive prompt is source-bearing: chunks contain raw messages,
+    // while merge/final prompts contain the only summaries of messages that will
+    // be discarded. Never trim any of them for repair, or a successful retry
+    // could claim coverage for omitted history. Retry only when the complete
+    // original prompt plus the bounded repair instruction still fits.
+    const repairedPrompt = `${promptText}${repairInstruction}`;
+    if (!hasSafeCompactionOutputRoom(model, repairedPrompt, maxTokens)) throw err;
+    log.debug("Progressive compaction retrying rejected output once", {
+      operation: "smart_compaction.progressive_output_retry",
+      schema,
+      retryCount: 1,
+      promptWasTrimmed: false,
+    });
+    return await runOnce(repairedPrompt, 1);
   }
 }
 
@@ -503,6 +570,7 @@ async function mergeProgressiveSummaries(input: {
           input.model,
           input.auth,
           mergePrompt,
+          "chunk",
           input.maxTokens,
           input.abortSignal,
           input.streamFn,
@@ -529,6 +597,7 @@ async function mergeProgressiveSummaries(input: {
         input.model,
         input.auth,
         mergePrompt,
+        "chunk",
         input.maxTokens,
         input.abortSignal,
         input.streamFn,
@@ -573,6 +642,7 @@ async function mergeProgressiveSummaries(input: {
       input.model,
       input.auth,
       compressPrompt,
+      "chunk",
       input.maxTokens,
       input.abortSignal,
       input.streamFn,
@@ -586,6 +656,7 @@ async function mergeProgressiveSummaries(input: {
     input.model,
     input.auth,
     finalPrompt,
+    "final",
     input.maxTokens,
     input.abortSignal,
     input.streamFn,
@@ -598,6 +669,7 @@ export async function runProgressiveCompaction(input: {
   llmMessages: Message[];
   humanUserIndexes: Set<number>;
   sourceIndexesByLlmIndex?: number[];
+  sourceEntryIdsByLlmIndex?: Array<string | undefined>;
   model: any;
   auth: { apiKey?: string; headers?: Record<string, string>; env?: Record<string, string> };
   settings: { reserveTokens: number };
@@ -665,12 +737,17 @@ export async function runProgressiveCompaction(input: {
         chunks,
         complete: false,
         reason,
+        previousSummary: input.previousSummary,
+        keptMessagesSummary: input.keptMessagesSummary,
+        turnPrefixSummary: input.turnPrefixSummary,
+        customInstructions: input.customInstructions,
       }),
       complete: false,
       processedChunkCount: chunkSummaries.length,
       totalChunkCount: chunks.length,
       nextUnprocessedMessageIndex: chunk.startMessageIndex,
       nextUnprocessedSourceMessageIndex: sourceIndexForLlmIndex(input.sourceIndexesByLlmIndex, chunk.startMessageIndex),
+      nextUnprocessedEntryId: sourceEntryIdForLlmIndex(input.sourceEntryIdsByLlmIndex, chunk.startMessageIndex),
       partialReason: reason,
     };
   };
@@ -695,20 +772,33 @@ export async function runProgressiveCompaction(input: {
       chunkCompletionPercent(firstChunk.index - 1),
     );
 
-    const batchSummaries = await Promise.all(batch.map(async (chunk) => {
-      const chunkPrompt = buildChunkSummaryPrompt(chunk, chunks.length);
-      input.publishEstimate?.(estimateCompactionPromptTokens(chunkPrompt), `progressive_chunk_${chunk.index}`, chunkCompletionPercent(chunk.index - 1));
-      return await completeCompactionPrompt(
-        input.model,
-        input.auth,
-        chunkPrompt,
-        maxTokens,
-        input.abortSignal,
-        input.streamFn,
-        input.onProgress ? (generatedChars) => input.onProgress?.(generatedChars, { phase: "progressive_chunk", chunkIndex: chunk.index, totalChunks: chunks.length }) : undefined,
-        getCompactionReasoningEffort(input.model, "progressive_chunk"),
-      );
-    }));
+    const batchAbortController = new AbortController();
+    const abortBatch = () => batchAbortController.abort();
+    if (input.abortSignal.aborted) abortBatch();
+    else input.abortSignal.addEventListener("abort", abortBatch, { once: true });
+    let batchSummaries: string[];
+    try {
+      batchSummaries = await Promise.all(batch.map(async (chunk) => {
+        const chunkPrompt = buildChunkSummaryPrompt(chunk, chunks.length);
+        input.publishEstimate?.(estimateCompactionPromptTokens(chunkPrompt), `progressive_chunk_${chunk.index}`, chunkCompletionPercent(chunk.index - 1));
+        return await completeCompactionPrompt(
+          input.model,
+          input.auth,
+          chunkPrompt,
+          "chunk",
+          maxTokens,
+          batchAbortController.signal,
+          input.streamFn,
+          input.onProgress ? (generatedChars) => input.onProgress?.(generatedChars, { phase: "progressive_chunk", chunkIndex: chunk.index, totalChunks: chunks.length }) : undefined,
+          getCompactionReasoningEffort(input.model, "progressive_chunk"),
+        );
+      }));
+    } catch (error) {
+      abortBatch();
+      throw error;
+    } finally {
+      input.abortSignal.removeEventListener("abort", abortBatch);
+    }
     chunkSummaries.push(...batchSummaries);
     offset += batch.length;
     setProgressMessage(
@@ -761,6 +851,10 @@ export async function runProgressiveCompaction(input: {
         chunks,
         complete: true,
         reason: msg,
+        previousSummary: input.previousSummary,
+        keptMessagesSummary: input.keptMessagesSummary,
+        turnPrefixSummary: input.turnPrefixSummary,
+        customInstructions: input.customInstructions,
       }),
       complete: true,
       processedChunkCount: chunkSummaries.length,

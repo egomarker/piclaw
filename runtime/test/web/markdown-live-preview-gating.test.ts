@@ -29,9 +29,11 @@ import {
   getLivePreviewDecorationRanges,
   getSelectionLineSignature,
   livePreviewFrozenField,
+  livePreviewParsingSuspendedField,
   livePreviewRangesCover,
   pushSafeReplace,
   setLivePreviewFrozen,
+  setLivePreviewParsingSuspended,
   splitRangeByDocumentLines,
 } from "../../extensions/viewers/editor/markdown/live-preview.ts";
 
@@ -131,6 +133,16 @@ test("live preview freeze field toggles from pointer freeze effects", () => {
   expect(state.field(livePreviewFrozenField)).toBe(false);
   expect(frozen.field(livePreviewFrozenField)).toBe(true);
   expect(thawed.field(livePreviewFrozenField)).toBe(false);
+});
+
+test("live preview parsing suspension follows Firefox typing burst effects", () => {
+  const state = EditorState.create({ extensions: [livePreviewParsingSuspendedField] });
+  const suspended = state.update({ effects: setLivePreviewParsingSuspended.of(true) }).state;
+  const resumed = suspended.update({ effects: setLivePreviewParsingSuspended.of(false) }).state;
+
+  expect(state.field(livePreviewParsingSuspendedField)).toBe(false);
+  expect(suspended.field(livePreviewParsingSuspendedField)).toBe(true);
+  expect(resumed.field(livePreviewParsingSuspendedField)).toBe(false);
 });
 
 test("live preview viewport cache covers nearby scroll inside the decoration margin", () => {

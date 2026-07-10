@@ -52,6 +52,34 @@ cd runtime && bun test --max-concurrency=1
 
 ## Recent focused integration notes
 
+### Earendil 0.80.5 runtime
+
+Piclaw's Pi runtime packages are sourced from `@earendil-works/*` and are pinned together at `0.80.5`. The upgrade adopts the upstream stream/event, model, pricing, provider-auth, and MCP adapter changes while keeping a small set of Piclaw-owned compatibility layers.
+
+| Compatibility layer | Why Piclaw still owns it | Focused coverage |
+|---|---|---|
+| `runtime/src/extensions/azure-openai-api.ts` and `runtime/extensions/integrations/azure-openai.ts` | Azure transport, deployment mapping, session correlation, replay sanitation, context budgeting, and throttle feedback | `runtime/test/extensions/azure-openai-*.test.ts` |
+| `runtime/src/extensions/github-copilot-dynamic-models.ts` | Merge authenticated live Copilot models into Earendil's static registry | `runtime/test/extensions/github-copilot-dynamic-models.test.ts` |
+| `runtime/src/extensions/mcp-timeout-patch.ts` | Preserve Piclaw's outer `PICLAW_MCP_TOOL_TIMEOUT_MS` timeout/abort guard around tools registered by the packaged adapter | `runtime/test/extensions/mcp-timeout-patch.test.ts` |
+| `runtime/src/agent-pool/cache-stats.ts` | Add diagnostic cache re-billing to the shared session statistics | `runtime/test/agent-pool/cache-stats.test.ts` |
+| `runtime/vendor-manifests/` plus generated `*.meta.json` | Keep browser dependencies reproducible and auditable | `runtime/test/scripts/runtime-vendors.test.ts` |
+
+The compatibility layers fail conservatively: dynamic model discovery falls back to the static catalog, the MCP wrapper leaves unrelated tools untouched and can be disabled independently, and statistics omit cache re-billing when provider usage data is insufficient.
+
+Useful focused validation from the repository root:
+
+```bash
+bun test \
+  runtime/test/agent-pool/cache-stats.test.ts \
+  runtime/test/extensions/mcp-timeout-patch.test.ts \
+  runtime/test/extensions/github-copilot-dynamic-models.test.ts \
+  runtime/test/extensions/azure-openai-api.test.ts \
+  runtime/test/extensions/azure-openai-retry-after.test.ts \
+  runtime/test/extensions/azure-openai-routing.test.ts
+```
+
+User/operator behavior is documented in [configuration.md](configuration.md), [tools-and-skills.md](tools-and-skills.md), [mcp.md](mcp.md), [azure-openai-extension.md](azure/azure-openai-extension.md), and [vendored-widget-libraries.md](vendored-widget-libraries.md).
+
 ### MCP adapter
 
 PiClaw now bundles `pi-mcp-adapter` as a normal package dependency and loads it as a packaged session extension from `node_modules/`.
@@ -65,10 +93,14 @@ Relevant files when working on MCP integration:
 - `skel/.pi/mcp.json.example`
 - `skel/.pi/skills/mcp-adapter/SKILL.md`
 
-Focused regression test:
+The `0.80.5` package set includes `pi-mcp-adapter` `2.11.0`, which forwards abort signals and applies its configured `requestTimeoutMs` to protocol requests. Piclaw independently wraps the MCP tools after their `session_start` registration so existing `PICLAW_MCP_TOOL_TIMEOUT_MS` behavior remains stable across adapter upgrades.
+
+Focused regression tests:
 
 ```bash
-PICLAW_DB_IN_MEMORY=1 bun test runtime/test/agent-pool/mcp-adapter-bundled.test.ts
+PICLAW_DB_IN_MEMORY=1 bun test \
+  runtime/test/agent-pool/mcp-adapter-bundled.test.ts \
+  runtime/test/extensions/mcp-timeout-patch.test.ts
 ```
 
 ### Azure OpenAI image commands
@@ -123,7 +155,7 @@ Notes:
 - the live Azure extension now aligns `prompt_cache_key`, `session_id`, and `x-client-request-id` from the active session id on the Azure Responses path
 - the harness now checks those correlation fields automatically and fails if they drift
 - the harness also fails if replayed request payloads still contain leaked `partialJson` scratch buffers
-- the `0.67.2` package set and focused Azure `json` / `tool` / `history` runs were validated locally on `gpt-5-3-codex` and `gpt-5-4`
+- historical `0.67.2` live-provider evidence for `gpt-5-3-codex` and `gpt-5-4` is recorded in [azure-openai-extension.md](azure/azure-openai-extension.md); deterministic `0.80.5` behavior is covered by the focused tests in the Earendil section above
 - `AOAI_EXPERIMENT_AZURE_CLIENT_REQUEST_ID=1` remains available for the optional `x-ms-client-request-id` experiment
 
 ### Workspace search / reindex UI
@@ -202,7 +234,6 @@ The editor pane now monitors for external file changes via `GET /workspace/stat?
 Relevant files:
 - `runtime/extensions/viewers/editor/editor-extension.ts`
 - `runtime/web/src/panes/file-conflict-monitor.ts`
-- `runtime/test/web/file-conflict-monitor.test.ts`
 
 ### Recovery and resilience
 

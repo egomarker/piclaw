@@ -1,11 +1,11 @@
 /**
- * extensions/mcp-timeout-patch.ts – Patches pi-mcp-adapter tool execution
- * with proper timeout and abort signal handling.
+ * extensions/mcp-timeout-patch.ts – Applies Piclaw's compatibility timeout
+ * and abort guard around tools registered by pi-mcp-adapter.
  *
- * The upstream pi-mcp-adapter (≤2.9.0) does not forward the abort signal
- * or apply a timeout to MCP callTool() invocations. If a server hangs,
- * the entire agent turn stalls indefinitely. This extension wraps registered
- * MCP tools with a timeout race and signal abort listener.
+ * pi-mcp-adapter 2.11 forwards abort signals and supports requestTimeoutMs for
+ * MCP protocol requests. This outer guard remains for existing Piclaw installs
+ * that rely on PICLAW_MCP_TOOL_TIMEOUT_MS and on Piclaw's 120-second default.
+ * The shorter of this guard and the adapter/SDK request timeout wins.
  *
  * Configurable via PICLAW_MCP_TOOL_TIMEOUT_MS (default: 120000 = 2 minutes).
  * Set PICLAW_MCP_TOOL_TIMEOUT_MS=0 to disable the wrapper timeout while still

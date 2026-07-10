@@ -118,6 +118,10 @@ describe("Editor status footer", () => {
         expect(source).toContain("this.languageCompartment.of(lang || [])");
         expect(source).toContain("handleFirefoxMarkdownTypingBurst()");
         expect(source).toContain("restoreMarkdownLanguageAfterTyping()");
+        expect(source).toContain("setLivePreviewParsingSuspended.of(suspended)");
+        expect(source).toContain("livePreviewEffects.forceRebuild()");
+        expect(source).toContain("this.view !== targetView");
+        expect(source).toContain("!this.livePreviewEnabled");
         expect(source).toContain("this._wsBtn.hidden = firefox");
         expect(source).toContain("Whitespace is unavailable in Firefox");
     });

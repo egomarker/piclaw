@@ -28,7 +28,7 @@ for the full reference.
 | Library | Global | Use for |
 |---|---|---|
 | `beautiful-mermaid` | `beautifulMermaid` | Diagrams (flowcharts, sequence, ER, etc.) |
-| ECharts 6.0 | `echarts` | Charts (bar, line, pie, heatmap, treemap, …) |
+| ECharts 6.1 | `echarts` | Charts (bar, line, pie, heatmap, treemap, …) |
 | D3 7.9 | `d3` | Custom SVG, force layouts |
 | KaTeX | `katex` | Math typesetting |
 | IBM Plex Sans | CSS `@font-face` | Body font (OFL 1.1) |
@@ -44,7 +44,7 @@ The `beautiful-mermaid` renderer requires post-processing to fix colors,
 rounded corners, and Google Fonts imports. A helper handles this in one call:
 
 ```html
-<script src="/static/js/vendor/beautiful-mermaid.js"></script>
+<script src="/static/common/js/vendor/beautiful-mermaid.js"></script>
 <script src="/workspace/.pi/skills/visual-artifact-generator/scripts/mermaid-fixup.js"></script>
 <script>
   const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;

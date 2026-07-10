@@ -5,7 +5,9 @@
  * ../smart-compaction.ts.
  */
 
+import path from "node:path";
 import type { FileOperations } from "@earendil-works/pi-coding-agent";
+import type { ToolOutcomeAnalysis } from "./messages.js";
 
 // Helpers
 // ---------------------------------------------------------------------------
@@ -17,13 +19,27 @@ import type { FileOperations } from "@earendil-works/pi-coding-agent";
  * `compressFilePaths` can't find a common prefix and the output bloats.
  */
 const CWD_PREFIX = process.cwd().endsWith("/") ? process.cwd() : process.cwd() + "/";
+const WORKSPACE_PREFIX = "/workspace/";
+const CWD_WORKSPACE_PREFIX = CWD_PREFIX.startsWith(WORKSPACE_PREFIX)
+  ? CWD_PREFIX.slice(WORKSPACE_PREFIX.length)
+  : "";
+
+/** Normalize current tool/file-operation paths to workspace-relative form. */
 function normalizePath(p: string): string {
-  if (p.startsWith(CWD_PREFIX)) return p.slice(CWD_PREFIX.length);
-  // Also handle bare /workspace/ when cwd is /workspace
-  if (p.startsWith("/") && !p.startsWith(CWD_PREFIX) && p.startsWith(process.cwd())) {
-    return p.slice(process.cwd().length + 1);
-  }
-  return p;
+  const resolved = path.isAbsolute(p)
+    ? path.normalize(p)
+    : CWD_WORKSPACE_PREFIX && p.startsWith(CWD_WORKSPACE_PREFIX)
+      ? path.resolve(WORKSPACE_PREFIX, p)
+      : path.resolve(process.cwd(), p);
+  if (resolved.startsWith(WORKSPACE_PREFIX)) return resolved.slice(WORKSPACE_PREFIX.length);
+  if (resolved.startsWith(CWD_PREFIX)) return resolved.slice(CWD_PREFIX.length);
+  return resolved;
+}
+
+/** Persisted summary paths are already workspace-relative; keep that meaning. */
+function normalizePersistedPath(p: string): string {
+  if (p.startsWith("/")) return normalizePath(p);
+  return path.posix.normalize(p.startsWith("./") ? p.slice(2) : p);
 }
 
 function normalizePathSet(paths: Iterable<string>): string[] {
@@ -35,6 +51,88 @@ function normalizePathSet(paths: Iterable<string>): string[] {
 }
 
 /** Compute final read-only / modified file lists from FileOperations. */
+function parseCompressedFileBlock(summary: string | undefined, tag: "read-files" | "modified-files"): Set<string> {
+  const paths = new Set<string>();
+  if (!summary) return paths;
+  const match = summary.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "i"));
+  if (!match) return paths;
+
+  const addPersistedPath = (path: string) => {
+    const normalized = normalizePersistedPath(path);
+    paths.add(normalized);
+    // Compatibility with summaries produced while a nested repository cwd was
+    // treated as the path root. The alias is matching-only and is never emitted.
+    if (CWD_WORKSPACE_PREFIX && !normalized.startsWith(CWD_WORKSPACE_PREFIX)) {
+      paths.add(normalizePersistedPath(`${CWD_WORKSPACE_PREFIX}${normalized}`));
+    }
+  };
+
+  let base = "";
+  let sawGroupedEntryUnderBase = false;
+  for (const rawLine of match[1].split("\n")) {
+    const line = rawLine.trim().replace(/^[-*]\s+/, "");
+    if (!line || line === "(none)") continue;
+    if (line.startsWith("base:")) {
+      const declaredBase = line.slice("base:".length).trim();
+      base = declaredBase === "./" ? "" : declaredBase;
+      continue;
+    }
+    const grouped = line.match(/^(.*\/|\.\/):\s*(.+)$/);
+    if (grouped) {
+      const directory = grouped[1] === "./" ? "" : grouped[1];
+      for (const file of grouped[2].split(",").map((part) => part.trim()).filter(Boolean)) {
+        addPersistedPath(`${base}${directory}${file}`);
+      }
+      if (base) sawGroupedEntryUnderBase = true;
+      continue;
+    }
+    addPersistedPath(line.startsWith("/") ? line : `${base}${line}`);
+    // Compatibility for summaries emitted before compressed clusters inserted
+    // `base: ./` before a root-level outlier. Those blocks are ambiguous, so
+    // retain the root interpretation only after a genuine grouped base entry;
+    // a lone base-relative singleton must not gain a workspace-root alias.
+    if (base && sawGroupedEntryUnderBase && !line.startsWith("/")) {
+      addPersistedPath(line);
+    }
+  }
+  return paths;
+}
+
+/**
+ * Remove write/edit paths that only have failed, missing, or no-change results
+ * in the current compaction window. Paths inherited from an earlier valid
+ * summary, or successfully modified at least once in this window, are retained.
+ */
+export function reconcileFileOperations(
+  fileOps: FileOperations,
+  toolAnalysis: ToolOutcomeAnalysis,
+  previousSummary?: string,
+): FileOperations {
+  const priorModified = parseCompressedFileBlock(previousSummary, "modified-files");
+  const attemptedMutationPaths = new Set<string>();
+  const successfulMutationPaths = new Set<string>();
+
+  for (const fact of toolAnalysis.facts) {
+    if ((fact.toolName !== "write" && fact.toolName !== "edit") || !fact.pathArgument) continue;
+    const path = normalizePath(fact.pathArgument);
+    attemptedMutationPaths.add(path);
+    if (!fact.missing && !fact.isError && !fact.noChange) successfulMutationPaths.add(path);
+  }
+
+  const shouldKeepMutation = (path: string): boolean => {
+    const normalized = normalizePath(path);
+    return !attemptedMutationPaths.has(normalized)
+      || successfulMutationPaths.has(normalized)
+      || priorModified.has(normalized);
+  };
+
+  return {
+    read: new Set(fileOps.read),
+    written: new Set([...fileOps.written].filter(shouldKeepMutation)),
+    edited: new Set([...fileOps.edited].filter(shouldKeepMutation)),
+  };
+}
+
 export function fileListsFromOps(fileOps: FileOperations): {
   readFiles: string[];
   modifiedFiles: string[];
@@ -54,7 +152,7 @@ const JUNK_PATH_PATTERNS: RegExp[] = [
   /^\/var\/log\//,                     // host log files
   /^\/proc\//,                         // proc filesystem
   /^\/sys\//,                          // sys filesystem
-  /^(?:\/tmp|tmp)\//,                  // host temp files or workspace tmp/
+  /(?:^|\/)tmp\//,                    // host, workspace, or nested-repo tmp/
   /(?:^|\/)\.piclaw\/tmp\//,          // piclaw temp files
   /(?:^|\/)\.cache\//,                // cache dirs
   /(?:^|\/)node_modules\//,           // dependency trees
@@ -109,6 +207,13 @@ function renderCompressedPathCluster(paths: string[]): string {
   if (paths.length === 0) return "(none)";
   const sorted = [...paths].sort();
   const prefix = findCommonDirectoryPrefix(sorted);
+  // Grouped entries use commas as separators. Keep comma-bearing filenames on
+  // individual lines so persisted file facts remain reversible.
+  if (sorted.some((filePath) => path.posix.basename(filePath).includes(","))) {
+    const lines = prefix ? [`base: ${prefix}`] : [];
+    lines.push(...sorted.map((filePath) => prefix ? filePath.slice(prefix.length) : filePath));
+    return lines.join("\n");
+  }
 
   const groups = new Map<string, string[]>();
   for (const p of sorted) {
@@ -145,6 +250,7 @@ function renderCompressedPathCluster(paths: string[]): string {
  *   base: piclaw/runtime/
  *   web/src/ui/: app.ts, theme.ts
  *   test/web/: app.test.ts
+ *   base: ./
  *   tmp/report.patch
  */
 export function compressFilePaths(paths: string[]): string {
@@ -165,13 +271,19 @@ export function compressFilePaths(paths: string[]): string {
   if (clusters.size <= 1) return renderCompressedPathCluster(uniqueSorted);
 
   const lines: string[] = [];
+  let activeBase = false;
   for (const key of [...clusters.keys()].sort()) {
     const cluster = clusters.get(key)!;
-    if (cluster.length === 1) {
-      lines.push(cluster[0]);
-      continue;
+    const rendered = cluster.length === 1 ? cluster[0] : renderCompressedPathCluster(cluster);
+    const declaresBase = /^base:\s+/m.test(rendered);
+    if (!declaresBase && activeBase) {
+      // Delimit a following root-relative cluster so the parser cannot inherit
+      // the previous compressed cluster's base prefix.
+      lines.push("base: ./");
+      activeBase = false;
     }
-    lines.push(renderCompressedPathCluster(cluster));
+    lines.push(rendered);
+    if (declaresBase) activeBase = true;
   }
   return lines.join("\n");
 }

@@ -231,10 +231,24 @@ function getErrorHeaders(error: unknown): unknown {
   return err?.headers ?? err?.response?.headers;
 }
 
+function getErrorDetails(error: unknown): string {
+  const err = error as { message?: unknown; name?: unknown; code?: unknown } | null | undefined;
+  return [err?.name, err?.code, err?.message]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
+}
+
+export function isAzureRateLimitRequestError(error: unknown): boolean {
+  return getErrorStatus(error) === 429 || /rate[ -]?limit|too many requests|ResourceExhausted/i.test(getErrorDetails(error));
+}
+
 export function isAzureRetryableRequestError(error: unknown): boolean {
   const status = getErrorStatus(error);
-  if (status === null) return false;
-  return status === 408 || status === 409 || status === 425 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+  if (status === 408 || status === 409 || status === 425 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504 || status === 524) {
+    return true;
+  }
+
+  return /socket connection was closed(?: unexpectedly)?|ResourceExhausted/i.test(getErrorDetails(error));
 }
 
 export function resolveAzureRetryDelayMs(options: { attempt: number; error: unknown; nowMs?: number }): number | null {
@@ -242,7 +256,7 @@ export function resolveAzureRetryDelayMs(options: { attempt: number; error: unkn
   const retryAfterMs = parseRetryAfterMs(getHeaderValue(getErrorHeaders(options.error), "retry-after"), options.nowMs);
   if (retryAfterMs !== null) return retryAfterMs;
   const status = getErrorStatus(options.error);
-  if (status === 429 || status === 503) return AZURE_RATE_LIMIT_BACKOFF_MS;
+  if (status === 503 || isAzureRateLimitRequestError(options.error)) return AZURE_RATE_LIMIT_BACKOFF_MS;
   return Math.max(2000, (options.attempt + 1) * 2000);
 }
 
@@ -390,6 +404,11 @@ const BASE_MODEL_SPECS: Record<string, { contextWindow?: number; maxTokens?: num
   "gpt-5-3-chat":       { contextWindow: 128000, maxTokens: 16384,  reasoning: true },
   "gpt-5-4":            { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
   "gpt-5-4-pro":        { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
+  "gpt-5-6":            { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
+  "gpt-5.6":            { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
+  "gpt-5.6-luna":       { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
+  "gpt-5.6-sol":        { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
+  "gpt-5.6-terra":      { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
   "gpt-5-5":            { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
   "gpt-5-5-pro":        { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
   "gpt-5.5":            { contextWindow: 1050000, maxTokens: 128000, reasoning: true },
@@ -1279,7 +1298,7 @@ function streamAzureOpenAIResponses(model: any, context: any, options: any) {
       }
 
       if (options?.maxTokens) {
-        params.max_output_tokens = options?.maxTokens;
+        params.max_output_tokens = Math.max(options.maxTokens, 16);
       }
       if (options?.temperature !== undefined) {
         params.temperature = options?.temperature;
@@ -1402,9 +1421,8 @@ function streamAzureOpenAIResponses(model: any, context: any, options: any) {
         } catch (error) {
           const delayMs = resolveAzureRetryDelayMs({ attempt, error });
           if (delayMs === null) throw error;
-          const status = getErrorStatus(error);
           const retryAfterHonored = hasRetryAfterHeader(error);
-          looksLikeRateLimit = status === 429 || /rate[ -]?limit|too many requests/i.test(formatAzureOpenAIError(error));
+          looksLikeRateLimit = isAzureRateLimitRequestError(error);
           streamErrorDetail = looksLikeRateLimit
             ? formatAzureRateLimitMessage({
                 modelId: model.id,

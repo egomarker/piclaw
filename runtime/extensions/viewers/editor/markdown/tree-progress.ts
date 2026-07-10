@@ -62,17 +62,31 @@ class TreeProgressPlugin {
     }
 
     update(update: ViewUpdate) {
-        if (!update.docChanged) return;
-        this.lastTreeLength = syntaxTree(update.state).length;
+        const previousTree = syntaxTree(update.startState);
+        const nextTree = syntaxTree(update.state);
+        if (!nextTree.topNode.type.isTop) {
+            this.lastTreeLength = 0;
+            this.cancelScheduledTick();
+            return;
+        }
+        const parserActivated = !previousTree.topNode.type.isTop;
+        if (!update.docChanged && !parserActivated) return;
+        // Reactivation must produce at least one growth signal even when the
+        // parser completes synchronously, so parser-backed widget fields can
+        // refresh after a Firefox typing burst.
+        this.lastTreeLength = parserActivated ? 0 : nextTree.length;
         this.schedule();
     }
 
     destroy() {
         this.destroyed = true;
-        if (this.idleHandle !== null) {
-            cancelIdle(this.idleHandle);
-            this.idleHandle = null;
-        }
+        this.cancelScheduledTick();
+    }
+
+    private cancelScheduledTick() {
+        if (this.idleHandle === null) return;
+        cancelIdle(this.idleHandle);
+        this.idleHandle = null;
     }
 
     private schedule() {
@@ -87,6 +101,7 @@ class TreeProgressPlugin {
         const state = this.view.state;
         const docLength = state.doc.length;
         if (this.lastTreeLength >= docLength) return;
+        if (!syntaxTree(state).topNode.type.isTop) return;
 
         const ensured = ensureSyntaxTree(state, docLength, TREE_PROGRESS_TICK_BUDGET_MS);
         const nextLength = (ensured ?? syntaxTree(state)).length;

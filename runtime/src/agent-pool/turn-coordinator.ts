@@ -123,19 +123,18 @@ export class AgentTurnCoordinator {
       }
 
       const textBlocks = content.filter((block) => (block as AgentContentBlock | undefined)?.type === "text") as AgentContentBlock[];
-      const nonCommentaryText = textBlocks
-        .filter((block) => resolveTextPhaseFromBlock(block) !== "commentary")
+      const text = textBlocks
         .map((block) => (typeof block.text === "string" ? block.text : ""))
         .join("");
-      if (nonCommentaryText) {
-        const lastNonCommentaryPhase = [...textBlocks]
-          .reverse()
-          .map((block) => resolveTextPhaseFromBlock(block))
-          .find((phase) => phase !== "commentary") ?? null;
-        return { text: nonCommentaryText, phase: lastNonCommentaryPhase };
-      }
+      const phase = [...textBlocks]
+        .reverse()
+        .map((block) => resolveTextPhaseFromBlock(block))
+        .find((candidate) => candidate !== null) ?? null;
 
-      return { text: "", phase: textBlocks.some((block) => resolveTextPhaseFromBlock(block) === "commentary") ? "commentary" : null };
+      // Commentary is user-visible streamed text. Hidden model reasoning uses
+      // distinct thinking blocks, so dropping commentary here loses prose the
+      // web UI already showed as a draft when the model proceeds to a tool.
+      return { text, phase };
     };
 
     const resetCurrentTurn = () => {
@@ -148,13 +147,13 @@ export class AgentTurnCoordinator {
 
     const flushTurn = () => {
       const text = currentTurnText.trim();
-      if ((!text || currentTurnPhase === "commentary") && !onTurnComplete) {
+      if (!text && !onTurnComplete) {
         resetCurrentTurn();
         return;
       }
-      if ((text && currentTurnPhase !== "commentary") || turnCount > 0) {
+      if (text || turnCount > 0) {
         onTurnComplete?.({
-          text: currentTurnPhase === "commentary" ? "" : text,
+          text,
           attachments: this.options.takeAttachments(chatJid),
           ...(currentTurnUsage ? { usage: currentTurnUsage } : {}),
         });
@@ -234,7 +233,9 @@ export class AgentTurnCoordinator {
           }
           const contentBlocks = Array.isArray(message.content) ? message.content as AgentContentBlock[] : [];
           const extracted = extractAssistantTextFromContent(message.content);
-          const hadTextContent = contentBlocks.some((block) => block?.type === "text" && typeof block.text === "string" && block.text.trim().length > 0);
+          const hadTextContent = typeof message.content === "string"
+            ? message.content.trim().length > 0
+            : contentBlocks.some((block) => block?.type === "text" && typeof block.text === "string" && block.text.trim().length > 0);
           const hadToolCallContent = contentBlocks.some((block) => block?.type === "toolCall");
           const hadThinkingContent = contentBlocks.some((block: any) => block?.type === "thinking" && typeof block?.thinking === "string" && block.thinking.trim().length > 0);
           lastAssistantState = {
@@ -245,20 +246,13 @@ export class AgentTurnCoordinator {
             hadThinkingContent,
           };
           currentTurnUsage = message.usage;
-          // message_end is authoritative: extensions can replace the finalized
-          // message, so do not trust accumulated streaming buffers as the final
-          // turn payload.
-          currentTurnText = extracted.text;
-          currentTurnPhase = extracted.phase;
-          if (hadToolCallContent) {
-            // Assistant text that ships in the same message as a tool call is
-            // scratchpad/planning text for the tool-use step, not a user-visible
-            // completed reply. Never surface or persist it as a chat turn.
-            currentTurnPhase = "commentary";
-            currentTurnText = "";
-          } else if (currentTurnPhase === "commentary") {
-            currentTurnText = "";
-          }
+          // Prefer authoritative message_end text because extensions may
+          // replace the streamed draft. Some providers omit visible text from
+          // the finalized tool-call message, though, so retain the completed
+          // stream as a fallback instead of silently losing what the UI showed.
+          const streamedText = currentTurnText.trim();
+          currentTurnText = extracted.text.trim() || streamedText;
+          currentTurnPhase = extracted.text.trim() ? extracted.phase : currentTurnPhase;
 
           this.options.onInfo?.("Assistant message completed", {
             operation: "turn_coordinator.message_end",
@@ -280,7 +274,7 @@ export class AgentTurnCoordinator {
 
     return {
       handleMessageUpdate,
-      getFinalText: () => currentTurnPhase === "commentary" ? "" : currentTurnText.trim(),
+      getFinalText: () => currentTurnText.trim(),
       getTurnCount: () => turnCount,
       getError: () => lastError,
       getLastAssistantState: () => lastAssistantState,

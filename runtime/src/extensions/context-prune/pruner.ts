@@ -9,6 +9,7 @@ export function pruneMessages(messages: any[], indexer: ToolCallIndexer): any[] 
 
 export interface ContextPruneCompactionSanitization {
   messages: any[];
+  sourceEntryIdsByMessageIndex: Array<string | undefined>;
   summarizedToolCallIds: Set<string>;
   aliasByToolCallId: Map<string, string>;
   prunedToolResults: number;
@@ -78,13 +79,27 @@ export function sanitizeContextPruneCompactionMessages(
   branchEntries: any[] | undefined,
 ): ContextPruneCompactionSanitization {
   const { summarizedToolCallIds, aliasByToolCallId } = collectSummarizedToolCalls(branchEntries);
+  const entryIdByMessage = new Map<any, string>();
+  for (const entry of branchEntries ?? []) {
+    if (entry?.type === "message" && entry.message && typeof entry.id === "string") {
+      entryIdByMessage.set(entry.message, entry.id);
+    }
+  }
   if (summarizedToolCallIds.size === 0 || messages.length === 0) {
-    return { messages, summarizedToolCallIds, aliasByToolCallId, prunedToolResults: 0, replacedToolCalls: 0 };
+    return {
+      messages,
+      sourceEntryIdsByMessageIndex: messages.map((message) => entryIdByMessage.get(message)),
+      summarizedToolCallIds,
+      aliasByToolCallId,
+      prunedToolResults: 0,
+      replacedToolCalls: 0,
+    };
   }
 
   let prunedToolResults = 0;
   let replacedToolCalls = 0;
   let changed = false;
+  const sourceEntryIdsByMessageIndex: Array<string | undefined> = [];
 
   const sanitized = messages.flatMap((message) => {
     if (message?.role === "toolResult" && typeof message.toolCallId === "string" && summarizedToolCallIds.has(message.toolCallId)) {
@@ -93,7 +108,10 @@ export function sanitizeContextPruneCompactionMessages(
       return [];
     }
 
-    if (message?.role !== "assistant" || !Array.isArray(message.content)) return [message];
+    if (message?.role !== "assistant" || !Array.isArray(message.content)) {
+      sourceEntryIdsByMessageIndex.push(entryIdByMessage.get(message));
+      return [message];
+    }
 
     let messageChanged = false;
     const content = message.content.map((block: any) => {
@@ -104,6 +122,7 @@ export function sanitizeContextPruneCompactionMessages(
       return buildPrunedToolCallPlaceholder(block, aliasByToolCallId.get(id));
     });
 
+    sourceEntryIdsByMessageIndex.push(entryIdByMessage.get(message));
     if (!messageChanged) return [message];
     changed = true;
     return [{ ...message, content }];
@@ -111,6 +130,7 @@ export function sanitizeContextPruneCompactionMessages(
 
   return {
     messages: changed ? sanitized : messages,
+    sourceEntryIdsByMessageIndex,
     summarizedToolCallIds,
     aliasByToolCallId,
     prunedToolResults,

@@ -9,6 +9,7 @@ import {
 import type { DecorationSet, Extension, Range, Transaction } from '#editor-vendor/codemirror';
 import type { SyntaxNode } from '@lezer/common';
 import { normalizeLinkHref } from './link.js';
+import { livePreviewParsingSuspendedField } from './live-preview.js';
 import { treeGrowthEffect, treeProgressPlugin } from './tree-progress.js';
 
 const imageDimensionCache = new Map<string, { width: number; height: number }>();
@@ -166,6 +167,7 @@ const imageBlockField = StateField.define<DecorationSet>({
         }
         if (!transaction.docChanged) return decorations;
         const mapped = decorations.map(transaction.changes);
+        if (transaction.state.field(livePreviewParsingSuspendedField, false)) return mapped;
         if (!changeAffectsImages(transaction, decorations)) return mapped;
         return buildImageBlocks(transaction.state);
     },

@@ -9,30 +9,29 @@
  */
 
 import type { ExtensionAPI, ExtensionFactory, CompactionResult } from "@earendil-works/pi-coding-agent";
-import type { Message } from "@earendil-works/pi-ai";
 import { resolveModelRequestAuth } from "../utils/model-auth.js";
 import { createLogger } from "../utils/logger.js";
-import { applyTokenEstimateSafetyMultiplier, getEffectiveContextWindow } from "../utils/context-window-budget.js";
+import { applyTokenEstimateSafetyMultiplier, getCompactionRequestOverheadTokens, getEffectiveContextWindow, getSystemPromptOverheadTokens, getTokenEstimateSafetyMultiplier } from "../utils/context-window-budget.js";
 import { recordCompactionCancellationReason } from "../agent-pool/compaction-cancel-reason.js";
 import { resolvePiclawCompactionTrigger, type PiclawCompactionTriggerMetadata } from "../agent-pool/compaction-trigger-context.js";
 
 import { getCompactionRuntimeConfig } from "../core/config.js";
-import { FULL_PASS_FALLBACK_MAX_PROMPT_TOKENS, MIN_COMPACTION_OUTPUT_TOKENS, MIN_SUMMARY_CHARS, PROGRESSIVE_FALLBACK_CONTEXT_WINDOW, SELECTIVE_THRESHOLD, SMART_COMPACTION_PROGRESS_INTERVAL_MS, SYSTEM_PROMPT_OVERHEAD_TOKENS } from "./smart-compaction/config.js";
+import { MAX_PROMPT_CHARS, MIN_COMPACTION_OUTPUT_TOKENS, PROGRESSIVE_FALLBACK_CONTEXT_WINDOW, SMART_COMPACTION_PROGRESS_INTERVAL_MS } from "./smart-compaction/config.js";
 import { estimateCompactionPromptTokens, estimateSmartCompactionCompletionPercent, estimateTokensFromChars, formatProgressCount, formatProgressRange, formatSmartCompactionStatus, getContextWindowEstimate, publishContextEstimate } from "./smart-compaction/context.js";
-import { compressFilePaths, fileListsFromOps } from "./smart-compaction/files.js";
-import { convertMessagesWithMetadata, type SourceMessage } from "./smart-compaction/messages.js";
-import { appendFileLists, buildTurnPrefixSummary, extractKeptMessagesSummary, tryNoOpCompaction } from "./smart-compaction/noop.js";
-import { buildProgressiveCompactionChunks, buildTrimmedProgressiveMergeRetryPrompt, getProgressiveCompactionBudget, runProgressiveCompaction, type ProgressiveCompactionProgress } from "./smart-compaction/progressive.js";
+import { reconcileFileOperations } from "./smart-compaction/files.js";
+import { analyzeToolOutcomes, convertMessagesWithMetadata, type SourceMessage } from "./smart-compaction/messages.js";
+import { appendMissingFileLists, buildTurnPrefixSummary, extractKeptMessagesSummary, tryNoOpCompaction } from "./smart-compaction/noop.js";
+import { buildProgressiveCompactionChunks, getProgressiveCompactionBudget, runProgressiveCompaction, type ProgressiveCompactionProgress } from "./smart-compaction/progressive.js";
 import { clampKeepRecentTokens, estimatePostCompactionFit, getCompactionReasoningEffort, getCompactionRetryPromptTokenTarget, getSafeCompactionMaxTokens } from "./smart-compaction/safety.js";
 import { buildSelectivePrompt, detectRecentTopicShift, SYSTEM_PROMPT } from "./smart-compaction/selective-prompt.js";
 import { streamComplete, type CompactionStreamFn } from "./smart-compaction/stream-complete.js";
+import { buildCompactionRepairInstruction, validateCompactionSummaryResponse } from "./smart-compaction/summary-validation.js";
 import { sanitizeContextPruneCompactionMessages } from "./context-prune/pruner.js";
 
 export type { CompactionStreamFn } from "./smart-compaction/stream-complete.js";
 
 export {
   buildProgressiveCompactionChunks,
-  buildTrimmedProgressiveMergeRetryPrompt,
   formatProgressCount,
   formatProgressRange,
   clampKeepRecentTokens,
@@ -135,35 +134,39 @@ function formatProgressiveProgressMessage(progress?: ProgressiveCompactionProgre
   return "Smart compaction: progressive summary still running…";
 }
 
+function serializeEntryContentForEstimate(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return JSON.stringify(content ?? "");
+  return content
+    .map((block: any) => {
+      if (block?.type === "text") return String(block.text || "");
+      if (block?.type === "thinking") return String(block.thinking || "");
+      if (block?.type === "toolCall") return `${block.name || "tool"} ${JSON.stringify(block.arguments ?? {})}`;
+      if (block?.type === "image") return "[image]".repeat(1200);
+      return JSON.stringify(block ?? "");
+    })
+    .join("\n");
+}
+
 function estimateEntryTokens(entry: any): number {
   if (!entry || typeof entry !== "object") return 0;
   if (entry.type === "message" && entry.message) {
     const converted = convertMessagesWithMetadata([entry.message as SourceMessage]);
     const serialized = converted.llmMessages
-      .map((message, index) => {
-        const content = Array.isArray((message as any).content)
-          ? (message as any).content
-              .map((block: any) => {
-                if (block?.type === "text") return String(block.text || "");
-                if (block?.type === "thinking") return String(block.thinking || "");
-                if (block?.type === "toolCall") return `${block.name || "tool"} ${JSON.stringify(block.arguments ?? {})}`;
-                if (block?.type === "image") return "[image]".repeat(1200);
-                return "";
-              })
-              .join("\n")
-          : "";
-        return `${message.role}:${index}:${content}`;
-      })
+      .map((message, index) => `${message.role}:${index}:${serializeEntryContentForEstimate((message as any).content)}`)
       .join("\n");
     return estimateTokensFromChars(serialized);
   }
   if (entry.type === "custom_message") {
-    return estimateTokensFromChars(typeof entry.content === "string" ? entry.content : JSON.stringify(entry.content ?? ""));
+    return estimateTokensFromChars(serializeEntryContentForEstimate(entry.content));
   }
   if (entry.type === "branch_summary") {
     return estimateTokensFromChars(String(entry.summary || ""));
   }
-  return 0;
+  // Retained metadata has small but non-zero structural cost. Counting one
+  // token also lets a later valid cut point strictly reduce an invalid
+  // metadata boundary without weakening the monotonic token invariant.
+  return entry.type === "header" || entry.type === "compaction" ? 0 : 1;
 }
 
 function sourceMessageIdentity(message: SourceMessage | undefined): string {
@@ -195,38 +198,99 @@ function resolveFirstKeptEntryIdForSourceMessageIndex(
   return null;
 }
 
-function estimateKeptTokensFromEntryId(branchEntries: any[] | undefined, firstKeptEntryId: string): number | null {
-  if (!Array.isArray(branchEntries) || !firstKeptEntryId) return null;
-  let found = false;
-  let tokens = 0;
-  for (const entry of branchEntries) {
-    if (!found && entry?.id === firstKeptEntryId) found = true;
-    if (!found) continue;
-    if (!entry || typeof entry !== "object" || entry.type === "header" || entry.type === "compaction") continue;
-    tokens += applyTokenEstimateSafetyMultiplier(estimateEntryTokens(entry));
-  }
-  return found ? tokens : null;
+function findBranchEntryIndex(branchEntries: any[] | undefined, entryId: string): number {
+  if (!Array.isArray(branchEntries) || !entryId) return -1;
+  return branchEntries.findIndex((entry) => entry?.id === entryId);
 }
 
-function chooseFirstKeptEntryForBudget(branchEntries: any[] | undefined, keepBudgetTokens: number): { firstKeptEntryId: string; estimatedKeepTokens: number } | null {
-  if (!Array.isArray(branchEntries) || branchEntries.length === 0) return null;
-  const budget = Math.max(0, Math.floor(keepBudgetTokens));
-  let estimatedKeepTokens = 0;
-  let selected: string | null = null;
+/** Match upstream Pi's compaction cut-point contract: never start kept context at a tool result or metadata entry. */
+function isValidCompactionCutPoint(entry: any): boolean {
+  if (!entry || typeof entry !== "object") return false;
+  if (entry.type === "branch_summary" || entry.type === "custom_message") return true;
+  if (entry.type !== "message") return false;
+  switch (entry.message?.role) {
+    case "bashExecution":
+    case "custom":
+    case "branchSummary":
+    case "compactionSummary":
+    case "user":
+    case "assistant":
+      return true;
+    default:
+      return false;
+  }
+}
 
-  for (let i = branchEntries.length - 1; i >= 0; i--) {
+function estimateKeptTokensFromIndex(branchEntries: any[], firstKeptIndex: number): number {
+  let tokens = 0;
+  for (let i = Math.max(0, firstKeptIndex); i < branchEntries.length; i++) {
     const entry = branchEntries[i];
     if (!entry || typeof entry !== "object" || entry.type === "header" || entry.type === "compaction") continue;
+    // Keep branch-derived estimates raw here. estimatePostCompactionFit applies
+    // the shared safety multiplier exactly once to the complete kept window.
+    tokens += estimateEntryTokens(entry);
+  }
+  return tokens;
+}
+
+function estimateKeptTokensFromEntryId(branchEntries: any[] | undefined, firstKeptEntryId: string): number | null {
+  if (!Array.isArray(branchEntries)) return null;
+  const firstKeptIndex = findBranchEntryIndex(branchEntries, firstKeptEntryId);
+  return firstKeptIndex >= 0 ? estimateKeptTokensFromIndex(branchEntries, firstKeptIndex) : null;
+}
+
+interface KeptWindowSelection {
+  firstKeptEntryId: string;
+  firstKeptEntryIndex: number;
+  currentFirstKeptEntryIndex: number;
+  estimatedKeepTokens: number;
+  currentEstimatedKeepTokens: number;
+}
+
+/**
+ * Select a smaller retained suffix without violating compaction history.
+ *
+ * Non-negotiable invariants:
+ * - candidates use the same valid cut-point roles as upstream Pi;
+ * - the candidate is strictly later than the current retained boundary;
+ * - the scan never reaches entries hidden before the current boundary; and
+ * - the selected suffix must contain fewer estimated tokens than the current suffix.
+ */
+function chooseFirstKeptEntryForBudget(
+  branchEntries: any[] | undefined,
+  currentFirstKeptEntryId: string,
+  keepBudgetTokens: number,
+): KeptWindowSelection | null {
+  if (!Array.isArray(branchEntries) || branchEntries.length === 0) return null;
+  const currentFirstKeptEntryIndex = findBranchEntryIndex(branchEntries, currentFirstKeptEntryId);
+  // Upstream may backscan from a valid message cut point to retain adjacent
+  // model/settings metadata. That existing boundary is valid history state even
+  // though any NEW adjusted boundary must itself be a valid message cut point.
+  if (currentFirstKeptEntryIndex < 0) return null;
+
+  const budget = Math.max(0, Math.floor(keepBudgetTokens));
+  const currentEstimatedKeepTokens = estimateKeptTokensFromIndex(branchEntries, currentFirstKeptEntryIndex);
+  let estimatedKeepTokens = 0;
+  let selected: { id: string; index: number; tokens: number } | null = null;
+
+  for (let i = branchEntries.length - 1; i > currentFirstKeptEntryIndex; i--) {
+    const entry = branchEntries[i];
+    if (!entry || typeof entry !== "object" || entry.type === "header" || entry.type === "compaction") continue;
+    estimatedKeepTokens += estimateEntryTokens(entry);
+    if (estimatedKeepTokens > budget) break;
+    if (!isValidCompactionCutPoint(entry)) continue;
     const id = typeof entry.id === "string" ? entry.id : "";
-    if (!id) continue;
-    const tokens = applyTokenEstimateSafetyMultiplier(estimateEntryTokens(entry));
-    if (selected && estimatedKeepTokens + tokens > budget) break;
-    selected = id;
-    estimatedKeepTokens += tokens;
-    if (estimatedKeepTokens >= budget) break;
+    if (id) selected = { id, index: i, tokens: estimatedKeepTokens };
   }
 
-  return selected ? { firstKeptEntryId: selected, estimatedKeepTokens } : null;
+  if (!selected || selected.tokens >= currentEstimatedKeepTokens) return null;
+  return {
+    firstKeptEntryId: selected.id,
+    firstKeptEntryIndex: selected.index,
+    currentFirstKeptEntryIndex,
+    estimatedKeepTokens: selected.tokens,
+    currentEstimatedKeepTokens,
+  };
 }
 
 const TARGET_CONTEXT_INSTRUCTIONS_RE = /^<!--\s*piclaw:target-context-window=(\d+)\s+target-model=([^\s]+)\s*-->\n?/;
@@ -257,7 +321,7 @@ function parseTargetContextInstructions(customInstructions: string | undefined):
 
 function buildTargetContextGuidance(targetContextWindow: number | null, targetModelLabel: string | null, configuredKeepRecent: number): string {
   if (!targetContextWindow) return "";
-  const effectiveWindow = getEffectiveContextWindow(targetContextWindow, SYSTEM_PROMPT_OVERHEAD_TOKENS);
+  const effectiveWindow = getEffectiveContextWindow(targetContextWindow, getSystemPromptOverheadTokens());
   const safeKeepRecent = clampKeepRecentTokens(configuredKeepRecent, targetContextWindow);
   const maxSummaryTokens = Math.max(0, effectiveWindow - applyTokenEstimateSafetyMultiplier(safeKeepRecent) - MIN_COMPACTION_OUTPUT_TOKENS);
   const target = targetModelLabel ? ` for ${targetModelLabel}` : "";
@@ -269,21 +333,20 @@ function buildTargetContextGuidance(targetContextWindow: number | null, targetMo
   ].join("\n");
 }
 
-const FULL_PASS_FALLBACK_CONTEXT_FRACTION = 0.6;
-
 function isCompactionInputOverflow(message: string): boolean {
   return /context\s*(?:length|window)|maximum context|max(?:imum)? tokens|too many tokens|input too large|prompt too large|exceeds.*(?:context|token)|token limit/i.test(message);
 }
 
 export function buildTrimmedCompactionRetryPrompt(promptText: string, targetPromptTokens: number): string | null {
-  const targetChars = Math.max(8_000, Math.floor(targetPromptTokens * 4));
+  const targetChars = Math.max(1_000, Math.floor(targetPromptTokens / getTokenEstimateSafetyMultiplier()) * 4);
   if (promptText.length <= targetChars) return null;
   const marker = "\n## Conversation Excerpts";
   const markerIndex = promptText.indexOf(marker);
   const notice = "\n\n… (older/less relevant compaction excerpts trimmed after provider context-overflow; preserve current task continuity from the remaining excerpts) …\n\n";
   if (markerIndex < 0) {
     const headChars = Math.min(Math.floor(targetChars * 0.35), Math.floor(promptText.length * 0.35));
-    const tailChars = Math.max(1_000, targetChars - headChars - notice.length);
+    const tailChars = targetChars - headChars - notice.length;
+    if (tailChars < 256) return null;
     return `${promptText.slice(0, headChars)}${notice}${promptText.slice(-tailChars)}`;
   }
 
@@ -292,16 +355,6 @@ export function buildTrimmedCompactionRetryPrompt(promptText: string, targetProm
   const tailChars = targetChars - head.length - notice.length;
   if (tailChars < 1_000) return null;
   return `${head}${notice}${promptText.slice(-tailChars)}`;
-}
-
-function estimateFullPassFallbackPromptTokens(llmMessages: Message[], tokensBefore: number): number {
-  const serializedChars = llmMessages.reduce((total, message) => {
-    const content = Array.isArray(message.content) ? message.content : [message.content];
-    return total + JSON.stringify({ role: message.role, content }).length + 64;
-  }, 0);
-  const serializedTokens = applyTokenEstimateSafetyMultiplier(Math.max(1, Math.ceil(serializedChars / 4)));
-  const sessionTokens = applyTokenEstimateSafetyMultiplier(tokensBefore);
-  return Math.max(serializedTokens, sessionTokens) + SYSTEM_PROMPT_OVERHEAD_TOKENS;
 }
 
 function maybeAdjustFirstKeptForFit(input: {
@@ -313,22 +366,62 @@ function maybeAdjustFirstKeptForFit(input: {
   branchEntries?: any[];
 }): { firstKeptEntryId: string; estimatedTotal: number; adjusted: boolean; margin: number } {
   const targetKeepRecent = Math.max(0, Math.min(input.configuredKeepRecent, input.targetKeepRecent));
-  const initial = estimatePostCompactionFit(input.summary, input.configuredKeepRecent, input.contextWindow);
-  const mustReduceKeptWindow = targetKeepRecent < input.configuredKeepRecent;
-  if (initial.fits && !mustReduceKeptWindow) {
+  const actualCurrentKeepTokens = estimateKeptTokensFromEntryId(input.branchEntries, input.currentFirstKeptEntryId);
+  // Branch data is authoritative when available. The configured value is only
+  // a conservative fallback for callers that cannot provide the active path.
+  const currentKeepTokens = actualCurrentKeepTokens ?? input.configuredKeepRecent;
+  const initial = estimatePostCompactionFit(input.summary, currentKeepTokens, input.contextWindow);
+  const mustReduceKeptWindow = currentKeepTokens > targetKeepRecent;
+  const currentBoundaryIndex = findBranchEntryIndex(input.branchEntries, input.currentFirstKeptEntryId);
+  const currentBoundaryInvalid = currentBoundaryIndex >= 0
+    && !isValidCompactionCutPoint(input.branchEntries?.[currentBoundaryIndex]);
+  if (initial.fits && !mustReduceKeptWindow && !currentBoundaryInvalid) {
+    log.debug("Smart compaction kept boundary unchanged", {
+      operation: "smart_compaction.boundary_selection",
+      adjustmentReason: "current_suffix_fits",
+      currentBoundaryIndex,
+      selectedBoundaryIndex: currentBoundaryIndex,
+      currentKeptTokens: currentKeepTokens,
+      selectedKeptTokens: currentKeepTokens,
+      estimatedTotal: initial.estimatedTotal,
+      margin: initial.margin,
+    });
     return { firstKeptEntryId: input.currentFirstKeptEntryId, estimatedTotal: initial.estimatedTotal, adjusted: false, margin: initial.margin };
   }
 
   const summaryTokens = applyTokenEstimateSafetyMultiplier(estimateTokensFromChars(input.summary));
   const overheadTokens = initial.overheadTokens;
   const safetyReserve = 512;
-  const fitBudget = Math.max(0, input.contextWindow - summaryTokens - overheadTokens - safetyReserve);
+  const safetyAdjustedFitBudget = Math.max(0, input.contextWindow - summaryTokens - overheadTokens - safetyReserve);
+  const fitBudget = Math.floor(safetyAdjustedFitBudget / getTokenEstimateSafetyMultiplier());
   const keepBudget = Math.min(targetKeepRecent, fitBudget);
-  const adjusted = chooseFirstKeptEntryForBudget(input.branchEntries, keepBudget);
+  const adjusted = chooseFirstKeptEntryForBudget(
+    input.branchEntries,
+    input.currentFirstKeptEntryId,
+    keepBudget,
+  );
   if (!adjusted) {
+    log.debug("Smart compaction found no safe retained-boundary adjustment", {
+      operation: "smart_compaction.boundary_selection",
+      adjustmentReason: currentBoundaryInvalid ? "invalid_current_boundary" : initial.fits ? "target_keep_budget" : "context_fit",
+      currentBoundaryIndex,
+      selectedBoundaryIndex: null,
+      currentKeptTokens: currentKeepTokens,
+      selectedKeptTokens: null,
+      targetKeepTokens: targetKeepRecent,
+      fitBudget,
+      estimatedTotal: initial.estimatedTotal,
+      margin: initial.margin,
+    });
     throw new Error(
-      `Compaction result still exceeds model context window: summary ${summaryTokens}t + kept ${input.configuredKeepRecent}t + overhead ${overheadTokens}t > ${input.contextWindow}t; no safe kept-window adjustment was available.`,
+      `Compaction result still exceeds model context window: summary ${summaryTokens}t + kept ${currentKeepTokens}t + overhead ${overheadTokens}t > ${input.contextWindow}t; no safe kept-window adjustment was available without violating monotonicity.`,
     );
+  }
+  if (
+    adjusted.firstKeptEntryIndex <= adjusted.currentFirstKeptEntryIndex
+    || adjusted.estimatedKeepTokens >= adjusted.currentEstimatedKeepTokens
+  ) {
+    throw new Error("Compaction kept-window adjustment violated the monotonic boundary invariant");
   }
 
   const adjustedFit = estimatePostCompactionFit(input.summary, adjusted.estimatedKeepTokens, input.contextWindow);
@@ -338,10 +431,21 @@ function maybeAdjustFirstKeptForFit(input: {
     );
   }
 
+  log.debug("Smart compaction selected a smaller retained boundary", {
+    operation: "smart_compaction.boundary_selection",
+    adjustmentReason: currentBoundaryInvalid ? "invalid_current_boundary" : initial.fits ? "target_keep_budget" : "context_fit",
+    currentBoundaryIndex: adjusted.currentFirstKeptEntryIndex,
+    selectedBoundaryIndex: adjusted.firstKeptEntryIndex,
+    currentKeptTokens: adjusted.currentEstimatedKeepTokens,
+    selectedKeptTokens: adjusted.estimatedKeepTokens,
+    targetKeepTokens: targetKeepRecent,
+    estimatedTotal: adjustedFit.estimatedTotal,
+    margin: adjustedFit.margin,
+  });
   return {
     firstKeptEntryId: adjusted.firstKeptEntryId,
     estimatedTotal: adjustedFit.estimatedTotal,
-    adjusted: adjusted.firstKeptEntryId !== input.currentFirstKeptEntryId,
+    adjusted: true,
     margin: adjustedFit.margin,
   };
 }
@@ -378,6 +482,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
     const publishContextSnapshot = (tokens: number | null | undefined, phase: "before_compaction" | "after_compaction") => {
       publishContextEstimate(ctx, typeof tokens === "number" && Number.isFinite(tokens) && tokens >= 0 ? tokens : null, phase, {
         completionPercent: phase === "after_compaction" ? 100 : 0,
+        contextWindow: phase === "after_compaction" ? targetContext.targetContextWindow : undefined,
       });
     };
 
@@ -428,6 +533,12 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
       const { llmMessages, humanUserIndexes, sourceIndexesByLlmIndex } = convertMessagesWithMetadata(
         messagesForCompaction,
       );
+      const sourceEntryIdsByLlmIndex = sourceIndexesByLlmIndex.map(
+        (sourceIndex) => sanitizedContextPrune.sourceEntryIdsByMessageIndex[sourceIndex],
+      );
+      const toolAnalysis = analyzeToolOutcomes(llmMessages);
+      const effectiveFileOps = reconcileFileOperations(preparation.fileOps, toolAnalysis, previousSummary);
+      const effectivePreparation = { ...preparation, fileOps: effectiveFileOps };
 
       // Check abort early — a concurrent compact() may have already cancelled us.
       if (abortSignal.aborted) return { cancel: true };
@@ -471,20 +582,32 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
       // mechanically. This saves ~60-110s and 100-270k input tokens.
       const noOpResult = tryNoOpCompaction(
         llmMessages,
-        preparation,
+        effectivePreparation,
         firstKeptEntryId,
         tokensBefore,
         topicShift,
         humanUserIndexes,
+        toolAnalysis,
         {
           hasKeptUserContext: keptContext.hasHumanUser,
           hasTurnPrefixHumanUser: !!turnPrefixContext && turnPrefixContext.humanUserIndexes.size > 0,
         },
         ctx,
       );
-      if (noOpResult) {
-        const postFit = estimatePostCompactionFit(noOpResult.compaction.summary, configuredKeepRecent, contextWindow);
-        if (!postFit.fits || configuredKeepRecent > safeKeepRecent) {
+      const noOpValidation = noOpResult
+        ? validateCompactionSummaryResponse(
+            { content: [{ type: "text", text: noOpResult.compaction.summary }], stopReason: "stop" },
+            "final",
+            MAX_PROMPT_CHARS,
+          )
+        : null;
+      if (noOpResult && noOpValidation?.ok) {
+        const actualNoOpKeptTokens = estimateKeptTokensFromEntryId(branchEntries, noOpResult.compaction.firstKeptEntryId);
+        const noOpKeptTokens = actualNoOpKeptTokens ?? configuredKeepRecent;
+        const postFit = estimatePostCompactionFit(noOpResult.compaction.summary, noOpKeptTokens, contextWindow);
+        const noOpBoundaryIndex = findBranchEntryIndex(branchEntries, noOpResult.compaction.firstKeptEntryId);
+        const noOpBoundaryInvalid = noOpBoundaryIndex >= 0 && !isValidCompactionCutPoint(branchEntries?.[noOpBoundaryIndex]);
+        if (!postFit.fits || noOpKeptTokens > safeKeepRecent || noOpBoundaryInvalid) {
           try {
             const adjusted = maybeAdjustFirstKeptForFit({
               summary: noOpResult.compaction.summary,
@@ -509,7 +632,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
             };
           } catch {
             log.debug(
-              `No-op compaction: post-compaction estimate ${postFit.estimatedTotal} tokens is unsafe for ${contextWindow} context (configured kept ${configuredKeepRecent}t, safe kept ${safeKeepRecent}t, margin ${postFit.margin}t). Falling through to LLM compaction.`,
+              `No-op compaction: post-compaction estimate ${postFit.estimatedTotal} tokens is unsafe for ${contextWindow} context (actual kept ${noOpKeptTokens}t, configured kept ${configuredKeepRecent}t, safe kept ${safeKeepRecent}t, margin ${postFit.margin}t). Falling through to LLM compaction.`,
             );
             publishCompactionStage(statusMessage(compactionMetadata, "no-op estimate unsafe; extracting signal…"), "noop_unsafe", postFit.estimatedTotal);
             // Don't return the no-op — fall through to LLM-based compaction
@@ -519,29 +642,16 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
           publishCompactionStage(statusMessage(compactionMetadata, "reused existing summary…"), "completed_noop", postFit.estimatedTotal);
           return noOpResult;
         }
-      }
-
-      // Short conversations can still overflow the provider's compaction prompt
-      // when they contain huge tool outputs or image/file payloads. Keep them
-      // on Piclaw's streaming/selective path rather than falling through to
-      // upstream full-pass compaction, which is less observable and has been a
-      // source of apparent threshold-compaction hangs on production instances.
-      const fullPassPromptEstimate = estimateFullPassFallbackPromptTokens(llmMessages, tokensBefore);
-      const conservativeFullPassLimit = Math.min(
-        Math.floor(contextWindow * FULL_PASS_FALLBACK_CONTEXT_FRACTION),
-        FULL_PASS_FALLBACK_MAX_PROMPT_TOKENS,
-      );
-      const fullPassFallbackAllowed = fullPassPromptEstimate + MIN_COMPACTION_OUTPUT_TOKENS <= conservativeFullPassLimit && !targetContext.targetContextWindow;
-      if (messagesForCompaction.length < SELECTIVE_THRESHOLD && fullPassFallbackAllowed) {
-        log.debug("Smart compaction: short conversation still using Piclaw selective path instead of upstream full-pass fallback", {
-          operation: "smart_compaction.short_selective",
-          trigger: compactionMetadata.trigger,
-          willRetry: compactionMetadata.willRetry,
-          messageCount: messagesForCompaction.length,
-          fullPassPromptEstimate,
-          conservativeFullPassLimit,
+      } else if (noOpResult && noOpValidation && !noOpValidation.ok) {
+        log.debug("No-op compaction rejected an inherited malformed summary; falling through to LLM compaction", {
+          operation: "smart_compaction.noop_invalid_summary",
+          validationFailure: noOpValidation.code,
         });
       }
+
+      // Always keep compaction on Piclaw's observable selective/progressive
+      // paths. Upstream full-pass fallback is intentionally disabled because
+      // large tool/image payloads can exceed provider request limits.
 
       const compactionStartedAt = Date.now();
       if (safeKeepRecent < configuredKeepRecent) {
@@ -557,7 +667,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
 
       const promptText = buildSelectivePrompt(
         llmMessages,
-        { tokensBefore, previousSummary, fileOps: preparation.fileOps, keptMessagesSummary, turnPrefixSummary },
+        { tokensBefore, previousSummary, fileOps: effectiveFileOps, keptMessagesSummary, turnPrefixSummary },
         effectiveCustomInstructions,
         topicShift,
         humanUserIndexes,
@@ -587,7 +697,23 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
       const recoveryCompaction = isRecoveryCompaction(compactionMetadata);
       const budget = recoveryCompaction ? { ...baseBudget, forceProgressive: true } : baseBudget;
       const promptTooLargeForSinglePass = promptTokens + MIN_COMPACTION_OUTPUT_TOKENS > budget.contextWindow;
-      if (budget.forceProgressive || promptText.length > budget.promptBudgetChars || promptTooLargeForSinglePass) {
+      // A bounded selective prompt must not disguise that it sampled an input
+      // too large for a complete single-pass representation. Use both upstream's
+      // count and an independent source estimate because tokensBefore can lag.
+      const sourceChars = llmMessages.reduce((total, message) => {
+        try {
+          return total + JSON.stringify(message).length;
+        } catch {
+          return total + String((message as SourceMessage).content ?? "").length;
+        }
+      }, 0);
+      const sourceTokens = Math.max(
+        tokensBefore,
+        applyTokenEstimateSafetyMultiplier(Math.max(1, Math.ceil(sourceChars / 4))),
+      );
+      const sourceTooLargeForSinglePass = sourceChars > budget.promptBudgetChars
+        || sourceTokens + MIN_COMPACTION_OUTPUT_TOKENS > budget.contextWindow;
+      if (budget.forceProgressive || promptText.length > budget.promptBudgetChars || promptTooLargeForSinglePass || sourceTooLargeForSinglePass) {
         try {
           publishCompactionStage(statusMessage(compactionMetadata, "progressive iterative mode…"), "progressive_iterative", promptTokens);
           log.debug(
@@ -597,6 +723,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
             llmMessages,
             humanUserIndexes,
             sourceIndexesByLlmIndex,
+            sourceEntryIdsByLlmIndex,
             model: compactionModel,
             auth,
             settings,
@@ -604,7 +731,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
             keptMessagesSummary,
             turnPrefixSummary,
             customInstructions: effectiveCustomInstructions,
-            fileOps: preparation.fileOps,
+            fileOps: effectiveFileOps,
             budget,
             abortSignal,
             ctx,
@@ -620,9 +747,19 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
               );
             },
           });
-          const fullSummary = progressiveResult.summary.includes("<read-files>") || progressiveResult.summary.includes("<modified-files>")
-            ? progressiveResult.summary
-            : appendFileLists(progressiveResult.summary, preparation.fileOps);
+          const progressiveValidation = validateCompactionSummaryResponse(
+            { content: [{ type: "text", text: progressiveResult.summary }], stopReason: "stop" },
+            "final",
+            Math.max(1, Math.floor(0.8 * settings.reserveTokens)) * 4,
+          );
+          if (!progressiveValidation.ok) {
+            return cancelCompactionWithReason(
+              ctx,
+              `Progressive compaction summary invalid (${progressiveValidation.code}): ${progressiveValidation.reason}`,
+            );
+          }
+          const validatedProgressiveSummary = progressiveValidation.text;
+          const fullSummary = appendMissingFileLists(validatedProgressiveSummary, effectiveFileOps);
 
           let finalFirstKeptEntryId = firstKeptEntryId;
           let estimatedTotal = 0;
@@ -630,15 +767,23 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
           let adjusted = false;
 
           if (!progressiveResult.complete) {
-            const partialFirstKeptEntryId = resolveFirstKeptEntryIdForSourceMessageIndex(
-              branchEntries,
-              messagesForCompaction,
-              progressiveResult.nextUnprocessedSourceMessageIndex,
-            );
+            const partialFirstKeptEntryId = progressiveResult.nextUnprocessedEntryId
+              ?? resolveFirstKeptEntryIdForSourceMessageIndex(
+                branchEntries,
+                messagesForCompaction,
+                progressiveResult.nextUnprocessedSourceMessageIndex,
+              );
             if (!partialFirstKeptEntryId) {
               return cancelCompactionWithReason(
                 ctx,
                 `Progressive compaction stopped early (${progressiveResult.partialReason ?? "time budget exhausted"}) but could not identify the first unsummarized entry to keep verbatim`,
+              );
+            }
+            const partialFirstKeptIndex = findBranchEntryIndex(branchEntries, partialFirstKeptEntryId);
+            if (partialFirstKeptIndex < 0 || !isValidCompactionCutPoint(branchEntries?.[partialFirstKeptIndex])) {
+              return cancelCompactionWithReason(
+                ctx,
+                `Progressive compaction stopped early (${progressiveResult.partialReason ?? "time budget exhausted"}) but the first unsummarized entry is not a valid compaction cut point`,
               );
             }
             const keptTokens = estimateKeptTokensFromEntryId(branchEntries, partialFirstKeptEntryId) ?? configuredKeepRecent;
@@ -708,7 +853,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
       try {
         const runCompletion = async (prompt: string) => {
           const safeOutput = getSafeCompactionMaxTokens(compactionModel, prompt, requestedMaxTokens);
-          return await streamComplete({
+          const response = await streamComplete({
             model: compactionModel,
             systemPrompt: SYSTEM_PROMPT,
             userPrompt: prompt,
@@ -722,78 +867,102 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
               setThrottledProgressMessage(statusMessage(compactionMetadata, "generating summary still running…"), "generating_summary_streaming");
             },
           });
+          return { response, maxOutputChars: safeOutput.maxTokens * 4 };
         };
 
         publishCompactionStage(statusMessage(compactionMetadata, "generating selective summary…"), "generating_summary", estimateCompactionPromptTokens(activePromptText));
-        let response;
+        let response: any;
+        let maxOutputChars = requestedMaxTokens * 4;
+        let retryCount = 0;
         try {
-          response = await runCompletion(activePromptText);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          const trimmedPrompt = isCompactionInputOverflow(msg)
-            ? buildTrimmedCompactionRetryPrompt(activePromptText, getCompactionRetryPromptTokenTarget(compactionModel))
-            : null;
-          if (!trimmedPrompt || abortSignal.aborted) throw err;
-          activePromptText = trimmedPrompt;
-          log.debug(`Smart compaction input overflow; retrying with trimmed prompt (~${Math.round(estimateCompactionPromptTokens(activePromptText) / 1000)}k tokens).`);
-          publishCompactionStage(statusMessage(compactionMetadata, "retrying with trimmed summary prompt…"), "generating_summary_trimmed_retry", estimateCompactionPromptTokens(activePromptText));
-          response = await runCompletion(activePromptText);
+          ({ response, maxOutputChars } = await runCompletion(activePromptText));
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          if (!isCompactionInputOverflow(errorMessage) || abortSignal.aborted) throw error;
+          const overflowTotalTarget = Math.floor(estimateCompactionPromptTokens(activePromptText) * 0.75);
+          const overflowTarget = Math.min(
+            getCompactionRetryPromptTokenTarget(compactionModel),
+            Math.max(1, overflowTotalTarget - getCompactionRequestOverheadTokens()),
+          );
+          const retryPrompt = buildTrimmedCompactionRetryPrompt(activePromptText, overflowTarget);
+          if (!retryPrompt) throw error;
+          retryCount = 1;
+          activePromptText = retryPrompt;
+          publishCompactionStage(
+            statusMessage(compactionMetadata, "retrying with a smaller provider request…"),
+            "generating_summary_trimmed_retry",
+            estimateCompactionPromptTokens(activePromptText),
+          );
+          ({ response, maxOutputChars } = await runCompletion(activePromptText));
         }
 
-        if (response.stopReason === "error") {
-          const errorMessage = (response as any).errorMessage || "unknown";
-          const trimmedPrompt = isCompactionInputOverflow(errorMessage)
-            ? buildTrimmedCompactionRetryPrompt(activePromptText, getCompactionRetryPromptTokenTarget(compactionModel))
-            : null;
-          if (trimmedPrompt && trimmedPrompt !== activePromptText && !abortSignal.aborted) {
-            activePromptText = trimmedPrompt;
-            log.debug(`Smart compaction LLM overflow response; retrying with trimmed prompt (~${Math.round(estimateCompactionPromptTokens(activePromptText) / 1000)}k tokens).`);
-            publishCompactionStage(statusMessage(compactionMetadata, "retrying with trimmed summary prompt…"), "generating_summary_trimmed_retry", estimateCompactionPromptTokens(activePromptText));
-            response = await runCompletion(activePromptText);
+        let validation = validateCompactionSummaryResponse(response, "final", maxOutputChars);
+        const responseErrorMessage = typeof response?.errorMessage === "string" ? response.errorMessage : "";
+        const providerInputOverflow = response?.stopReason === "error" && isCompactionInputOverflow(responseErrorMessage);
+        if (!validation.ok && (validation.retryable || providerInputOverflow) && !abortSignal.aborted) {
+          const reason = validation.reason;
+          const targetPromptTokens = getCompactionRetryPromptTokenTarget(compactionModel);
+          let retryPrompt: string | null = null;
+          if (providerInputOverflow) {
+            // Provider caps can be lower than model metadata. Retry once with a
+            // strictly smaller request and no appended repair text.
+            const overflowTotalTarget = Math.floor(estimateCompactionPromptTokens(activePromptText) * 0.75);
+            const overflowTarget = Math.min(
+              targetPromptTokens,
+              Math.max(1, overflowTotalTarget - getCompactionRequestOverheadTokens()),
+            );
+            retryPrompt = buildTrimmedCompactionRetryPrompt(activePromptText, overflowTarget);
+          } else {
+            const repairInstruction = buildCompactionRepairInstruction("final", reason);
+            const repairContentTokens = applyTokenEstimateSafetyMultiplier(estimateTokensFromChars(repairInstruction));
+            const basePromptTarget = Math.max(1, targetPromptTokens - repairContentTokens);
+            const trimmedPrompt = buildTrimmedCompactionRetryPrompt(activePromptText, basePromptTarget);
+            const activePromptContentTokens = applyTokenEstimateSafetyMultiplier(estimateTokensFromChars(activePromptText));
+            const boundedBasePrompt = trimmedPrompt
+              ?? (activePromptContentTokens <= basePromptTarget ? activePromptText : null);
+            if (boundedBasePrompt) retryPrompt = `${boundedBasePrompt}${repairInstruction}`;
+          }
+
+          if (retryPrompt && retryCount === 0) {
+            retryCount = 1;
+            activePromptText = retryPrompt;
+            log.debug(`Smart compaction output rejected; retrying once with bounded instructions`, {
+              operation: "smart_compaction.output_retry",
+              stopReason: response?.stopReason ?? "missing",
+              validationFailure: validation.ok ? null : validation.code,
+              retryCount,
+            });
+            publishCompactionStage(
+              statusMessage(compactionMetadata, "repairing incomplete summary output…"),
+              "generating_summary_trimmed_retry",
+              estimateCompactionPromptTokens(activePromptText),
+            );
+            ({ response, maxOutputChars } = await runCompletion(activePromptText));
+            validation = validateCompactionSummaryResponse(response, "final", maxOutputChars);
           }
         }
 
-        if (response.stopReason === "error") {
-          const errorMessage = (response as any).errorMessage || "unknown";
-          log.debug(
-            `Smart compaction LLM error: ${errorMessage}; cancelling instead of falling back to upstream full-pass compaction`,
-          );
-          return cancelCompactionWithReason(ctx, `Smart compaction LLM error: ${errorMessage}`);
+        if (!validation.ok) {
+          const errorMessage = response?.stopReason === "error" && (response as any).errorMessage
+            ? `${validation.reason}: ${(response as any).errorMessage}`
+            : validation.reason;
+          log.debug("Smart compaction output validation failed; cancelling instead of persisting partial output", {
+            operation: "smart_compaction.output_invalid",
+            stopReason: validation.stopReason,
+            validationFailure: validation.code,
+            retryCount,
+          });
+          return cancelCompactionWithReason(ctx, `Smart compaction output invalid (${validation.code}): ${errorMessage}`);
         }
 
-        const summary = response.content
-          .filter((c: any) => c.type === "text")
-          .map((c: any) => c.text)
-          .join("\n")
-          .trim();
-
-        if (summary.length < MIN_SUMMARY_CHARS) {
-          log.debug("Smart compaction summary too short; cancelling instead of falling back to upstream full-pass compaction");
-          return cancelCompactionWithReason(ctx, "Smart compaction summary too short");
-        }
+        const summary = validation.text;
 
         if (abortSignal.aborted) return { cancel: true };
 
-        // Append deterministic file sections (same format as built-in)
-        const { readFiles, modifiedFiles } = fileListsFromOps(
-          preparation.fileOps,
-        );
-        let fullSummary = summary;
-        if (
-          !summary.includes("<read-files>") &&
-          !summary.includes("<modified-files>")
-        ) {
-          const parts: string[] = [];
-          if (readFiles.length > 0) {
-            parts.push(`\n<read-files>\n${compressFilePaths(readFiles)}\n</read-files>`);
-          }
-          if (modifiedFiles.length > 0) {
-            parts.push(
-              `\n<modified-files>\n${compressFilePaths(modifiedFiles)}\n</modified-files>`,
-            );
-          }
-          if (parts.length) fullSummary += "\n" + parts.join("\n");
-        }
+        // Append each deterministic file section omitted by the validated model
+        // output. A valid existing read block must not suppress a missing modified
+        // block (or vice versa).
+        const fullSummary = appendMissingFileLists(summary, effectiveFileOps);
 
         const adjustedFit = maybeAdjustFirstKeptForFit({
           summary: fullSummary,
@@ -843,5 +1012,3 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
   });
   };
 }
-
-export const smartCompaction: ExtensionFactory = createSmartCompactionExtension();

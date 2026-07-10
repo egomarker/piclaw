@@ -1374,32 +1374,42 @@
 .post-thinking-visibility {
     margin: 4px 0 8px 0;
     font-size: 0.88em;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--chat-surface-radius, 8px);
+    color: var(--text-secondary);
+    overflow: hidden;
 }
 
-/* Flex container so the disclosure button and copy button sit inline
- * (Q15+Q16 a11y rework split them into siblings so they could be real
- * <button> elements — nesting buttons is invalid HTML). */
+/* Header row: disclosure toggle (left) + copy action (right), always visible.
+   Mirrors .agent-thinking so persisted thinking looks like live thinking. */
 .post-thinking-visibility-controls {
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: 4px;
+    justify-content: space-between;
+    gap: var(--spacing-sm, 8px);
+    padding: 4px 6px 4px 8px;
 }
 
 .post-thinking-visibility-header {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 2px 8px 2px 4px;
-    border-radius: 6px;
+    gap: 6px;
+    flex: 1 1 auto;
+    min-width: 0;
+    /* Keep the tap target at least 24px tall (WCAG 2.2 Target Size, touch). */
+    min-height: 24px;
+    padding: 2px 4px 2px 0;
     cursor: pointer;
-    color: var(--text-secondary);
-    background: color-mix(in srgb, var(--accent-color) 8%, transparent);
-    border: 1px solid color-mix(in srgb, var(--accent-color) 15%, transparent);
+    color: var(--turn-color, var(--accent-color));
+    background: transparent;
+    border: none;
+    border-radius: 4px;
     user-select: none;
-    transition: background 0.15s;
-    /* Button reset: native <button> defaults that don't fit the pill style. */
+    /* Button reset: native <button> defaults that don't fit the header style. */
     font: inherit;
     line-height: inherit;
+    text-align: left;
     appearance: none;
     -webkit-appearance: none;
 }
@@ -1407,10 +1417,6 @@
 .post-thinking-visibility-header:focus-visible {
     outline: 2px solid var(--accent-color);
     outline-offset: 2px;
-}
-
-.post-thinking-visibility-header:hover {
-    background: color-mix(in srgb, var(--accent-color) 14%, transparent);
 }
 
 .post-thinking-visibility-toggle {
@@ -1421,40 +1427,47 @@
 }
 
 .post-thinking-visibility-label {
-    font-weight: 500;
+    font-weight: 600;
     font-variant-numeric: tabular-nums;
 }
 
-.post-thinking-visibility-copy {
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 0 2px;
-    font-size: 0.95em;
-    color: var(--text-secondary);
-    opacity: 0.6;
-    transition: opacity 0.15s;
-    line-height: 1;
+/* Enlarge the shared 22px action button to a >=24px touch target for this
+   header row without affecting the app-wide .post-action-btn sizing. */
+.post-thinking-visibility-copy.post-action-btn {
+    min-width: 24px;
+    min-height: 24px;
 }
 
-.post-thinking-visibility-copy:hover {
-    opacity: 1;
-}
-
+/* Body lives inside the same card; a subtle divider separates it from the
+   header row instead of a second bordered box. */
 .post-thinking-visibility-detail {
-    margin-top: 6px;
-    padding: 8px 12px;
-    border-radius: 6px;
-    background: color-mix(in srgb, var(--accent-color) 5%, transparent);
-    border: 1px solid color-mix(in srgb, var(--accent-color) 10%, transparent);
+    padding: 8px 12px 10px 12px;
+    border-top: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
     color: var(--text-secondary);
-    font-size: 0.92em;
+    /* Match the live "Thoughts" panel (.agent-thinking / .agent-thinking-body)
+       exactly: same inherited proportional family, size and line-height. */
+    font-family: inherit;
+    font-size: var(--font-size-sm);
     line-height: 1.35;
+    /* Cap growth but stay viewport-aware so long traces stay usable on short
+       mobile screens (dvh tracks the dynamic viewport; 400px is the desktop
+       cap and the fallback for browsers without dvh support). */
     max-height: 400px;
+    max-height: min(400px, 60dvh);
     overflow-y: auto;
     scrollbar-width: thin;
     word-break: break-word;
     overflow-wrap: anywhere;
+}
+
+/* The panel is always mounted (so the Safari scroll-anchor's ResizeObserver can
+   observe both expand and collapse); collapse it to zero height when closed. */
+.post-thinking-visibility[data-expanded="false"] .post-thinking-visibility-detail {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-top-width: 0;
+    overflow: hidden;
 }
 
 .post-thinking-visibility-detail > div {
@@ -1539,4 +1552,3 @@
     background-color: var(--danger-color);
     color: white;
 }
-

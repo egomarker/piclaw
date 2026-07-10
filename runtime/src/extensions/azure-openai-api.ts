@@ -264,9 +264,10 @@ export interface AzureBaseOptions {
 }
 
 const CONTEXT_SAFETY_TOKENS = 4096;
-const MIN_MAX_TOKENS = 1;
+// OpenAI Responses rejects max_output_tokens below 16.
+const MIN_MAX_TOKENS = 16;
 
-/** Clamp output tokens to the remaining context window, mirroring pi-ai 0.80.3. */
+/** Clamp output tokens to the remaining context window while preserving the Responses API floor. */
 export function clampAzureMaxTokensToContext(
   model: { contextWindow?: number },
   context: AzureBaseContextInput | undefined,

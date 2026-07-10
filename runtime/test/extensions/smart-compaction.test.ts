@@ -1,6 +1,7 @@
 /**
  * smart-compaction.test.ts – unit tests for selective-fragment compaction.
  */
+import path from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as actualCodingAgent from "../../../node_modules/@earendil-works/pi-coding-agent/dist/index.js";
 
@@ -163,7 +164,6 @@ import {
   buildProgressiveCompactionChunks,
   buildTargetContextCompactionInstructions,
   buildTrimmedCompactionRetryPrompt,
-  buildTrimmedProgressiveMergeRetryPrompt,
   clampKeepRecentTokens,
   formatProgressCount,
   formatProgressRange,
@@ -176,6 +176,87 @@ import {
 } from "../../src/extensions/smart-compaction.js";
 import { consumeCompactionCancellationReason } from "../../src/agent-pool/compaction-cancel-reason.js";
 import { runWithPiclawCompactionTrigger } from "../../src/agent-pool/compaction-trigger-context.js";
+import { compressFilePaths } from "../../src/extensions/smart-compaction/files.js";
+import { estimateCompactionPromptTokens } from "../../src/extensions/smart-compaction/context.js";
+import { analyzeToolOutcomes, serializeToolBatchCompact } from "../../src/extensions/smart-compaction/messages.js";
+import { buildTurnPrefixSummary } from "../../src/extensions/smart-compaction/noop.js";
+import { validateCompactionSummaryResponse } from "../../src/extensions/smart-compaction/summary-validation.js";
+
+describe("smart-compaction output validation", () => {
+  const validSummary =
+    "## Goal\nPreserve conversation continuity\n\n## Current Active Topic\n- validation\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- concise\n\n## Progress\n### Done\n- [x] generated summary\n### In Progress\n- [ ] validate\n### Blocked\n- none\n\n## Key Decisions\n- **Strict output**: accept complete summaries only\n\n## Next Steps\n1. continue\n\n## Critical Context\n- all required state is present";
+
+  it.each([
+    ["length", true],
+    ["toolUse", false],
+    ["aborted", false],
+    ["error", false],
+  ])("rejects stopReason %s", (stopReason, retryable) => {
+    const result = validateCompactionSummaryResponse(
+      { content: [{ type: "text", text: validSummary }], stopReason },
+      "final",
+      10_000,
+    );
+    expect(result).toMatchObject({ ok: false, code: "stop_reason", retryable, stopReason });
+  });
+
+  it("rejects malformed output over the old length-only threshold", () => {
+    const result = validateCompactionSummaryResponse(
+      { content: [{ type: "text", text: `This is not a structured checkpoint. ${"x".repeat(200)}` }], stopReason: "stop" },
+      "final",
+      10_000,
+    );
+    expect(result).toMatchObject({ ok: false, code: "missing_heading" });
+  });
+
+  it("rejects missing, duplicated, and empty required headings", () => {
+    const missing = validSummary.replace("## Key Decisions", "## Other Decisions");
+    expect(validateCompactionSummaryResponse({ content: [{ type: "text", text: missing }], stopReason: "stop" }, "final", 10_000))
+      .toMatchObject({ ok: false, code: "missing_heading" });
+
+    const duplicated = `${validSummary}\n\n## Goal\nduplicate`;
+    expect(validateCompactionSummaryResponse({ content: [{ type: "text", text: duplicated }], stopReason: "stop" }, "final", 10_000))
+      .toMatchObject({ ok: false, code: "duplicate_heading" });
+
+    const empty = validSummary.replace("## Goal\nPreserve conversation continuity", "## Goal\n");
+    expect(validateCompactionSummaryResponse({ content: [{ type: "text", text: empty }], stopReason: "stop" }, "final", 10_000))
+      .toMatchObject({ ok: false, code: "empty_section" });
+  });
+
+  it("rejects leading commentary and unexpected top-level headings", () => {
+    const leading = `Here is the requested summary.\n\n${validSummary}`;
+    expect(validateCompactionSummaryResponse({ content: [{ type: "text", text: leading }], stopReason: "stop" }, "final", 10_000))
+      .toMatchObject({ ok: false, code: "leading_content" });
+
+    const echoedRepair = `## Output Repair Requirement\n- echoed instruction\n\n${validSummary}`;
+    expect(validateCompactionSummaryResponse({ content: [{ type: "text", text: echoedRepair }], stopReason: "stop" }, "final", 10_000))
+      .toMatchObject({ ok: false, code: "unexpected_heading" });
+  });
+
+  it("rejects malformed, duplicated, misplaced, and empty deterministic file sections", () => {
+    const cases = [
+      `${validSummary}\n<read-files>\n/workspace/a.ts`,
+      `${validSummary}\n<read-files>\n/workspace/a.ts\n</read-files>\n<read-files>\n/workspace/b.ts\n</read-files>`,
+      validSummary.replace("Preserve conversation continuity", "Preserve conversation continuity\n<read-files>\n/workspace/a.ts\n</read-files>"),
+      `${validSummary}\n<modified-files>\n</modified-files>`,
+    ];
+    for (const text of cases) {
+      expect(validateCompactionSummaryResponse(
+        { content: [{ type: "text", text }], stopReason: "stop" },
+        "final",
+        20_000,
+      )).toMatchObject({ ok: false, code: "invalid_file_sections" });
+    }
+  });
+
+  it("accepts one complete, normally stopped structured summary", () => {
+    expect(validateCompactionSummaryResponse(
+      { content: [{ type: "text", text: validSummary }], stopReason: "stop" },
+      "final",
+      10_000,
+    )).toMatchObject({ ok: true, text: validSummary });
+  });
+});
 
 describe("smart-compaction", () => {
   let handler: ((event: any, ctx: any) => Promise<any>) | null = null;
@@ -247,25 +328,6 @@ describe("smart-compaction", () => {
     expect(getCompactionReasoningEffort({ provider: "github-copilot", id: "claude-opus-4.8", reasoning: true, contextWindow: 200_000, thinkingLevelMap: { xhigh: "xhigh" } }, "selective")).toBeUndefined();
   });
 
-  it("trims progressive merge retry prompts by preserving rules and recent summaries", () => {
-    const prompt = [
-      "Merge these ordered intermediate compaction summaries into the final continuity state.",
-      "\nRules:\n- Preserve exact paths.",
-      "\n## Ordered Intermediate Summaries",
-      "older-summary".repeat(20_000),
-      "RECENT-PROGRESSIVE-MARKER",
-    ].join("\n");
-
-    const trimmed = buildTrimmedProgressiveMergeRetryPrompt(prompt, 8_000);
-
-    expect(trimmed).toBeTruthy();
-    expect(trimmed!.length).toBeLessThan(prompt.length);
-    expect(trimmed).toContain("Rules");
-    expect(trimmed).toContain("## Ordered Intermediate Summaries");
-    expect(trimmed).toContain("RECENT-PROGRESSIVE-MARKER");
-    expect(trimmed).toContain("progressive merge material trimmed");
-  });
-
   it("trims compaction retry prompts by preserving instructions and recent excerpts", () => {
     const prompt = [
       "# Smart compaction prompt",
@@ -286,11 +348,113 @@ describe("smart-compaction", () => {
     expect(trimmed).toContain("trimmed after provider context-overflow");
   });
 
+  it("retries provider input overflow with a strictly smaller total request and no appended repair text", async () => {
+    const previousProgressiveBudget = process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS;
+    const previousRequestOverhead = process.env.PICLAW_COMPACTION_REQUEST_OVERHEAD_TOKENS;
+    process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS = "100000";
+    process.env.PICLAW_COMPACTION_REQUEST_OVERHEAD_TOKENS = "1000";
+    const summaryText = "## Goal\nRecover from provider overflow\n\n## Current Active Topic\n- selective retry\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- keep retry bounded\n\n## Progress\n### Done\n- [x] prompt trimmed\n\n### In Progress\n- [ ] continue\n\n### Blocked\n- none\n\n## Key Decisions\n- **Overflow retry**: do not append repair text\n\n## Next Steps\n1. Continue\n\n## Critical Context\n- retry succeeded";
+    (completeSimple as any)
+      .mockRejectedValueOnce(new Error("input context length exceeded"))
+      .mockResolvedValueOnce({ content: [{ type: "text", text: summaryText }], stopReason: "stop" });
+
+    try {
+      const messages = Array.from({ length: 60 }, (_, index) => userMsg(`Overflow context ${index}: ${"x".repeat(500)}`));
+      const result = await handler!(
+        {
+          preparation: makePreparation(messages.length, {
+            messagesToSummarize: messages,
+            settings: { enabled: true, reserveTokens: 2_000, keepRecentTokens: 1_000 },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx({ model: { provider: "test", id: "selective-overflow", contextWindow: 20_000, reasoning: false } }),
+      );
+
+      const prompts = (completeSimple as any).mock.calls.map((call: any[]) => call[1].messages[0].content[0].text as string);
+      expect(prompts).toHaveLength(2);
+      expect(prompts[1].length).toBeLessThan(prompts[0].length);
+      expect(estimateCompactionPromptTokens(prompts[1])).toBeLessThanOrEqual(Math.floor(estimateCompactionPromptTokens(prompts[0]) * 0.75) + 1);
+      expect(prompts[1]).not.toContain("Output Repair Requirement");
+      expect(result.compaction.summary).toContain("Recover from provider overflow");
+    } finally {
+      if (previousProgressiveBudget === undefined) delete process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS;
+      else process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS = previousProgressiveBudget;
+      if (previousRequestOverhead === undefined) delete process.env.PICLAW_COMPACTION_REQUEST_OVERHEAD_TOKENS;
+      else process.env.PICLAW_COMPACTION_REQUEST_OVERHEAD_TOKENS = previousRequestOverhead;
+    }
+  });
+
+  it("accounts for estimator safety when trimming selective retry prompts", () => {
+    const previousMultiplier = process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER;
+    process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER = "1.5";
+    try {
+      const selectivePrompt = `# Rules\n## Conversation Excerpts\n${"older".repeat(10_000)}\nRECENT`;
+      const targetContentTokens = 8_000;
+      const selective = buildTrimmedCompactionRetryPrompt(selectivePrompt, targetContentTokens);
+
+      expect(selective).toBeTruthy();
+      expect(Math.ceil(selective!.length / 4) * 1.5).toBeLessThanOrEqual(targetContentTokens);
+    } finally {
+      if (previousMultiplier === undefined) delete process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER;
+      else process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER = previousMultiplier;
+    }
+  });
+
+  it("reserves the initiating user constraint ahead of a large split-turn tool batch", () => {
+    const calls = Array.from({ length: 40 }, (_, index) => ({
+      id: `tc-prefix-${index}`,
+      name: index === 39 ? "edit" : "read",
+      args: { path: `/workspace/prefix-${index}.ts` },
+    }));
+    const messages: any[] = [
+      userMsg("Use Bun; do not deploy"),
+      assistantToolCallMsg(calls),
+      ...calls.map((call, index) => index === 39
+        ? { ...toolResultMsg(call.id, call.name, `PREFIX_FINAL_FAILURE replacement was not found ${"z".repeat(140)}`), isError: true }
+        : toolResultMsg(call.id, call.name, `PREFIX_OUTCOME_${index} ${"x".repeat(160)}`)),
+    ];
+
+    const summary = buildTurnPrefixSummary(messages, new Set([0]));
+
+    expect(summary).toContain("Use Bun; do not deploy");
+    expect(summary).toContain("PREFIX_FINAL_FAILURE");
+    expect(summary.length).toBeLessThanOrEqual(20_500);
+  });
+
+  it("does not infer failure from ordinary read content that mentions an error", () => {
+    const messages: any[] = [
+      assistantToolCallMsg([{ id: "tc-read-doc", name: "read", args: { path: "/workspace/README.md" } }]),
+      toolResultMsg("tc-read-doc", "read", "Documentation: if an error occurs, retry the command."),
+    ];
+
+    const analysis = analyzeToolOutcomes(messages);
+
+    expect(analysis.facts).toHaveLength(1);
+    expect(analysis.facts[0].isError).toBe(false);
+  });
+
+  it("pairs provider-suffixed tool result IDs with their base tool calls exactly once", () => {
+    const messages: any[] = [
+      assistantToolCallMsg([{ id: "tc-signed-write", name: "write", args: { path: "/workspace/signed.ts" } }]),
+      toolResultMsg("tc-signed-write|encrypted-signature", "write", "Successfully wrote signed.ts"),
+    ];
+
+    const analysis = analyzeToolOutcomes(messages);
+
+    expect(analysis.facts).toHaveLength(1);
+    expect(analysis.facts[0]).toMatchObject({ missing: false, resultIndex: 1 });
+    expect(analysis.matchedResultIndexes).toEqual(new Set([1]));
+    expect(analysis.orphanResultIndexes).toEqual([]);
+    expect(serializeToolBatchCompact(messages, 0, analysis)).toContain("Successfully wrote signed.ts");
+  });
+
   it("uses Piclaw selective compaction for short conversations instead of upstream full-pass fallback", async () => {
     const summaryText = "## Goal\nShort selective goal\n\n## Current Active Topic\n- short conversation compaction\n\n## Historical / Background Context\n- compacted via Piclaw selective path\n\n## Constraints & Preferences\n- preserve facts\n\n## Progress\n### Done\n- [x] summary generated\n\n### In Progress\n- [ ] continue\n\n### Blocked\n- none\n\n## Key Decisions\n- **No upstream fallback**: short automatic compactions stay observable.\n\n## Next Steps\n1. Continue.\n\n## Critical Context\n- context";
     (completeSimple as any).mockResolvedValueOnce({
       content: [{ type: "text", text: summaryText }],
-      stopReason: "end",
+      stopReason: "stop",
     });
 
     const prep = makePreparation(10);
@@ -308,11 +472,11 @@ describe("smart-compaction", () => {
   });
 
   it("invokes LLM with selective prompt for large conversations", async () => {
-    const summaryText = "## Goal\nTest goal\n\n## Constraints & Preferences\n- none\n\n## Progress\n### Done\n- [x] Something\n\n### In Progress\n\n### Blocked\n\n## Key Decisions\n\n## Next Steps\n\n## Critical Context\n- context";
+    const summaryText = "## Goal\nTest goal\n\n## Current Active Topic\n- current work\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- none\n\n## Progress\n### Done\n- [x] Something\n\n### In Progress\n\n### Blocked\n\n## Key Decisions\n\n## Next Steps\n\n## Critical Context\n- context";
 
     (completeSimple as any).mockResolvedValueOnce({
       content: [{ type: "text", text: summaryText }],
-      stopReason: "end",
+      stopReason: "stop",
     });
 
     const prep = makePreparation(60);
@@ -375,6 +539,10 @@ describe("smart-compaction", () => {
       completionPercent: 100,
       completionEstimated: true,
     });
+    const finalSmartStatusCall = ctx.ui.setStatus.mock.calls
+      .filter(([key]: [string]) => key === "smart_compaction")
+      .at(-1);
+    expect(finalSmartStatusCall).toEqual(["smart_compaction", undefined]);
   });
 
   it("does not request reasoning for GitHub Copilot Opus 4.8 compaction", async () => {
@@ -382,7 +550,7 @@ describe("smart-compaction", () => {
 
     (completeSimple as any).mockResolvedValueOnce({
       content: [{ type: "text", text: summaryText }],
-      stopReason: "end",
+      stopReason: "stop",
     });
 
     const result = await handler!(
@@ -409,11 +577,11 @@ describe("smart-compaction", () => {
   });
 
   it("sanitizes context-pruned tool history before building the compaction prompt", async () => {
-    const summaryText = "## Goal\nPruned tool history\n\n## Constraints & Preferences\n- none\n\n## Progress\n### Done\n- [x] Sanitized raw outputs\n\n### In Progress\n\n### Blocked\n\n## Key Decisions\n\n## Next Steps\n\n## Critical Context\n- context";
+    const summaryText = "## Goal\nPruned tool history\n\n## Current Active Topic\n- current work\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- none\n\n## Progress\n### Done\n- [x] Sanitized raw outputs\n\n### In Progress\n\n### Blocked\n\n## Key Decisions\n\n## Next Steps\n\n## Critical Context\n- context";
 
     (completeSimple as any).mockResolvedValueOnce({
       content: [{ type: "text", text: summaryText }],
-      stopReason: "end",
+      stopReason: "stop",
     });
 
     const prep = makePreparation(60);
@@ -466,7 +634,7 @@ describe("smart-compaction", () => {
 
     (completeSimple as any).mockResolvedValueOnce({
       content: [{ type: "text", text: summaryText }],
-      stopReason: "end",
+      stopReason: "stop",
     });
 
     const ctx = makeCtx({
@@ -496,11 +664,11 @@ describe("smart-compaction", () => {
   });
 
   it("appends deterministic file lists to summary", async () => {
-    const summaryText = "## Goal\nAppend files test\n\n## Constraints\n- x\n\n## Progress\n### Done\n- [x] test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context";
+    const summaryText = "## Goal\nAppend files test\n\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n- x\n\n## Progress\n### Done\n- [x] test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none";
 
     (completeSimple as any).mockResolvedValueOnce({
       content: [{ type: "text", text: summaryText }],
-      stopReason: "end",
+      stopReason: "stop",
     });
 
     const prep = makePreparation(60, {
@@ -533,20 +701,20 @@ describe("smart-compaction", () => {
 
   it("compresses top-level file clusters even when one outlier breaks the global prefix", async () => {
     (completeSimple as any).mockResolvedValueOnce({
-      content: [{ type: "text", text: "## Goal\nTest\n\n## Constraints\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context" }],
-      stopReason: "end",
+      content: [{ type: "text", text: "## Goal\nTest\n\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none" }],
+      stopReason: "stop",
     });
 
     const prep = makePreparation(60, {
       fileOps: {
         read: new Set([
-          "piclaw/runtime/src/agent-control/handlers/login.ts",
-          "piclaw/runtime/src/channels/web/http/dispatch-agent.ts",
-          "piclaw/runtime/test/agent-control/agent-control-handlers.test.ts",
-          "piclaw/runtime/test/scripts/check-import-boundaries.test.ts",
-          "piclaw/runtime/web/src/components/settings/providers.ts",
-          "piclaw/scripts/check-import-boundaries.test.ts",
-          "notes/reference/pr474-dispatch.md",
+          "/workspace/piclaw/runtime/src/agent-control/handlers/login.ts",
+          "/workspace/piclaw/runtime/src/channels/web/http/dispatch-agent.ts",
+          "/workspace/piclaw/runtime/test/agent-control/agent-control-handlers.test.ts",
+          "/workspace/piclaw/runtime/test/scripts/check-import-boundaries.test.ts",
+          "/workspace/piclaw/runtime/web/src/components/settings/providers.ts",
+          "/workspace/piclaw/scripts/check-import-boundaries.test.ts",
+          "/workspace/notes/reference/pr474-dispatch.md",
         ]),
         written: new Set<string>(),
         edited: new Set<string>(),
@@ -571,8 +739,8 @@ describe("smart-compaction", () => {
 
   it("filters junk paths after normalization for both read and modified files", async () => {
     (completeSimple as any).mockResolvedValueOnce({
-      content: [{ type: "text", text: "## Goal\nTest\n\n## Constraints\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context" }],
-      stopReason: "end",
+      content: [{ type: "text", text: "## Goal\nTest\n\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none" }],
+      stopReason: "stop",
     });
 
     const prep = makePreparation(60, {
@@ -625,7 +793,7 @@ describe("smart-compaction", () => {
     const summaryText = "## Goal\nTarget context\n\n## Current Active Topic\n- fit smaller model\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- concise\n\n## Progress\n### Done\n- [x] target prompt built\n\n### In Progress\n- [ ] validate\n\n### Blocked\n- none\n\n## Key Decisions\n- **Target**: fit lower context\n\n## Next Steps\n1. continue\n\n## Critical Context\n- target-aware";
     (completeSimple as any).mockResolvedValueOnce({
       content: [{ type: "text", text: summaryText }],
-      stopReason: "end",
+      stopReason: "stop",
     });
 
     const result = await handler!(
@@ -649,7 +817,7 @@ describe("smart-compaction", () => {
     const summaryText = "## Goal\nMetadata target context\n\n## Current Active Topic\n- fit metadata-selected model\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- concise\n\n## Progress\n### Done\n- [x] metadata resolved\n\n### In Progress\n- [ ] validate\n\n### Blocked\n- none\n\n## Key Decisions\n- **Target**: metadata wins over upstream manual reason\n\n## Next Steps\n1. continue\n\n## Critical Context\n- metadata-aware";
     (completeSimple as any).mockResolvedValueOnce({
       content: [{ type: "text", text: summaryText }],
-      stopReason: "end",
+      stopReason: "stop",
     });
 
     const ctx = makeCtx();
@@ -701,7 +869,7 @@ describe("smart-compaction", () => {
     );
 
     expect(result).toEqual({ cancel: true });
-    expect(consumeCompactionCancellationReason(ctx)).toBe("Smart compaction LLM error: Rate limited");
+    expect(consumeCompactionCancellationReason(ctx)).toBe("Smart compaction output invalid (stop_reason): completion stop reason was error; expected stop: Rate limited");
   });
 
   it("cancels on LLM error instead of falling through to upstream full-pass compaction", async () => {
@@ -722,14 +890,14 @@ describe("smart-compaction", () => {
     );
 
     expect(result).toEqual({ cancel: true });
-    expect(consumeCompactionCancellationReason(ctx)).toBe("Smart compaction LLM error: Rate limited");
+    expect(consumeCompactionCancellationReason(ctx)).toBe("Smart compaction output invalid (stop_reason): completion stop reason was error; expected stop: Rate limited");
     expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
 
   it("cancels on too-short summary instead of falling through to upstream full-pass compaction", async () => {
-    (completeSimple as any).mockResolvedValueOnce({
+    (completeSimple as any).mockResolvedValue({
       content: [{ type: "text", text: "Short." }],
-      stopReason: "end",
+      stopReason: "stop",
     });
 
     const ctx = makeCtx();
@@ -743,8 +911,81 @@ describe("smart-compaction", () => {
     );
 
     expect(result).toEqual({ cancel: true });
-    expect(consumeCompactionCancellationReason(ctx)).toBe("Smart compaction summary too short");
+    expect(consumeCompactionCancellationReason(ctx)).toBe("Smart compaction output invalid (too_short): summary was 6 characters; minimum is 100");
+    expect(completeSimple).toHaveBeenCalledTimes(2);
     expect(ctx.ui.notify).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["length", "partial structured output"],
+    ["malformed", `Unstructured output ${"x".repeat(200)}`],
+  ])("retries one rejected %s completion with repair instructions", async (kind, rejectedText) => {
+    const validSummary = "## Goal\nRepaired output\n\n## Current Active Topic\n- validation\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- concise\n\n## Progress\n### Done\n- [x] repaired\n### In Progress\n- [ ] continue\n### Blocked\n- none\n\n## Key Decisions\n- strict output\n\n## Next Steps\n1. continue\n\n## Critical Context\n- repaired continuity";
+    (completeSimple as any)
+      .mockResolvedValueOnce({
+        content: [{ type: "text", text: rejectedText }],
+        stopReason: kind === "length" ? "length" : "stop",
+      })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: validSummary }], stopReason: "stop" });
+
+    const result = await handler!(
+      { preparation: makePreparation(60), branchEntries: [], signal: new AbortController().signal },
+      makeCtx(),
+    );
+
+    expect(result.compaction.summary).toContain("Repaired output");
+    expect(result.compaction.summary).not.toContain(rejectedText);
+    expect(completeSimple).toHaveBeenCalledTimes(2);
+    expect((completeSimple as any).mock.calls[1][1].messages[0].content[0].text).toContain("Output Repair Requirement");
+  });
+
+  it("uses a content-only budget when deciding whether a selective repair prompt already fits", async () => {
+    const validSummary = "## Goal\nRepair near the input target\n\n## Current Active Topic\n- bounded retry\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- preserve excerpts\n\n## Progress\n### Done\n- [x] retried\n### In Progress\n- [ ] continue\n### Blocked\n- none\n\n## Key Decisions\n- **Budget**: count request overhead once\n\n## Next Steps\n1. continue\n\n## Critical Context\n- original prompt was retained";
+    (completeSimple as any)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: `Malformed ${"y".repeat(200)}` }], stopReason: "stop" })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: validSummary }], stopReason: "stop" });
+
+    const previousProgressiveBudget = process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS;
+    process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS = "100000";
+    try {
+      const result = await handler!(
+        {
+          preparation: makePreparation(60, {
+            messagesToSummarize: [userMsg(`Near-target continuity ${"x".repeat(60_000)}`)],
+            tokensBefore: 30_000,
+            settings: { enabled: true, reserveTokens: 2_000, keepRecentTokens: 1_000 },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx({ model: { provider: "test", id: "content-only-retry", contextWindow: 32_000, reasoning: false } }),
+      );
+
+      expect(completeSimple).toHaveBeenCalledTimes(2);
+      expect((completeSimple as any).mock.calls[0][1].messages[0].content[0].text).not.toContain("deterministic chunk");
+      expect(result.compaction.summary).toContain("Repair near the input target");
+      expect((completeSimple as any).mock.calls[1][1].messages[0].content[0].text).toContain("Output Repair Requirement");
+    } finally {
+      if (previousProgressiveBudget === undefined) delete process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS;
+      else process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS = previousProgressiveBudget;
+    }
+  });
+
+  it.each(["toolUse", "aborted"])("cancels without retry for non-terminal stopReason %s", async (stopReason) => {
+    (completeSimple as any).mockResolvedValueOnce({
+      content: [{ type: "text", text: "partial" }],
+      stopReason,
+    });
+    const ctx = makeCtx();
+
+    const result = await handler!(
+      { preparation: makePreparation(60), branchEntries: [], signal: new AbortController().signal },
+      ctx,
+    );
+
+    expect(result).toEqual({ cancel: true });
+    expect(completeSimple).toHaveBeenCalledTimes(1);
+    expect(consumeCompactionCancellationReason(ctx)).toContain(`completion stop reason was ${stopReason}`);
   });
 
   it("falls through when no auth is available", async () => {
@@ -788,28 +1029,31 @@ describe("smart-compaction", () => {
     // Handler should return { cancel: true } before reaching completeSimple
     // because the signal is already aborted at entry.
 
+    const ctx = makeCtx();
     const result = await handler!(
       {
         preparation: makePreparation(60),
         branchEntries: [],
         signal: ac.signal,
       },
-      makeCtx(),
+      ctx,
     );
 
     // Should return cancel (not a compaction result) when aborted
     expect(result).toEqual({ cancel: true });
     // Should never reach the LLM call
     expect(completeSimple).not.toHaveBeenCalled();
+    expect(ctx.ui.setStatus.mock.calls.filter(([key]: [string]) => key === "smart_compaction").at(-1))
+      .toEqual(["smart_compaction", undefined]);
   });
 
-  it("does not skip file sections if summary already has them", async () => {
+  it("does not duplicate valid existing file sections", async () => {
     const summaryWithFiles =
-      "## Goal\nTest\n<read-files>\n/already.ts\n</read-files>\n<modified-files>\n/already-mod.ts\n</modified-files>\n\n## Constraints\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context";
+      "## Goal\nTest\n\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none\n<read-files>\n/already.ts\n</read-files>\n<modified-files>\n/already-mod.ts\n</modified-files>";
 
     (completeSimple as any).mockResolvedValueOnce({
       content: [{ type: "text", text: summaryWithFiles }],
-      stopReason: "end",
+      stopReason: "stop",
     });
 
     const result = await handler!(
@@ -821,20 +1065,39 @@ describe("smart-compaction", () => {
       makeCtx(),
     );
 
-    // Should NOT double-append file sections
-    const readCount = (
-      result.compaction.summary.match(/<read-files>/g) || []
-    ).length;
-    expect(readCount).toBe(1);
+    expect(result.compaction.summary.match(/<read-files>/g)).toHaveLength(1);
+    expect(result.compaction.summary.match(/<modified-files>/g)).toHaveLength(1);
+  });
+
+  it("appends a missing deterministic modified block when a valid read block already exists", async () => {
+    const summaryWithReadFiles =
+      "## Goal\nTest\n\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none\n<read-files>\n/already.ts\n</read-files>";
+    (completeSimple as any).mockResolvedValueOnce({
+      content: [{ type: "text", text: summaryWithReadFiles }],
+      stopReason: "stop",
+    });
+
+    const result = await handler!(
+      {
+        preparation: makePreparation(60),
+        branchEntries: [],
+        signal: new AbortController().signal,
+      },
+      makeCtx(),
+    );
+
+    expect(result.compaction.summary.match(/<read-files>/g)).toHaveLength(1);
+    expect(result.compaction.summary.match(/<modified-files>/g)).toHaveLength(1);
+    expect(result.compaction.summary).toContain("file-4.ts");
   });
 
   it("sends previous summary to LLM for iterative update", async () => {
     const prevSummary = "## Goal\nPrevious goal\n## Progress\n### Done\n- [x] old task";
-    const summaryText = "## Goal\nUpdated goal\n\n## Constraints\n- x\n## Progress\n### Done\n- [x] old task\n- [x] new task\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context";
+    const summaryText = "## Goal\nUpdated goal\n\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n- x\n## Progress\n### Done\n- [x] old task\n- [x] new task\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none";
 
     (completeSimple as any).mockResolvedValueOnce({
       content: [{ type: "text", text: summaryText }],
-      stopReason: "end",
+      stopReason: "stop",
     });
 
     const prep = makePreparation(60, { previousSummary: prevSummary });
@@ -913,6 +1176,204 @@ describe("smart-compaction", () => {
       }
     });
 
+    it("serializes every result in a progressive parallel-tool batch exactly once", () => {
+      const messages = [
+        assistantToolCallMsg([
+          { id: "tc-tests", name: "bash", args: { command: "bun test" } },
+          { id: "tc-read", name: "read", args: { path: "/workspace/secret.txt" } },
+        ]),
+        toolResultMsg("tc-tests", "bash", "Tests: 27 passed, 0 failed"),
+        { ...toolResultMsg("tc-read", "read", "permission denied"), isError: true },
+        userMsg("Preserve both outcomes."),
+      ];
+
+      const joined = buildProgressiveCompactionChunks(messages as any, 4_000, new Set([3]))
+        .map((chunk) => chunk.text)
+        .join("\n");
+
+      expect(joined.match(/27 passed, 0 failed/g)).toHaveLength(1);
+      expect(joined).not.toContain("ERROR: Tests: 27 passed, 0 failed");
+      expect(joined.match(/permission denied/g)).toHaveLength(1);
+      expect(joined).toContain("ERROR: permission denied");
+      expect(joined).toContain("Preserve both outcomes.");
+    });
+
+    it("truncates pathological tool batches only between complete outcomes", () => {
+      const calls = Array.from({ length: 140 }, (_, index) => ({
+        id: `tc-huge-${index}`,
+        name: index === 139 ? "edit" : "read",
+        args: { path: `/workspace/${"long-name-".repeat(8)}${index}.ts` },
+      }));
+      const messages: any[] = [
+        assistantToolCallMsg(calls),
+        ...calls.map((call, index) => ({
+          ...toolResultMsg(call.id, call.name, index === 139 ? "FINAL_BATCH_FAILURE permission denied" : `outcome-${index} ${"x".repeat(170)}`),
+          isError: index === 139,
+        })),
+      ];
+
+      const serialized = serializeToolBatchCompact(messages as any, 0);
+
+      expect(serialized.length).toBeLessThanOrEqual(20_000);
+      expect(serialized).toContain("FINAL_BATCH_FAILURE");
+      expect(serialized).toMatch(/\(\+\d+ outcomes omitted\)$/);
+      expect(serialized).not.toMatch(/\.\.\.$/);
+    });
+
+    it.each(["length", "toolUse", "aborted", "error"])("rejects a chunk stopped with %s before it can be merged", async (stopReason) => {
+      const longMessages = Array.from({ length: 24 }, (_, i) => userMsg(`Chunk failure fact ${i}: ${"x".repeat(3_000)}`));
+      (completeSimple as any).mockImplementation(async (_model: any, context: any) => {
+        const prompt = context.messages[0].content[0].text as string;
+        if (prompt.includes("deterministic chunk")) {
+          return {
+            content: [{ type: "text", text: "## Chunk Range\n- partial" }],
+            stopReason,
+            errorMessage: stopReason === "error" ? "provider failure" : undefined,
+          };
+        }
+        throw new Error("a rejected chunk must not reach merge");
+      });
+      const ctx = makeCtx({ model: { provider: "test", id: "chunk-validation", contextWindow: 16_000, reasoning: false } });
+
+      const result = await handler!(
+        {
+          preparation: makePreparation(longMessages.length, {
+            messagesToSummarize: longMessages,
+            tokensBefore: 90_000,
+            settings: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 1_000 },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        ctx,
+      );
+
+      expect(result).toEqual({ cancel: true });
+      expect(consumeCompactionCancellationReason(ctx)).toContain(`stop reason was ${stopReason}`);
+      const prompts = (completeSimple as any).mock.calls.map((call: any[]) => call[1].messages[0].content[0].text as string);
+      expect(prompts.every((prompt: string) => !prompt.includes("Ordered Intermediate Summaries"))).toBe(true);
+      if (stopReason === "length") expect(prompts.some((prompt: string) => prompt.includes("Output Repair Requirement"))).toBe(true);
+    });
+
+    it("does not retry an unchanged progressive prompt after provider input overflow", async () => {
+      const previousPromptChars = process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS;
+      process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS = "3000";
+      const longMessages = Array.from({ length: 24 }, (_, i) => userMsg(`Overflow fact ${i}: ${"x".repeat(800)}`));
+      (completeSimple as any).mockRejectedValue(new Error("input context length exceeded"));
+
+      try {
+        const result = await handler!(
+          {
+            preparation: makePreparation(longMessages.length, {
+              messagesToSummarize: longMessages,
+              tokensBefore: 90_000,
+              settings: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 1_000 },
+            }),
+            branchEntries: [],
+            signal: new AbortController().signal,
+          },
+          makeCtx({ model: { provider: "test", id: "overflow-no-retry", contextWindow: 16_000, reasoning: false } }),
+        );
+
+        expect(result).toEqual({ cancel: true });
+        const prompts = (completeSimple as any).mock.calls.map((call: any[]) => call[1].messages[0].content[0].text as string);
+        expect(prompts.length).toBeGreaterThan(0);
+        expect(new Set(prompts).size).toBe(prompts.length);
+        expect(prompts.every((prompt: string) => !prompt.includes("Output Repair Requirement"))).toBe(true);
+      } finally {
+        if (previousPromptChars === undefined) delete process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS;
+        else process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS = previousPromptChars;
+      }
+    });
+
+    it("retries one truncated final merge and persists only the valid repaired checkpoint", async () => {
+      const longMessages = Array.from({ length: 24 }, (_, i) => userMsg(`Final merge fact ${i}: ${"x".repeat(3_000)}`));
+      let finalCalls = 0;
+      (completeSimple as any).mockImplementation(async (_model: any, context: any) => {
+        const prompt = context.messages[0].content[0].text as string;
+        if (prompt.includes("deterministic chunk") || prompt.includes("smaller intermediate summary")) {
+          const range = prompt.match(/Message index range: ([0-9-]+)/)?.[1] ?? "merged";
+          return {
+            content: [{ type: "text", text: `## Chunk Range\n- ${range}\n\n## Goals / User Intent\n- Preserve final merge facts\n\n## Constraints & Preferences\n- none\n\n## Decisions\n- strict validation\n\n## Files / Commands / Tool Outcomes\n- none\n\n## Progress\n- Done: chunk summarized\n- In progress: final merge\n- Blocked: none\n\n## Open Questions / Next Steps\n- merge\n\n## Key Continuity Facts\n- fact ${range}` }],
+            stopReason: "stop",
+          };
+        }
+        finalCalls += 1;
+        if (finalCalls === 1) {
+          return { content: [{ type: "text", text: "## Goal\nTruncated final" }], stopReason: "length" };
+        }
+        return {
+          content: [{ type: "text", text: "## Goal\nValidated progressive checkpoint\n\n## Current Active Topic\n- output validation\n\n## Historical / Background Context\n- chunks were summarized before final merge\n\n## Constraints & Preferences\n- concise\n\n## Progress\n### Done\n- [x] final checkpoint repaired\n### In Progress\n- [ ] continue live work\n### Blocked\n- none\n\n## Key Decisions\n- **Validation**: reject truncated output\n\n## Next Steps\n1. continue\n\n## Critical Context\n- final merge facts remain available" }],
+          stopReason: "stop",
+        };
+      });
+
+      const result = await handler!(
+        {
+          preparation: makePreparation(longMessages.length, {
+            messagesToSummarize: longMessages,
+            tokensBefore: 90_000,
+            settings: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 1_000 },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx({ model: { provider: "test", id: "final-validation", contextWindow: 16_000, reasoning: false } }),
+      );
+
+      expect(result.compaction.summary).toContain("Validated progressive checkpoint");
+      expect(result.compaction.summary).not.toContain("Truncated final");
+      expect(finalCalls).toBe(2);
+      const finalPrompts = (completeSimple as any).mock.calls
+        .map((call: any[]) => call[1].messages[0].content[0].text as string)
+        .filter((prompt: string) => prompt.includes("final continuity state"));
+      expect(finalPrompts).toHaveLength(2);
+      expect(finalPrompts.at(-1)).toContain("Output Repair Requirement");
+      expect(finalPrompts[1].startsWith(finalPrompts[0])).toBe(true);
+      expect(finalPrompts[1]).toContain("fact 0-");
+      for (const prompt of finalPrompts) {
+        expect(() => getSafeCompactionMaxTokens(
+          { provider: "test", id: "final-validation", contextWindow: 16_000, reasoning: false },
+          prompt,
+          16_384,
+        )).not.toThrow();
+      }
+    });
+
+    it("cancels when the repaired final merge remains malformed", async () => {
+      const longMessages = Array.from({ length: 24 }, (_, i) => userMsg(`Malformed final fact ${i}: ${"x".repeat(3_000)}`));
+      let finalCalls = 0;
+      (completeSimple as any).mockImplementation(async (_model: any, context: any) => {
+        const prompt = context.messages[0].content[0].text as string;
+        if (prompt.includes("deterministic chunk") || prompt.includes("smaller intermediate summary")) {
+          return {
+            content: [{ type: "text", text: "## Chunk Range\n- range\n\n## Goals / User Intent\n- preserve facts\n\n## Constraints & Preferences\n- none\n\n## Decisions\n- none\n\n## Files / Commands / Tool Outcomes\n- none\n\n## Progress\n- Done: chunk summarized\n- In progress: final merge\n- Blocked: none\n\n## Open Questions / Next Steps\n- merge\n\n## Key Continuity Facts\n- live facts" }],
+            stopReason: "stop",
+          };
+        }
+        finalCalls += 1;
+        return { content: [{ type: "text", text: `Malformed final checkpoint ${"x".repeat(200)}` }], stopReason: "stop" };
+      });
+      const ctx = makeCtx({ model: { provider: "test", id: "malformed-final", contextWindow: 16_000, reasoning: false } });
+
+      const result = await handler!(
+        {
+          preparation: makePreparation(longMessages.length, {
+            messagesToSummarize: longMessages,
+            tokensBefore: 90_000,
+            settings: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 1_000 },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        ctx,
+      );
+
+      expect(result).toEqual({ cancel: true });
+      expect(finalCalls).toBe(2);
+      expect(consumeCompactionCancellationReason(ctx)).toContain("missing required heading");
+    });
+
     it("uses chunk summaries and an ordered final merge when selective prompt exceeds model budget", async () => {
       const longMessages: any[] = [];
       for (let i = 0; i < 70; i++) {
@@ -926,12 +1387,12 @@ describe("smart-compaction", () => {
           const range = prompt.match(/Message index range: ([0-9-]+)/)?.[1] ?? "unknown";
           return {
             content: [{ type: "text", text: `## Chunk Range\n- ${range}\n\n## Goals / User Intent\n- Preserve chunk ${range}\n\n## Constraints & Preferences\n- none\n\n## Decisions\n- none\n\n## Files / Commands / Tool Outcomes\n- none\n\n## Progress\n- Done: chunk summarized\n- In progress: final merge\n- Blocked: none\n\n## Open Questions / Next Steps\n- merge\n\n## Key Continuity Facts\n- Important continuity fact in ${range}` }],
-            stopReason: "end",
+            stopReason: "stop",
           };
         }
         return {
           content: [{ type: "text", text: "## Goal\nProgressive final goal\n\n## Current Active Topic\n- progressive compaction\n\n## Historical / Background Context\n- ordered chunk summaries preserved\n\n## Constraints & Preferences\n- preserve facts\n\n## Progress\n### Done\n- [x] chunks summarized\n\n### In Progress\n- [ ] final validation\n\n### Blocked\n- none\n\n## Key Decisions\n- **Progressive mode**: chunk then merge\n\n## Next Steps\n1. validate\n\n## Critical Context\n- Important continuity fact 0\n- Important continuity fact 69" }],
-          stopReason: "end",
+          stopReason: "stop",
         };
       });
 
@@ -1003,20 +1464,22 @@ describe("smart-compaction", () => {
       let maxActiveChunkCalls = 0;
       (completeSimple as any).mockImplementation(async (_model: any, context: any) => {
         const prompt = context.messages[0].content[0].text as string;
-        if (prompt.includes("deterministic chunk")) {
-          activeChunkCalls += 1;
-          maxActiveChunkCalls = Math.max(maxActiveChunkCalls, activeChunkCalls);
-          await new Promise((resolve) => setTimeout(resolve, 20));
-          activeChunkCalls -= 1;
-          const range = prompt.match(/Message index range: ([0-9-]+)/)?.[1] ?? "unknown";
+        if (prompt.includes("deterministic chunk") || prompt.includes("smaller intermediate summary")) {
+          if (prompt.includes("deterministic chunk")) {
+            activeChunkCalls += 1;
+            maxActiveChunkCalls = Math.max(maxActiveChunkCalls, activeChunkCalls);
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            activeChunkCalls -= 1;
+          }
+          const range = prompt.match(/Message index range: ([0-9-]+)/)?.[1] ?? "merged";
           return {
             content: [{ type: "text", text: `## Chunk Range\n- ${range}\n\n## Goals / User Intent\n- Preserve parallel chunk ${range}\n\n## Constraints & Preferences\n- none\n\n## Decisions\n- none\n\n## Files / Commands / Tool Outcomes\n- none\n\n## Progress\n- Done: chunk summarized\n- In progress: final merge\n- Blocked: none\n\n## Open Questions / Next Steps\n- merge\n\n## Key Continuity Facts\n- Parallel continuity fact in ${range}` }],
-            stopReason: "end",
+            stopReason: "stop",
           };
         }
         return {
           content: [{ type: "text", text: "## Goal\nParallel progressive final goal\n\n## Current Active Topic\n- progressive compaction\n\n## Historical / Background Context\n- ordered chunk summaries preserved after parallel chunking\n\n## Constraints & Preferences\n- preserve facts\n\n## Progress\n### Done\n- [x] chunks summarized\n\n### In Progress\n- [ ] final validation\n\n### Blocked\n- none\n\n## Key Decisions\n- **Progressive mode**: chunk summaries can run concurrently; merge remains ordered\n\n## Next Steps\n1. validate\n\n## Critical Context\n- Parallel continuity fact 0\n- Parallel continuity fact 49" }],
-          stopReason: "end",
+          stopReason: "stop",
         };
       });
 
@@ -1059,12 +1522,12 @@ describe("smart-compaction", () => {
           const range = prompt.match(/Message index range: ([0-9-]+)/)?.[1] ?? "unknown";
           return {
             content: [{ type: "text", text: `## Chunk Range\n- ${range}\n\n## Goals / User Intent\n- Preserve oversized short-session chunk ${range}\n\n## Constraints & Preferences\n- none\n\n## Decisions\n- none\n\n## Files / Commands / Tool Outcomes\n- none\n\n## Progress\n- Done: chunk summarized\n- In progress: final merge\n- Blocked: none\n\n## Open Questions / Next Steps\n- merge\n\n## Key Continuity Facts\n- Oversized short-session fact in ${range}` }],
-            stopReason: "end",
+            stopReason: "stop",
           };
         }
         return {
           content: [{ type: "text", text: "## Goal\nProgressive short-session final goal\n\n## Current Active Topic\n- oversized short-session compaction\n\n## Historical / Background Context\n- short sessions can still overflow provider prompt limits\n\n## Constraints & Preferences\n- preserve facts\n\n## Progress\n### Done\n- [x] chunks summarized\n\n### In Progress\n- [ ] final validation\n\n### Blocked\n- none\n\n## Key Decisions\n- **Progressive mode**: used despite low message count\n\n## Next Steps\n1. validate\n\n## Critical Context\n- Oversized short-session fact 0\n- Oversized short-session fact 7" }],
-          stopReason: "end",
+          stopReason: "stop",
         };
       });
 
@@ -1099,12 +1562,12 @@ describe("smart-compaction", () => {
           const range = prompt.match(/Message index range: ([0-9-]+)/)?.[1] ?? "unknown";
           return {
             content: [{ type: "text", text: `## Chunk Range\n- ${range}\n\n## Goals / User Intent\n- Preserve undercounted short-session chunk ${range}\n\n## Constraints & Preferences\n- none\n\n## Decisions\n- none\n\n## Files / Commands / Tool Outcomes\n- none\n\n## Progress\n- Done: chunk summarized\n- In progress: final merge\n- Blocked: none\n\n## Open Questions / Next Steps\n- merge\n\n## Key Continuity Facts\n- Undercounted short-session fact in ${range}` }],
-            stopReason: "end",
+            stopReason: "stop",
           };
         }
         return {
           content: [{ type: "text", text: "## Goal\nProgressive undercounted short-session final goal\n\n## Current Active Topic\n- oversized short-session compaction\n\n## Historical / Background Context\n- tokensBefore can undercount provider prompt tokens\n\n## Constraints & Preferences\n- preserve facts\n\n## Progress\n### Done\n- [x] chunks summarized\n\n### In Progress\n- [ ] final validation\n\n### Blocked\n- none\n\n## Key Decisions\n- **Progressive mode**: used because serialized messages exceed full-pass safety\n\n## Next Steps\n1. validate\n\n## Critical Context\n- Undercounted short-session fact 0\n- Undercounted short-session fact 5" }],
-          stopReason: "end",
+          stopReason: "stop",
         };
       });
 
@@ -1142,12 +1605,12 @@ describe("smart-compaction", () => {
           const range = prompt.match(/Message index range: ([0-9-]+)/)?.[1] ?? "unknown";
           return {
             content: [{ type: "text", text: `## Chunk Range\n- ${range}\n\n## Goals / User Intent\n- Preserve sandbox-capped chunk ${range}\n\n## Constraints & Preferences\n- none\n\n## Decisions\n- none\n\n## Files / Commands / Tool Outcomes\n- none\n\n## Progress\n- Done: chunk summarized\n- In progress: final merge\n- Blocked: none\n\n## Open Questions / Next Steps\n- merge\n\n## Key Continuity Facts\n- Sandbox-capped fact in ${range}` }],
-            stopReason: "end",
+            stopReason: "stop",
           };
         }
         return {
           content: [{ type: "text", text: "## Goal\nProgressive sandbox-capped final goal\n\n## Current Active Topic\n- sandbox prompt cap\n\n## Historical / Background Context\n- provider rejected full-pass summarization above 272000 prompt tokens even though the model reported a larger context window\n\n## Constraints & Preferences\n- preserve facts\n\n## Progress\n### Done\n- [x] chunks summarized\n\n### In Progress\n- [ ] final validation\n\n### Blocked\n- none\n\n## Key Decisions\n- **Progressive mode**: absolute full-pass cap overrides reported context\n\n## Next Steps\n1. validate\n\n## Critical Context\n- Sandbox-capped short-session fact 0\n- Sandbox-capped short-session fact 7" }],
-          stopReason: "end",
+          stopReason: "stop",
         };
       });
 
@@ -1184,12 +1647,12 @@ describe("smart-compaction", () => {
         if (prompt.includes("deterministic chunk")) {
           return {
             content: [{ type: "text", text: `## Chunk Range\n- 0-1\n\n## Goals / User Intent\n- ${hugeSummary}` }],
-            stopReason: "end",
+            stopReason: "stop",
           };
         }
         return {
           content: [{ type: "text", text: `## Goal\n${hugeSummary}` }],
-          stopReason: "end",
+          stopReason: "stop",
         };
       });
 
@@ -1232,7 +1695,7 @@ describe("smart-compaction", () => {
         const range = prompt.match(/Message index range: ([0-9-]+)/)?.[1] ?? "unknown";
         return {
           content: [{ type: "text", text: `## Chunk Range\n- ${range}\n\n## Goals / User Intent\n- Preserve partial timeout chunk ${range}\n\n## Constraints & Preferences\n- keep unsummarized chunks\n\n## Decisions\n- partial compaction is safe only if the tail is retained\n\n## Files / Commands / Tool Outcomes\n- none\n\n## Progress\n- Done: chunk summarized\n- In progress: retain tail\n- Blocked: time budget\n\n## Open Questions / Next Steps\n- resume\n\n## Key Continuity Facts\n- Partial-timeout fact in ${range}` }],
-          stopReason: "end",
+          stopReason: "stop",
         };
       });
 
@@ -1244,16 +1707,29 @@ describe("smart-compaction", () => {
               messagesToSummarize: messages,
               tokensBefore: 60_000,
               firstKeptEntryId: "entry-119",
+              previousSummary: "LEGACY_COMPACTED_FACT: preserve this older decision\n<modified-files>\n/workspace/legacy.ts\n</modified-files>",
               settings: { enabled: true, reserveTokens: 8192, keepRecentTokens: 1000 },
             }),
             branchEntries,
+            customInstructions: "CUSTOM_COMPACTION_NOTE: preserve exact deployment constraint",
             signal: new AbortController().signal,
           },
           ctx,
         );
 
         expect(result.compaction.summary).toContain("remaining messages are retained verbatim");
+        expect(result.compaction.summary).toContain("LEGACY_COMPACTED_FACT: preserve this older decision");
+        expect(result.compaction.summary).toContain("CUSTOM_COMPACTION_NOTE: preserve exact deployment constraint");
+        expect(result.compaction.summary).toContain("[modified-files]");
+        expect(result.compaction.summary.match(/<modified-files>/g)).toHaveLength(1);
+        expect(result.compaction.summary).toContain("file-4.ts");
         expect(result.compaction.summary).toContain("Completed Progressive Chunk");
+        expect(result.compaction.summary).not.toMatch(/^## Chunk Range$/m);
+        expect(validateCompactionSummaryResponse(
+          { content: [{ type: "text", text: result.compaction.summary }], stopReason: "stop" },
+          "final",
+          100_000,
+        ).ok).toBe(true);
         expect(result.compaction.firstKeptEntryId).not.toBe("entry-119");
         const keptIndex = branchEntries.findIndex((entry) => entry.id === result.compaction.firstKeptEntryId);
         expect(keptIndex).toBeGreaterThan(0);
@@ -1337,6 +1813,100 @@ describe("smart-compaction", () => {
       expect(fit.estimatedTotal).toBe(fit.summaryTokens + 11_000 + fit.overheadTokens);
     });
 
+    it("uses the shared overhead override and token-estimate safety multiplier at fit thresholds", () => {
+      const previousOverhead = process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS;
+      const previousMultiplier = process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER;
+      try {
+        process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS = "4000";
+        process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER = "1";
+        const fourThousandOverhead = estimatePostCompactionFit("x".repeat(4_000), 1_000, 6_000);
+        expect(fourThousandOverhead).toMatchObject({ estimatedTotal: 6_000, fits: false, overheadTokens: 4_000 });
+
+        process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS = "1000";
+        const overriddenOverhead = estimatePostCompactionFit("x".repeat(4_000), 1_000, 6_000);
+        expect(overriddenOverhead).toMatchObject({ estimatedTotal: 3_000, fits: true, overheadTokens: 1_000 });
+
+        process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER = "1.25";
+        const safetyAdjusted = estimatePostCompactionFit("x".repeat(4_000), 1_000, 3_500);
+        expect(safetyAdjusted).toMatchObject({ estimatedTotal: 3_500, fits: false, summaryTokens: 1_250 });
+      } finally {
+        if (previousOverhead === undefined) delete process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS;
+        else process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS = previousOverhead;
+        if (previousMultiplier === undefined) delete process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER;
+        else process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER = previousMultiplier;
+      }
+    });
+
+    it("applies the token-estimate safety multiplier exactly once to branch-derived kept tokens", async () => {
+      const previousOverhead = process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS;
+      const previousMultiplier = process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER;
+      const previousSummary = "## Goal\nKeep current work\n\n## Current Active Topic\n- exact fit accounting\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- preserve state\n\n## Progress\n### Done\n- [x] prior\n\n### In Progress\n- [ ] current\n\n### Blocked\n- none\n\n## Key Decisions\n- **Safety**: multiply estimates once\n\n## Next Steps\n1. continue\n\n## Critical Context\n- important";
+      try {
+        process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS = "4000";
+        process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER = "1.25";
+        const prep = makePreparation(45, {
+          messagesToSummarize: [
+            assistantToolCallMsg([{ id: "tc-fit", name: "read", args: { path: "/workspace/a.ts" } }]),
+            toolResultMsg("tc-fit", "read", "read ok"),
+          ],
+          previousSummary,
+          isSplitTurn: true,
+          settings: { enabled: true, reserveTokens: 4096, keepRecentTokens: 10_000 },
+          fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
+        });
+        prep.firstKeptEntryId = "current-kept";
+
+        const result = await handler!(
+          {
+            preparation: prep,
+            branchEntries: [
+              { type: "message", id: "current-kept", message: userMsg(`Current retained context ${"x".repeat(31_600)}`) },
+            ],
+            signal: new AbortController().signal,
+          },
+          makeCtx({ model: { provider: "test", id: "fit-once", contextWindow: 20_000, reasoning: false } }),
+        );
+
+        expect(result.compaction.firstKeptEntryId).toBe("current-kept");
+        expect(completeSimple).not.toHaveBeenCalled();
+      } finally {
+        if (previousOverhead === undefined) delete process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS;
+        else process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS = previousOverhead;
+        if (previousMultiplier === undefined) delete process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER;
+        else process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER = previousMultiplier;
+      }
+    });
+
+    it("uses the actual retained suffix before accepting the no-op fast path", async () => {
+      const previousSummary = "## Goal\nKeep current work\n\n## Current Active Topic\n- actual retained suffix\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- fit the real context\n\n## Progress\n### Done\n- [x] prior\n\n### In Progress\n- [ ] current\n\n### Blocked\n- none\n\n## Key Decisions\n- **Fit**: use branch-derived tokens\n\n## Next Steps\n1. continue\n\n## Critical Context\n- important";
+      const prep = makePreparation(45, {
+        messagesToSummarize: [
+          assistantToolCallMsg([{ id: "tc-actual-fit", name: "read", args: { path: "/workspace/a.ts" } }]),
+          toolResultMsg("tc-actual-fit", "read", "read ok"),
+        ],
+        previousSummary,
+        isSplitTurn: true,
+        settings: { enabled: true, reserveTokens: 2_000, keepRecentTokens: 1_000 },
+        fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
+      });
+      prep.firstKeptEntryId = "large-current-suffix";
+
+      const result = await handler!(
+        {
+          preparation: prep,
+          branchEntries: [
+            { type: "message", id: "large-current-suffix", message: userMsg(`Large retained suffix ${"x".repeat(20_000)}`) },
+            { type: "message", id: "small-later-boundary", message: _assistantTextMsg("Current answer") },
+          ],
+          signal: new AbortController().signal,
+        },
+        makeCtx({ model: { provider: "test", id: "actual-fit", contextWindow: 10_000, reasoning: false } }),
+      );
+
+      expect(result.compaction.firstKeptEntryId).toBe("small-later-boundary");
+      expect(completeSimple).not.toHaveBeenCalled();
+    });
+
     it("adjusts the kept window when no-op compaction would overflow a lower-context model", async () => {
       const previousSummary = "## Goal\nKeep current work\n\n## Current Active Topic\n- lower context\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- preserve state\n\n## Progress\n### Done\n- [x] prior\n\n### In Progress\n- [ ] current\n\n### Blocked\n- none\n\n## Key Decisions\n- **Safety**: fit target context\n\n## Next Steps\n1. continue\n\n## Critical Context\n- important";
       const prep = makePreparation(45, {
@@ -1370,11 +1940,268 @@ describe("smart-compaction", () => {
       expect(completeSimple).not.toHaveBeenCalled();
     });
 
-    it("caps requested maxTokens so prompt + output fits the model window", () => {
-      const safe = getSafeCompactionMaxTokens({ contextWindow: 8_000 }, "x".repeat(4_000), 16_000);
-      expect(safe.promptTokens).toBeGreaterThan(4_000);
-      expect(safe.maxTokens).toBeLessThan(16_000);
-      expect(safe.promptTokens + safe.maxTokens).toBeLessThanOrEqual(8_000);
+    it("cancels a target-model downshift when the shared effective budget cannot be met safely", async () => {
+      const summary = "## Goal\nFit downshifted model\n\n## Current Active Topic\n- target fit\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- preserve current work\n\n## Progress\n### Done\n- [x] summarized\n### In Progress\n- [ ] switch model\n### Blocked\n- none\n\n## Key Decisions\n- enforce shared budget\n\n## Next Steps\n1. compact further\n\n## Critical Context\n- retained work must survive";
+      (completeSimple as any).mockResolvedValue({ content: [{ type: "text", text: summary }], stopReason: "stop" });
+      const prep = makePreparation(60, {
+        settings: { enabled: true, reserveTokens: 4_096, keepRecentTokens: 50_000 },
+      });
+      prep.firstKeptEntryId = "only-retained-entry";
+      const ctx = makeCtx({ model: { provider: "test", id: "large-source", contextWindow: 128_000, reasoning: false } });
+
+      const result = await handler!(
+        {
+          preparation: prep,
+          branchEntries: [
+            { type: "message", id: "only-retained-entry", message: userMsg(`Unmovable current work ${"x".repeat(16_000)}`) },
+          ],
+          customInstructions: buildTargetContextCompactionInstructions(8_000, "test/downshift"),
+          signal: new AbortController().signal,
+        },
+        ctx,
+      );
+
+      expect(result).toEqual({ cancel: true });
+      expect(consumeCompactionCancellationReason(ctx)).toContain("no safe kept-window adjustment");
+    });
+
+    it("never adjusts firstKeptEntryId to a tool result or metadata entry", async () => {
+      const previousSummary = "## Goal\nKeep current work\n\n## Current Active Topic\n- valid compaction boundary\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- preserve tool batches\n\n## Progress\n### Done\n- [x] prior\n\n### In Progress\n- [ ] current\n\n### Blocked\n- none\n\n## Key Decisions\n- **Boundary safety**: never retain an orphan tool result\n\n## Next Steps\n1. continue\n\n## Critical Context\n- important";
+      const prep = makePreparation(45, {
+        messagesToSummarize: [
+          assistantToolCallMsg([{ id: "tc-overflow", name: "read", args: { path: "/workspace/a.ts" } }]),
+          toolResultMsg("tc-overflow", "read", "read ok"),
+        ],
+        previousSummary,
+        isSplitTurn: true,
+        settings: { enabled: true, reserveTokens: 4096, keepRecentTokens: 50_000 },
+        fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
+      });
+      const batchAssistant = assistantToolCallMsg([
+        { id: "tc-batch-1", name: "read", args: { path: "/workspace/one.ts" } },
+        { id: "tc-batch-2", name: "read", args: { path: "/workspace/two.ts" } },
+      ]);
+      const branchEntries = [
+        { type: "message", id: "kept-user", message: userMsg(`retained work ${"x".repeat(20_000)}`) },
+        { type: "model_change", id: "model-settings-metadata", provider: "test", modelId: "small" },
+        { type: "message", id: "batch-assistant", message: batchAssistant },
+        { type: "message", id: "batch-result-1", message: toolResultMsg("tc-batch-1", "read", "first result") },
+        { type: "message", id: "batch-result-2", message: toolResultMsg("tc-batch-2", "read", "x".repeat(40_000)) },
+      ];
+      prep.firstKeptEntryId = "kept-user";
+      (completeSimple as any).mockResolvedValueOnce({
+        content: [{ type: "text", text: previousSummary }],
+        stopReason: "stop",
+      });
+      const ctx = makeCtx({ model: { provider: "test", id: "small", contextWindow: 16_000, reasoning: false } });
+
+      const result = await handler!(
+        { preparation: prep, branchEntries, signal: new AbortController().signal },
+        ctx,
+      );
+
+      expect(result).toEqual({ cancel: true });
+      expect(result?.compaction?.firstKeptEntryId).not.toBe("batch-result-2");
+      expect(result?.compaction?.firstKeptEntryId).not.toBe("model-settings-metadata");
+      expect(consumeCompactionCancellationReason(ctx)).toContain("no safe kept-window adjustment");
+    });
+
+    it("repairs an invalid historical kept boundary even when the current suffix already fits", async () => {
+      const previousSummary = "## Goal\nKeep current work\n\n## Current Active Topic\n- repair retained boundary\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- never start at a tool result\n\n## Progress\n### Done\n- [x] prior\n\n### In Progress\n- [ ] continue\n\n### Blocked\n- none\n\n## Key Decisions\n- **Boundary safety**: move forward\n\n## Next Steps\n1. continue\n\n## Critical Context\n- retained suffix is small";
+      const prep = makePreparation(2, {
+        messagesToSummarize: [
+          assistantToolCallMsg([{ id: "tc-boundary-fit", name: "read", args: { path: "/workspace/a.ts" } }]),
+          toolResultMsg("tc-boundary-fit", "read", "read ok"),
+        ],
+        previousSummary,
+        isSplitTurn: true,
+        settings: { enabled: true, reserveTokens: 4_096, keepRecentTokens: 20_000 },
+        fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
+      });
+      prep.firstKeptEntryId = "invalid-tool-result";
+      const branchEntries = [
+        { type: "message", id: "invalid-tool-result", message: toolResultMsg("tc-historical", "read", "historical tool output with enough content to reduce") },
+        { type: "message", id: "later-valid-user", message: userMsg("Current retained instruction") },
+      ];
+
+      const result = await handler!(
+        { preparation: prep, branchEntries, signal: new AbortController().signal },
+        makeCtx(),
+      );
+
+      expect(result.compaction.firstKeptEntryId).toBe("later-valid-user");
+      expect(completeSimple).not.toHaveBeenCalled();
+    });
+
+    it("adjusts forward from an upstream metadata-prefixed retained boundary", async () => {
+      const previousSummary = "## Goal\nKeep current work\n\n## Current Active Topic\n- metadata-prefixed boundary\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- preserve state\n\n## Progress\n### Done\n- [x] prior\n\n### In Progress\n- [ ] current\n\n### Blocked\n- none\n\n## Key Decisions\n- **Boundary safety**: move forward to a valid message\n\n## Next Steps\n1. continue\n\n## Critical Context\n- important";
+      const prep = makePreparation(45, {
+        messagesToSummarize: [
+          assistantToolCallMsg([{ id: "tc-metadata", name: "read", args: { path: "/workspace/a.ts" } }]),
+          toolResultMsg("tc-metadata", "read", "read ok"),
+        ],
+        previousSummary,
+        isSplitTurn: true,
+        settings: { enabled: true, reserveTokens: 4096, keepRecentTokens: 50_000 },
+        fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
+      });
+      const branchEntries = [
+        { type: "model_change", id: "current-metadata", provider: "test", modelId: "large" },
+        { type: "message", id: "large-user", message: userMsg(`Large retained turn ${"x".repeat(30_000)}`) },
+        { type: "message", id: "later-assistant", message: _assistantTextMsg("Current answer") },
+      ];
+      prep.firstKeptEntryId = "current-metadata";
+
+      const result = await handler!(
+        { preparation: prep, branchEntries, signal: new AbortController().signal },
+        makeCtx({ model: { provider: "test", id: "small", contextWindow: 16_000, reasoning: false } }),
+      );
+
+      expect(result.compaction.firstKeptEntryId).toBe("later-assistant");
+      expect(completeSimple).not.toHaveBeenCalled();
+    });
+
+    it("repairs a zero-token metadata-prefixed boundary without weakening monotonicity", async () => {
+      const previousSummary = "## Goal\nKeep current work\n\n## Current Active Topic\n- metadata boundary\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- preserve state\n\n## Progress\n### Done\n- [x] prior\n### In Progress\n- [ ] continue\n### Blocked\n- none\n\n## Key Decisions\n- use valid cut points\n\n## Next Steps\n1. continue\n\n## Critical Context\n- current instruction matters";
+      const prep = makePreparation(2, {
+        messagesToSummarize: [
+          assistantToolCallMsg([{ id: "tc-metadata-repair", name: "edit", args: { path: "/workspace/a.ts" } }]),
+          toolResultMsg("tc-metadata-repair", "edit", "done"),
+        ],
+        previousSummary,
+        isSplitTurn: true,
+        settings: { enabled: true, reserveTokens: 4_096, keepRecentTokens: 20_000 },
+      });
+      prep.firstKeptEntryId = "metadata-boundary";
+      const branchEntries = [
+        { type: "model_change", id: "metadata-boundary", provider: "test", modelId: "large" },
+        { type: "message", id: "valid-assistant-boundary", message: _assistantTextMsg("Current retained answer") },
+      ];
+
+      const result = await handler!(
+        { preparation: prep, branchEntries, signal: new AbortController().signal },
+        makeCtx(),
+      );
+
+      expect(result.compaction.firstKeptEntryId).toBe("valid-assistant-boundary");
+    });
+
+    it("keeps a complete parallel tool batch by cutting at its assistant message", async () => {
+      const previousSummary = "## Goal\nKeep current work\n\n## Current Active Topic\n- parallel tool batch\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- preserve tool/result grouping\n\n## Progress\n### Done\n- [x] prior\n\n### In Progress\n- [ ] current\n\n### Blocked\n- none\n\n## Key Decisions\n- **Boundary safety**: cut before the complete tool batch\n\n## Next Steps\n1. continue\n\n## Critical Context\n- important";
+      const prep = makePreparation(45, {
+        messagesToSummarize: [
+          assistantToolCallMsg([{ id: "tc-overflow", name: "read", args: { path: "/workspace/a.ts" } }]),
+          toolResultMsg("tc-overflow", "read", "read ok"),
+        ],
+        previousSummary,
+        isSplitTurn: true,
+        settings: { enabled: true, reserveTokens: 4096, keepRecentTokens: 50_000 },
+        fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
+      });
+      const branchEntries = [
+        { type: "message", id: "kept-user", message: userMsg(`retained work ${"x".repeat(40_000)}`) },
+        {
+          type: "message",
+          id: "batch-assistant",
+          message: assistantToolCallMsg([
+            { id: "tc-batch-1", name: "read", args: { path: "/workspace/one.ts" } },
+            { id: "tc-batch-2", name: "read", args: { path: "/workspace/two.ts" } },
+          ]),
+        },
+        { type: "message", id: "batch-result-1", message: toolResultMsg("tc-batch-1", "read", "x".repeat(8_000)) },
+        { type: "message", id: "batch-result-2", message: toolResultMsg("tc-batch-2", "read", "y".repeat(8_000)) },
+      ];
+      prep.firstKeptEntryId = "kept-user";
+
+      const result = await handler!(
+        { preparation: prep, branchEntries, signal: new AbortController().signal },
+        makeCtx({ model: { provider: "test", id: "small", contextWindow: 16_000, reasoning: false } }),
+      );
+
+      expect(result.compaction.firstKeptEntryId).toBe("batch-assistant");
+      expect(completeSimple).not.toHaveBeenCalled();
+    });
+
+    it("does not cross an earlier compaction boundary when the current retained suffix already fits", async () => {
+      const previousSummary = "## Goal\nKeep current work\n\n## Current Active Topic\n- current retained suffix\n\n## Historical / Background Context\n- older compacted work\n\n## Constraints & Preferences\n- do not resurrect history\n\n## Progress\n### Done\n- [x] prior\n\n### In Progress\n- [ ] current\n\n### Blocked\n- none\n\n## Key Decisions\n- **Boundary safety**: preserve the current lower bound\n\n## Next Steps\n1. continue\n\n## Critical Context\n- important";
+      const prep = makePreparation(45, {
+        messagesToSummarize: [
+          assistantToolCallMsg([{ id: "tc-overflow", name: "read", args: { path: "/workspace/a.ts" } }]),
+          toolResultMsg("tc-overflow", "read", "read ok"),
+        ],
+        previousSummary,
+        isSplitTurn: true,
+        settings: { enabled: true, reserveTokens: 4096, keepRecentTokens: 50_000 },
+        fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
+      });
+      const branchEntries = [
+        { type: "message", id: "hidden-before-compaction", message: userMsg(`hidden history ${"x".repeat(8_000)}`) },
+        { type: "compaction", id: "earlier-compaction", summary: "Earlier summary", firstKeptEntryId: "hidden-before-compaction" },
+        { type: "message", id: "current-first-kept", message: userMsg("Current retained task") },
+        { type: "message", id: "current-assistant", message: _assistantTextMsg("Current retained response") },
+      ];
+      prep.firstKeptEntryId = "current-first-kept";
+
+      const result = await handler!(
+        { preparation: prep, branchEntries, signal: new AbortController().signal },
+        makeCtx({ model: { provider: "test", id: "small", contextWindow: 16_000, reasoning: false } }),
+      );
+
+      expect(result.compaction.firstKeptEntryId).toBe("current-first-kept");
+      expect(completeSimple).not.toHaveBeenCalled();
+    });
+
+    it("does not expand a small retained suffix merely because configured keepRecentTokens is larger", async () => {
+      const previousSummary = "## Goal\nKeep current work\n\n## Current Active Topic\n- small suffix\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- keep the boundary monotonic\n\n## Progress\n### Done\n- [x] prior\n\n### In Progress\n- [ ] current\n\n### Blocked\n- none\n\n## Key Decisions\n- **Monotonicity**: adjustment may only reduce retained context\n\n## Next Steps\n1. continue\n\n## Critical Context\n- important";
+      const prep = makePreparation(45, {
+        messagesToSummarize: [
+          assistantToolCallMsg([{ id: "tc-overflow", name: "read", args: { path: "/workspace/a.ts" } }]),
+          toolResultMsg("tc-overflow", "read", "read ok"),
+        ],
+        previousSummary,
+        isSplitTurn: true,
+        settings: { enabled: true, reserveTokens: 4096, keepRecentTokens: 50_000 },
+        fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
+      });
+      const branchEntries = [
+        { type: "message", id: "older-visible-entry", message: userMsg(`older visible context ${"x".repeat(6_000)}`) },
+        { type: "message", id: "current-first-kept", message: userMsg("Current retained task") },
+        { type: "message", id: "current-assistant", message: _assistantTextMsg("Current retained response") },
+      ];
+      prep.firstKeptEntryId = "current-first-kept";
+
+      const result = await handler!(
+        { preparation: prep, branchEntries, signal: new AbortController().signal },
+        makeCtx({ model: { provider: "test", id: "small", contextWindow: 16_000, reasoning: false } }),
+      );
+
+      expect(result.compaction.firstKeptEntryId).toBe("current-first-kept");
+      expect(completeSimple).not.toHaveBeenCalled();
+    });
+
+    it("uses isolated request framing—not full agent overhead—when sizing compaction output", () => {
+      const previousSystemOverhead = process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS;
+      const previousRequestOverhead = process.env.PICLAW_COMPACTION_REQUEST_OVERHEAD_TOKENS;
+      const previousMultiplier = process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER;
+      try {
+        process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS = "4000";
+        process.env.PICLAW_COMPACTION_REQUEST_OVERHEAD_TOKENS = "1000";
+        process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER = "1";
+        const safe = getSafeCompactionMaxTokens({ contextWindow: 8_000 }, "x".repeat(4_000), 16_000);
+        expect(safe.promptTokens).toBe(2_000);
+        expect(safe.maxTokens).toBeLessThan(16_000);
+        expect(safe.promptTokens + safe.maxTokens).toBeLessThanOrEqual(8_000);
+
+        process.env.PICLAW_COMPACTION_REQUEST_OVERHEAD_TOKENS = "2000";
+        expect(getSafeCompactionMaxTokens({ contextWindow: 8_000 }, "x".repeat(4_000), 16_000).promptTokens).toBe(3_000);
+      } finally {
+        if (previousSystemOverhead === undefined) delete process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS;
+        else process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS = previousSystemOverhead;
+        if (previousRequestOverhead === undefined) delete process.env.PICLAW_COMPACTION_REQUEST_OVERHEAD_TOKENS;
+        else process.env.PICLAW_COMPACTION_REQUEST_OVERHEAD_TOKENS = previousRequestOverhead;
+        if (previousMultiplier === undefined) delete process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER;
+        else process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER = previousMultiplier;
+      }
     });
 
     it("rejects compaction prompts with no safe output room", () => {
@@ -1411,18 +2238,18 @@ describe("smart-compaction", () => {
     });
 
     it("handler only processes preparation data from its own event", async () => {
-      const summaryA = "## Goal\nSession A goal\n## Constraints\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- session A";
-      const summaryB = "## Goal\nSession B goal\n## Constraints\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- session B";
+      const summaryA = "## Goal\nSession A goal\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- session A";
+      const summaryB = "## Goal\nSession B goal\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- session B";
 
       // First call returns session A summary
       (completeSimple as any).mockResolvedValueOnce({
         content: [{ type: "text", text: summaryA }],
-        stopReason: "end",
+        stopReason: "stop",
       });
       // Second call returns session B summary
       (completeSimple as any).mockResolvedValueOnce({
         content: [{ type: "text", text: summaryB }],
-        stopReason: "end",
+        stopReason: "stop",
       });
 
       const prepA = makePreparation(60, { firstKeptEntryId: "session-A-entry" });
@@ -1476,7 +2303,7 @@ describe("smart-compaction", () => {
       const prep = makePreparation(60, {
         messagesToSummarize: splitTurnMsgs,
         previousSummary:
-          "## Goal\nImplement feature X\n\n## Constraints\n- none\n\n## Progress\n### Done\n- [x] Started\n### In Progress\n- [ ] Working\n### Blocked\n\n## Key Decisions\n\n## Next Steps\n1. Continue\n\n## Critical Context\n- Important stuff",
+          "## Goal\nImplement feature X\n\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n- none\n\n## Progress\n### Done\n- [x] Started\n### In Progress\n- [ ] Working\n### Blocked\n\n## Key Decisions\n\n## Next Steps\n1. Continue\n\n## Critical Context\n- Important stuff",
         fileOps: {
           read: new Set(["/a.ts"]),
           written: new Set<string>(),
@@ -1504,6 +2331,8 @@ describe("smart-compaction", () => {
       expect(result.compaction.summary).toContain("Implement feature X"); // preserved from previous
       expect(result.compaction.summary).toContain("Split-Turn Continuation"); // delta appended
       expect(result.compaction.summary).toContain("split-turn"); // mechanical delta
+      expect(result.compaction.summary).toContain("Tool outcomes:");
+      expect(result.compaction.summary).toContain("succeeded — Edited file-1.ts successfully");
       expect(result.compaction.summary).toContain("<modified-files>"); // file lists updated
 
       // Should use core Pi status feedback without notification/message panes or custom working UI.
@@ -1516,30 +2345,33 @@ describe("smart-compaction", () => {
       );
     });
 
-    it("skips LLM for minimal content (tiny user input, no modifications)", async () => {
-      // User sent < 100 chars, no writes/edits
-      const minimalMsgs: any[] = [
-        userMsg("ok"), // 2 chars
-        assistantToolCallMsg([{ id: "tc-1", name: "read", args: { path: "/a.ts" } }]),
-        toolResultMsg("tc-1", "read", "file contents..."),
-      ];
-      // Pad to 60 messages with reads
-      for (let i = 3; i < 60; i++) {
-        if (i % 2 === 1) {
-          minimalMsgs.push(
-            assistantToolCallMsg([
-              { id: `tc-${i}`, name: "read", args: { path: `/file-${i}.ts` } },
-            ]),
-          );
-        } else {
-          minimalMsgs.push(toolResultMsg(`tc-${i - 1}`, "read", `contents of file-${i}`));
-        }
-      }
+    it("skips LLM for a genuinely empty split-turn continuation", async () => {
+      const result = await handler!(
+        {
+          preparation: makePreparation(1, {
+            messagesToSummarize: [assistantToolCallMsg([])],
+            previousSummary:
+              "## Goal\nContinue current work\n## Current Active Topic\n- current work\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- none\n## Progress\n### Done\n- [x] prior\n### In Progress\n- [ ] current\n### Blocked\n- none\n## Key Decisions\n- none\n## Next Steps\n1. continue\n## Critical Context\n- state retained",
+            isSplitTurn: true,
+            fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx(),
+      );
 
-      const prep = makePreparation(60, {
+      expect(completeSimple).not.toHaveBeenCalled();
+      expect(result.compaction.summary).toContain("1 messages (split-turn, no new user input)");
+    });
+
+    it("skips LLM for a harmless acknowledgement with no new tool outcome", async () => {
+      const minimalMsgs: any[] = [userMsg("thanks")];
+
+      const prep = makePreparation(1, {
         messagesToSummarize: minimalMsgs,
         previousSummary:
-          "## Goal\nExplore codebase\n\n## Constraints\n\n## Progress\n### Done\n- [x] Read files\n### In Progress\n### Blocked\n\n## Key Decisions\n\n## Next Steps\n\n## Critical Context\n- Reading files",
+          "## Goal\nExplore codebase\n\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n\n## Progress\n### Done\n- [x] Read files\n### In Progress\n### Blocked\n\n## Key Decisions\n\n## Next Steps\n\n## Critical Context\n- Reading files",
         fileOps: {
           read: new Set(["/a.ts", "/b.ts"]),
           written: new Set<string>(),
@@ -1566,8 +2398,187 @@ describe("smart-compaction", () => {
       expect(ctx.ui.setWorkingIndicator).not.toHaveBeenCalled();
       expect(ctx.ui.setStatus).toHaveBeenCalledWith(
         "smart_compaction",
-        expect.stringContaining("minimal-content compaction"),
+        expect.stringContaining("harmless acknowledgement"),
       );
+    });
+
+    it("falls through to LLM compaction instead of reusing a malformed inherited summary", async () => {
+      const repairedSummary = "## Goal\nRepair inherited state\n\n## Current Active Topic\n- validation\n\n## Historical / Background Context\n- old summary was incomplete\n\n## Constraints & Preferences\n- preserve continuity\n\n## Progress\n### Done\n- [x] repaired\n### In Progress\n- [ ] continue\n### Blocked\n- none\n\n## Key Decisions\n- **Schema**: validate no-op output\n\n## Next Steps\n1. continue\n\n## Critical Context\n- repaired summary is complete";
+      (completeSimple as any).mockResolvedValueOnce({
+        content: [{ type: "text", text: repairedSummary }],
+        stopReason: "stop",
+      });
+
+      const result = await handler!(
+        {
+          preparation: makePreparation(1, {
+            messagesToSummarize: [userMsg("thanks")],
+            previousSummary: "## Goal\nIncomplete inherited summary\n\n## Progress\n- waiting",
+            settings: { enabled: true, reserveTokens: 2_000, keepRecentTokens: 1_000 },
+            fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx(),
+      );
+
+      expect(completeSimple).toHaveBeenCalledTimes(1);
+      expect(result.compaction.summary).toContain("Repair inherited state");
+    });
+
+    it.each([
+      "don't deploy",
+      "no, revert that",
+      "use Bun",
+      "yes",
+    ])("does not no-op a short critical instruction: %s", async (instruction) => {
+      const summaryText =
+        "## Goal\nUpdated safely\n## Current Active Topic\n- current work\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- preserve short instruction\n## Progress\n### Done\n- [x] Test\n### In Progress\n- [ ] continue\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- short instruction retained";
+      (completeSimple as any).mockResolvedValueOnce({
+        content: [{ type: "text", text: summaryText }],
+        stopReason: "stop",
+      });
+
+      const result = await handler!(
+        {
+          preparation: makePreparation(1, {
+            messagesToSummarize: [userMsg(instruction)],
+            previousSummary:
+              "## Goal\nOld goal\n## Current Active Topic\n- current work\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- old\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- old context",
+            fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx(),
+      );
+
+      expect(completeSimple).toHaveBeenCalledTimes(1);
+      expect(result.compaction.summary).toContain("short instruction retained");
+    });
+
+    it("does not no-op a split turn with a failed bash result", async () => {
+      const failedResult = {
+        ...toolResultMsg("tc-test", "bash", "Tests: 3 failed, 12 passed"),
+        isError: true,
+      };
+      (completeSimple as any).mockResolvedValueOnce({
+        content: [{ type: "text", text: "## Goal\nFix tests\n## Current Active Topic\n- current work\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- preserve failures\n## Progress\n### Done\n- [x] Test\n### In Progress\n- [ ] fix three failures\n### Blocked\n- tests failed\n## Key Decisions\n## Next Steps\n## Critical Context\n- Tests: 3 failed, 12 passed" }],
+        stopReason: "stop",
+      });
+
+      const result = await handler!(
+        {
+          preparation: makePreparation(2, {
+            messagesToSummarize: [
+              assistantToolCallMsg([{ id: "tc-test", name: "bash", args: { command: "bun test" } }]),
+              failedResult,
+            ],
+            previousSummary:
+              "## Goal\nFix tests\n## Current Active Topic\n- current work\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- use Bun\n## Progress\n### Done\n- [x] Test\n### In Progress\n- [ ] run tests\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- baseline",
+            isSplitTurn: true,
+            fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx(),
+      );
+
+      expect(completeSimple).toHaveBeenCalledTimes(1);
+      expect(result.compaction.summary).toContain("3 failed");
+    });
+
+    it("does not no-op a failed edit reported as no changes", async () => {
+      (completeSimple as any).mockResolvedValueOnce({
+        content: [{ type: "text", text: "## Goal\nApply edit\n## Current Active Topic\n- current work\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- preserve no-change result\n## Progress\n### Done\n- [x] Test\n### In Progress\n- [ ] retry edit\n### Blocked\n- No changes applied\n## Key Decisions\n## Next Steps\n## Critical Context\n- Applied: 0" }],
+        stopReason: "stop",
+      });
+
+      const result = await handler!(
+        {
+          preparation: makePreparation(2, {
+            messagesToSummarize: [
+              assistantToolCallMsg([{ id: "tc-edit", name: "edit", args: { path: "/workspace/a.ts" } }]),
+              toolResultMsg("tc-edit", "edit", "Applied: 0\nNo changes applied"),
+            ],
+            previousSummary:
+              "## Goal\nApply edit\n## Current Active Topic\n- current work\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- exact replacement\n## Progress\n### Done\n- [x] Test\n### In Progress\n- [ ] edit a.ts\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- baseline",
+            isSplitTurn: true,
+            fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set(["/workspace/a.ts"]) },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx(),
+      );
+
+      expect(completeSimple).toHaveBeenCalledTimes(1);
+      expect(result.compaction.summary).not.toContain("<modified-files>");
+      expect(result.compaction.summary).not.toContain("/workspace/a.ts");
+    });
+
+    it("does not no-op a successful command with a critical outcome", async () => {
+      (completeSimple as any).mockResolvedValueOnce({
+        content: [{ type: "text", text: "## Goal\nInspect deployment\n## Current Active Topic\n- current work\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- preserve command outcome\n## Progress\n### Done\n- [x] checked status\n### In Progress\n### Blocked\n- disk is 98% full\n## Key Decisions\n## Next Steps\n1. free disk space\n## Critical Context\n- command exited successfully but disk is 98% full" }],
+        stopReason: "stop",
+      });
+
+      await handler!(
+        {
+          preparation: makePreparation(2, {
+            messagesToSummarize: [
+              assistantToolCallMsg([{ id: "tc-status", name: "bash", args: { command: "df -h" } }]),
+              toolResultMsg("tc-status", "bash", "Command succeeded\n/dev/root 98% full"),
+            ],
+            previousSummary:
+              "## Goal\nInspect deployment\n## Current Active Topic\n- current work\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- avoid outages\n## Progress\n### Done\n- [x] Test\n### In Progress\n- [ ] inspect\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- baseline",
+            isSplitTurn: true,
+            fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx(),
+      );
+
+      expect(completeSimple).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not no-op when a non-first result in a parallel batch fails", async () => {
+      const secondResult = {
+        ...toolResultMsg("tc-parallel-2", "edit", "Replacement text was not found"),
+        isError: true,
+      };
+      (completeSimple as any).mockResolvedValueOnce({
+        content: [{ type: "text", text: "## Goal\nApply parallel edits\n## Current Active Topic\n- current work\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- preserve mixed outcomes\n## Progress\n### Done\n- [x] first edit\n### In Progress\n- [ ] second edit\n### Blocked\n- replacement not found\n## Key Decisions\n## Next Steps\n## Critical Context\n- second parallel result failed" }],
+        stopReason: "stop",
+      });
+
+      await handler!(
+        {
+          preparation: makePreparation(3, {
+            messagesToSummarize: [
+              assistantToolCallMsg([
+                { id: "tc-parallel-1", name: "edit", args: { path: "/workspace/one.ts" } },
+                { id: "tc-parallel-2", name: "edit", args: { path: "/workspace/two.ts" } },
+              ]),
+              toolResultMsg("tc-parallel-1", "edit", "Applied edit successfully"),
+              secondResult,
+            ],
+            previousSummary:
+              "## Goal\nApply parallel edits\n## Current Active Topic\n- current work\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- preserve outcomes\n## Progress\n### Done\n- [x] Test\n### In Progress\n- [ ] edit files\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- baseline",
+            isSplitTurn: true,
+            fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set(["/workspace/one.ts", "/workspace/two.ts"]) },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx(),
+      );
+
+      expect(completeSimple).toHaveBeenCalledTimes(1);
     });
 
     it("does NOT no-op when user has substantial input", async () => {
@@ -1588,17 +2599,17 @@ describe("smart-compaction", () => {
       }
 
       const summaryText =
-        "## Goal\nUpdated\n## Constraints\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context";
+        "## Goal\nUpdated\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none";
 
       (completeSimple as any).mockResolvedValueOnce({
         content: [{ type: "text", text: summaryText }],
-        stopReason: "end",
+        stopReason: "stop",
       });
 
       const prep = makePreparation(60, {
         messagesToSummarize: substantiveMsgs,
         previousSummary:
-          "## Goal\nOld goal\n## Constraints\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context",
+          "## Goal\nOld goal\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none",
         fileOps: {
           read: new Set(["/a.ts"]),
           written: new Set<string>(),
@@ -1631,11 +2642,11 @@ describe("smart-compaction", () => {
       }
 
       const summaryText =
-        "## Goal\nFirst compaction\n## Constraints\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context";
+        "## Goal\nFirst compaction\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none";
 
       (completeSimple as any).mockResolvedValueOnce({
         content: [{ type: "text", text: summaryText }],
-        stopReason: "end",
+        stopReason: "stop",
       });
 
       const prep = makePreparation(60, {
@@ -1663,11 +2674,11 @@ describe("smart-compaction", () => {
 
     it("does not classify a non-split tool-only window as split-turn continuation", async () => {
       const summaryText =
-        "## Goal\nFresh summary\n## Constraints\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context";
+        "## Goal\nFresh summary\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none";
 
       (completeSimple as any).mockResolvedValueOnce({
         content: [{ type: "text", text: summaryText }],
-        stopReason: "end",
+        stopReason: "stop",
       });
 
       const splitLikeMsgs: any[] = [];
@@ -1684,7 +2695,7 @@ describe("smart-compaction", () => {
           preparation: makePreparation(60, {
             messagesToSummarize: splitLikeMsgs,
             previousSummary:
-              "## Goal\nOld summary\n## Constraints\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context",
+              "## Goal\nOld summary\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none",
             isSplitTurn: false,
           }),
           branchEntries: [],
@@ -1698,11 +2709,11 @@ describe("smart-compaction", () => {
 
     it("does not no-op when kept messages show active current user work", async () => {
       const summaryText =
-        "## Goal\nFresh summary\n## Constraints\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context";
+        "## Goal\nFresh summary\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none";
 
       (completeSimple as any).mockResolvedValueOnce({
         content: [{ type: "text", text: summaryText }],
-        stopReason: "end",
+        stopReason: "stop",
       });
 
       const minimalMsgs = [userMsg("ok")];
@@ -1719,7 +2730,7 @@ describe("smart-compaction", () => {
           preparation: makePreparation(60, {
             messagesToSummarize: minimalMsgs,
             previousSummary:
-              "## Goal\nOld summary\n## Constraints\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context",
+              "## Goal\nOld summary\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none",
             isSplitTurn: false,
             fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
           }),
@@ -1737,11 +2748,11 @@ describe("smart-compaction", () => {
 
     it("does not no-op a split turn when the discarded prefix contains user intent", async () => {
       const summaryText =
-        "## Goal\nFresh summary\n## Constraints\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context";
+        "## Goal\nFresh summary\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none";
 
       (completeSimple as any).mockResolvedValueOnce({
         content: [{ type: "text", text: summaryText }],
-        stopReason: "end",
+        stopReason: "stop",
       });
 
       const splitLikeMsgs: any[] = [];
@@ -1758,7 +2769,7 @@ describe("smart-compaction", () => {
           preparation: makePreparation(60, {
             messagesToSummarize: splitLikeMsgs,
             previousSummary:
-              "## Goal\nOld summary\n## Constraints\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context",
+              "## Goal\nOld summary\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none",
             isSplitTurn: true,
             turnPrefixMessages: [userMsg("Actually switch to the reducer bug now")],
           }),
@@ -1780,15 +2791,15 @@ describe("smart-compaction", () => {
       for (let i = 2; i < 50; i++) {
         splitTurnMsgs.push(
           i % 2 === 0
-            ? assistantToolCallMsg([{ id: `tc-${i}`, name: "read", args: { path: `/r${i}.ts` } }])
-            : toolResultMsg(`tc-${i - 1}`, "read", "ok"),
+            ? assistantToolCallMsg([{ id: `tc-${i}`, name: "edit", args: { path: `/r${i}.ts` } }])
+            : toolResultMsg(`tc-${i - 1}`, "edit", `Edited /r${i - 1}.ts successfully`),
         );
       }
 
       const prep = makePreparation(50, {
         messagesToSummarize: splitTurnMsgs,
         previousSummary:
-          "## Goal\nBuild widget\n\n## Progress\n### Done\n- [x] init\n### In Progress\n### Blocked\n\n## Critical Context\n- Widget state lives in /widget.ts\n- Uses React hooks pattern",
+          "## Goal\nBuild widget\n\n## Current Active Topic\n- widget implementation\n\n## Historical / Background Context\n- initialized\n\n## Constraints & Preferences\n- preserve React hooks pattern\n\n## Progress\n### Done\n- [x] init\n### In Progress\n- [ ] continue\n### Blocked\n- none\n\n## Key Decisions\n- **State**: keep widget state in /widget.ts\n\n## Next Steps\n1. continue\n\n## Critical Context\n- Widget state lives in /widget.ts\n- Uses React hooks pattern",
         fileOps: {
           read: new Set(["/r2.ts"]),
           written: new Set(["/new.ts"]),
@@ -1822,6 +2833,300 @@ describe("smart-compaction", () => {
     });
   });
 
+  describe("file-operation outcome reconciliation", () => {
+    const freshSummary =
+      "## Goal\nTrack actual file changes\n## Current Active Topic\n- current work\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- only claim successful writes\n## Progress\n### Done\n- [x] Test\n### In Progress\n- [ ] continue\n### Blocked\n- none\n## Key Decisions\n- use tool outcomes\n## Next Steps\n1. continue\n## Critical Context\n- deterministic file facts";
+
+    it("does not claim a file from a write call with a missing result", async () => {
+      (completeSimple as any).mockResolvedValueOnce({
+        content: [{ type: "text", text: freshSummary }],
+        stopReason: "stop",
+      });
+
+      const result = await handler!(
+        {
+          preparation: makePreparation(1, {
+            messagesToSummarize: [
+              assistantToolCallMsg([{ id: "tc-missing-write", name: "write", args: { path: "/workspace/missing.ts" } }]),
+            ],
+            previousSummary: freshSummary,
+            isSplitTurn: true,
+            fileOps: { read: new Set<string>(), written: new Set(["/workspace/missing.ts"]), edited: new Set<string>() },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx(),
+      );
+
+      expect(completeSimple).toHaveBeenCalledTimes(1);
+      expect(result.compaction.summary).not.toContain("<modified-files>");
+      expect(result.compaction.summary).not.toContain("missing.ts");
+    });
+
+    it("retains a file with a matched successful write result", async () => {
+      (completeSimple as any).mockResolvedValueOnce({
+        content: [{ type: "text", text: freshSummary }],
+        stopReason: "stop",
+      });
+
+      const result = await handler!(
+        {
+          preparation: makePreparation(3, {
+            messagesToSummarize: [
+              userMsg("Create the successful file now"),
+              assistantToolCallMsg([{ id: "tc-success-write", name: "write", args: { path: "/workspace/success.ts" } }]),
+              toolResultMsg("tc-success-write", "write", "Created /workspace/success.ts successfully"),
+            ],
+            previousSummary: freshSummary,
+            fileOps: { read: new Set<string>(), written: new Set(["/workspace/success.ts"]), edited: new Set<string>() },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx(),
+      );
+
+      expect(result.compaction.summary).toContain("<modified-files>");
+      expect(result.compaction.summary).toContain("success.ts");
+    });
+
+    it("retains an inherited modified-file fact when a later edit attempt fails", async () => {
+      const previousSummary = `${freshSummary}\n<modified-files>\n/workspace/inherited.ts\n</modified-files>`;
+      (completeSimple as any).mockResolvedValueOnce({
+        content: [{ type: "text", text: freshSummary }],
+        stopReason: "stop",
+      });
+
+      const result = await handler!(
+        {
+          preparation: makePreparation(2, {
+            messagesToSummarize: [
+              assistantToolCallMsg([{ id: "tc-inherited-edit", name: "edit", args: { path: "/workspace/inherited.ts" } }]),
+              { ...toolResultMsg("tc-inherited-edit", "edit", "No changes applied"), isError: true },
+            ],
+            previousSummary,
+            isSplitTurn: true,
+            fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set(["/workspace/inherited.ts"]) },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx(),
+      );
+
+      expect(completeSimple).toHaveBeenCalledTimes(1);
+      expect(result.compaction.summary).toContain("<modified-files>");
+      expect(result.compaction.summary).toContain("inherited.ts");
+    });
+
+    it("matches workspace-relative inherited paths across cwd-root changes", async () => {
+      const previousSummary = `${freshSummary}\n<modified-files>\npiclaw/runtime/src/cwd-change.ts\n</modified-files>`;
+      (completeSimple as any).mockResolvedValueOnce({
+        content: [{ type: "text", text: freshSummary }],
+        stopReason: "stop",
+      });
+
+      const result = await handler!(
+        {
+          preparation: makePreparation(2, {
+            messagesToSummarize: [
+              assistantToolCallMsg([{ id: "tc-cwd-change", name: "edit", args: { path: "/workspace/piclaw/runtime/src/cwd-change.ts" } }]),
+              { ...toolResultMsg("tc-cwd-change", "edit", "No changes applied"), isError: true },
+            ],
+            previousSummary,
+            isSplitTurn: true,
+            fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set(["/workspace/piclaw/runtime/src/cwd-change.ts"]) },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx(),
+      );
+
+      expect(result.compaction.summary).toContain("piclaw/runtime/src/cwd-change.ts");
+    });
+
+    it("does not claim a dot-relative failed edit as a modification", async () => {
+      (completeSimple as any).mockResolvedValueOnce({
+        content: [{ type: "text", text: freshSummary }],
+        stopReason: "stop",
+      });
+
+      const result = await handler!(
+        {
+          preparation: makePreparation(2, {
+            messagesToSummarize: [
+              assistantToolCallMsg([{ id: "tc-dot-relative", name: "edit", args: { path: "./src/dot-relative.ts" } }]),
+              { ...toolResultMsg("tc-dot-relative", "edit", "No changes applied"), isError: true },
+            ],
+            isSplitTurn: true,
+            fileOps: {
+              read: new Set<string>(),
+              written: new Set<string>(),
+              edited: new Set([path.resolve(process.cwd(), "src/dot-relative.ts")]),
+            },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx(),
+      );
+
+      expect(result.compaction.summary).not.toContain("dot-relative.ts");
+    });
+
+    it("does not claim a parent-relative failed edit as a modification", async () => {
+      (completeSimple as any).mockResolvedValueOnce({
+        content: [{ type: "text", text: freshSummary }],
+        stopReason: "stop",
+      });
+
+      const result = await handler!(
+        {
+          preparation: makePreparation(2, {
+            messagesToSummarize: [
+              assistantToolCallMsg([{ id: "tc-parent-relative", name: "edit", args: { path: "../shared.ts" } }]),
+              { ...toolResultMsg("tc-parent-relative", "edit", "No changes applied"), isError: true },
+            ],
+            isSplitTurn: true,
+            fileOps: {
+              read: new Set<string>(),
+              written: new Set<string>(),
+              edited: new Set([path.resolve(process.cwd(), "../shared.ts")]),
+            },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx(),
+      );
+
+      expect(result.compaction.summary).not.toContain("shared.ts");
+    });
+
+    it("retains an inherited outlier from a pre-delimiter compressed path block", async () => {
+      const previousSummary = `${freshSummary}\n<modified-files>\nbase: piclaw/runtime/\nweb/src/: a.ts, b.ts\nzdocs/report.patch\n</modified-files>`;
+      (completeSimple as any).mockResolvedValueOnce({
+        content: [{ type: "text", text: freshSummary }],
+        stopReason: "stop",
+      });
+
+      const result = await handler!(
+        {
+          preparation: makePreparation(2, {
+            messagesToSummarize: [
+              assistantToolCallMsg([{ id: "tc-old-outlier", name: "edit", args: { path: "/workspace/zdocs/report.patch" } }]),
+              { ...toolResultMsg("tc-old-outlier", "edit", "No changes applied"), isError: true },
+            ],
+            previousSummary,
+            isSplitTurn: true,
+            fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set(["/workspace/zdocs/report.patch"]) },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx(),
+      );
+
+      expect(result.compaction.summary).toContain("zdocs/report.patch");
+    });
+
+    it("does not treat every base-relative singleton as a root-level inherited alias", async () => {
+      const previousSummary = `${freshSummary}\n<modified-files>\nbase: runtime/\nweb/src/ui/app.ts\n</modified-files>`;
+      (completeSimple as any).mockResolvedValueOnce({
+        content: [{ type: "text", text: freshSummary }],
+        stopReason: "stop",
+      });
+
+      const result = await handler!(
+        {
+          preparation: makePreparation(2, {
+            messagesToSummarize: [
+              assistantToolCallMsg([{ id: "tc-root-alias", name: "edit", args: { path: "/workspace/web/src/ui/app.ts" } }]),
+              { ...toolResultMsg("tc-root-alias", "edit", "No changes applied"), isError: true },
+            ],
+            previousSummary,
+            isSplitTurn: true,
+            fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set(["/workspace/web/src/ui/app.ts"]) },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx(),
+      );
+
+      expect(result.compaction.summary).not.toContain("web/src/ui/app.ts");
+    });
+
+    it("retains an inherited comma-bearing filename after a failed retry", async () => {
+      const commaPath = "piclaw/runtime/src/report,final.ts";
+      const previousSummary = `${freshSummary}\n<modified-files>\n${compressFilePaths([
+        commaPath,
+        "piclaw/runtime/src/a.ts",
+        "piclaw/runtime/src/b.ts",
+        "piclaw/runtime/test/a.test.ts",
+      ])}\n</modified-files>`;
+      (completeSimple as any).mockResolvedValueOnce({
+        content: [{ type: "text", text: freshSummary }],
+        stopReason: "stop",
+      });
+
+      const result = await handler!(
+        {
+          preparation: makePreparation(2, {
+            messagesToSummarize: [
+              assistantToolCallMsg([{ id: "tc-comma", name: "edit", args: { path: `/workspace/${commaPath}` } }]),
+              { ...toolResultMsg("tc-comma", "edit", "No changes applied"), isError: true },
+            ],
+            previousSummary,
+            isSplitTurn: true,
+            fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set([`/workspace/${commaPath}`]) },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx(),
+      );
+
+      expect(result.compaction.summary).toContain("report,final.ts");
+    });
+
+    it("retains an inherited outlier path after a compressed path cluster", async () => {
+      const compressedPaths = compressFilePaths([
+        "piclaw/runtime/src/a.ts",
+        "piclaw/runtime/src/b.ts",
+        "piclaw/runtime/test/a.test.ts",
+        "zdocs/report.patch",
+      ]);
+      const previousSummary = `${freshSummary}\n<modified-files>\n${compressedPaths}\n</modified-files>`;
+      (completeSimple as any).mockResolvedValueOnce({
+        content: [{ type: "text", text: freshSummary }],
+        stopReason: "stop",
+      });
+
+      const result = await handler!(
+        {
+          preparation: makePreparation(2, {
+            messagesToSummarize: [
+              assistantToolCallMsg([{ id: "tc-outlier-edit", name: "edit", args: { path: "/workspace/zdocs/report.patch" } }]),
+              { ...toolResultMsg("tc-outlier-edit", "edit", "No changes applied"), isError: true },
+            ],
+            previousSummary,
+            isSplitTurn: true,
+            fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set(["/workspace/zdocs/report.patch"]) },
+          }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx(),
+      );
+
+      expect(compressedPaths).toContain("base: piclaw/runtime/");
+      expect(result.compaction.summary).toContain("zdocs/report.patch");
+    });
+  });
+
   describe("prompt construction", () => {
     it("includes head, tail, and gap markers for large conversations", async () => {
       let capturedPrompt = "";
@@ -1832,10 +3137,10 @@ describe("smart-compaction", () => {
             content: [
               {
                 type: "text",
-                text: "## Goal\nTest\n## Constraints\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context",
+                text: "## Goal\nTest\n## Current Active Topic\n- (none)\n\n## Historical / Background Context\n- (none)\n\n## Constraints & Preferences\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none",
               },
             ],
-            stopReason: "end",
+            stopReason: "stop",
           });
         },
       );
@@ -1860,6 +3165,75 @@ describe("smart-compaction", () => {
       expect(capturedPrompt).toContain("Files Modified");
     });
 
+    it("includes every bounded outcome from a parallel tool batch exactly once", async () => {
+      let capturedPrompt = "";
+      (completeSimple as any).mockImplementationOnce((_model: any, opts: any) => {
+        capturedPrompt = opts.messages[0].content[0].text;
+        return Promise.resolve({
+          content: [{ type: "text", text: "## Goal\nPreserve parallel outcomes\n## Current Active Topic\n- current work\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- keep failures\n## Progress\n### Done\n- [x] Test\n### In Progress\n- [ ] retry failed edit\n### Blocked\n- second edit failed\n## Key Decisions\n## Next Steps\n## Critical Context\n- parallel batch retained" }],
+          stopReason: "stop",
+        });
+      });
+
+      const messages: any[] = Array.from({ length: 56 }, (_, index) => userMsg(`Relevant user context ${index}`));
+      const calls = Array.from({ length: 8 }, (_, index) => ({
+        id: `tc-prompt-${index + 1}`,
+        name: index === 7 ? "edit" : "read",
+        args: { path: `/workspace/file-${index + 1}.ts` },
+      }));
+      const parallelBatch: any = assistantToolCallMsg(calls);
+      parallelBatch.content.unshift({ type: "text", text: "ASSISTANT_BATCH_NARRATIVE migration already ran; only verify outcomes" });
+      const results = calls.map((call, index) => index === 7
+        ? { ...toolResultMsg(call.id, call.name, `OUTCOME_${index + 1} FINAL_FAILURE_MARKER replacement was not found ${"z".repeat(120)}`), isError: true }
+        : toolResultMsg(call.id, call.name, `OUTCOME_${index + 1} completed ${"x".repeat(150)}`));
+      messages.push(parallelBatch, ...results);
+
+      await handler!(
+        {
+          preparation: makePreparation(60, { messagesToSummarize: messages }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx(),
+      );
+
+      for (let index = 1; index <= 8; index += 1) {
+        expect(capturedPrompt.match(new RegExp(`OUTCOME_${index}`, "g"))?.length).toBe(1);
+      }
+      expect(capturedPrompt).toContain("edit(/workspace/file-8.ts) → ERROR: OUTCOME_8 FINAL_FAILURE_MARKER");
+      expect(capturedPrompt.match(/FINAL_FAILURE_MARKER/g)?.length).toBe(1);
+      expect(capturedPrompt.match(/ASSISTANT_BATCH_NARRATIVE/g)?.length).toBe(1);
+    });
+
+    it("preserves an orphaned failed tool result in bounded recent context", async () => {
+      let capturedPrompt = "";
+      (completeSimple as any).mockImplementationOnce((_model: any, opts: any) => {
+        capturedPrompt = opts.messages[0].content[0].text;
+        return Promise.resolve({
+          content: [{ type: "text", text: "## Goal\nPreserve anomalous outcomes\n## Current Active Topic\n- current work\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- keep failures\n## Progress\n### Done\n- [x] Test\n### In Progress\n- [ ] investigate orphan\n### Blocked\n- orphan failed\n## Key Decisions\n## Next Steps\n## Critical Context\n- orphan retained" }],
+          stopReason: "stop",
+        });
+      });
+
+      const messages: any[] = Array.from({ length: 58 }, (_, index) => userMsg(`Relevant user context ${index}`));
+      messages.push(
+        { ...toolResultMsg("tc-orphan", "bash", "ORPHAN_FAILURE_MARKER exit code 9"), isError: true },
+        userMsg("Preserve the unmatched failed result."),
+      );
+
+      await handler!(
+        {
+          preparation: makePreparation(60, { messagesToSummarize: messages }),
+          branchEntries: [],
+          signal: new AbortController().signal,
+        },
+        makeCtx(),
+      );
+
+      expect(capturedPrompt.match(/ORPHAN_FAILURE_MARKER/g)?.length).toBe(1);
+      expect(capturedPrompt).toContain("ToolResult:ERROR:bash");
+    });
+
     it("annotates recent topic shifts so stale topics become background", async () => {
       let capturedPrompt = "";
       (completeSimple as any).mockImplementationOnce(
@@ -1869,10 +3243,10 @@ describe("smart-compaction", () => {
             content: [
               {
                 type: "text",
-                text: "## Goal\nInvestigate active issue\n## Current Active Topic\n- Azure streaming failures\n## Historical / Background Context\n- Widget work\n## Constraints & Preferences\n- none\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context",
+                text: "## Goal\nInvestigate active issue\n## Current Active Topic\n- Azure streaming failures\n## Historical / Background Context\n- Widget work\n## Constraints & Preferences\n- none\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none",
               },
             ],
-            stopReason: "end",
+            stopReason: "stop",
           });
         },
       );
@@ -1924,11 +3298,11 @@ describe("smart-compaction", () => {
   describe("A1 no-op safeguards", () => {
     it("does not reuse the previous summary for a tiny pivot message", async () => {
       const summaryText =
-        "## Goal\nAzure streaming\n## Current Active Topic\n- Investigate Azure streaming\n## Historical / Background Context\n- Widget layout\n## Constraints & Preferences\n- none\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context";
+        "## Goal\nAzure streaming\n## Current Active Topic\n- Investigate Azure streaming\n## Historical / Background Context\n- Widget layout\n## Constraints & Preferences\n- none\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none";
 
       (completeSimple as any).mockResolvedValueOnce({
         content: [{ type: "text", text: summaryText }],
-        stopReason: "end",
+        stopReason: "stop",
       });
 
       const messages: any[] = [
@@ -2000,8 +3374,8 @@ describe("smart-compaction", () => {
       (completeSimple as any).mockImplementationOnce((_model: any, opts: any) => {
         capturedPrompt = opts.messages[0].content[0].text;
         return Promise.resolve({
-          content: [{ type: "text", text: "## Goal\nRefactor auth\n## Current Active Topic\n- auth refactor\n## Historical / Background Context\n- none\n## Constraints & Preferences\n- none\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context" }],
-          stopReason: "end",
+          content: [{ type: "text", text: "## Goal\nRefactor auth\n## Current Active Topic\n- auth refactor\n## Historical / Background Context\n- none\n## Constraints & Preferences\n- none\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none" }],
+          stopReason: "stop",
         });
       });
 
@@ -2030,8 +3404,8 @@ describe("smart-compaction", () => {
       (completeSimple as any).mockImplementationOnce((_model: any, opts: any) => {
         capturedPrompt = opts.messages[0].content[0].text;
         return Promise.resolve({
-          content: [{ type: "text", text: "## Goal\nFix auth\n## Current Active Topic\n- auth\n## Historical / Background Context\n- none\n## Constraints & Preferences\n- none\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context" }],
-          stopReason: "end",
+          content: [{ type: "text", text: "## Goal\nFix auth\n## Current Active Topic\n- auth\n## Historical / Background Context\n- none\n## Constraints & Preferences\n- none\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none" }],
+          stopReason: "stop",
         });
       });
 
@@ -2058,8 +3432,8 @@ describe("smart-compaction", () => {
       (completeSimple as any).mockImplementationOnce((_model: any, opts: any) => {
         capturedPrompt = opts.messages[0].content[0].text;
         return Promise.resolve({
-          content: [{ type: "text", text: "## Goal\nRouter impl\n## Current Active Topic\n- router\n## Historical / Background Context\n- none\n## Constraints & Preferences\n- none\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context" }],
-          stopReason: "end",
+          content: [{ type: "text", text: "## Goal\nRouter impl\n## Current Active Topic\n- router\n## Historical / Background Context\n- none\n## Constraints & Preferences\n- none\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none" }],
+          stopReason: "stop",
         });
       });
 
@@ -2086,8 +3460,8 @@ describe("smart-compaction", () => {
       (completeSimple as any).mockImplementationOnce((_model: any, opts: any) => {
         capturedPrompt = opts.messages[0].content[0].text;
         return Promise.resolve({
-          content: [{ type: "text", text: "## Goal\nNew work\n## Current Active Topic\n- new\n## Historical / Background Context\n- old\n## Constraints & Preferences\n- none\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context" }],
-          stopReason: "end",
+          content: [{ type: "text", text: "## Goal\nNew work\n## Current Active Topic\n- new\n## Historical / Background Context\n- old\n## Constraints & Preferences\n- none\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none" }],
+          stopReason: "stop",
         });
       });
 
@@ -2118,8 +3492,8 @@ describe("smart-compaction", () => {
       (completeSimple as any).mockImplementationOnce((_model: any, opts: any) => {
         capturedPrompt = opts.messages[0].content[0].text;
         return Promise.resolve({
-          content: [{ type: "text", text: "## Goal\nTest\n## Current Active Topic\n- test\n## Historical / Background Context\n- none\n## Constraints & Preferences\n- none\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context" }],
-          stopReason: "end",
+          content: [{ type: "text", text: "## Goal\nTest\n## Current Active Topic\n- test\n## Historical / Background Context\n- none\n## Constraints & Preferences\n- none\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none" }],
+          stopReason: "stop",
         });
       });
 
@@ -2160,8 +3534,8 @@ describe("smart-compaction", () => {
       (completeSimple as any).mockImplementationOnce((_model: any, opts: any) => {
         capturedPrompt = opts.messages[0].content[0].text;
         return Promise.resolve({
-          content: [{ type: "text", text: "## Goal\nCompaction work\n## Current Active Topic\n- compaction fix\n## Historical / Background Context\n- none\n## Constraints & Preferences\n- none\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context" }],
-          stopReason: "end",
+          content: [{ type: "text", text: "## Goal\nCompaction work\n## Current Active Topic\n- compaction fix\n## Historical / Background Context\n- none\n## Constraints & Preferences\n- none\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none" }],
+          stopReason: "stop",
         });
       });
 
@@ -2220,8 +3594,8 @@ describe("smart-compaction", () => {
       (completeSimple as any).mockImplementationOnce((_model: any, opts: any) => {
         capturedPrompt = opts.messages[0].content[0].text;
         return Promise.resolve({
-          content: [{ type: "text", text: "## Goal\nCompaction\n## Current Active Topic\n- compaction\n## Historical / Background Context\n- none\n## Constraints & Preferences\n- none\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context" }],
-          stopReason: "end",
+          content: [{ type: "text", text: "## Goal\nCompaction\n## Current Active Topic\n- compaction\n## Historical / Background Context\n- none\n## Constraints & Preferences\n- none\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none" }],
+          stopReason: "stop",
         });
       });
 
@@ -2262,8 +3636,8 @@ describe("smart-compaction", () => {
       (completeSimple as any).mockImplementationOnce((_model: any, opts: any) => {
         capturedPrompt = opts.messages[0].content[0].text;
         return Promise.resolve({
-          content: [{ type: "text", text: "## Goal\nCompaction\n## Current Active Topic\n- compaction\n## Historical / Background Context\n- none\n## Constraints & Preferences\n- none\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context" }],
-          stopReason: "end",
+          content: [{ type: "text", text: "## Goal\nCompaction\n## Current Active Topic\n- compaction\n## Historical / Background Context\n- none\n## Constraints & Preferences\n- none\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none" }],
+          stopReason: "stop",
         });
       });
 
@@ -2291,8 +3665,12 @@ describe("smart-compaction", () => {
         // Kept entries (from firstKeptEntryId onward)
         { id: keptEntryId, type: "message", message: { role: "user", content: [{ type: "text", text: "Now refactor the compaction strategy to walk backwards" }] } },
         { id: "kept-2", type: "message", message: { role: "assistant", content: [{ type: "text", text: "Done, implemented backwards walk" }] } },
-        { id: "kept-3", type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "tc-kept", name: "edit", arguments: { path: "/workspace/piclaw/runtime/src/extensions/smart-compaction.ts" } }] } },
-        { id: "kept-4", type: "message", message: { role: "toolResult", toolCallId: "tc-kept", toolName: "edit", content: [{ type: "text", text: "Applied edit" }], isError: false } },
+        { id: "kept-3", type: "message", message: { role: "assistant", content: [
+          { type: "toolCall", id: "tc-kept-edit", name: "edit", arguments: { path: "/workspace/piclaw/runtime/src/extensions/smart-compaction.ts" } },
+          { type: "toolCall", id: "tc-kept-test", name: "bash", arguments: { command: "bun test smart-compaction" } },
+        ] } },
+        { id: "kept-4", type: "message", message: { role: "toolResult", toolCallId: "tc-kept-edit", toolName: "edit", content: [{ type: "text", text: "KEPT_EDIT_OUTCOME applied" }], isError: false } },
+        { id: "kept-4b", type: "message", message: { role: "toolResult", toolCallId: "tc-kept-test", toolName: "bash", content: [{ type: "text", text: "KEPT_TEST_OUTCOME 127 passed" }], isError: false } },
         { id: "kept-5", type: "custom_message", customType: "note", content: [{ type: "text", text: "Keep reducer follow-up in mind" }], display: true },
         { id: "kept-6", type: "branch_summary", fromId: "branch-123", summary: "Branch work switched from EML viewer to compaction fixes" },
         { id: "kept-7", type: "message", message: { role: "user", content: [{ type: "text", text: "Run the tests and rebuild" }] } },
@@ -2317,6 +3695,10 @@ describe("smart-compaction", () => {
       expect(capturedPrompt).toContain("compaction strategy to walk backwards");
       expect(capturedPrompt).toContain("Done, implemented backwards walk");
       expect(capturedPrompt).toContain("smart-compaction.ts");
+      expect(capturedPrompt.match(/KEPT_EDIT_OUTCOME/g)?.length).toBe(1);
+      expect(capturedPrompt.match(/KEPT_TEST_OUTCOME/g)?.length).toBe(1);
+      expect(capturedPrompt).toContain("bash(bun test smart-compaction) → KEPT_TEST_OUTCOME 127 passed");
+      expect(capturedPrompt).not.toContain("[ToolResult:bash]");
       expect(capturedPrompt).toContain("Keep reducer follow-up in mind");
       expect(capturedPrompt).toContain("switched from EML viewer to compaction fixes");
       expect(capturedPrompt).toContain("Run the tests and rebuild");
@@ -2331,8 +3713,8 @@ describe("smart-compaction", () => {
       (completeSimple as any).mockImplementationOnce((_model: any, opts: any) => {
         capturedPrompt = opts.messages[0].content[0].text;
         return Promise.resolve({
-          content: [{ type: "text", text: "## Goal\nCompaction\n## Current Active Topic\n- compaction\n## Historical / Background Context\n- none\n## Constraints & Preferences\n- none\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context" }],
-          stopReason: "end",
+          content: [{ type: "text", text: "## Goal\nCompaction\n## Current Active Topic\n- compaction\n## Historical / Background Context\n- none\n## Constraints & Preferences\n- none\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none" }],
+          stopReason: "stop",
         });
       });
 
@@ -2378,8 +3760,8 @@ describe("smart-compaction", () => {
       (completeSimple as any).mockImplementationOnce((_model: any, opts: any) => {
         capturedPrompt = opts.messages[0].content[0].text;
         return Promise.resolve({
-          content: [{ type: "text", text: "## Goal\nWork\n## Current Active Topic\n- work\n## Historical / Background Context\n- none\n## Constraints & Preferences\n- none\n## Progress\n### Done\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context" }],
-          stopReason: "end",
+          content: [{ type: "text", text: "## Goal\nWork\n## Current Active Topic\n- work\n## Historical / Background Context\n- none\n## Constraints & Preferences\n- none\n## Progress\n### Done\n- [x] Test\n### In Progress\n### Blocked\n## Key Decisions\n## Next Steps\n## Critical Context\n- none" }],
+          stopReason: "stop",
         });
       });
 

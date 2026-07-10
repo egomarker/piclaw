@@ -2071,6 +2071,7 @@ body {
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  overflow-anchor: auto;
   padding: 16px 16px 8px;
   display: flex;
   flex-direction: column-reverse;
@@ -2588,32 +2589,44 @@ body {
 .thinking-visibility-pill {
   margin: 4px 0 8px 0;
   font-size: 12px;
+  background: var(--bg-code, color-mix(in srgb, var(--accent, #58a6ff) 5%, transparent));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-soft, var(--text-secondary, #71767b));
+  overflow: hidden;
 }
 
-/* Flex container so the disclosure button and copy button sit inline
- * (a11y rework split them into siblings so they could be real <button>
- * elements — nesting buttons is invalid HTML). */
+/* Header row: disclosure toggle (left) + copy action (right), always visible.
+   Single-card layout mirrors the live thinking panel for UI consistency. */
 .thinking-visibility-pill__controls {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px 4px 8px;
 }
 
 .thinking-visibility-pill__header {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 10px 3px 6px;
-  border-radius: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  /* Keep the tap target at least 24px tall (WCAG 2.2 Target Size, touch). */
+  min-height: 24px;
+  padding: 2px 4px 2px 0;
+  border-radius: 4px;
   cursor: pointer;
   color: var(--text-soft, var(--text-secondary, #71767b));
-  background: var(--tint-accent-08, color-mix(in srgb, var(--accent, #58a6ff) 8%, transparent));
-  border: 1px solid var(--tint-accent-15, color-mix(in srgb, var(--accent, #58a6ff) 15%, transparent));
+  background: transparent;
+  border: none;
   font-family: inherit;
   font-size: 12px;
+  font-weight: 600;
+  text-align: left;
   user-select: none;
-  transition: background 0.15s, color 0.15s;
-  /* Button reset: native <button> defaults that don't fit the pill style. */
+  transition: color 0.15s;
+  /* Button reset: native <button> defaults that don't fit the header style. */
   appearance: none;
   -webkit-appearance: none;
 }
@@ -2624,7 +2637,6 @@ body {
 }
 
 .thinking-visibility-pill__header:hover {
-  background: var(--tint-accent-14, color-mix(in srgb, var(--accent, #58a6ff) 14%, transparent));
   color: var(--text-primary, #e7e9ea);
 }
 
@@ -2634,41 +2646,58 @@ body {
 }
 
 .thinking-visibility-pill__label {
-  font-weight: 500;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
-.thinking-visibility-pill__copy {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0 2px;
-  font-size: 13px;
-  color: var(--text-soft, var(--text-secondary, #71767b));
-  opacity: 0.6;
-  transition: opacity 0.15s;
-  line-height: 1;
+/* Guarantee a >=24px touch target for the copy button in this header row. */
+.thinking-visibility-pill__copy.message-action-bar__btn {
+  min-width: 24px;
+  min-height: 24px;
 }
 
-.thinking-visibility-pill__copy:hover {
-  opacity: 1;
+/* Screen-reader-only utility: removes an element from the visual layout while
+   keeping it in the accessibility tree (used for aria-live status messages). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
+/* Body lives inside the same card; a subtle divider separates it from the
+   header row instead of a second bordered box. */
 .thinking-visibility-pill__detail {
-  margin-top: 6px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  background: var(--bg-code, color-mix(in srgb, var(--accent, #58a6ff) 5%, transparent));
-  border: 1px solid var(--border);
+  padding: 6px 10px 8px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   color: var(--text-soft, var(--text-secondary, #71767b));
   font-size: 12px;
   font-family: var(--font-mono, monospace);
   line-height: 1.4;
+  /* Cap growth but stay viewport-aware so long traces stay usable on short
+     mobile screens (dvh tracks the dynamic viewport; 400px is the desktop cap
+     and the fallback for browsers without dvh support). */
   max-height: 400px;
+  max-height: min(400px, 60dvh);
   overflow-y: auto;
   scrollbar-width: thin;
   word-break: break-word;
   overflow-wrap: anywhere;
+}
+
+/* The panel is always mounted (so the Safari scroll-anchor's ResizeObserver can
+   observe both expand and collapse); collapse it to zero height when closed. */
+.thinking-visibility-pill[data-expanded="false"] .thinking-visibility-pill__detail {
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-top-width: 0;
+  overflow: hidden;
 }
 
 .thinking-visibility-pill__content {

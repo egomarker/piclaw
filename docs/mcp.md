@@ -122,29 +122,31 @@ mcp({ tool: "filesystem_read_file", args: "{\"path\":\"./README.md\"}" })
 
 `args` must be a JSON string.
 
-## Timeout and abort handling
+## Timeout, abort, and output handling
 
-PiClaw ships a built-in `mcp-timeout-patch` extension that wraps every MCP tool call with:
+`pi-mcp-adapter` 2.11.0 forwards Pi abort signals into connect, discovery, resource, and tool requests. It also applies `requestTimeoutMs` consistently across those request types. Configure a global protocol-request timeout in the active MCP configuration file:
 
-- **Timeout** — if an MCP server does not respond within the deadline, the call fails cleanly with a descriptive error instead of stalling the agent turn indefinitely.
-- **Abort signal forwarding** — if the user cancels or the session is torn down, the pending MCP call is aborted immediately.
-
-The default timeout is **2 minutes** (120 000 ms). Override it with:
-
-```bash
-export PICLAW_MCP_TOOL_TIMEOUT_MS=60000  # 1 minute
+```json
+{
+  "settings": {
+    "requestTimeoutMs": 120000
+  },
+  "mcpServers": {}
+}
 ```
 
-Set to `0` to disable the timeout (not recommended).
+A server-level `requestTimeoutMs` overrides the global value. If it is omitted or set to `0` or any negative value, the MCP SDK default applies.
 
-This patch remains in place because the upstream `pi-mcp-adapter` (≤ 2.9.0, audited during the Earendil 0.79.1 bump) does not forward the SDK abort signal or apply any timeout to its `callTool()` invocations.
+For compatibility with existing installations, PiClaw also keeps an outer 120-second guard around registered MCP tools. Override it with `PICLAW_MCP_TOOL_TIMEOUT_MS`, or set that variable to `0` to disable only the outer guard. The shorter of the PiClaw guard and the adapter/SDK request timeout wins, so increase both settings when requests must run for more than two minutes.
+
+The adapter also guards oversized MCP output by default and spills excess text to temporary files. Set `settings.outputGuard` to `false` to disable it, or provide `{ "maxBytes", "maxLines", "detailsMaxBytes" }` to tune the thresholds.
 
 ## Notes
 
 - `pi-mcp-adapter` does not require `mcp-cli`.
 - MCP servers are lazy by default, so they do not connect until first use.
 - `/mcp setup` provides guided onboarding for shared/compatibility MCP config.
-- `/mcp-auth <server>` currently shows OAuth token-file setup guidance for HTTP/OAuth MCP servers; it is not a full interactive browser OAuth flow.
+- Interactive sessions can authenticate with `/mcp-auth`; remote/headless sessions can use the proxy tool's `auth-start` and `auth-complete` actions.
 - Global `settings.toolPrefix` controls whether proxied/direct tool names are server-prefixed (`server`, `short`, or `none`).
 - Global `settings.directTools` can expose all imported MCP tools as first-class Pi tools; per-server `directTools` can enable all tools or only a named subset.
 - Keep large MCP servers behind the proxy unless you intentionally want `directTools`.

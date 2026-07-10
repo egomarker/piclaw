@@ -19,6 +19,7 @@ import { getChatJid } from "../../core/chat-context.js";
 import { getSessionStorageConfig } from "../../core/config.js";
 import { getSessionFileLineCount } from "../../session-rotation.js";
 import { getAutoCompactionTokenStatusForSession } from "../../agent-pool/compaction.js";
+import { computePromptCacheWaste } from "../../agent-pool/cache-stats.js";
 import { peekProviderUsage, type ProviderUsageWindow } from "../../agent-pool/provider-usage.js";
 import { getTokenUsageByModel, getTokenUsageByProvider, getTokenUsageTotals } from "../../db.js";
 import { createLogger, debugSuppressedError } from "../../utils/logger.js";
@@ -158,6 +159,20 @@ export async function handleStats(session: AgentSession, _command: StatsCommand)
     `| Tokens | in ${formatCompactNumber(tokens.input)}, out ${formatCompactNumber(tokens.output)}, cache-r ${formatCompactNumber(tokens.cacheRead)}, cache-w ${formatCompactNumber(tokens.cacheWrite)}, total ${formatCompactNumber(tokens.total)} |`,
     `| Cost | ${formatCurrency(stats.cost)} |`,
   ];
+
+  try {
+    const cacheWaste = computePromptCacheWaste(session.sessionManager.getEntries(), session.modelRegistry);
+    if (cacheWaste.missedTokens > 0) {
+      const missLabel = cacheWaste.missCount === 1 ? "1 miss" : `${cacheWaste.missCount} misses`;
+      const cost = cacheWaste.missedCost >= 0.0001 ? `${formatCurrency(cacheWaste.missedCost)}, ` : "";
+      lines.push(`| Cache re-billed | ${cost}${formatCompactNumber(cacheWaste.missedTokens)} tokens (${missLabel}) |`);
+    }
+  } catch (err) {
+    debugSuppressedError(log, "Prompt-cache statistics were unavailable while building /stats output.", err, {
+      operation: "agent_control.info.stats.prompt_cache",
+      chatJid: getChatJid(),
+    });
+  }
 
   const chatJid = getChatJid();
   try {

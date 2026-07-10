@@ -121,12 +121,13 @@ If you want managed‑identity Azure OpenAI + Foundry providers:
 - Configure:
   - `AOAI_BASE_URL` (Responses API base URL)
   - `AOAI_MODEL_ID` / `AOAI_MODEL_NAME` / `AOAI_MODEL_IDS`
+  - `AOAI_DEPLOYMENT_NAME_MAP` when Azure deployment names differ from model ids
   - `AOAI_RESOURCE` (defaults to `https://cognitiveservices.azure.com/`)
   - `FOUNDRY_BASE_URL` / `FOUNDRY_MODEL_IDS` / `FOUNDRY_MODEL_NAMES` (optional)
   - `FOUNDRY_RESOURCE` (defaults to `https://cognitiveservices.azure.com/`)
 - Restart Piclaw after installing.
 
-The extension uses **custom API names** (`azure-openai-responses-mi`, `azure-foundry-openai-completions-mi`) so it does **not** override global OpenAI handlers. See `docs/azure/azure-openai-extension.md` for design notes and pitfalls.
+The extension uses **custom API names** (`azure-openai-responses-mi`, `azure-foundry-openai-completions-mi`) so it does **not** override global OpenAI handlers. See [Azure OpenAI extension](azure-openai-extension.md) for model metadata, context budgeting, retry behavior, and troubleshooting.
 
 ## Operational notes
 
@@ -140,4 +141,4 @@ The extension uses **custom API names** (`azure-openai-responses-mi`, `azure-fou
 
 ## Known issues
 
-- `gpt-5-3-codex` can still emit `response.failed` / "Unknown error" after model switching. Phase replay and tool/ reasoning toggles reduce some errors but do not fully eliminate failures yet. See `docs/azure/azure-openai-extension.md`.
+- Azure can still emit `response.failed` with empty output after a long replay or model switch. Piclaw treats the empty failure as likely token-budget exhaustion, trims replay history proactively, retries transient failures, and reports a clear final error if the retry budget is exhausted. Reduce conversation history or switch deployments when it persists; see [Azure OpenAI extension](azure-openai-extension.md).

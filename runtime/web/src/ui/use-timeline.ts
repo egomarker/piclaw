@@ -3,6 +3,19 @@ import { getTimeline, getPostsByHashtag } from '../api.js';
 import { cacheTimelineSnapshot, getCachedTimelineSnapshot } from './app-timeline-cache.js';
 import { dedupePosts } from './timeline-utils.js';
 
+export function isTimelineRequestCurrent({
+  requestId,
+  currentRequestId,
+  mutationVersion,
+  currentMutationVersion,
+  chatToken,
+  currentChatToken,
+}) {
+  return requestId === currentRequestId
+    && mutationVersion === currentMutationVersion
+    && chatToken === currentChatToken;
+}
+
 export function mergeFreshTimelinePosts(currentPosts, freshPosts) {
   const currentArray = Array.isArray(currentPosts) ? currentPosts : [];
   const freshArray = Array.isArray(freshPosts) ? freshPosts : null;
@@ -41,6 +54,7 @@ export function useTimeline({ preserveTimelineScroll, preserveTimelineScrollTop,
   const postsRef = useRef(null);
   const chatTokenRef = useRef(0);
   const mutationVersionRef = useRef(0);
+  const refreshRequestRef = useRef(0);
 
   useEffect(() => {
     hasMoreRef.current = hasMore;
@@ -71,6 +85,7 @@ export function useTimeline({ preserveTimelineScroll, preserveTimelineScrollTop,
     hasMoreRef.current = false;
     setHasMoreState(false);
     mutationVersionRef.current = 0;
+    refreshRequestRef.current += 1;
   }, [chatJid]);
 
   const cacheCurrentSnapshot = useCallback((nextPosts, nextHasMore) => {
@@ -82,6 +97,7 @@ export function useTimeline({ preserveTimelineScroll, preserveTimelineScrollTop,
   }, [chatJid, shouldCacheCurrentView]);
 
   const setTimelineState = useCallback((nextPosts, nextHasMore) => {
+    mutationVersionRef.current += 1;
     postsRef.current = Array.isArray(nextPosts) ? nextPosts : [];
     hasMoreRef.current = Boolean(nextHasMore);
     setPostsState(postsRef.current);
@@ -91,17 +107,21 @@ export function useTimeline({ preserveTimelineScroll, preserveTimelineScrollTop,
 
   const loadPosts = useCallback(async (hashtag = null) => {
     const token = chatTokenRef.current;
+    const mutationVersion = mutationVersionRef.current;
     try {
       if (hashtag) {
         const result = await getPostsByHashtag(hashtag, 50, 0, chatJid);
-        if (token !== chatTokenRef.current) return;
-        setPostsState(result.posts);
+        if (token !== chatTokenRef.current || mutationVersion !== mutationVersionRef.current) return;
+        mutationVersionRef.current += 1;
+        postsRef.current = Array.isArray(result?.posts) ? result.posts : [];
+        hasMoreRef.current = false;
+        setPostsState(postsRef.current);
         setHasMoreState(false);
         return;
       }
 
       const applyFreshPayload = (result) => {
-        if (token !== chatTokenRef.current) return;
+        if (token !== chatTokenRef.current || mutationVersion !== mutationVersionRef.current) return;
         const nextPosts = Array.isArray(result?.posts) ? result.posts : [];
         const nextHasMore = Boolean(result?.has_more);
         setTimelineState(nextPosts, nextHasMore);
@@ -141,9 +161,18 @@ export function useTimeline({ preserveTimelineScroll, preserveTimelineScrollTop,
 
   const refreshTimeline = useCallback(async () => {
     const token = chatTokenRef.current;
+    const mutationVersion = mutationVersionRef.current;
+    const requestId = ++refreshRequestRef.current;
     try {
       const result = await getTimeline(10, null, chatJid);
-      if (token !== chatTokenRef.current) return;
+      if (!isTimelineRequestCurrent({
+        requestId,
+        currentRequestId: refreshRequestRef.current,
+        mutationVersion,
+        currentMutationVersion: mutationVersionRef.current,
+        chatToken: token,
+        currentChatToken: chatTokenRef.current,
+      })) return;
       setTimelineState(mergeFreshTimelinePosts(postsRef.current, result?.posts), Boolean(result?.has_more));
     } catch (error) {
       if (token !== chatTokenRef.current) return;
@@ -176,7 +205,6 @@ export function useTimeline({ preserveTimelineScroll, preserveTimelineScrollTop,
     try {
       const result = await getTimeline(10, oldestId, chatJid);
       if (token !== chatTokenRef.current) return;
-      mutationVersionRef.current += 1;
       if (result.posts.length > 0) {
         applyUpdate(() => {
           const nextPosts = dedupePosts([...result.posts, ...(postsRef.current || [])]);
@@ -200,11 +228,14 @@ export function useTimeline({ preserveTimelineScroll, preserveTimelineScrollTop,
   }, [loadMore]);
 
   const setPosts = useCallback((updater) => {
+    // Invalidate in-flight refreshes synchronously. State updater callbacks may
+    // run on a later render, which is too late for view switches and realtime
+    // final responses racing an already-resolved timeline request.
+    mutationVersionRef.current += 1;
     setPostsState((prev) => {
       const nextPosts = typeof updater === 'function' ? updater(prev) : updater;
       postsRef.current = nextPosts;
       if (Array.isArray(nextPosts)) {
-        mutationVersionRef.current += 1;
         // Persist even the empty snapshot: deleting the last visible row must
         // invalidate the prior cached state, otherwise a quick switch-away
         // and back within the TTL would resurrect rows we just removed.

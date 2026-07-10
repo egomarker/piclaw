@@ -24,7 +24,12 @@ import './footnote.js';
 import './tag.js';
 
 // Core engine + theme
-import { livePreviewFrozenField, livePreviewPlugin, livePreviewPointerFreeze } from './live-preview.js';
+import {
+    livePreviewFrozenField,
+    livePreviewParsingSuspendedField,
+    livePreviewPlugin,
+    livePreviewPointerFreeze,
+} from './live-preview.js';
 import { markdownPreviewTheme } from './theme.js';
 import { livePreviewCursorNav } from './cursor-nav.js';
 import { autoCloseCodeFence, extendEmphasisPair, tightListEnterKeymap } from './edit-helpers.js';
@@ -61,6 +66,7 @@ export const markdownParserExtensions = [
  */
 export const markdownLivePreview: Extension = [
     livePreviewFrozenField,
+    livePreviewParsingSuspendedField,
     livePreviewPointerFreeze,
     imageBlocks(),
     editableTables(),
@@ -73,3 +79,5 @@ export const markdownLivePreview: Extension = [
     tightListEnterKeymap,
     markdownPreviewTheme,
 ];
+
+export { forceLivePreviewRebuild, setLivePreviewParsingSuspended } from './live-preview.js';
