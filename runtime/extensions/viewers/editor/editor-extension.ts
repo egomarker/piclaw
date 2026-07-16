@@ -14,7 +14,6 @@ import {
     EditorState,
     EditorView,
     Compartment,
-    StateEffect,
     minimalSetup,
     lineNumbers,
     highlightActiveLine,
@@ -66,7 +65,6 @@ import { footnoteExtension } from './markdown/footnote.js';
 import { hashtagExtension } from './markdown/tag.js';
 import {
     getLocalBoolWithFallback,
-    isFirefoxUserAgent,
     restoreEditorViewStateBestEffort,
     setLocalBoolBestEffort,
     shouldDisableWhitespaceMarkersForPerformance,
@@ -99,8 +97,6 @@ const LARGE_DOCUMENT_LINES = 1_000;
 const LARGE_DOCUMENT_LINE_CHARS = 2_000;
 const DIRTY_RECHECK_DELAY_MS = 500;
 const CONTENT_CHANGE_DEBOUNCE_MS = 1000;
-const FIREFOX_MARKDOWN_TYPING_LANGUAGE_MIN_CHARS = 8 * 1024;
-const FIREFOX_MARKDOWN_TYPING_LANGUAGE_RESTORE_MS = 350;
 
 const shellLanguage = StreamLanguage.define(shell);
 
@@ -311,12 +307,6 @@ export class StandaloneEditorInstance implements PaneInstance {
     private dirtyRecheckTimer: number | null = null;
     private _viewStateRafPending = false;
     private contentChangeTimer: number | null = null;
-    private markdownLanguageRestoreTimer: number | null = null;
-    private markdownLanguageSuspended = false;
-    private livePreviewTypingEffects: {
-        setParsingSuspended: (suspended: boolean) => StateEffect<boolean>;
-        forceRebuild: () => StateEffect<void>;
-    } | null = null;
     private diffMode: 'saved' | null = null;
     private vimEnabledRef: { current: boolean };
 
@@ -548,6 +538,12 @@ export class StandaloneEditorInstance implements PaneInstance {
         if (this.saving || !this.view || !this.dirty) return;
 
         const value = this.view.state.doc.toString();
+        if (value === this.initialContent) {
+            this.clearDirtyRecheckTimer();
+            this.setDirty(false);
+            this.updateStatusText('All changes saved');
+            return;
+        }
         this.saving = true;
         this.updateSaveButton();
         this.updateStatusText('Saving…');
@@ -677,7 +673,6 @@ export class StandaloneEditorInstance implements PaneInstance {
                 if (update.docChanged) {
                     this.checkDirty();
                     this.scheduleContentChangeCallback();
-                    this.handleFirefoxMarkdownTypingBurst();
                 }
                 if ((update.selectionSet || update.docChanged) && this.viewStateChangeCb) {
                     if (!this._viewStateRafPending) {
@@ -784,17 +779,12 @@ export class StandaloneEditorInstance implements PaneInstance {
     /** Lazy-load and apply/remove markdown live preview extensions. */
     private async applyLivePreview(enabled: boolean): Promise<void> {
         if (!this.view || this.disposed || this.isDiffMode()) return;
-        this.restoreMarkdownLanguageAfterTyping();
         const wrapEffect = this.wrappingCompartment.reconfigure(this.largeDocumentMode ? [] : EditorView.lineWrapping);
 
         if (enabled) {
             const targetView = this.view;
             try {
-                const {
-                    forceLivePreviewRebuild,
-                    markdownLivePreview,
-                    setLivePreviewParsingSuspended,
-                } = await import('./markdown/index.js');
+                const { markdownLivePreview } = await import('./markdown/index.js');
                 if (
                     this.disposed
                     || !this.view
@@ -802,10 +792,6 @@ export class StandaloneEditorInstance implements PaneInstance {
                     || !this.livePreviewEnabled
                     || !this.isLivePreviewAvailable()
                 ) return;
-                this.livePreviewTypingEffects = {
-                    setParsingSuspended: (suspended) => setLivePreviewParsingSuspended.of(suspended),
-                    forceRebuild: () => forceLivePreviewRebuild.of(),
-                };
                 this.view.dispatch({
                     effects: [
                         this.livePreviewCompartment.reconfigure(markdownLivePreview),
@@ -824,7 +810,6 @@ export class StandaloneEditorInstance implements PaneInstance {
                     wrapEffect,
                 ],
             });
-            this.livePreviewTypingEffects = null;
         }
     }
 
@@ -846,18 +831,8 @@ export class StandaloneEditorInstance implements PaneInstance {
         return this.livePreviewEnabled && this.isLivePreviewAvailable();
     }
 
-    private getCurrentDocLength(): number {
-        return this.view?.state.doc.length ?? this.initialContentLength;
-    }
-
-    private isFirefoxBrowser(): boolean {
-        return isFirefoxUserAgent(this.ownerWindow.navigator?.userAgent || '');
-    }
-
     private isWhitespaceDisabledInCurrentMode(): boolean {
         return shouldDisableWhitespaceMarkersForPerformance({
-            userAgent: this.ownerWindow.navigator?.userAgent || '',
-            docLength: this.getCurrentDocLength(),
             largeDocumentMode: this.largeDocumentMode,
             livePreviewActive: this.isLivePreview(),
         });
@@ -868,7 +843,6 @@ export class StandaloneEditorInstance implements PaneInstance {
     }
 
     private getWhitespaceDisabledStatusText(): string {
-        if (this.isFirefoxBrowser()) return 'Whitespace is unavailable in Firefox';
         if (this.largeDocumentMode) return 'Whitespace is disabled in Large File Mode';
         if (this.isLivePreview()) return 'Whitespace is disabled in Live Preview';
         return 'Whitespace is disabled in this editor mode';
@@ -895,9 +869,8 @@ export class StandaloneEditorInstance implements PaneInstance {
 
     private updateWhitespaceControlState(): void {
         if (!this._wsBtn) return;
-        const firefox = this.isFirefoxBrowser();
         const disabled = this.isWhitespaceDisabledInCurrentMode();
-        this._wsBtn.hidden = firefox;
+        this._wsBtn.hidden = false;
         this._wsBtn.disabled = disabled;
         this._wsBtn.classList.toggle('active', !disabled && this.showWhitespace);
         this._wsBtn.title = disabled ? this.getWhitespaceDisabledStatusText() : 'Toggle whitespace (Alt+W)';
@@ -950,25 +923,23 @@ export class StandaloneEditorInstance implements PaneInstance {
             this.setDirty(this.view.state.doc.toString() !== this.initialContent);
             return;
         }
-        const docLength = this.view.state.doc.length;
-        if (docLength !== this.initialContentLength) {
+        if (this.view.state.doc.length !== this.initialContentLength) {
             this.clearDirtyRecheckTimer();
             this.setDirty(true);
             return;
         }
 
-        // Same-length edits: mark dirty immediately. Skip the expensive
-        // full-document string comparison that scheduleDirtyRecheck() does —
-        // it serializes the entire rope on every keystroke debounce.
-        // Dirty state clears on save/reload instead.
+        // Same-length edits are dirty immediately. Reconcile after typing has
+        // gone idle so an undo back to the saved document clears dirty without
+        // serializing CodeMirror's rope in the transaction hot path.
         this.setDirty(true);
+        this.scheduleDirtyRecheck();
     }
 
     private clearDirtyRecheckTimer(): void {
-        if (this.dirtyRecheckTimer !== null) {
-            this.ownerWindow.clearTimeout(this.dirtyRecheckTimer);
-            this.dirtyRecheckTimer = null;
-        }
+        if (this.dirtyRecheckTimer === null) return;
+        this.ownerWindow.clearTimeout(this.dirtyRecheckTimer);
+        this.dirtyRecheckTimer = null;
     }
 
     private scheduleDirtyRecheck(): void {
@@ -985,58 +956,6 @@ export class StandaloneEditorInstance implements PaneInstance {
             this.ownerWindow.clearTimeout(this.contentChangeTimer);
             this.contentChangeTimer = null;
         }
-    }
-
-    private clearMarkdownLanguageRestoreTimer(): void {
-        if (this.markdownLanguageRestoreTimer !== null) {
-            this.ownerWindow.clearTimeout(this.markdownLanguageRestoreTimer);
-            this.markdownLanguageRestoreTimer = null;
-        }
-    }
-
-    private shouldSuspendMarkdownLanguageWhileTyping(): boolean {
-        return this.isFirefoxBrowser()
-            && this.isMarkdownFile()
-            && !this.largeDocumentMode
-            && !this.isDiffMode()
-            && (!this.isLivePreview() || this.livePreviewTypingEffects !== null)
-            && this.getCurrentDocLength() >= FIREFOX_MARKDOWN_TYPING_LANGUAGE_MIN_CHARS;
-    }
-
-    private handleFirefoxMarkdownTypingBurst(): void {
-        if (!this.view || this.disposed || !this.shouldSuspendMarkdownLanguageWhileTyping()) return;
-        if (!this.markdownLanguageSuspended) {
-            this.markdownLanguageSuspended = true;
-            const livePreviewEffects = this.isLivePreview() ? this.livePreviewTypingEffects : null;
-            this.view.dispatch({
-                effects: livePreviewEffects
-                    ? [
-                        this.languageCompartment.reconfigure([]),
-                        livePreviewEffects.setParsingSuspended(true),
-                    ]
-                    : this.languageCompartment.reconfigure([]),
-            });
-        }
-        this.clearMarkdownLanguageRestoreTimer();
-        this.markdownLanguageRestoreTimer = this.ownerWindow.setTimeout(() => this.restoreMarkdownLanguageAfterTyping(), FIREFOX_MARKDOWN_TYPING_LANGUAGE_RESTORE_MS);
-    }
-
-    private restoreMarkdownLanguageAfterTyping(): void {
-        this.clearMarkdownLanguageRestoreTimer();
-        if (!this.markdownLanguageSuspended) return;
-        this.markdownLanguageSuspended = false;
-        if (!this.view || this.disposed || this.largeDocumentMode || this.isDiffMode()) return;
-        const languageEffect = this.languageCompartment.reconfigure(languageForPath(this.path) || []);
-        const livePreviewEffects = this.isLivePreview() ? this.livePreviewTypingEffects : null;
-        this.view.dispatch({
-            effects: livePreviewEffects
-                ? [
-                    languageEffect,
-                    livePreviewEffects.setParsingSuspended(false),
-                    livePreviewEffects.forceRebuild(),
-                ]
-                : languageEffect,
-        });
     }
 
     private scheduleContentChangeCallback(): void {
@@ -1465,7 +1384,6 @@ export class StandaloneEditorInstance implements PaneInstance {
         this.conflictMonitor?.dispose();
         this.clearDirtyRecheckTimer();
         this.clearContentChangeTimer();
-        this.clearMarkdownLanguageRestoreTimer();
         this.unbindHostListeners();
         this.destroyEditorViews();
         this.container.innerHTML = '';

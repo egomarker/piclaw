@@ -3,6 +3,11 @@ import { type SettingsData, type WatchdogPhase, type CompactionBackoff, type Set
 import { NumberStepper } from "./NumberStepper";
 import { registerSettingsPane } from "./pane-registry";
 
+function normalizeSmartCompactionMethod(value: unknown): "selective" | "pipelined" {
+  const normalized = String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return normalized === "pipelined" || normalized === "traditional_pipelined" ? "pipelined" : "selective";
+}
+
 export function CompactionSection({
   data,
   onSaveCompaction,
@@ -10,10 +15,17 @@ export function CompactionSection({
   data: SettingsData;
   onSaveCompaction: (field: string, value: unknown) => void;
 }) {
-  const timeoutSec = useSignal(data.compactionTimeoutSec ?? 0);
+  const autoCompactionEnabled = useSignal(data.autoCompactionEnabled ?? true);
+  const processingMethod = useSignal<"selective" | "pipelined">(
+    normalizeSmartCompactionMethod(data.smartCompactionMethod)
+  );
+  const remoteCompactionEnabled = useSignal(data.remoteCompactionEnabled ?? false);
+  const remoteCompactionTimeoutSec = useSignal(data.remoteCompactionTimeoutSec ?? 60);
+  const timeoutSec = useSignal(data.compactionTimeoutSec ?? 300);
   const backoffBase = useSignal(data.compactionBackoffBaseMin ?? 0);
   const backoffMax = useSignal(data.compactionBackoffMaxMin ?? 0);
-  const watchdogTimeout = useSignal(data.progressWatchdogTimeoutSec ?? 0);
+  const thresholdPercent = useSignal(data.compactionThresholdPercent ?? 80);
+  const watchdogTimeout = useSignal(data.progressWatchdogTimeoutSec ?? 300);
   const toolsInput = useSignal((data.toolResultCompactionTools ?? []).join(", "));
   const semanticSummaryMaxInputChars = useSignal(data.toolResultSemanticSummaryMaxInputChars ?? 4000);
   const semanticSummaryMaxTokens = useSignal(data.toolResultSemanticSummaryMaxTokens ?? 512);
@@ -51,10 +63,86 @@ export function CompactionSection({
 
       <h3 className="settings-panel__subsection-title">Automatic compaction</h3>
 
+      <div className="settings-panel__field settings-panel__checkbox-row">
+        <input
+          id="autoCompactionEnabled"
+          type="checkbox"
+          checked={autoCompactionEnabled.value}
+          onChange={(e) => {
+            const value = (e.target as HTMLInputElement).checked;
+            autoCompactionEnabled.value = value;
+            onSaveCompaction("autoCompactionEnabled", value);
+          }}
+        />
+        <label htmlFor="autoCompactionEnabled" className="settings-panel__label">
+          Enable automatic compaction
+        </label>
+        <span className="settings-panel__description">Piclaw-managed pre-prompt/idle compaction. The upstream agent auto-compactor stays suppressed internally.</span>
+      </div>
+
+      <div className="settings-panel__field">
+        <label className="settings-panel__label" htmlFor="smartCompactionMethod">Processing method</label>
+        <div className="settings-panel__field-content">
+          <select
+            id="smartCompactionMethod"
+            className="settings-panel__input"
+            value={processingMethod.value}
+            onChange={(event) => {
+              const value = normalizeSmartCompactionMethod((event.target as HTMLSelectElement).value);
+              processingMethod.value = value;
+              onSaveCompaction("smartCompactionMethod", value);
+            }}
+          >
+            <option value="selective">Selective</option>
+            <option value="pipelined">Pipelined</option>
+          </select>
+          <span className="settings-panel__description">
+            {processingMethod.value === "pipelined"
+              ? "Canonicalize and classify every discarded source event with an auditable coverage ledger before summarizing."
+              : "Extract the highest-value continuity excerpts and use complete progressive coverage when the bounded prompt cannot represent all source."}
+          </span>
+        </div>
+      </div>
+
+      <h3 className="settings-panel__subsection-title">Provider-native compaction</h3>
+
+      <div className="settings-panel__field settings-panel__checkbox-row">
+        <input
+          id="remoteCompactionEnabled"
+          type="checkbox"
+          checked={remoteCompactionEnabled.value}
+          onChange={(e) => {
+            const value = (e.target as HTMLInputElement).checked;
+            remoteCompactionEnabled.value = value;
+            onSaveCompaction("remoteCompactionEnabled", value);
+          }}
+        />
+        <label htmlFor="remoteCompactionEnabled" className="settings-panel__label">
+          Attempt provider-native compaction first
+        </label>
+        <span className="settings-panel__description">
+          Opt-in for explicitly supported providers only ({(data.remoteCompactionSupportedProviders ?? ["openai"]).join(", ")}). Any unsupported endpoint, timeout, malformed response, authentication limitation, or provider failure falls back atomically to {processingMethod.value}.
+        </span>
+      </div>
+
+      <div className="settings-panel__field">
+        <label className="settings-panel__label">Provider-native timeout (sec)</label>
+        <NumberStepper value={remoteCompactionTimeoutSec} min={1} max={300} step={5} onSave={(v) => onSaveCompaction("remoteCompactionTimeoutSec", v)} />
+        <span className="settings-panel__description">Deadline for the remote pre-pass before the selected local fallback runs.</span>
+      </div>
+
+      <h3 className="settings-panel__subsection-title">Execution limits</h3>
+
       <div className="settings-panel__field">
         <label className="settings-panel__label">Compaction timeout (sec)</label>
         <NumberStepper value={timeoutSec} min={1} max={3600} step={10} onSave={(v) => onSaveCompaction("compactionTimeoutSec", v)} />
         <span className="settings-panel__description">Abort a stuck pre-prompt/manual compaction instead of hanging forever.</span>
+      </div>
+
+      <div className="settings-panel__field">
+        <label className="settings-panel__label">Automatic threshold (%)</label>
+        <NumberStepper value={thresholdPercent} min={10} max={95} step={1} onSave={(v) => onSaveCompaction("compactionThresholdPercent", v)} />
+        <span className="settings-panel__description">Start automatic compaction when active context reaches this percentage of its effective window.</span>
       </div>
 
       <div className="settings-panel__field">

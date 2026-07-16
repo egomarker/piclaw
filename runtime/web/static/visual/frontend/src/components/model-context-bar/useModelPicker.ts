@@ -43,8 +43,12 @@ export function useModelPicker(): UseModelPickerResult {
           ? info.model_options.map(o => ({ id: o.label ?? o.id, context_window: o.context_window }))
           : (info.models?.length ? info.models.map(id => ({ id })) : FALLBACK_MODELS);
         onCurrentModel(info.current ?? currentModelName);
-        if (info.thinking_level) onThinkingLevel(info.thinking_level);
-        thinkingLevels.value = info.available_thinking_levels?.length ? info.available_thinking_levels : FALLBACK_THINKING_LEVELS;
+        if (info.thinking_level_label || info.thinking_level) {
+          onThinkingLevel(info.thinking_level_label ?? info.thinking_level!);
+        }
+        thinkingLevels.value = info.available_thinking_level_labels?.length
+          ? info.available_thinking_level_labels
+          : (info.available_thinking_levels?.length ? info.available_thinking_levels : FALLBACK_THINKING_LEVELS);
       } else { flashStatus("Model fetch failed"); }
     } catch { flashStatus("Model fetch failed"); }
   }, []);

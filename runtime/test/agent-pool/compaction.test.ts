@@ -4,13 +4,16 @@ import "../helpers.js";
 import {
   computeAutoCompactionTokenStatus,
   estimateContextTokensFromSession,
+  finalizeRecoveryCompactionOutcome,
   getAutoCompactionTokenStatusForSession,
   maybeAutoCompactSessionBeforePrompt,
+  noteCompactionFailure,
   noteCompactionSuccess,
   runCompactionWithTimeout,
 } from "../../src/agent-pool/compaction.js";
-import { getChatAutoCompactionWindow, initDatabase, setChatCompactionBackoff } from "../../src/db.js";
+import { getChatAutoCompactionWindow, getChatCompactionBackoff, initDatabase, setChatCompactionBackoff } from "../../src/db.js";
 import { recordCompactionCancellationReason } from "../../src/agent-pool/compaction-cancel-reason.js";
+import { getSessionActivitySnapshot } from "../../src/extensions/session-status.js";
 
 beforeEach(() => {
   initDatabase();
@@ -32,6 +35,28 @@ function makeSession(messages: any[], usageTokens?: number): any {
     },
   };
 }
+
+test("1.05M context models do not compact at 181k but do compact near the 80% threshold", () => {
+  const session = (usageTokens: number) => ({
+    getContextUsage: () => ({ tokens: usageTokens }),
+    model: { provider: "github-copilot", id: "gpt-5.6-sol", contextWindow: 1_050_000 },
+    sessionManager: {
+      getLeafId: () => `leaf-${usageTokens}`,
+      getEntries: () => [{ id: `entry-${usageTokens}` }],
+      buildSessionContext: () => ({ messages: [{ role: "user", content: "small prompt" }] }),
+    },
+  });
+
+  const low = getAutoCompactionTokenStatusForSession(session(181_080) as any, "web:1m-low")!;
+  expect(low.contextTokens).toBe(199_188);
+  expect(low.tokenStatus.autoCompactionScopeLimit).toBe(836_800);
+  expect(low.tokenStatus.tokenLimitReached).toBe(false);
+
+  const threshold = getAutoCompactionTokenStatusForSession(session(760_727) as any, "web:1m-threshold")!;
+  expect(threshold.contextTokens).toBeGreaterThanOrEqual(836_800);
+  expect(threshold.tokenStatus.autoCompactionScopeLimit).toBe(836_800);
+  expect(threshold.tokenStatus.tokenLimitReached).toBe(true);
+});
 
 test("computeAutoCompactionTokenStatus supports body-after-prefix growth plus hard ceiling", () => {
   const scoped = computeAutoCompactionTokenStatus({
@@ -64,11 +89,26 @@ test("computeAutoCompactionTokenStatus supports body-after-prefix growth plus ha
   expect(hardCeiling.tokenLimitReached).toBe(true);
 });
 
-test("computeAutoCompactionTokenStatus caps threshold tokens for huge-context models", () => {
+test("computeAutoCompactionTokenStatus scales proportionally for huge-context models by default", () => {
+  const status = computeAutoCompactionTokenStatus({
+    activeContextTokens: 750_000,
+    contextWindow: 1_000_000,
+    thresholdPercent: 75,
+    hardCeilingPercent: 95,
+    overheadTokens: 4_000,
+    scope: "total",
+  });
+
+  expect(status.autoCompactionScopeLimit).toBe(747_000);
+  expect(status.fullContextWindowLimit).toBe(946_200);
+  expect(status.tokenLimitReached).toBe(true);
+});
+
+test("computeAutoCompactionTokenStatus honors an explicitly configured absolute cap", () => {
   const status = computeAutoCompactionTokenStatus({
     activeContextTokens: 250_000,
     contextWindow: 1_000_000,
-    thresholdPercent: 60,
+    thresholdPercent: 75,
     hardCeilingPercent: 95,
     overheadTokens: 4_000,
     maxThresholdTokens: 240_000,
@@ -272,9 +312,9 @@ test("runCompactionWithTimeout preserves extension-recorded cancellation reasons
   process.env.PICLAW_COMPACTION_TIMEOUT_MS = "5000";
   try {
     const session = makeSession([]);
-    recordCompactionCancellationReason(session.sessionManager, "Smart compaction summary too short");
 
     const result = await runCompactionWithTimeout(session, "web:recorded-cancel", {}, async () => {
+      recordCompactionCancellationReason(session.sessionManager, "Smart compaction summary too short");
       throw new Error("Compaction cancelled");
     });
 
@@ -330,10 +370,80 @@ test("runCompactionWithTimeout joins concurrent compaction calls for the same ch
 
     release.resolve("first");
 
-    expect(await first).toEqual({ ok: true, result: "first" });
-    expect(await second).toEqual({ ok: true, result: "first" });
+    const ownerOutcome = await first;
+    const joinedOutcome = await second;
+    expect(ownerOutcome).toEqual({ ok: true, result: "first" });
+    expect(joinedOutcome).toEqual({ ok: true, result: "first" });
+    expect(ownerOutcome.joined).toBe(false);
+    expect(joinedOutcome.joined).toBe(true);
+    expect(ownerOutcome.generationId).toBe(joinedOutcome.generationId);
     expect(calls).toBe(1);
     expect(warnings).toEqual(["Compaction already in progress; joining existing compaction"]);
+  } finally {
+    if (previousTimeout === undefined) delete process.env.PICLAW_COMPACTION_TIMEOUT_MS;
+    else process.env.PICLAW_COMPACTION_TIMEOUT_MS = previousTimeout;
+  }
+});
+
+test("joined recovery failure finalizes backoff exactly once", async () => {
+  const previousTimeout = process.env.PICLAW_COMPACTION_TIMEOUT_MS;
+  process.env.PICLAW_COMPACTION_TIMEOUT_MS = "5000";
+  try {
+    const chatJid = "web:joined-recovery-failure";
+    const release = deferred<void>();
+    const session = makeSession([]);
+    let calls = 0;
+    const compact = async () => {
+      calls += 1;
+      await release.promise;
+      throw new Error("provider unavailable");
+    };
+
+    const first = runCompactionWithTimeout(session, chatJid, {}, compact, "recovery");
+    await Promise.resolve();
+    const second = runCompactionWithTimeout(session, chatJid, {}, compact, "recovery");
+    release.resolve();
+
+    const ownerOutcome = await first;
+    const joinedOutcome = await second;
+    finalizeRecoveryCompactionOutcome(session, chatJid, ownerOutcome);
+    finalizeRecoveryCompactionOutcome(session, chatJid, joinedOutcome);
+
+    expect(calls).toBe(1);
+    expect(ownerOutcome.joined).toBe(false);
+    expect(joinedOutcome.joined).toBe(true);
+    expect(getChatCompactionBackoff(chatJid)).toMatchObject({
+      failureCount: 1,
+      lastErrorMessage: "provider unavailable",
+    });
+  } finally {
+    if (previousTimeout === undefined) delete process.env.PICLAW_COMPACTION_TIMEOUT_MS;
+    else process.env.PICLAW_COMPACTION_TIMEOUT_MS = previousTimeout;
+  }
+});
+
+test("runCompactionWithTimeout serializes but does not join compactions from replaced sessions", async () => {
+  const previousTimeout = process.env.PICLAW_COMPACTION_TIMEOUT_MS;
+  process.env.PICLAW_COMPACTION_TIMEOUT_MS = "5000";
+  try {
+    const firstRelease = deferred<string>();
+    const firstSession = makeSession([]);
+    const replacementSession = makeSession([]);
+    let replacementCalls = 0;
+
+    const first = runCompactionWithTimeout(firstSession, "web:replaced-session", {}, async () => await firstRelease.promise);
+    await Promise.resolve();
+    const replacement = runCompactionWithTimeout(replacementSession, "web:replaced-session", {}, async () => {
+      replacementCalls += 1;
+      return "replacement";
+    });
+    await Promise.resolve();
+    expect(replacementCalls).toBe(0);
+
+    firstRelease.resolve("old-session");
+    expect(await first).toEqual({ ok: true, result: "old-session" });
+    expect(await replacement).toEqual({ ok: true, result: "replacement" });
+    expect(replacementCalls).toBe(1);
   } finally {
     if (previousTimeout === undefined) delete process.env.PICLAW_COMPACTION_TIMEOUT_MS;
     else process.env.PICLAW_COMPACTION_TIMEOUT_MS = previousTimeout;
@@ -382,6 +492,140 @@ test("runCompactionWithTimeout keeps the single-flight lock until timed-out comp
   } finally {
     if (previousTimeout === undefined) delete process.env.PICLAW_COMPACTION_TIMEOUT_MS;
     else process.env.PICLAW_COMPACTION_TIMEOUT_MS = previousTimeout;
+  }
+});
+
+test("a never-settling timed-out compaction quarantines its mutable session", async () => {
+  const previousTimeout = process.env.PICLAW_COMPACTION_TIMEOUT_MS;
+  const previousGrace = process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS;
+  process.env.PICLAW_COMPACTION_TIMEOUT_MS = "5";
+  process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS = "0";
+  try {
+    const never = deferred<void>();
+    let calls = 0;
+    const session = {
+      ...makeSession([]),
+      isCompacting: true,
+      abortCompaction: () => undefined,
+    };
+    const compact = async () => {
+      calls += 1;
+      await never.promise;
+      return "impossible";
+    };
+
+    const owner = await runCompactionWithTimeout(session, "web:timeout-quarantine", {}, compact);
+    const joined = await runCompactionWithTimeout(session, "web:timeout-quarantine", {}, compact);
+
+    expect(owner.ok).toBe(false);
+    expect(owner.joined).toBe(false);
+    expect(joined.ok).toBe(false);
+    expect(joined.joined).toBe(true);
+    expect(joined.generationId).toBe(owner.generationId);
+    expect(calls).toBe(1);
+    expect(getSessionActivitySnapshot("web:timeout-quarantine")?.isCompacting).toBe(true);
+  } finally {
+    if (previousTimeout === undefined) delete process.env.PICLAW_COMPACTION_TIMEOUT_MS;
+    else process.env.PICLAW_COMPACTION_TIMEOUT_MS = previousTimeout;
+    if (previousGrace === undefined) delete process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS;
+    else process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS = previousGrace;
+  }
+});
+
+test("a late timed-out compaction cannot clear a replacement generation's active state", async () => {
+  const previousTimeout = process.env.PICLAW_COMPACTION_TIMEOUT_MS;
+  const previousGrace = process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS;
+  process.env.PICLAW_COMPACTION_TIMEOUT_MS = "20";
+  process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS = "5";
+  const chatJid = "web:late-compaction-generation";
+
+  try {
+    const oldRelease = deferred<string>();
+    const replacementRelease = deferred<string>();
+    const oldSession = {
+      ...makeSession([]),
+      isCompacting: true,
+      abortCompaction: () => undefined,
+    };
+    const replacementSession = makeSession([]);
+
+    const first = await runCompactionWithTimeout(oldSession, chatJid, {}, async () => await oldRelease.promise);
+    expect(first.ok).toBe(false);
+
+    const replacement = runCompactionWithTimeout(
+      replacementSession,
+      chatJid,
+      {},
+      async () => await replacementRelease.promise,
+    );
+    await Promise.resolve();
+    expect(getSessionActivitySnapshot(chatJid)?.isCompacting).toBe(true);
+
+    oldRelease.resolve("late-old-result");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(getSessionActivitySnapshot(chatJid)?.isCompacting).toBe(true);
+
+    replacementRelease.resolve("replacement-result");
+    expect(await replacement).toEqual({ ok: true, result: "replacement-result" });
+    expect(getSessionActivitySnapshot(chatJid)?.isCompacting).toBe(false);
+  } finally {
+    if (previousTimeout === undefined) delete process.env.PICLAW_COMPACTION_TIMEOUT_MS;
+    else process.env.PICLAW_COMPACTION_TIMEOUT_MS = previousTimeout;
+    if (previousGrace === undefined) delete process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS;
+    else process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS = previousGrace;
+  }
+});
+
+test("late cancellation cleanup cannot consume a replacement generation's reason", async () => {
+  const previousTimeout = process.env.PICLAW_COMPACTION_TIMEOUT_MS;
+  const previousGrace = process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS;
+  process.env.PICLAW_COMPACTION_TIMEOUT_MS = "50";
+  process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS = "0";
+  const chatJid = "web:late-cancellation-reason";
+
+  try {
+    const oldRelease = deferred<void>();
+    const replacementRelease = deferred<void>();
+    const oldStarted = deferred<void>();
+    const replacementStarted = deferred<void>();
+    const session = {
+      ...makeSession([]),
+      isCompacting: true,
+      abortCompaction: () => undefined,
+    };
+    const replacementSession = {
+      ...makeSession([]),
+      isCompacting: true,
+      abortCompaction: () => undefined,
+    };
+
+    const old = runCompactionWithTimeout(session, chatJid, {}, async () => {
+      recordCompactionCancellationReason(session.sessionManager, "old generation reason");
+      oldStarted.resolve();
+      await oldRelease.promise;
+      throw new Error("Compaction cancelled");
+    });
+    await oldStarted.promise;
+    expect((await old).ok).toBe(false);
+
+    const replacement = runCompactionWithTimeout(replacementSession, chatJid, {}, async () => {
+      recordCompactionCancellationReason(replacementSession.sessionManager, "replacement generation reason");
+      replacementStarted.resolve();
+      await replacementRelease.promise;
+      throw new Error("Compaction cancelled");
+    });
+    await replacementStarted.promise;
+
+    oldRelease.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    replacementRelease.resolve();
+
+    expect(await replacement).toEqual({ ok: false, errorMessage: "replacement generation reason" });
+  } finally {
+    if (previousTimeout === undefined) delete process.env.PICLAW_COMPACTION_TIMEOUT_MS;
+    else process.env.PICLAW_COMPACTION_TIMEOUT_MS = previousTimeout;
+    if (previousGrace === undefined) delete process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS;
+    else process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS = previousGrace;
   }
 });
 
@@ -584,7 +828,25 @@ test("maybeAutoCompactSessionBeforePrompt emits repeated-compaction warning at t
   }
 });
 
-test("maybeAutoCompactSessionBeforePrompt suppresses retry after an expired non-cancellation failure", async () => {
+test("noteCompactionFailure starts a fresh failure series after stale persisted state", () => {
+  const chatJid = `web:stale-compaction-failure-${Date.now()}`;
+  setChatCompactionBackoff(chatJid, {
+    chatJid,
+    failureCount: 9,
+    lastFailedAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
+    backoffUntil: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+    lastErrorMessage: "Historical failure",
+  });
+
+  noteCompactionFailure(chatJid, "Fresh failure");
+
+  const backoff = getChatCompactionBackoff(chatJid);
+  expect(backoff?.failureCount).toBe(1);
+  expect(backoff?.lastErrorMessage).toBe("Fresh failure");
+  expect(Date.parse(backoff?.backoffUntil || "")).toBeGreaterThan(Date.now());
+});
+
+test("maybeAutoCompactSessionBeforePrompt retries after non-cancellation backoff expires", async () => {
   const previousThreshold = process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT;
   process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT = "75";
   try {
@@ -620,13 +882,11 @@ test("maybeAutoCompactSessionBeforePrompt suppresses retry after an expired non-
       (event) => events.push(event),
     );
 
-    expect(compactCalls).toBe(0);
-    expect(warnings).toContain("Pre-prompt auto-compaction suppressed for chat after recent failures");
-    expect(events).toContainEqual(expect.objectContaining({
-      type: "compaction_suppressed",
-      reason: "previous_failure",
-      errorMessage: "Compaction timed out after 180s",
-    }));
+    expect(compactCalls).toBe(1);
+    expect(warnings).not.toContain("Pre-prompt auto-compaction suppressed for chat after recent failures");
+    expect(events).toContainEqual(expect.objectContaining({ type: "compaction_start" }));
+    expect(events).toContainEqual(expect.objectContaining({ type: "compaction_end", aborted: false }));
+    expect(getChatCompactionBackoff(chatJid)).toBeNull();
   } finally {
     if (previousThreshold === undefined) delete process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT;
     else process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT = previousThreshold;

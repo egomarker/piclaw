@@ -84,7 +84,17 @@ describe("github-copilot dynamic models extension", () => {
     ];
 
     const merged = mergeGitHubCopilotDynamicModels(existing, [
-      makeLiveModel("gpt-5.6"),
+      makeLiveModel("gpt-5.6", {
+        capabilities: {
+          family: "gpt-5.6",
+          limits: { max_context_window_tokens: 1050000, max_output_tokens: 128000, vision: { max_prompt_images: 1 } },
+          supports: { reasoning_effort: ["none", "low", "medium", "high", "xhigh", "max"] },
+        },
+      }),
+      makeLiveModel("claude-opus-4.6", {
+        supported_endpoints: ["/v1/messages"],
+        capabilities: { limits: { max_context_window_tokens: 200000, max_output_tokens: 64000, vision: {} }, supports: {} },
+      }),
       makeLiveModel("claude-opus-4.7-high", {
         supported_endpoints: ["/v1/messages", "/chat/completions"],
         capabilities: { limits: { max_context_window_tokens: 200000, max_output_tokens: 64000, vision: {} }, supports: {} },
@@ -104,6 +114,7 @@ describe("github-copilot dynamic models extension", () => {
     expect(ids).toContain("gpt-5.5");
     expect(ids).toContain("gpt-4.1");
     expect(ids).toContain("gemini-3.5-flash");
+    expect(ids).toContain("claude-opus-4.6");
     expect(ids).toContain("claude-opus-4.7-high");
     expect(ids).toContain("claude-fable-5-xhigh");
     expect(ids).toContain("mai-code-1-flash-internal");
@@ -115,6 +126,10 @@ describe("github-copilot dynamic models extension", () => {
     expect(gpt56.reasoning).toBe(true);
     expect(gpt56.contextWindow).toBe(1050000);
     expect(gpt56.maxTokens).toBe(128000);
+    expect(gpt56.thinkingLevelMap).toMatchObject({ xhigh: "xhigh", max: "max" });
+
+    const claude46 = merged.find((model) => model.id === "claude-opus-4.6")!;
+    expect(claude46.thinkingLevelMap).toEqual({ max: "max" });
 
     const claude = merged.find((model) => model.id === "claude-opus-4.7-high")!;
     expect(claude.api).toBe("anthropic-messages");
@@ -126,7 +141,7 @@ describe("github-copilot dynamic models extension", () => {
     expect(fable.api).toBe("anthropic-messages");
     expect(fable.reasoning).toBe(true);
     expect(fable.compat).toEqual({ forceAdaptiveThinking: true });
-    expect(fable.thinkingLevelMap).toEqual({ xhigh: "xhigh" });
+    expect(fable.thinkingLevelMap).toEqual({ off: null, minimal: null, low: null, medium: null, high: null, xhigh: "xhigh", max: null });
     expect(fable.contextWindow).toBe(200000);
     expect(fable.maxTokens).toBe(4096);
 

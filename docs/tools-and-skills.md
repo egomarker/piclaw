@@ -586,7 +586,7 @@ Direct commands (no LLM round-trip):
 | `/stats` | Show session token and cost stats |
 | `/context` (alias `/ctx`) | Show context window usage |
 | `/last` | Show last assistant response |
-| `/compact [instructions]` | Manually compact the session |
+| `/compact [instructions]` | Manually compact the session, attach a Markdown report, and refresh context usage immediately |
 | `/auto-compact on\|off` | Toggle auto-compaction |
 | `/auto-retry on\|off` | Toggle auto-retry |
 | `/abort` | Abort the current response |
@@ -658,7 +658,8 @@ Adaptive Card and side-conversation helpers are intentionally explicit web-facin
 - `/btw` is currently a thin consumer of the side-prompt substrate: it streams a side answer in the web panel, reseeds from current main-chat context, and only injects back into the main chat when explicitly requested.
 - `/btw` currently reuses the chat's model/thinking context but is still prompt-only rather than a full side tool-using agent loop.
 - `/theme`, `/tint`, and `/meters` are web-local UI commands handled without an LLM round-trip.
-- `/context` reports current context-window usage; the compose-footer indicator is refreshed on reconnect and when returning to the tab so the compaction affordance stays current.
+- `/context` reports current context-window usage; the compose-footer indicator is refreshed on reconnect, when returning to the tab, and immediately after successful `/compact`. If the post-compaction rebuilt-session estimate is temporarily unavailable, Piclaw uses the report's safety-adjusted estimate and retains it as the endpoint fallback until live usage is available.
+- `/compact` attaches a full Markdown report. Provider-native reports show only Piclaw's explicitly marked readable continuity checkpoint when one exists; encrypted canonical state and arbitrary provider output are never included.
 
 ### Reading `/stats`
 

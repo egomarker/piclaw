@@ -13,8 +13,9 @@ import {
   TOPIC_SHIFT_CONTEXT_AFTER,
   TOPIC_SHIFT_CONTEXT_BEFORE,
 } from "./config.js";
+import { checkPiclawCompactionBudget } from "../../agent-pool/compaction-trigger-context.js";
 import { compressFilePaths, fileListsFromOps } from "./files.js";
-import { buildPreview, extractText, isRealUserMessage, selectRecentContextBackwards, serializeMessage } from "./messages.js";
+import { buildPreview, extractText, isCompactionSummaryUserMessage, isRealUserMessage, selectRecentContextBackwards, serializeMessage } from "./messages.js";
 
 function detectSessionType(
   messages: Message[],
@@ -27,6 +28,7 @@ function detectSessionType(
   let errorMentions = 0;
 
   for (let i = 0; i < messages.length; i++) {
+    checkPiclawCompactionBudget("smart_compaction.prompt.detect_session_type");
     const msg = messages[i];
     if (msg.role === "assistant") {
       for (const block of msg.content as any[]) {
@@ -59,6 +61,7 @@ function detectSessionType(
 function findUserComplaints(messages: Message[], humanUserIndexes?: Set<number>): number[] {
   const out: number[] = [];
   for (let i = 0; i < messages.length; i++) {
+    checkPiclawCompactionBudget("smart_compaction.prompt.find_complaints");
     if (!isRealUserMessage(messages[i], i, humanUserIndexes)) continue;
     const text = extractText(messages[i].content).toLowerCase();
     if (
@@ -78,6 +81,7 @@ function findFirstUserRequest(
   humanUserIndexes?: Set<number>,
 ): { index: number; text: string } | null {
   for (let i = 0; i < messages.length; i++) {
+    checkPiclawCompactionBudget("smart_compaction.prompt.find_first_request");
     if (!isRealUserMessage(messages[i], i, humanUserIndexes)) continue;
     const text = extractText(messages[i].content).trim();
     return { index: i, text };
@@ -91,6 +95,7 @@ function findLatestUserRequest(
   humanUserIndexes?: Set<number>,
 ): { index: number; text: string } | null {
   for (let i = messages.length - 1; i >= 0; i--) {
+    checkPiclawCompactionBudget("smart_compaction.prompt.find_latest_request");
     if (!isRealUserMessage(messages[i], i, humanUserIndexes)) continue;
     const text = extractText(messages[i].content).trim();
     return { index: i, text };
@@ -106,6 +111,7 @@ function findRecentUserTurns(
 ): { index: number; text: string }[] {
   const turns: { index: number; text: string }[] = [];
   for (let i = messages.length - 1; i >= 0 && turns.length < maxTurns; i--) {
+    checkPiclawCompactionBudget("smart_compaction.prompt.find_recent_user_turns");
     if (!isRealUserMessage(messages[i], i, humanUserIndexes)) continue;
     const text = extractText(messages[i].content).trim();
     turns.push({ index: i, text });
@@ -176,6 +182,7 @@ function tokenizeTopicText(text: string): Set<string> {
 function findUserTurns(messages: Message[], humanUserIndexes?: Set<number>): UserTurn[] {
   const turns: UserTurn[] = [];
   for (let i = 0; i < messages.length; i++) {
+    checkPiclawCompactionBudget("smart_compaction.prompt.find_user_turns");
     if (!isRealUserMessage(messages[i], i, humanUserIndexes)) continue;
     const text = extractText(messages[i].content).trim();
     if (!text || text.startsWith("/")) continue;
@@ -207,7 +214,7 @@ export function detectRecentTopicShift(messages: Message[], humanUserIndexes?: S
       reasons.push(`strong pivot cue: "${strongMatch[0]}"`);
     }
 
-    // Compute lexical overlap (needed by both weak-cue and standalone-overlap checks).
+    // Compute lexical overlap to disambiguate weak pivot wording.
     const overlap = computeTokenOverlap(current.tokens, previous.tokens);
     const bothSubstantial = current.tokens.size >= 4 && previous.tokens.size >= 4;
 
@@ -222,12 +229,10 @@ export function detectRecentTopicShift(messages: Message[], humanUserIndexes?: S
       }
     }
 
-    // Standalone low overlap (no cue at all) fires only at an even stricter
-    // threshold: truly disjoint vocabulary (Jaccard ~0) is a strong signal on
-    // its own, but natural task-continuation variation can easily hit 0.06.
-    if (reasons.length === 0 && bothSubstantial && overlap === 0) {
-      reasons.push(`zero lexical overlap between substantial turns`);
-    }
+    // Lexical disjointness alone is not intent evidence. Sequential workflow
+    // instructions (for example "run tests" followed by "commit the changes")
+    // often share no words while remaining the same task. Require an explicit
+    // strong cue or a weak cue corroborated by low overlap.
 
     if (reasons.length > 0) {
       return { current, previous, reasons, overlap };
@@ -243,6 +248,7 @@ function findKeyDecisionMessages(
 ): number[] {
   const indices: number[] = [];
   for (let i = 0; i < messages.length; i++) {
+    checkPiclawCompactionBudget("smart_compaction.prompt.find_decisions");
     if (exclude.has(i)) continue;
     if (messages[i].role !== "assistant") continue;
     const textBlocks = (messages[i].content as any[]).filter(
@@ -329,13 +335,20 @@ interface SelectivePromptInput {
   turnPrefixSummary?: string;
 }
 
-export function buildSelectivePrompt(
+export interface SelectivePromptBuildResult {
+  text: string;
+  completeSourceCoverage: boolean;
+  omittedSourceMessageCount: number;
+  truncatedContinuitySectionCount: number;
+}
+
+export function buildSelectivePromptWithCoverage(
   allMessages: Message[],
   input: SelectivePromptInput,
   customInstructions?: string,
   topicShift?: TopicShiftSignal | null,
   humanUserIndexes?: Set<number>,
-): string {
+): SelectivePromptBuildResult {
   const total = allMessages.length;
   const sessionType = detectSessionType(allMessages, humanUserIndexes);
   const firstRequest = findFirstUserRequest(allMessages, humanUserIndexes);
@@ -349,6 +362,12 @@ export function buildSelectivePrompt(
   const turnPrefixSummary = capPromptContext(input.turnPrefixSummary, 4_000, "split-turn prefix");
   const previousSummary = capPromptContext(input.previousSummary, 12_000, "previous summary");
   const boundedCustomInstructions = capPromptContext(customInstructions, 2_000, "user compaction note");
+  // Previous summaries are the only surviving representation of already
+  // compacted history, and custom instructions can carry operator constraints.
+  // A selective preview may be bounded, but it must not claim complete source
+  // coverage when either source-bearing section was truncated.
+  const truncatedContinuitySectionCount = Number((input.previousSummary?.trim().length ?? 0) > 12_000)
+    + Number((customInstructions?.trim().length ?? 0) > 2_000);
 
   // A1 requirement: always preserve enough context to distinguish the newest
   // active topic from older background material.
@@ -499,10 +518,12 @@ export function buildSelectivePrompt(
       : `Summarize these conversation excerpts into a structured context checkpoint. Focus on what matters for continuing the work.`;
 
   const sorted = [...included].sort((a, b) => a - b);
+  const representedSourceIndexes = new Set<number>();
   let lastIdx = -1;
   let chars = sec.join("\n").length + instruction.length + 300;
 
   for (const idx of sorted) {
+    checkPiclawCompactionBudget("smart_compaction.prompt.render_excerpts");
     const gap = lastIdx >= 0 && idx > lastIdx + 1
       ? `\n--- [${idx - lastIdx - 1} messages omitted] ---\n`
       : "";
@@ -514,6 +535,10 @@ export function buildSelectivePrompt(
       break;
     }
     if (gap) sec.push(gap);
+    // An empty override means a matched tool result is represented by the
+    // preceding compact assistant batch. Count it as covered even though it
+    // deliberately emits no duplicate line.
+    representedSourceIndexes.add(idx);
     if (line) {
       sec.push(line);
       chars += addition.length;
@@ -521,7 +546,36 @@ export function buildSelectivePrompt(
     lastIdx = idx;
   }
 
-  return sec.join("\n") + `\n\n---\n\n${instruction}`;
+  const sourceBearingIndexes = allMessages
+    .map((message, index) => ({ message, index }))
+    .filter(({ message, index }) => !isCompactionSummaryUserMessage(message) && !!serializeMessage(message, index, humanUserIndexes))
+    .map(({ index }) => index);
+  const omittedSourceMessageCount = sourceBearingIndexes
+    .filter((index) => !representedSourceIndexes.has(index))
+    .length;
+  return {
+    text: sec.join("\n") + `\n\n---\n\n${instruction}`,
+    completeSourceCoverage: omittedSourceMessageCount === 0 && truncatedContinuitySectionCount === 0,
+    omittedSourceMessageCount,
+    truncatedContinuitySectionCount,
+  };
+}
+
+/** Compatibility wrapper for callers that only need the prompt text. */
+export function buildSelectivePrompt(
+  allMessages: Message[],
+  input: SelectivePromptInput,
+  customInstructions?: string,
+  topicShift?: TopicShiftSignal | null,
+  humanUserIndexes?: Set<number>,
+): string {
+  return buildSelectivePromptWithCoverage(
+    allMessages,
+    input,
+    customInstructions,
+    topicShift,
+    humanUserIndexes,
+  ).text;
 }
 
 // ---------------------------------------------------------------------------

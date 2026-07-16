@@ -85,6 +85,13 @@
 .timeline-sentinel {
     width: 100%;
     height: 1px;
+    flex: 0 0 1px;
+    pointer-events: none;
+}
+
+.timeline-virtual-spacer {
+    width: 100%;
+    flex: 0 0 auto;
     pointer-events: none;
 }
 
@@ -114,6 +121,19 @@
     border-radius: var(--chat-surface-radius);
     animation: post-entry-fade 0.24s ease-out backwards;
     transition: background-color var(--ui-transition-fast), opacity 0.18s ease, transform 0.18s ease;
+}
+
+/*
+ * Native viewport virtualization: retain the full DOM for browser search,
+ * selection, thread navigation, and scroll anchoring while letting the engine
+ * skip layout/paint for historical rows far outside the timeline viewport.
+ * Unsupported engines ignore both declarations and keep the existing layout.
+ */
+@supports (content-visibility: auto) {
+    .timeline-content > .post {
+        content-visibility: auto;
+        contain-intrinsic-size: auto 120px;
+    }
 }
 
 .post.removing {

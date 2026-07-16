@@ -3,12 +3,40 @@ import { expect, test } from "bun:test";
 import {
   decideAutomaticRecovery,
   DEFAULT_AUTOMATIC_RECOVERY_CONFIG,
+  getAutomaticRecoveryConfig,
   isContextPressureFailure,
   isLengthStopFailure,
   isNonRecoverableFailure,
   isProviderAuthConfigFailure,
   isTransientFailure,
 } from "../../src/agent-pool/automatic-recovery.js";
+
+test("keeps turn auto-recovery enabled when generic retry is disabled", () => {
+  const previous = process.env.PICLAW_TURN_AUTO_RECOVERY_ENABLED;
+  delete process.env.PICLAW_TURN_AUTO_RECOVERY_ENABLED;
+  try {
+    const config = getAutomaticRecoveryConfig({ enabled: false, maxRetries: 7, baseDelayMs: 1234, maxDelayMs: 5678 });
+    expect(config.enabled).toBe(true);
+    expect(config.maxAttempts).toBe(7);
+    expect(config.baseDelayMs).toBe(1234);
+    expect(config.maxDelayMs).toBe(5678);
+  } finally {
+    if (previous === undefined) delete process.env.PICLAW_TURN_AUTO_RECOVERY_ENABLED;
+    else process.env.PICLAW_TURN_AUTO_RECOVERY_ENABLED = previous;
+  }
+});
+
+test("honors explicit turn auto-recovery env disable", () => {
+  const previous = process.env.PICLAW_TURN_AUTO_RECOVERY_ENABLED;
+  process.env.PICLAW_TURN_AUTO_RECOVERY_ENABLED = "0";
+  try {
+    const config = getAutomaticRecoveryConfig({ enabled: true, maxRetries: 7, baseDelayMs: 1234, maxDelayMs: 5678 });
+    expect(config.enabled).toBe(false);
+  } finally {
+    if (previous === undefined) delete process.env.PICLAW_TURN_AUTO_RECOVERY_ENABLED;
+    else process.env.PICLAW_TURN_AUTO_RECOVERY_ENABLED = previous;
+  }
+});
 
 test("classifies context-limit failures as compact-then-retry", () => {
   const decision = decideAutomaticRecovery({
@@ -50,6 +78,7 @@ test("treats timeout-before-finalization during compaction intent as compact-the
 test("classifies provider auth/config failures as terminal auth_config", () => {
   expect(isProviderAuthConfigFailure("No API key for provider: openai-codex")).toBe(true);
   expect(isProviderAuthConfigFailure("Token refresh failed: 401")).toBe(true);
+  expect(isProviderAuthConfigFailure("provider.getApiKey is not a function")).toBe(true);
 
   const noKeyDecision = decideAutomaticRecovery({
     config: DEFAULT_AUTOMATIC_RECOVERY_CONFIG,
@@ -80,6 +109,23 @@ test("classifies provider auth/config failures as terminal auth_config", () => {
   expect(refreshDecision.recover).toBe(false);
   expect(refreshDecision.classifier).toBe("auth_config");
   expect(refreshDecision.strategy).toBeNull();
+
+  const compactionAuthDecision = decideAutomaticRecovery({
+    config: DEFAULT_AUTOMATIC_RECOVERY_CONFIG,
+    errorText: "provider.getApiKey is not a function",
+    recoveryAttemptsUsed: 0,
+    elapsedMs: 1000,
+    snapshot: {
+      hadToolActivity: false,
+      hadPartialOutput: false,
+      compactionErrorMessage: "provider.getApiKey is not a function",
+      sawCompactionIntent: true,
+    },
+  });
+
+  expect(compactionAuthDecision.recover).toBe(false);
+  expect(compactionAuthDecision.classifier).toBe("auth_config");
+  expect(compactionAuthDecision.strategy).toBeNull();
 });
 
 test("classifies output-length stops as terminal length_stop without confusing context length", () => {
@@ -100,6 +146,24 @@ test("classifies output-length stops as terminal length_stop without confusing c
   expect(decision.recover).toBe(false);
   expect(decision.classifier).toBe("length_stop");
   expect(decision.strategy).toBeNull();
+});
+
+test("retries unknown failures without compaction when there is no context pressure", () => {
+  const decision = decideAutomaticRecovery({
+    config: DEFAULT_AUTOMATIC_RECOVERY_CONFIG,
+    errorText: "unexpected provider disconnect state",
+    recoveryAttemptsUsed: 0,
+    elapsedMs: 1000,
+    snapshot: {
+      hadToolActivity: false,
+      hadPartialOutput: false,
+      sawCompactionIntent: false,
+    },
+  });
+
+  expect(decision.recover).toBe(true);
+  expect(decision.classifier).toBe("unknown");
+  expect(decision.strategy).toBe("retry");
 });
 
 test("classifies invalid-request and aborted failures as non-recoverable", () => {
@@ -174,7 +238,7 @@ test("allows compaction recovery despite tool activity when error is context-pre
   expect(decision.strategy).toBe("compact_then_retry");
 });
 
-test("treats tool-use budget exhaustion as compact-then-retry tool-history pressure", () => {
+test("treats tool-use budget exhaustion as terminal tool-history pressure without compaction", () => {
   const decision = decideAutomaticRecovery({
     config: DEFAULT_AUTOMATIC_RECOVERY_CONFIG,
     errorText: "Tool-use budget exceeded before finalization (65/64 tool steps).",
@@ -189,8 +253,30 @@ test("treats tool-use budget exhaustion as compact-then-retry tool-history press
     },
   });
 
-  expect(decision.recover).toBe(true);
+  expect(isContextPressureFailure("Tool-use budget exceeded before finalization (65/64 tool steps).")).toBe(false);
+  expect(decision.recover).toBe(false);
   expect(decision.classifier).toBe("tool_history_pressure");
+  expect(decision.strategy).toBeNull();
+});
+
+test("compacts tool-budget exhaustion only when model-aware context pressure was independently observed", () => {
+  const decision = decideAutomaticRecovery({
+    config: DEFAULT_AUTOMATIC_RECOVERY_CONFIG,
+    errorText: "Tool-use budget exceeded before finalization (48/48 tool steps).",
+    recoveryAttemptsUsed: 0,
+    elapsedMs: 1000,
+    snapshot: {
+      hadToolActivity: true,
+      hadPartialOutput: false,
+      toolUseBudgetExceeded: true,
+      assistantToolUseMessageCount: 1,
+      toolExecutionCount: 48,
+      sawCompactionIntent: true,
+    },
+  });
+
+  expect(decision.recover).toBe(true);
+  expect(decision.classifier).toBe("context_pressure");
   expect(decision.strategy).toBe("compact_then_retry");
 });
 

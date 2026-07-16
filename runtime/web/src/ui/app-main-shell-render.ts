@@ -41,6 +41,7 @@ export function scrollToPostedTimelineMessage(options: {
   getElementById?: (id: string) => HTMLElement | null;
   scheduleRaf?: (callback: () => void) => void;
   scheduleTimeout?: (callback: () => void, delayMs: number) => void;
+  requestReveal?: (id: string | number) => void;
   maxAttempts?: number;
 }): void {
   const {
@@ -49,6 +50,11 @@ export function scrollToPostedTimelineMessage(options: {
     getElementById = (value) => document.getElementById(value),
     scheduleRaf = (callback) => requestAnimationFrame(callback),
     scheduleTimeout = (callback, delayMs) => { setTimeout(callback, delayMs); },
+    requestReveal = (value) => {
+      if (typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('piclaw:reveal-timeline-post', { detail: { id: value } }));
+      }
+    },
     maxAttempts = 12,
   } = options;
 
@@ -73,6 +79,7 @@ export function scrollToPostedTimelineMessage(options: {
     });
   };
 
+  requestReveal(id);
   tryScroll(maxAttempts);
 }
 

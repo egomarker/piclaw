@@ -24,6 +24,7 @@ import {
     persistHighlight,
     persistAside,
     removeAnnotationAtIndex,
+    subscribePostSelectionChanges,
     type PostHighlight,
     type PostAside,
 } from './post-highlights.js';
@@ -1615,11 +1616,11 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
         const onPointerUp = () => {
             setTimeout(onSelectionChange, 50);
         };
-        document.addEventListener('selectionchange', onSelectionChange);
+        const unsubscribeSelectionChanges = subscribePostSelectionChanges(el, onSelectionChange);
         el.addEventListener('pointerup', onPointerUp);
         el.addEventListener('touchend', onPointerUp);
         return () => {
-            document.removeEventListener('selectionchange', onSelectionChange);
+            unsubscribeSelectionChanges();
             el.removeEventListener('pointerup', onPointerUp);
             el.removeEventListener('touchend', onPointerUp);
             if (dismissTimer) clearTimeout(dismissTimer);

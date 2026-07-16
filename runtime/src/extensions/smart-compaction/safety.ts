@@ -108,10 +108,20 @@ export function getCompactionModelContextWindow(model: unknown): number {
   return getModelContextWindow(model) ?? PROGRESSIVE_FALLBACK_CONTEXT_WINDOW;
 }
 
+/** Legacy public sizing helper retained for facade API compatibility. */
 export function getCompactionRetryPromptTokenTarget(model: unknown, fraction = 0.65): number {
   const contextWindow = getCompactionModelContextWindow(model);
   const effectiveWindow = getEffectiveContextWindow(contextWindow, getCompactionRequestOverheadTokens());
   return Math.max(MIN_COMPACTION_OUTPUT_TOKENS, Math.floor(effectiveWindow * fraction));
+}
+
+/** Normalize the operator reserve into the output target used by every path. */
+export function getCompactionOutputTokenTarget(reserveTokens: number): number {
+  const requested = Math.floor(Math.max(0, Number(reserveTokens) || 0) * 0.8);
+  return Math.max(
+    MIN_COMPACTION_OUTPUT_TOKENS,
+    Math.min(requested, MAX_COMPACTION_OUTPUT_TOKENS),
+  );
 }
 
 export function getSafeCompactionMaxTokens(model: unknown, promptText: string, requestedMaxTokens: number): {
@@ -160,7 +170,8 @@ export function getCompactionReasoningEffort(
     .sort((a, b) => compactionReasoningRank(b) - compactionReasoningRank(a));
   if (supportedAtOrBelowTarget[0]) return supportedAtOrBelowTarget[0];
 
-  return supported
-    .slice()
-    .sort((a, b) => compactionReasoningRank(a) - compactionReasoningRank(b))[0];
+  // If every explicitly supported effort is above the context/config cap, omit
+  // reasoning entirely. Falling upward to the model's lowest explicit level can
+  // burn the tiny reserve on small-context compaction calls.
+  return undefined;
 }

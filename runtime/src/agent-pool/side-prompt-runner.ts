@@ -80,7 +80,7 @@ export async function runSidePrompt(
         apiKey: auth.apiKey,
         headers: auth.headers,
         env: auth.env,
-        reasoning: toSideReasoning((session as AgentSession & { thinkingLevel?: unknown }).thinkingLevel),
+        reasoning: toSideReasoning((session as AgentSession & { thinkingLevel?: unknown }).thinkingLevel) as NonNullable<Parameters<typeof streamSimple>[2]>["reasoning"],
         signal: options.signal,
       },
     );

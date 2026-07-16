@@ -54,13 +54,13 @@ export function estimateSmartCompactionCompletionPercent(phase: string): number 
     case "completed_noop":
     case "completed_noop_adjusted": return 100;
     case "noop_unsafe": return 12;
-    case "builtin_fallback": return 5;
     case "extracting": return 10;
     case "summarizing_prompt": return 20;
     case "generating_summary": return 45;
     case "generating_summary_streaming": return 65;
-    case "generating_summary_trimmed_retry": return 55;
-    case "completed_selective": return 100;
+    case "generating_summary_repair": return 55;
+    case "completed_selective":
+    case "completed_pipelined": return 100;
     case "progressive_iterative": return 25;
     case "progressive_chunking": return 28;
     case "progressive_chunk": return 45;
@@ -71,7 +71,6 @@ export function estimateSmartCompactionCompletionPercent(phase: string): number 
     case "merge_final": return 92;
     case "completed_progressive":
     case "completed_progressive_partial": return 100;
-    case "progressive_builtin_fallback": return 20;
     case "compaction_done": return 100;
     default: return 50;
   }
@@ -96,7 +95,7 @@ export function formatProgressRange(start: number, end: number, total: number): 
 export function formatSmartCompactionStatus(message: string, completionPercent?: number | null): string {
   const normalizedPercent = normalizeCompletionPercent(completionPercent);
   if (normalizedPercent == null) return message;
-  const body = message.replace(/^Smart compaction:\s*/, "");
+  const body = message.replace(/^(?:(?:Manual|Idle|Target-aware) smart compaction|Recovery compaction|Smart compaction):\s*/i, "");
   return `Smart compaction: ${normalizedPercent}% — ${body}`;
 }
 

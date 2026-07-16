@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createStreamingEventHandler } from "../../../../src/channels/web/sse/agent-events.js";
 
-function makeHandler() {
+function makeHandler(formatThinkingLevel?: (level: string) => string) {
   const statuses: Record<string, unknown>[] = [];
   const emitter = {
     status: vi.fn((payload: Record<string, unknown>) => statuses.push(payload)),
@@ -22,9 +22,23 @@ function makeHandler() {
     agentId: "agent-1",
     threadId: "thread-1",
     turnId: "turn-1",
+    formatThinkingLevel,
   });
   return { handler, statuses, emitter };
 }
+
+describe("web SSE thinking level events", () => {
+  it("reports legacy raw levels with their display labels", () => {
+    const { handler, emitter } = makeHandler((level) => level === "xhigh" ? "max" : level);
+
+    handler({ type: "thinking_level_changed", level: "xhigh" } as any);
+
+    expect(emitter.modelChanged).toHaveBeenCalledWith(expect.objectContaining({
+      thinking_level: "xhigh",
+      thinking_level_label: "max",
+    }));
+  });
+});
 
 describe("web SSE provider retry events", () => {
   it("includes the selected model in rate-limit retry status", () => {

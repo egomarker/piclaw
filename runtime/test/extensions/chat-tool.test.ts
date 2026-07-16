@@ -124,6 +124,33 @@ describe("chat tool extension", () => {
     expect(result.content[0].text).toContain("queued as a follow-up");
   });
 
+  test("steers immediately when mode is omitted", async () => {
+    const { tool, chatToolModule } = await getTool();
+    const calls: Array<Record<string, unknown>> = [];
+    chatToolModule.setChatToolRelayFn(async (request) => {
+      calls.push(request as Record<string, unknown>);
+      return {
+        status: "ok",
+        relayed: true,
+        source_chat_jid: request.source_chat_jid,
+        target_chat_jid: "web:target",
+        target_agent_name: "research",
+      };
+    });
+
+    await withChatContext(chatJid, "web", () => tool.execute("x", {
+      target_agent_name: "@research",
+      content: "Please act on this now.",
+    }));
+
+    expect(calls).toEqual([{
+      source_chat_jid: chatJid,
+      target_agent_name: "research",
+      content: "Please act on this now.",
+      mode: "steer",
+    }]);
+  });
+
   test("rejects ambiguous target selectors", async () => {
     const { tool, chatToolModule } = await getTool();
     chatToolModule.setChatToolRelayFn(async () => {

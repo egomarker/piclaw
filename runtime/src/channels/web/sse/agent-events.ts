@@ -225,6 +225,7 @@ export interface StreamingEventHandlerOptions {
   previewMaxCharsPerLine?: number;
   includeThoughtFull?: () => boolean;
   includeDraftFull?: () => boolean;
+  formatThinkingLevel?: (level: string) => string;
   onThoughtBuffer?: (text: string, totalLines: number) => void;
   onThinkingComplete?: (text: string, totalLines: number, durationMs: number) => void;
   onDraftBuffer?: (text: string, totalLines: number) => void;
@@ -324,11 +325,15 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
       const record = event as { level?: unknown; previousLevel?: unknown; previous_level?: unknown };
       const level = readWidgetString(record.level);
       if (level) {
+        const previousLevel = readWidgetString(record.previousLevel, record.previous_level);
         options.emitter.modelChanged({
           ...base,
           thinking_level: level,
-          thinking_level_label: level,
-          previous_thinking_level: readWidgetString(record.previousLevel, record.previous_level),
+          thinking_level_label: options.formatThinkingLevel?.(level) ?? level,
+          previous_thinking_level: previousLevel,
+          previous_thinking_level_label: previousLevel
+            ? (options.formatThinkingLevel?.(previousLevel) ?? previousLevel)
+            : null,
         });
       }
     }

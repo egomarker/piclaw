@@ -220,7 +220,6 @@ const LIVE_PREVIEW_FREEZE_TAIL_MS = 100;
 const LIVE_PREVIEW_RANGE_MARGIN_CHARS = 4000;
 
 export const setLivePreviewFrozen = StateEffect.define<boolean>();
-export const setLivePreviewParsingSuspended = StateEffect.define<boolean>();
 export const forceLivePreviewRebuild = StateEffect.define<void>();
 
 export const livePreviewFrozenField = StateField.define<boolean>({
@@ -228,16 +227,6 @@ export const livePreviewFrozenField = StateField.define<boolean>({
     update(value, transaction) {
         for (const effect of transaction.effects) {
             if (effect.is(setLivePreviewFrozen)) return effect.value;
-        }
-        return value;
-    },
-});
-
-export const livePreviewParsingSuspendedField = StateField.define<boolean>({
-    create: () => false,
-    update(value, transaction) {
-        for (const effect of transaction.effects) {
-            if (effect.is(setLivePreviewParsingSuspended)) return effect.value;
         }
         return value;
     },
@@ -485,24 +474,9 @@ class LivePreviewPlugin {
         this.selectionLineSignature = nextSelectionLineSignature;
 
         const frozen = update.state.field(livePreviewFrozenField, false);
-        const parsingSuspended = update.state.field(livePreviewParsingSuspendedField, false);
         const freezeReleased = transactionHasFreezeEffect(update) && !frozen;
         const treeGrew = transactionHasTreeGrowthEffect(update);
         const forceRebuild = transactionHasForceRebuildEffect(update);
-
-        if (parsingSuspended) {
-            if (this.rebuildTimer !== null) {
-                clearTimeout(this.rebuildTimer);
-                this.rebuildTimer = null;
-            }
-            if (update.docChanged) {
-                const mappedDecorations = this.decorations.map(update.changes);
-                this.decorations = changesMayMoveReplaceAcrossLineBreak(update)
-                    ? normalizeReplaceDecorationSet(mappedDecorations, update.state.doc)
-                    : mappedDecorations;
-            }
-            return;
-        }
 
         const selectionIsCollapsed = update.state.selection.ranges.every((range) => range.empty);
         const selectionTouchesViewport = update.selectionSet && (

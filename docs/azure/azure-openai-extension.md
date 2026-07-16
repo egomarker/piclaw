@@ -406,9 +406,9 @@ and also passed focused `json` / `tool` / `history` validation on `gpt-5-3-codex
 
 - `/workspace/tmp/azure-openai-harness-0672-gpt53-xms.json`
 
-### Earendil `0.80.5` compatibility
+### Earendil `0.80.6` compatibility
 
-The runtime now uses the `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, and `@earendil-works/pi-coding-agent` packages at `0.80.5`. Piclaw keeps its Azure transport wrapper because Azure still needs stricter replay sanitation, context-aware output clamping, request/session correlation, and clearer retry handling than the generic Responses path supplies.
+The runtime now uses the `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, and `@earendil-works/pi-coding-agent` packages at `0.80.6`. Piclaw keeps its Azure transport wrapper because Azure still needs stricter replay sanitation, context-aware output clamping, request/session correlation, and clearer retry handling than the generic Responses path supplies.
 
 Current state:
 
@@ -416,7 +416,7 @@ Current state:
 - Piclaw adapts Azure `reasoning_text` and commentary-phase events into normal thinking updates, including reasoning-token usage
 - deterministic coverage verifies output-token clamping, session correlation, GPT-5.6 metadata, retryable status classification, `Retry-After` parsing, deployment-name mapping, and final error text
 - focused coverage lives in `runtime/test/extensions/azure-openai-api.test.ts`, `azure-openai-retry-after.test.ts`, and `azure-openai-routing.test.ts`
-- the older `0672` report paths above are retained as historical live-provider evidence; they are not claims that those exact report files were regenerated for `0.80.5`
+- the older `0672` report paths above are retained as historical live-provider evidence; they are not claims that those exact report files were regenerated for `0.80.6`
 
 ## Troubleshooting checklist
 

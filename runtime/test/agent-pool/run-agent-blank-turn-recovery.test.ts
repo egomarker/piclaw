@@ -4,6 +4,7 @@ import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
 import { getAttachmentRegistry } from "../../src/agent-pool/attachments.js";
 import { AgentTurnCoordinator } from "../../src/agent-pool/turn-coordinator.js";
+import { initDatabase } from "../../src/db.js";
 import { runAgentPrompt } from "../../src/agent-pool/run-agent-orchestrator.js";
 import { setEnv } from "../helpers.js";
 
@@ -85,7 +86,7 @@ test("runAgentPrompt retries a blank user-only session delta and returns the rec
       recordMessageUsage: () => {},
     });
 
-    const result = await runAgentPrompt("yes", "web:default", { timeoutMs: 0 }, {
+    const result = await runAgentPrompt("yes", "web:default", { timeoutMs: 0, skipPrePromptCompaction: true }, {
       getOrCreateRuntime: async () => createRuntime(session) as any,
       turnCoordinator,
       clearAttachments: (chatJid) => attachments.clear(chatJid),
@@ -100,6 +101,85 @@ test("runAgentPrompt retries a blank user-only session delta and returns the rec
     expect(result.result).toBe("recovered answer");
     expect(result.recovery?.attemptsUsed).toBe(1);
     expect(result.recovery?.recovered).toBe(true);
+  } finally {
+    restoreEnv();
+  }
+});
+
+test("runAgentPrompt retries a blank turn below the configured context threshold without compaction", async () => {
+  initDatabase();
+  const restoreEnv = setEnv({
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "1",
+    PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
+    PICLAW_COMPACTION_THRESHOLD_PERCENT: "80",
+    PICLAW_COMPACTION_MAX_THRESHOLD_TOKENS: "0",
+  });
+
+  try {
+    class StubSession {
+      private listeners: Array<(event: any) => void> = [];
+      private entries: Array<any> = [];
+      sessionManager = {
+        getLeafId: () => "leaf-below-threshold",
+        getEntries: () => this.entries,
+        buildSessionContext: () => ({ messages: this.entries.map((entry) => entry.message) }),
+      };
+      model = { provider: "github-copilot", id: "large-context", contextWindow: 100_000 };
+      isStreaming = false;
+      isCompacting = false;
+      isRetrying = false;
+      promptCalls = 0;
+      compactCalls = 0;
+      getContextUsage = () => ({ tokens: 65_000 });
+
+      subscribe(listener: (event: any) => void) {
+        this.listeners.push(listener);
+        return () => {
+          this.listeners = this.listeners.filter((entry) => entry !== listener);
+        };
+      }
+
+      async prompt() {
+        this.promptCalls += 1;
+        this.entries.push({ type: "message", message: { role: "user", content: "continue" } });
+        if (this.promptCalls === 1) return;
+        this.entries.push({ type: "message", message: { role: "assistant", content: "recovered without compaction" } });
+        for (const listener of this.listeners) {
+          listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "recovered without compaction" } });
+        }
+      }
+
+      async compact() {
+        this.compactCalls += 1;
+      }
+
+      async abort() {}
+    }
+
+    const session = new StubSession();
+    const result = await runAgentPrompt("continue", "web:blank-below-threshold", {
+      timeoutMs: 0,
+      skipPrePromptCompaction: true,
+    }, {
+      getOrCreateRuntime: async () => createRuntime(session) as any,
+      turnCoordinator: new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} }),
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: "/workspace/logs",
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.result).toBe("recovered without compaction");
+    expect(result.recovery).toEqual(expect.objectContaining({
+      attemptsUsed: 1,
+      recovered: true,
+      strategyHistory: ["retry"],
+    }));
+    expect(session.promptCalls).toBe(2);
+    expect(session.compactCalls).toBe(0);
   } finally {
     restoreEnv();
   }
@@ -153,7 +233,7 @@ test("runAgentPrompt treats terminal UI side-effect tools as successful even aft
       recordMessageUsage: () => {},
     });
 
-    const result = await runAgentPrompt("post widget", "web:default", { timeoutMs: 0 }, {
+    const result = await runAgentPrompt("post widget", "web:default", { timeoutMs: 0, skipPrePromptCompaction: true }, {
       getOrCreateRuntime: async () => createRuntime(session) as any,
       turnCoordinator,
       clearAttachments: () => {},
@@ -213,7 +293,7 @@ test("runAgentPrompt exhausts recovery when repeated blank user-only deltas pers
       recordMessageUsage: () => {},
     });
 
-    const result = await runAgentPrompt("yes", "web:default", { timeoutMs: 0 }, {
+    const result = await runAgentPrompt("yes", "web:default", { timeoutMs: 0, skipPrePromptCompaction: true }, {
       getOrCreateRuntime: async () => createRuntime(session) as any,
       turnCoordinator,
       clearAttachments: () => {},

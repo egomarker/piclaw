@@ -1,95 +1,95 @@
 /**
- * extensions/provider-request-sanitizer.ts — Defensive provider payload cleanup.
+ * Provider request sanitization.
  *
- * The OpenAI Responses API rejects a request when any input item repeats an
- * `id`, even if the duplicated IDs came from replaying cross-model assistant
- * history.  This extension runs after pi-ai has built the provider payload and
- * before the HTTP request is sent, ensuring duplicate Responses item IDs are
- * made unique without changing the original first occurrence.
+ * Responses item IDs are provider-owned replay handles, not client-generated
+ * identifiers. Two failure modes matter here:
+ *
+ * 1. Duplicate IDs in one request are rejected. Optional duplicate IDs can be
+ *    omitted; duplicate reasoning items must be dropped because their ID is
+ *    required and inventing a replacement creates an invalid provider handle.
+ * 2. GitHub Copilot Responses IDs are scoped to a connection. Persisting them
+ *    in a Piclaw session and replaying them after resume/restart produces
+ *    `input item ID does not belong to this connection`. Copilot replay is made
+ *    stateless by dropping opaque reasoning items and optional input-item IDs;
+ *    textual assistant history and function-call `call_id` pairing remain.
  */
+import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
-import { createHash } from "node:crypto";
+type PayloadRecord = Record<string, unknown>;
 
-import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
-
-import { createLogger } from "../utils/logger.js";
-
-const log = createLogger("extensions.provider-request-sanitizer");
-const MAX_RESPONSE_ITEM_ID_LENGTH = 64;
-
-type MutableRecord = Record<string, unknown>;
-
-function isRecord(value: unknown): value is MutableRecord {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+export interface ProviderPayloadSanitizerOptions {
+  stripConnectionBoundIds?: boolean;
 }
 
-function sanitizeIdPart(value: string): string {
-  const sanitized = value.replace(/[^a-zA-Z0-9_-]/g, "_").replace(/_+$/g, "");
-  return sanitized || "item";
+function isPayloadRecord(value: unknown): value is PayloadRecord {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-function shortHash(value: string): string {
-  return createHash("sha256").update(value).digest("base64url").slice(0, 10);
-}
-
-function buildUniqueDuplicateId(originalId: string, itemIndex: number, usedIds: Set<string>): string {
-  const suffixBase = `${itemIndex.toString(36)}_${shortHash(`${originalId}:${itemIndex}`)}`;
-  let suffix = `_${suffixBase}`;
-  let base = sanitizeIdPart(originalId);
-  if (base.length + suffix.length > MAX_RESPONSE_ITEM_ID_LENGTH) {
-    base = base.slice(0, MAX_RESPONSE_ITEM_ID_LENGTH - suffix.length).replace(/_+$/g, "") || "item";
-  }
-
-  let candidate = `${base}${suffix}`;
-  let attempt = 1;
-  while (usedIds.has(candidate)) {
-    suffix = `_${suffixBase}_${attempt.toString(36)}`;
-    base = sanitizeIdPart(originalId);
-    if (base.length + suffix.length > MAX_RESPONSE_ITEM_ID_LENGTH) {
-      base = base.slice(0, MAX_RESPONSE_ITEM_ID_LENGTH - suffix.length).replace(/_+$/g, "") || "item";
-    }
-    candidate = `${base}${suffix}`;
-    attempt++;
-  }
-  return candidate;
+function cloneWithoutId(item: PayloadRecord): PayloadRecord {
+  const { id: _id, ...rest } = item;
+  return rest;
 }
 
 /**
- * Return a provider payload with duplicate `input[].id` values fixed.
- *
- * The function is intentionally narrow: it only touches Responses-style payloads
- * with an array `input`, and only clones the payload/input/items when a duplicate
- * item ID is present.
+ * Return the original payload when no change is needed; otherwise return a
+ * shallow-cloned payload/input array without mutating provider-library data.
  */
-export function sanitizeProviderPayloadItemIds(payload: unknown): unknown {
-  if (!isRecord(payload) || !Array.isArray(payload.input)) return payload;
+export function sanitizeProviderPayloadItemIds(
+  payload: unknown,
+  options: ProviderPayloadSanitizerOptions = {},
+): unknown {
+  if (!isPayloadRecord(payload) || !Array.isArray(payload.input)) return payload;
 
-  const usedIds = new Set<string>();
-  let sanitizedInput: unknown[] | null = null;
-  let duplicateCount = 0;
+  const seen = new Set<string>();
+  let changed = false;
+  const input: unknown[] = [];
 
-  for (let index = 0; index < payload.input.length; index++) {
-    const item = payload.input[index];
-    if (!isRecord(item) || typeof item.id !== "string" || item.id.length === 0) continue;
-
-    if (!usedIds.has(item.id)) {
-      usedIds.add(item.id);
+  for (const rawItem of payload.input) {
+    if (!isPayloadRecord(rawItem)) {
+      input.push(rawItem);
       continue;
     }
 
-    if (!sanitizedInput) sanitizedInput = payload.input.slice();
-    const replacementId = buildUniqueDuplicateId(item.id, index, usedIds);
-    usedIds.add(replacementId);
-    sanitizedInput[index] = { ...item, id: replacementId };
-    duplicateCount++;
+    const itemType = typeof rawItem.type === "string" ? rawItem.type : "";
+    const itemId = typeof rawItem.id === "string" && rawItem.id ? rawItem.id : null;
+
+    if (options.stripConnectionBoundIds) {
+      if (itemType === "reasoning") {
+        changed = true;
+        continue;
+      }
+      if (itemId) {
+        changed = true;
+        input.push(cloneWithoutId(rawItem));
+        continue;
+      }
+      input.push(rawItem);
+      continue;
+    }
+
+    if (!itemId || !seen.has(itemId)) {
+      if (itemId) seen.add(itemId);
+      input.push(rawItem);
+      continue;
+    }
+
+    changed = true;
+    if (itemType === "reasoning") continue;
+    input.push(cloneWithoutId(rawItem));
   }
 
-  if (!sanitizedInput) return payload;
-
-  log.warn("Deduplicated duplicate provider input item IDs", { duplicateCount });
-  return { ...payload, input: sanitizedInput };
+  if (!changed) return payload;
+  return { ...payload, input };
 }
 
-export const providerRequestSanitizer: ExtensionFactory = (pi: ExtensionAPI): void => {
-  pi.on("before_provider_request", async (event) => sanitizeProviderPayloadItemIds(event.payload));
+function needsStatelessCopilotReplay(ctx: unknown): boolean {
+  const model = (ctx as { model?: { provider?: unknown; api?: unknown } } | null | undefined)?.model;
+  return model?.provider === "github-copilot" && model?.api === "openai-responses";
+}
+
+export const providerRequestSanitizer: ExtensionFactory = (pi) => {
+  pi.on("before_provider_request", async (event, ctx) => sanitizeProviderPayloadItemIds(
+    event.payload,
+    { stripConnectionBoundIds: needsStatelessCopilotReplay(ctx) },
+  ));
 };

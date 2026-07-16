@@ -188,6 +188,7 @@ export interface ScrollToTimelineMessageOptions {
   getElementById?: (id: string) => HTMLElement | null;
   scheduleRaf?: (callback: () => void) => void;
   scheduleTimeout?: (callback: () => void, delayMs: number) => void;
+  requestReveal?: (id: string | number) => void;
 }
 
 /** Scroll/highlight a message row, fetching it first when missing from the DOM/timeline. */
@@ -203,6 +204,11 @@ export async function scrollToTimelineMessage(options: ScrollToTimelineMessageOp
     scheduleTimeout = (callback, delayMs) => {
       setTimeout(callback, delayMs);
     },
+    requestReveal = (value) => {
+      if (typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('piclaw:reveal-timeline-post', { detail: { id: value } }));
+      }
+    },
   } = options;
 
   const highlight = (el: HTMLElement) => {
@@ -211,6 +217,7 @@ export async function scrollToTimelineMessage(options: ScrollToTimelineMessageOp
     scheduleTimeout(() => el.classList.remove('post-highlight'), 2000);
   };
 
+  requestReveal(id);
   const existing = getElementById(`post-${id}`);
   if (existing) {
     highlight(existing);

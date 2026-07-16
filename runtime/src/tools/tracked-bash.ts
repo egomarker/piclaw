@@ -34,6 +34,11 @@ interface ResolveShellConfigOptions {
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
   pathExists?: (path: string) => boolean;
+  shellPath?: string;
+}
+
+interface TrackedBashOperationsOptions {
+  shellPath?: string | (() => string | undefined);
 }
 
 const POWERSHELL_ARGS = ["-NoProfile", "-Command"];
@@ -55,6 +60,12 @@ export function resolveShellCandidates(options: ResolveShellConfigOptions = {}):
   const env = options.env ?? process.env;
   const pathExists = options.pathExists ?? existsSync;
   const candidates: ShellConfig[] = [];
+  const shellPath = options.shellPath?.trim();
+
+  if (shellPath) {
+    if (!pathExists(shellPath)) throw new Error(`Custom shell path not found: ${shellPath}`);
+    return [{ shell: shellPath, args: POSIX_ARGS, family: "posix" }];
+  }
 
   if (platform === "win32") {
     if (env.SHELL && pathExists(env.SHELL)) {
@@ -96,7 +107,13 @@ function createTrackedShellOperations(resolveCandidates: () => ShellConfig[]): B
     exec: (command, cwd, { onData, signal, timeout, env }) => {
       return new Promise((resolve, reject) => {
         (async () => {
-          const shellCandidates = resolveCandidates();
+          let shellCandidates: ShellConfig[];
+          try {
+            shellCandidates = resolveCandidates();
+          } catch (error) {
+            reject(error as Error);
+            return;
+          }
 
           if (!existsSync(cwd)) {
             reject(new Error(`Working directory does not exist: ${cwd}\nCannot execute shell commands.`));
@@ -319,8 +336,11 @@ function createTrackedShellOperations(resolveCandidates: () => ShellConfig[]): B
 }
 
 /** Create host-shell tool operations with child process tracking and keychain resolution. */
-export function createTrackedBashOperations(): BashOperations {
-  return createTrackedShellOperations(() => resolveShellCandidates());
+export function createTrackedBashOperations(options: TrackedBashOperationsOptions = {}): BashOperations {
+  return createTrackedShellOperations(() => {
+    const shellPath = typeof options.shellPath === "function" ? options.shellPath() : options.shellPath;
+    return resolveShellCandidates({ shellPath });
+  });
 }
 
 /** Create Windows PowerShell-only tool operations. */

@@ -36,7 +36,8 @@ type ChatBranchLike = {
 type ChatToolRelayAgentPool = Pick<AgentPool, "findChatByAgentName" | "getAgentHandleForChat" | "listActiveChats" | "listKnownChats">;
 
 type DirectChatToolRelayWeb = {
-  handleRequest(req: Request): Promise<Response>;
+  handleAgentMessage?: (req: Request, pathname: string) => Promise<Response>;
+  handleRequest?: (req: Request) => Promise<Response>;
 };
 
 type DirectChatToolRelayOptions = {
@@ -242,7 +243,10 @@ export function createDirectChatToolRelayHandler(
       },
     );
 
-    const forwardRes = await web.handleRequest(forwardReq);
+    const forwardRes = typeof web.handleAgentMessage === "function"
+      ? await web.handleAgentMessage(forwardReq, pathname)
+      : await web.handleRequest?.(forwardReq);
+    if (!forwardRes) throw new Error("Cross-session chat relay is unavailable in this runtime.");
     if (!forwardRes.ok) {
       const body = await forwardRes.json().catch(() => ({} as Record<string, unknown>));
       const message = typeof body.error === "string" ? body.error : `Cross-session chat relay failed (${forwardRes.status}).`;

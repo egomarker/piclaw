@@ -66,6 +66,8 @@ test("agent pool aggregates streamed text and writes logs", async () => {
   const ws = getTestWorkspace();
   restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
 
+  const { initDatabase } = await importFresh<typeof import("../src/db.js")>("../src/db.js");
+  initDatabase();
   const { AgentPool } = await importFresh<typeof import("../src/agent-pool.js")>("../src/agent-pool.js");
 
   class StubSession {
@@ -120,6 +122,8 @@ test("agent pool aggregates recovery counters into memory instrumentation", asyn
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
 
+  const { initDatabase } = await importFresh<typeof import("../src/db.js")>("../src/db.js");
+  initDatabase();
   const { AgentPool } = await importFresh<typeof import("../src/agent-pool.js")>("../src/agent-pool.js");
 
   class RecoveringSession {
@@ -182,6 +186,8 @@ test("agent pool honors timeout overrides", async () => {
   const ws = getTestWorkspace();
   restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
 
+  const { initDatabase } = await importFresh<typeof import("../src/db.js")>("../src/db.js");
+  initDatabase();
   const { AgentPool } = await importFresh<typeof import("../src/agent-pool.js")>("../src/agent-pool.js");
 
   let abortCalled = false;
@@ -197,7 +203,7 @@ test("agent pool honors timeout overrides", async () => {
     async prompt(_prompt: string) {
       this.promptCalls += 1;
       if (this.promptCalls === 1) {
-        await Bun.sleep(20);
+        await Bun.sleep(250);
         return;
       }
       for (const listener of this.listeners) {
@@ -217,7 +223,7 @@ test("agent pool honors timeout overrides", async () => {
     createSession: async () => createRuntime(new StubSession()) as any,
   });
 
-  const timedOut = await pool.runAgent("test", "web:default", { timeoutMs: 5 });
+  const timedOut = await pool.runAgent("test", "web:default", { timeoutMs: 100 });
   expect(timedOut.status).toBe("error");
   expect(abortCalled).toBe(true);
 

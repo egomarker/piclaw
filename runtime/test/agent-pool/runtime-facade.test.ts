@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -7,6 +7,7 @@ import { clearProviderUsageCache } from "../../src/agent-pool/provider-usage.js"
 import { AgentRuntimeFacade } from "../../src/agent-pool/runtime-facade.js";
 import { SESSIONS_DIR } from "../../src/core/config.js";
 import { sanitiseJid } from "../../src/agent-pool/session.js";
+import { initDatabase } from "../../src/db.js";
 
 function createRuntime(session: any): AgentSessionRuntime {
   return {
@@ -22,6 +23,10 @@ function createRuntime(session: any): AgentSessionRuntime {
     dispose: async () => {},
   } as any;
 }
+
+beforeEach(() => {
+  initDatabase();
+});
 
 afterEach(() => {
   clearProviderUsageCache();
@@ -105,6 +110,34 @@ test("AgentRuntimeFacade reports available models and context usage", async () =
   });
 });
 
+test("AgentRuntimeFacade reports display labels for legacy max thinking metadata", async () => {
+  const legacyModel = {
+    provider: "anthropic",
+    id: "claude-legacy",
+    reasoning: true,
+    thinkingLevelMap: { xhigh: "max" },
+  };
+  const session = {
+    model: legacyModel,
+    thinkingLevel: "xhigh",
+    supportsThinking: () => true,
+    getAvailableThinkingLevels: () => ["off", "low", "medium", "high", "xhigh"],
+    modelRegistry: {
+      refresh: () => {},
+      getAvailable: () => [legacyModel],
+    },
+  };
+
+  const fixture = createFacade();
+  fixture.pool.set("web:legacy", { runtime: createRuntime(session), lastUsed: Date.now() });
+
+  const available = await fixture.facade.getAvailableModels("web:legacy");
+  expect(available.thinking_level).toBe("xhigh");
+  expect(available.thinking_level_label).toBe("max");
+  expect(available.available_thinking_levels).toEqual(["off", "low", "medium", "high", "xhigh"]);
+  expect(available.available_thinking_level_labels).toEqual(["off", "low", "medium", "high", "max"]);
+});
+
 test("AgentRuntimeFacade filters web model options with scopedModelsOnly enabledModels", async () => {
   const previous = process.env.PICLAW_SCOPED_MODELS_ONLY;
   process.env.PICLAW_SCOPED_MODELS_ONLY = "1";
@@ -177,6 +210,7 @@ test("AgentRuntimeFacade returns registry-backed model options without hydrating
     thinking_level_label: null,
     supports_thinking: false,
     available_thinking_levels: ["off"],
+    available_thinking_level_labels: ["off"],
     provider_usage: null,
   });
 });
@@ -188,8 +222,8 @@ test("AgentRuntimeFacade restores persisted current model for a cold chat withou
   mkdirSync(sessionDir, { recursive: true });
   writeFileSync(join(sessionDir, "2026-04-17T18-00-00-000Z_test.jsonl"), [
     JSON.stringify({ type: "session", version: 3, id: "test", timestamp: "2026-04-17T18:00:00.000Z", cwd: "/workspace" }),
-    JSON.stringify({ type: "model_change", id: "m1", parentId: null, timestamp: "2026-04-17T18:00:00.100Z", provider: "azure-openai", modelId: "gpt-5-mini" }),
-    JSON.stringify({ type: "thinking_level_change", id: "t1", parentId: "m1", timestamp: "2026-04-17T18:00:00.200Z", thinkingLevel: "high" }),
+    JSON.stringify({ type: "model_change", id: "m1", parentId: null, timestamp: "2026-04-17T18:00:00.100Z", provider: "azure-openai", modelId: "gpt-5.6-sol" }),
+    JSON.stringify({ type: "thinking_level_change", id: "t1", parentId: "m1", timestamp: "2026-04-17T18:00:00.200Z", thinkingLevel: "max" }),
     "",
   ].join("\n"));
 
@@ -206,7 +240,14 @@ test("AgentRuntimeFacade restores persisted current model for a cold chat withou
       modelRegistry: {
         refresh: () => { refreshCalls += 1; },
         getAvailable: () => [
-          { provider: "azure-openai", id: "gpt-5-mini", name: "GPT 5 Mini", contextWindow: 200000, reasoning: true },
+          {
+            provider: "azure-openai",
+            id: "gpt-5.6-sol",
+            name: "GPT 5.6 Sol",
+            contextWindow: 1_050_000,
+            reasoning: true,
+            thinkingLevelMap: { off: null, xhigh: "xhigh", max: "max" },
+          },
         ],
         getAll: () => [],
         registerProvider: () => {},
@@ -221,10 +262,11 @@ test("AgentRuntimeFacade restores persisted current model for a cold chat withou
     const available = await facade.getAvailableModels(chatJid);
     expect(getOrCreateCalls).toBe(0);
     expect(refreshCalls).toBe(1);
-    expect(available.current).toBe("azure-openai/gpt-5-mini");
-    expect(available.thinking_level).toBe("high");
-    expect(available.thinking_level_label).toBe("high");
+    expect(available.current).toBe("azure-openai/gpt-5.6-sol");
+    expect(available.thinking_level).toBe("max");
+    expect(available.thinking_level_label).toBe("max");
     expect(available.supports_thinking).toBe(true);
+    expect(available.available_thinking_levels).toContain("max");
   } finally {
     rmSync(sessionDir, { recursive: true, force: true });
   }

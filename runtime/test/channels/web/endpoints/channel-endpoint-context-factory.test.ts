@@ -93,6 +93,92 @@ describe("web channel endpoint context factory", () => {
     expect((await status.getContextUsageForChat("web:default"))?.tokens).toBe(10);
   });
 
+  test("falls back to persisted context usage after an awaited pool miss", async () => {
+    const calls: string[] = [];
+    const channel = {
+      json: (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status }),
+      getContextUsage: (chatJid: string) => {
+        calls.push(`stored:${chatJid}`);
+        return { tokens: 21703, contextWindow: 200000, percent: 10.8515 };
+      },
+      agentPool: {
+        getContextUsageForChat: async (chatJid: string) => {
+          calls.push(`pool:${chatJid}`);
+          return null;
+        },
+        getAvailableModels: async () => ({ models: [] }),
+      },
+    };
+
+    const contexts = createWebChannelEndpointContexts(
+      channel as unknown as Parameters<typeof createWebChannelEndpointContexts>[0],
+      {
+        defaultChatJid: "web:default",
+        defaultAgentId: "default",
+        getIdentitySnapshot: () => createIdentitySnapshot(),
+      },
+    );
+
+    await expect(contexts.agentStatus().getContextUsageForChat("web:compacted")).resolves.toEqual({
+      tokens: 21703,
+      contextWindow: 200000,
+      percent: 10.8515,
+    });
+    expect(calls).toEqual(["pool:web:compacted", "stored:web:compacted"]);
+  });
+
+  test("falls back to persisted context usage when the pool returns null tokens", async () => {
+    const channel = {
+      json: (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status }),
+      getContextUsage: () => ({ tokens: 21703, contextWindow: 200000, percent: 10.8515 }),
+      agentPool: {
+        getContextUsageForChat: async () => ({ tokens: null, contextWindow: 200000, percent: null }),
+        getAvailableModels: async () => ({ models: [] }),
+      },
+    };
+
+    const contexts = createWebChannelEndpointContexts(
+      channel as unknown as Parameters<typeof createWebChannelEndpointContexts>[0],
+      {
+        defaultChatJid: "web:default",
+        defaultAgentId: "default",
+        getIdentitySnapshot: () => createIdentitySnapshot(),
+      },
+    );
+
+    await expect(contexts.agentStatus().getContextUsageForChat("web:compacted")).resolves.toEqual({
+      tokens: 21703,
+      contextWindow: 200000,
+      percent: 10.8515,
+    });
+  });
+
+  test("falls back to persisted context usage when the pool lookup rejects", async () => {
+    const channel = {
+      json: (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status }),
+      getContextUsage: () => ({ tokens: 123, contextWindow: 1000, percent: 12.3 }),
+      agentPool: {
+        getContextUsageForChat: async () => { throw new Error("session evicted"); },
+        getAvailableModels: async () => ({ models: [] }),
+      },
+    };
+
+    const contexts = createWebChannelEndpointContexts(
+      channel as unknown as Parameters<typeof createWebChannelEndpointContexts>[0],
+      {
+        defaultChatJid: "web:default",
+        defaultAgentId: "default",
+        getIdentitySnapshot: () => createIdentitySnapshot(),
+      },
+    );
+
+    await expect(contexts.agentStatus().getContextUsageForChat("web:compacted")).resolves.toEqual({
+      tokens: 123,
+      contextWindow: 1000,
+      percent: 12.3,
+    });
+  });
+
   test("rebuilds agents/avatar contexts from the latest identity snapshot", () => {
     let identity = createIdentitySnapshot();
 

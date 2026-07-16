@@ -8,6 +8,7 @@ import {
   isLikelySafariBrowser,
   isWorkspaceUpdateRelevantForPath,
   removeSourcePaneAfterDetachClaim,
+  shouldApplyWorkspaceEditorRefresh,
   shouldDelayPaneReattachAfterWindowClose,
   shouldDisableTerminalReattach,
   shouldRequireManualTerminalCloseRecovery,
@@ -295,6 +296,28 @@ test('isWorkspaceUpdateRelevantForPath matches direct and wildcard paths', () =>
 test('isWorkspaceUpdateRelevantForPath ignores unrelated updates', () => {
   expect(isWorkspaceUpdateRelevantForPath('notes/todo.md', [{ changed_paths: ['notes/other.md'] }])).toBe(false);
   expect(isWorkspaceUpdateRelevantForPath('notes/todo.md', [{ path: 'notes/other.md' }])).toBe(false);
+});
+
+test('shouldApplyWorkspaceEditorRefresh rechecks dirty state after the workspace fetch', () => {
+  let dirty = false;
+  const instance = {
+    isDirty: () => dirty,
+    getCurrentMtime: () => '2026-07-15T19:00:00.000Z',
+  };
+
+  expect(shouldApplyWorkspaceEditorRefresh(instance, instance, '2026-07-15T19:01:00.000Z')).toBe(true);
+  dirty = true;
+  expect(shouldApplyWorkspaceEditorRefresh(instance, instance, '2026-07-15T19:01:00.000Z')).toBe(false);
+});
+
+test('shouldApplyWorkspaceEditorRefresh rejects stale instances and self-save mtimes', () => {
+  const instance = {
+    isDirty: () => false,
+    getCurrentMtime: () => '2026-07-15T19:00:00.000Z',
+  };
+
+  expect(shouldApplyWorkspaceEditorRefresh(instance, {}, '2026-07-15T19:01:00.000Z')).toBe(false);
+  expect(shouldApplyWorkspaceEditorRefresh(instance, instance, '2026-07-15T19:00:00.000Z')).toBe(false);
 });
 
 test('shouldRetainPaneDetachState keeps detached ownership even after the source tab is removed', () => {

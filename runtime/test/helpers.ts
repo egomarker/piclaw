@@ -74,6 +74,7 @@ export function getTestWorkspace(): TempWorkspace {
 
 const ENFORCED_TEST_ENV: Readonly<Record<string, string>> = {
   PICLAW_DB_IN_MEMORY: "1",
+  PICLAW_AUTO_COMPACTION_ENABLED: "1",
 };
 
 getTestWorkspace();

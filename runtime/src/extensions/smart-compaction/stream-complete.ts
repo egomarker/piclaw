@@ -41,6 +41,8 @@ export interface StreamCompleteOptions {
   headers?: Record<string, string>;
   env?: SimpleStreamOptions["env"];
   reasoning?: "minimal" | "low" | "medium" | "high";
+  /** Optional provider-payload transform (used to rehydrate native compaction state). */
+  onPayload?: SimpleStreamOptions["onPayload"];
   /** Custom stream function for proxy-routed providers. Falls back to streamSimple. */
   streamFn?: CompactionStreamFn;
   /** Called periodically with the number of text characters generated so far. */
@@ -57,7 +59,7 @@ export interface StreamCompleteOptions {
 export async function streamComplete(opts: StreamCompleteOptions): Promise<AssistantMessage> {
   const {
     model, systemPrompt, userPrompt, maxTokens, signal,
-    apiKey, headers, env, reasoning, streamFn, onProgress,
+    apiKey, headers, env, reasoning, onPayload, streamFn, onProgress,
     progressIntervalMs = SMART_COMPACTION_PROGRESS_INTERVAL_MS,
   } = opts;
 
@@ -69,8 +71,8 @@ export async function streamComplete(opts: StreamCompleteOptions): Promise<Assis
   };
 
   const streamOptions: SimpleStreamOptions = reasoning
-    ? { maxTokens, signal, apiKey, headers, env, reasoning }
-    : { maxTokens, signal, apiKey, headers, env };
+    ? { maxTokens, signal, apiKey, headers, env, reasoning, onPayload }
+    : { maxTokens, signal, apiKey, headers, env, onPayload };
 
   const normalizedContext = normalizeLlmContext(context);
 

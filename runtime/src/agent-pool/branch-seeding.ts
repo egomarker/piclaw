@@ -73,8 +73,12 @@ function createInvalidDeferredBranchSeedError(chatJid: string, reason: string, c
 }
 
 export function normalizeThinkingLevel(value: string | null | undefined): ThinkingLevel | null {
-  return value === "off" || value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh"
-    ? value
+  // Pi 0.80.x runtime can receive provider-specific future thinking aliases
+  // before the shared ThinkingLevel type is widened. Preserve the serialized
+  // value for replay while keeping this module source-compatible with the
+  // current @earendil-works/pi-agent-core type surface.
+  return value === "off" || value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max"
+    ? value as ThinkingLevel
     : null;
 }
 

@@ -1,6 +1,6 @@
 import type { InteractionRow } from "../../../db.js";
 import type { WebAgentBufferEntry } from "../agent/agent-buffers.js";
-import type { QueuedFollowupItem } from "../runtime/followup-placeholders.js";
+import type { QueuedFollowupItem, QueuedFollowupSourceMetadata } from "../runtime/followup-placeholders.js";
 import type { SendMessageOptions } from "../messaging/message-write-flows.js";
 import type { WebMessageProcessingStorageService } from "../messaging/message-processing-storage-service.js";
 import type { WebChannelRuntimeFollowupFacadeService } from "../runtime/runtime-followup-facade-service.js";
@@ -51,6 +51,45 @@ type WebChannelRuntimePublicSurfaceBroadcast = Pick<
   "sse" | "uiBridge" | "broadcastEvent"
 >;
 
+type WebChannelRuntimePublicSurfaceAgentMessageEntry = {
+  handleAgentMessage?: (req: Request, pathname: string) => Promise<Response>;
+};
+
+type WebChannelRuntimePublicSurfaceAgentPool = {
+  isStreaming?: (chatJid: string) => boolean;
+  isActive?: (chatJid: string) => boolean;
+  queueStreamingMessage?: (
+    chatJid: string,
+    text: string,
+    behavior: "steer" | "followUp",
+  ) => Promise<{ queued: boolean; error?: string }>;
+};
+
+export type RuntimeAgentMessageMode = "auto" | "queue" | "steer";
+
+export interface RuntimeAgentMessageRequest {
+  chatJid: string;
+  content: string;
+  mode?: RuntimeAgentMessageMode;
+  mediaIds?: number[];
+  contentBlocks?: unknown[];
+  linkPreviews?: unknown[];
+  threadId?: number | string | null;
+  screenHint?: string | null;
+  source?: string;
+  queuedBy?: QueuedFollowupSourceMetadata;
+}
+
+export interface RuntimeAgentMessageResult {
+  status: "ok";
+  chat_jid: string;
+  row_id?: number | null;
+  user_message?: InteractionRow;
+  thread_id: number | null;
+  queued?: "followup" | "steer";
+  created: boolean;
+}
+
 export interface ExtensionWorkingStateSnapshot {
   message: string | null;
   indicator: Record<string, unknown> | null;
@@ -100,10 +139,99 @@ function resolveWorkingIndicatorSnapshot(payload: Record<string, unknown>): Reco
     : { mode: "hidden", frames: [], intervalMs };
 }
 
-export interface WebChannelRuntimePublicSurfaceChannel {
+function normalizeRuntimeMessageMode(value: unknown): RuntimeAgentMessageMode {
+  return value === "queue" || value === "steer" || value === "auto" ? value : "auto";
+}
+
+function normalizeRuntimeMessageChatJid(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeRuntimeMessageContent(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function normalizeRuntimeMessageSource(value: unknown): string {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed || "runtime.extension";
+}
+
+function normalizeRuntimeMessageMediaIds(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => typeof item === "number" ? item : Number.parseInt(String(item ?? ""), 10))
+    .filter((item) => Number.isInteger(item) && item > 0);
+}
+
+function normalizeRuntimeMessageThreadId(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === "") return undefined;
+  const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function normalizeRuntimeMessageScreenHint(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function cloneRuntimeMessageArray<T = unknown>(value: unknown): T[] | undefined {
+  return Array.isArray(value) ? [...value] as T[] : undefined;
+}
+
+function hasRuntimeMessagePayload(input: {
+  content: string;
+  mediaIds: number[];
+  contentBlocks?: unknown[];
+  linkPreviews?: unknown[];
+}): boolean {
+  return input.content.trim().length > 0 || input.mediaIds.length > 0 || Boolean(input.contentBlocks?.length) || Boolean(input.linkPreviews?.length);
+}
+
+function isRuntimeRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object");
+}
+
+function readRuntimeMessageResultThreadId(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function readRuntimeMessageResultRowId(payload: Record<string, unknown>, userMessage: unknown): number | null {
+  if (typeof payload.row_id === "number" && Number.isInteger(payload.row_id) && payload.row_id > 0) return payload.row_id;
+  if (isRuntimeRecord(userMessage) && typeof userMessage.id === "number" && Number.isInteger(userMessage.id) && userMessage.id > 0) return userMessage.id;
+  return null;
+}
+
+function normalizeRuntimeHandlerMessageResult(chatJid: string, payload: unknown): RuntimeAgentMessageResult {
+  const data = isRuntimeRecord(payload) ? payload : {};
+  const userMessage = data.user_message;
+  const rowId = readRuntimeMessageResultRowId(data, userMessage);
+  const queued = data.queued === "followup" || data.queued === "steer" ? data.queued : undefined;
+  const threadId = readRuntimeMessageResultThreadId(data.thread_id);
+  return {
+    status: "ok",
+    chat_jid: typeof data.chat_jid === "string" && data.chat_jid.trim() ? data.chat_jid.trim() : chatJid,
+    ...(rowId ? { row_id: rowId } : {}),
+    ...(isRuntimeRecord(userMessage) ? { user_message: userMessage as unknown as InteractionRow } : {}),
+    thread_id: threadId,
+    ...(queued ? { queued } : {}),
+    created: isRuntimeRecord(userMessage),
+  };
+}
+
+async function readRuntimeHandlerError(response: Response): Promise<string> {
+  const payload = await response.clone().json().catch(() => null);
+  if (isRuntimeRecord(payload) && typeof payload.error === "string" && payload.error.trim()) return payload.error.trim();
+  const text = await response.text().catch(() => "");
+  return text.trim().slice(0, 500);
+}
+
+export interface WebChannelRuntimePublicSurfaceChannel extends WebChannelRuntimePublicSurfaceAgentMessageEntry {
   runtimeFollowupFacade: WebChannelRuntimePublicSurfaceFollowupFacade;
   messageProcessingStorageService: WebChannelRuntimePublicSurfaceStorage;
   sessionBroadcast: WebChannelRuntimePublicSurfaceBroadcast;
+  agentPool?: WebChannelRuntimePublicSurfaceAgentPool;
 }
 
 export interface WebChannelRuntimePublicSurfaceServiceCarrier {
@@ -186,6 +314,114 @@ export class WebChannelRuntimePublicSurfaceService {
     options?: { threadId?: number | null; text?: string; widgetId?: string },
   ): Promise<void> {
     await this.channel.runtimeFollowupFacade.postDashboardWidget(chatJid, options);
+  }
+
+  async enqueueAgentMessage(request: RuntimeAgentMessageRequest): Promise<RuntimeAgentMessageResult> {
+    const chatJid = normalizeRuntimeMessageChatJid(request?.chatJid);
+    if (!chatJid) throw new Error("enqueueAgentMessage requires a target chatJid.");
+    if (!chatJid.startsWith("web:")) throw new Error(`enqueueAgentMessage only supports web chats; got ${chatJid}.`);
+
+    const content = normalizeRuntimeMessageContent(request?.content);
+    const mediaIds = normalizeRuntimeMessageMediaIds(request?.mediaIds);
+    const contentBlocks = cloneRuntimeMessageArray(request?.contentBlocks);
+    const linkPreviews = cloneRuntimeMessageArray(request?.linkPreviews);
+    if (!hasRuntimeMessagePayload({ content, mediaIds, contentBlocks, linkPreviews })) {
+      throw new Error("enqueueAgentMessage requires content or attachments.");
+    }
+
+    const mode = normalizeRuntimeMessageMode(request?.mode);
+    const source = normalizeRuntimeMessageSource(request?.source);
+    const queuedBy = request?.queuedBy && typeof request.queuedBy === "object" ? { ...request.queuedBy } : undefined;
+    const screenHint = normalizeRuntimeMessageScreenHint(request?.screenHint);
+
+    if (typeof this.channel.handleAgentMessage === "function") {
+      const body = {
+        content,
+        mode,
+        media_ids: mediaIds,
+        ...(contentBlocks ? { content_blocks: contentBlocks } : {}),
+        ...(linkPreviews ? { link_previews: linkPreviews } : {}),
+        ...(request?.threadId !== undefined ? { thread_id: normalizeRuntimeMessageThreadId(request?.threadId) ?? null } : {}),
+        ...(screenHint !== undefined ? { screen_hint: screenHint } : {}),
+      };
+      const response = await this.channel.handleAgentMessage(new Request(
+        `http://internal/agent/default/message?chat_jid=${encodeURIComponent(chatJid)}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ), "/agent/default/message");
+      const responsePayload = await response.clone().json().catch(() => null);
+      if (!response.ok) {
+        const detail = await readRuntimeHandlerError(response);
+        throw new Error(`enqueueAgentMessage failed: ${response.status} ${response.statusText}${detail ? `: ${detail}` : ""}`);
+      }
+      return normalizeRuntimeHandlerMessageResult(chatJid, responsePayload);
+    }
+
+    const agentPool = this.channel.agentPool;
+    const isStreaming = typeof agentPool?.isStreaming === "function" ? agentPool.isStreaming(chatJid) : false;
+    const isActive = typeof agentPool?.isActive === "function" ? agentPool.isActive(chatJid) : isStreaming;
+    const hasQueuedBacklog = this.channel.runtimeFollowupFacade.getQueuedFollowupCount(chatJid) > 0;
+
+    if (mode === "steer" && isStreaming && typeof agentPool?.queueStreamingMessage === "function") {
+      const steerResult = await agentPool.queueStreamingMessage(chatJid, content, "steer");
+      if (steerResult.queued) {
+        const queuedAt = new Date().toISOString();
+        this.channel.sessionBroadcast.broadcastEvent("agent_steer_queued", {
+          chat_jid: chatJid,
+          thread_id: null,
+          source,
+          timestamp: queuedAt,
+          content,
+        });
+        return { status: "ok", chat_jid: chatJid, thread_id: null, queued: "steer", created: false };
+      }
+    }
+
+    if ((mode === "queue" || mode === "auto") && (isActive || hasQueuedBacklog)) {
+      const queuedAt = new Date().toISOString();
+      const rowId = this.channel.runtimeFollowupFacade.enqueueQueuedFollowupItem(chatJid, 0, content, null, queuedAt, {
+        mediaIds,
+        contentBlocks,
+        linkPreviews,
+        ...(screenHint ? { screenHint } : {}),
+        source,
+        ...(queuedBy ? { queuedBy } : {}),
+      });
+      this.channel.sessionBroadcast.broadcastEvent("agent_followup_queued", {
+        chat_jid: chatJid,
+        thread_id: null,
+        row_id: rowId,
+        content,
+        timestamp: queuedAt,
+        source,
+        ...(queuedBy ? { queued_by: queuedBy } : {}),
+      });
+      if (hasQueuedBacklog && !isActive) this.channel.runtimeFollowupFacade.resumeChat(chatJid);
+      return { status: "ok", chat_jid: chatJid, row_id: rowId, thread_id: null, queued: "followup", created: false };
+    }
+
+    const explicitThreadId = normalizeRuntimeMessageThreadId(request?.threadId);
+    const interaction = this.channel.messageProcessingStorageService.storeMessage(chatJid, content, false, mediaIds, {
+      contentBlocks,
+      linkPreviews,
+      threadId: explicitThreadId,
+      screenHint,
+    });
+    if (!interaction) throw new Error("Failed to store runtime agent message.");
+
+    const threadId = typeof interaction.data?.thread_id === "number"
+      ? interaction.data.thread_id
+      : interaction.id ?? null;
+    this.channel.sessionBroadcast.broadcastEvent("new_post", interaction);
+    this.channel.runtimeFollowupFacade.resumeChat(chatJid, threadId);
+
+    return {
+      status: "ok",
+      chat_jid: chatJid,
+      row_id: interaction.id,
+      user_message: interaction,
+      thread_id: threadId,
+      created: true,
+    };
   }
 
   queueFollowupPlaceholder(chatJid: string, text: string, threadId?: number, queuedContent?: string): InteractionRow | null {

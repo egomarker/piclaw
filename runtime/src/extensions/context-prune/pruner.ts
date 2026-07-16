@@ -9,6 +9,8 @@ export function pruneMessages(messages: any[], indexer: ToolCallIndexer): any[] 
 
 export interface ContextPruneCompactionSanitization {
   messages: any[];
+  /** Original input index for every sanitized message that remains. */
+  sourceMessageIndexesByMessageIndex: number[];
   sourceEntryIdsByMessageIndex: Array<string | undefined>;
   summarizedToolCallIds: Set<string>;
   aliasByToolCallId: Map<string, string>;
@@ -88,6 +90,7 @@ export function sanitizeContextPruneCompactionMessages(
   if (summarizedToolCallIds.size === 0 || messages.length === 0) {
     return {
       messages,
+      sourceMessageIndexesByMessageIndex: messages.map((_, index) => index),
       sourceEntryIdsByMessageIndex: messages.map((message) => entryIdByMessage.get(message)),
       summarizedToolCallIds,
       aliasByToolCallId,
@@ -99,9 +102,10 @@ export function sanitizeContextPruneCompactionMessages(
   let prunedToolResults = 0;
   let replacedToolCalls = 0;
   let changed = false;
+  const sourceMessageIndexesByMessageIndex: number[] = [];
   const sourceEntryIdsByMessageIndex: Array<string | undefined> = [];
 
-  const sanitized = messages.flatMap((message) => {
+  const sanitized = messages.flatMap((message, sourceMessageIndex) => {
     if (message?.role === "toolResult" && typeof message.toolCallId === "string" && summarizedToolCallIds.has(message.toolCallId)) {
       prunedToolResults++;
       changed = true;
@@ -109,6 +113,7 @@ export function sanitizeContextPruneCompactionMessages(
     }
 
     if (message?.role !== "assistant" || !Array.isArray(message.content)) {
+      sourceMessageIndexesByMessageIndex.push(sourceMessageIndex);
       sourceEntryIdsByMessageIndex.push(entryIdByMessage.get(message));
       return [message];
     }
@@ -122,6 +127,7 @@ export function sanitizeContextPruneCompactionMessages(
       return buildPrunedToolCallPlaceholder(block, aliasByToolCallId.get(id));
     });
 
+    sourceMessageIndexesByMessageIndex.push(sourceMessageIndex);
     sourceEntryIdsByMessageIndex.push(entryIdByMessage.get(message));
     if (!messageChanged) return [message];
     changed = true;
@@ -130,6 +136,7 @@ export function sanitizeContextPruneCompactionMessages(
 
   return {
     messages: changed ? sanitized : messages,
+    sourceMessageIndexesByMessageIndex,
     sourceEntryIdsByMessageIndex,
     summarizedToolCallIds,
     aliasByToolCallId,

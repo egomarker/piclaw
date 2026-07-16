@@ -280,6 +280,92 @@ test("agent control session and tree commands", async () => {
   expect(labels.message).toContain("Labels:");
 });
 
+test("provider-native compact report surfaces the marked readable checkpoint without opaque state", async () => {
+  const ws = getTestWorkspace();
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+
+  const db = await import("../../src/db.js");
+  db.initDatabase();
+  const applyControlCommand = await getControl();
+  const session = new TestAgentControlSession(ws.workspace, registry);
+  const runtime = createTestSessionRuntime(session);
+  session.compact = async () => ({
+    tokensBefore: 77399,
+    estimatedTokensAfter: 19730,
+    firstKeptEntryId: "entry-remote",
+    summary: "[Piclaw provider-native compaction state. The opaque canonical context is injected at request time.]",
+    details: {
+      kind: "piclaw.remote_compaction",
+      version: 1,
+      adapter: "openai-responses-compact",
+      provider: "openai-codex",
+      modelId: "gpt-5.5",
+      api: "openai-codex-responses",
+      baseUrl: "https://chatgpt.com/backend-api",
+      output: [
+        {
+          type: "message",
+          role: "user",
+          content: [{
+            type: "input_text",
+            text: "Earlier context was compacted locally. Preserve this continuity state together with the following events:\n\n## Goal\nPreserve this readable checkpoint.",
+          }],
+        },
+        { type: "compaction_summary", encrypted_content: "opaque-secret" },
+      ],
+      fileOperations: { read: [], written: [], edited: [] },
+      createdAt: "2026-07-16T05:34:41.961Z",
+    },
+  }) as any;
+
+  const compact = await applyControlCommand(runtime as any, registry, { type: "compact", raw: "/compact" });
+  expect(compact.status).toBe("success");
+  const media = db.getMediaById(compact.mediaIds![0]);
+  const report = media ? new TextDecoder().decode(media.data) : "";
+  expect(report).toContain("## Readable continuity checkpoint");
+  expect(report).toContain("## Goal\nPreserve this readable checkpoint.");
+  expect(report).not.toContain("## Summary");
+  expect(report).not.toContain("opaque-secret");
+  expect(report).not.toContain("opaque canonical context is injected");
+});
+
+test("manual compaction context usage falls back to the safety-adjusted report estimate", async () => {
+  const { resolveManualCompactionContextUsage } = await import("../../src/agent-control/handlers/control.js");
+  const report = {
+    tokensBefore: 77399,
+    estimatedTokensAfter: 19730,
+    estimatedTokensAfterSource: "upstream" as const,
+    safetyAdjustedTokensAfter: 21703,
+    reductionPercent: 74.5,
+  };
+
+  expect(resolveManualCompactionContextUsage({
+    tokens: null,
+    contextWindow: 200000,
+    percent: null,
+    estimated: true,
+    source: "compact_command",
+    phase: "after_manual_compaction",
+  }, report)).toEqual({
+    tokens: 21703,
+    contextWindow: 200000,
+    percent: 10.8515,
+    estimated: true,
+    source: "compaction_report",
+    phase: "after_manual_compaction",
+  });
+
+  const measured = {
+    tokens: 21000,
+    contextWindow: 200000,
+    percent: 10.5,
+    estimated: true,
+    source: "compact_command",
+    phase: "after_manual_compaction",
+  };
+  expect(resolveManualCompactionContextUsage(measured, report)).toBe(measured);
+});
+
 test("agent control queue, compact, and abort commands", async () => {
   const ws = getTestWorkspace();
   restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
@@ -299,8 +385,11 @@ test("agent control queue, compact, and abort commands", async () => {
 
   const compact = await applyControlCommand(runtime as any, registry, { type: "compact", instructions: "shorten", raw: "/compact shorten" });
   expect(compact.message).toContain("Compaction complete.");
+  expect(compact.message).toContain("Method: Pipelined");
+  expect(compact.message).toContain("Execution: Single Pass");
+  expect(compact.message).toContain("Provider-native pre-pass: Provider Failure — Remote endpoint returned HTTP 503");
   expect(compact.message).toContain("Removed 1 orphaned tool-result block before rewriting the session.");
-  expect(compact.message).toContain("Estimated after: 42 after (upstream estimate)");
+  expect(compact.message).toContain("Estimated after: 42 (upstream estimate)");
   expect(compact.message).toContain("96.5% reduction");
   expect(compact.message).toContain("Safety-adjusted after:");
   expect(compact.message).toContain("Attached: full compaction report (.md).");
@@ -322,8 +411,16 @@ test("agent control queue, compact, and abort commands", async () => {
   const compactMedia = db.getMediaById(compact.mediaIds![0]);
   expect(compactMedia?.filename).toMatch(/^compaction-report-.*\.md$/);
   expect(compactMedia?.content_type).toBe("text/markdown");
+  expect(compactMedia?.metadata).toMatchObject({
+    compaction_method: "Pipelined",
+    compaction_execution: "Single Pass",
+    remote_compaction_outcome: "Provider Failure — Remote endpoint returned HTTP 503",
+  });
   const compactReport = compactMedia ? new TextDecoder().decode(compactMedia.data) : "";
   expect(compactReport).toContain("# Compaction report");
+  expect(compactReport).toContain("Method: Pipelined");
+  expect(compactReport).toContain("Execution: Single Pass");
+  expect(compactReport).toContain("Provider-native pre-pass: Provider Failure — Remote endpoint returned HTTP 503");
   expect(compactReport).toContain("Estimated tokens after: 42 (upstream)");
   expect(compactReport).toContain("Estimated reduction: 96.5%");
   expect(compactReport).toContain("## Summary");
@@ -362,7 +459,8 @@ test("agent control queue, compact, and abort commands", async () => {
     const compactTimeout = await applyControlCommand(runtime as any, registry, { type: "compact", raw: "/compact" });
     expect(compactTimeout.status).toBe("error");
     expect(compactTimeout.message).toContain("Compaction timed out");
-    expect(compactTimeout.message).toContain("session was not rewritten");
+    expect(compactTimeout.message).toContain("physical compaction may still be settling");
+    expect(compactTimeout.message).toContain("external failsafe remains armed");
     expect(session.abortCompactionCalls).toBe(1);
   } finally {
     restoreTimeoutEnv();
@@ -370,9 +468,15 @@ test("agent control queue, compact, and abort commands", async () => {
     session.isCompacting = false;
   }
 
-  const autoCompact = await applyControlCommand(runtime as any, registry, { type: "auto_compact", enabled: true, raw: "/auto-compact on" });
-  expect(autoCompact.message).toContain("on");
-  expect(session.autoCompactionEnabled).toBe(true);
+  const autoCompactOff = await applyControlCommand(runtime as any, registry, { type: "auto_compact", enabled: false, raw: "/auto-compact off" });
+  expect(autoCompactOff.message).toContain("off");
+  const autoCompactOn = await applyControlCommand(runtime as any, registry, { type: "auto_compact", enabled: true, raw: "/auto-compact on" });
+  expect(autoCompactOn.message).toContain("on");
+  const configModule = await import("../../src/core/config.js");
+  expect(configModule.getCompactionRuntimeConfig().autoCompactionEnabled).toBe(true);
+  expect(JSON.parse(readFileSync(getConfigPath(), "utf-8")).compaction.autoCompactionEnabled).toBe(true);
+  // Piclaw owns this preference; the upstream session auto-compactor remains suppressed.
+  expect(session.autoCompactionEnabled).toBe(false);
 
   const autoRetry = await applyControlCommand(runtime as any, registry, { type: "auto_retry", enabled: true, raw: "/auto-retry on" });
   expect(autoRetry.message).toContain("on");
@@ -617,14 +721,26 @@ test("agent control cycle and agent identity commands", async () => {
   const cycleThinking = await applyControlCommand(runtime as any, cycleRegistry, { type: "cycle_thinking", raw: "/cycle-thinking" });
   expect(cycleThinking.message).toContain("Thinking level set");
 
+  session.model = {
+    provider: "openai",
+    id: "gpt-5.6-sol",
+    reasoning: true,
+    thinkingLevelMap: { xhigh: "xhigh", max: "max" },
+  } as any;
   const maxOnOpenAi = await applyControlCommand(runtime as any, cycleRegistry, { type: "thinking", level: "max", raw: "/thinking max" });
-  expect(maxOnOpenAi.status).toBe("error");
-  expect(maxOnOpenAi.message).toContain("Unknown thinking level: max");
+  expect(maxOnOpenAi.status).toBe("success");
+  expect(maxOnOpenAi.thinking_level).toBe("max");
+  expect(maxOnOpenAi.thinking_level_label).toBe("max");
 
-  session.model = { provider: "anthropic", id: "claude-opus-4-6", reasoning: true } as any;
+  session.model = {
+    provider: "anthropic",
+    id: "claude-opus-4-6",
+    reasoning: true,
+    thinkingLevelMap: { max: "max" },
+  } as any;
   const maxOnAnthropic = await applyControlCommand(runtime as any, cycleRegistry, { type: "thinking", level: "max", raw: "/thinking max" });
   expect(maxOnAnthropic.status).toBe("success");
-  expect(maxOnAnthropic.thinking_level).toBe("xhigh");
+  expect(maxOnAnthropic.thinking_level).toBe("max");
   expect(maxOnAnthropic.thinking_level_label).toBe("max");
   expect(maxOnAnthropic.message).toContain("Thinking level set to max");
 
@@ -736,7 +852,9 @@ test("agent control idempotent mode commands stay stable across repeats", async 
   const autoCompactSecond = await applyControlCommand(runtime as any, registry, { type: "auto_compact", enabled: true, raw: "/auto-compact on" });
   expect(autoCompactFirst.status).toBe("success");
   expect(autoCompactSecond.status).toBe("success");
-  expect(session.autoCompactionEnabled).toBe(true);
+  const configModule = await import("../../src/core/config.js");
+  expect(configModule.getCompactionRuntimeConfig().autoCompactionEnabled).toBe(true);
+  expect(session.autoCompactionEnabled).toBe(false);
 
   const autoRetryFirst = await applyControlCommand(runtime as any, registry, { type: "auto_retry", enabled: false, raw: "/auto-retry off" });
   const autoRetrySecond = await applyControlCommand(runtime as any, registry, { type: "auto_retry", enabled: false, raw: "/auto-retry off" });

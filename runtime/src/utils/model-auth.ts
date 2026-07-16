@@ -21,6 +21,10 @@ export async function resolveModelRequestAuth(
   registry: ModelRegistry,
   model: Model<Api>,
 ): Promise<ModelRequestAuth> {
+  if (!registry || (typeof registry !== "object" && typeof registry !== "function")) {
+    return { ok: false, error: `No model registry is available for ${model.provider}/${model.id}.` };
+  }
+
   const reg = registry as ModelRegistry & {
     getApiKeyAndHeaders?: (model: Model<Api>) => Promise<{ ok: boolean; apiKey?: string; headers?: Record<string, string>; env?: Record<string, string>; error?: string }>;
     getApiKey?: (model: Model<Api>) => Promise<string | undefined>;

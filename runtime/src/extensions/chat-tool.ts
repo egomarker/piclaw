@@ -53,7 +53,7 @@ const ChatSchema = Type.Object({
     Type.Literal("auto"),
     Type.Literal("queue"),
     Type.Literal("steer"),
-  ], { description: "Delivery mode for busy targets: auto (default), queue, or steer." })),
+  ], { description: "Delivery mode for busy targets: steer (default), queue, or auto." })),
 });
 
 type ChatToolParams = {
@@ -69,8 +69,8 @@ const HINT = [
   "Prefer target_agent_name with an @alias (for example @research). Use target_chat_jid only as a fallback when no alias exists.",
   "@aliases are resolved through the internal Pi chat-branch/session-tree registry before delivery; do not use opaque session IDs when an alias is available.",
   "Sender identity is derived from the current chat session and cannot be supplied by the caller; destination identity is resolved before delivery.",
-  "The destination receives the message through its normal inbound-message path with structured reply-to metadata, so queueing and busy-session behavior stay consistent.",
-  "Use mode='queue' to enqueue behind active work, or mode='steer' to inject steering while the target is streaming.",
+  "The destination receives the message through its normal inbound-message path with structured reply-to metadata.",
+  "Messages steer the target immediately by default. Use mode='queue' to enqueue behind active work, or mode='auto' for standard request behavior.",
 ].join("\n");
 
 function err(message: string): AgentToolResult<Record<string, unknown>> {
@@ -128,7 +128,7 @@ export const chatTool: ExtensionFactory = (pi: ExtensionAPI) => {
           ...(targetChatJid ? { target_chat_jid: targetChatJid } : {}),
           ...(targetAgentName ? { target_agent_name: targetAgentName } : {}),
           content,
-          mode: params.mode || "auto",
+          mode: params.mode || "steer",
         });
 
         const target = describeTarget(result);

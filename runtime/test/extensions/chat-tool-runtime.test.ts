@@ -133,6 +133,45 @@ describe("direct chat tool runtime relay", () => {
     });
   });
 
+  test("uses the trusted agent-message entry point when available instead of auth-guarded request routing", async () => {
+    let handleAgentMessageCalled = false;
+    let handleRequestCalled = false;
+    const relay = createDirectChatToolRelayHandler(makeAgentPool(), {
+      handleAgentMessage: async (req, pathname) => {
+        handleAgentMessageCalled = true;
+        expect(pathname).toBe("/agent/default/message");
+        expect(req.url).toBe("http://internal/agent/default/message?chat_jid=web%3Atarget");
+        return jsonResponse({ created: true, row_id: 123 }, 201);
+      },
+      handleRequest: async () => {
+        handleRequestCalled = true;
+        return jsonResponse({ error: "Unauthorized" }, 401);
+      },
+    }, {
+      getAgentDisplayName: () => "Smith",
+      getChatBranchByChatJid: () => null,
+      getChatBranchByAgentName: () => null,
+    });
+
+    const result = await relay({
+      source_chat_jid: "web:source",
+      target_agent_name: "@research",
+      content: "hello",
+      mode: "auto",
+    });
+
+    expect(handleAgentMessageCalled).toBe(true);
+    expect(handleRequestCalled).toBe(false);
+    expect(result).toMatchObject({
+      status: "ok",
+      relayed: true,
+      target_chat_jid: "web:target",
+      target_agent_name: "research",
+      created: true,
+      row_id: 123,
+    });
+  });
+
   test("does not accept sender aliases from the request and rejects self-targets", async () => {
     const relay = createDirectChatToolRelayHandler(makeAgentPool(), {
       handleRequest: async () => jsonResponse({ created: true }, 201),

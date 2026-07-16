@@ -40,6 +40,176 @@ describe("web channel runtime public surface service", () => {
     });
   });
 
+  test("delegates targeted runtime agent messages to the web handler path when available", async () => {
+    const calls: string[] = [];
+    let body: Record<string, unknown> | null = null;
+    const service = createWebChannelRuntimePublicSurfaceService({
+      handleAgentMessage: async (req, pathname) => {
+        const url = new URL(req.url);
+        calls.push(`handler:${pathname}:${url.searchParams.get("chat_jid")}`);
+        body = await req.json() as Record<string, unknown>;
+        return Response.json({
+          user_message: { id: 77, chat_jid: "web:goal", timestamp: "2026-03-28T00:00:00.000Z", data: { thread_id: 77 } },
+          thread_id: 77,
+        }, { status: 201 });
+      },
+      runtimeFollowupFacade: {} as any,
+      messageProcessingStorageService: {} as any,
+      sessionBroadcast: { sse: {}, uiBridge: {}, broadcastEvent: () => undefined } as any,
+    });
+
+    const result = await service.enqueueAgentMessage({
+      chatJid: "web:goal",
+      content: "🎯 Continue goal: Ship it",
+      mediaIds: [3],
+      contentBlocks: [{ type: "text", text: "inline" }],
+      linkPreviews: [{ url: "https://example.invalid" }],
+      threadId: 5,
+      mode: "queue",
+    });
+
+    expect(result.status).toBe("ok");
+    expect(result.chat_jid).toBe("web:goal");
+    expect(result.row_id).toBe(77);
+    expect(result.thread_id).toBe(77);
+    expect(result.created).toBe(true);
+    expect(calls).toEqual(["handler:/agent/default/message:web:goal"]);
+    expect(body).toEqual({
+      content: "🎯 Continue goal: Ship it",
+      mode: "queue",
+      media_ids: [3],
+      content_blocks: [{ type: "text", text: "inline" }],
+      link_previews: [{ url: "https://example.invalid" }],
+      thread_id: 5,
+    });
+  });
+
+  test("enqueues targeted runtime agent messages through storage, broadcast, and chat resume", async () => {
+    const calls: string[] = [];
+    const stored = interaction(9);
+    stored.data.thread_id = 9;
+
+    const service = createWebChannelRuntimePublicSurfaceService({
+      agentPool: {
+        isStreaming: (chatJid) => {
+          calls.push(`streaming:${chatJid}`);
+          return false;
+        },
+        isActive: (chatJid) => {
+          calls.push(`active:${chatJid}`);
+          return false;
+        },
+      },
+      runtimeFollowupFacade: {
+        getQueuedFollowupCount: (chatJid) => {
+          calls.push(`count:${chatJid}`);
+          return 0;
+        },
+        resumeChat: (chatJid, threadRootId) => {
+          calls.push(`resume:${chatJid}:${threadRootId ?? "null"}`);
+        },
+      } as any,
+      messageProcessingStorageService: {
+        storeMessage: (chatJid, content, isBot, mediaIds, options) => {
+          calls.push(`store:${chatJid}:${content}:${isBot ? 1 : 0}:${mediaIds.join(",")}:${options?.threadId ?? "undefined"}:${options?.screenHint ?? ""}`);
+          return stored;
+        },
+      } as any,
+      sessionBroadcast: {
+        sse: {},
+        uiBridge: {},
+        broadcastEvent: (eventType, data) => {
+          calls.push(`broadcast:${eventType}:${(data as InteractionRow).id ?? ""}`);
+        },
+      } as any,
+    });
+
+    const result = await service.enqueueAgentMessage({
+      chatJid: "web:goal",
+      content: "🎯 Continue goal: Ship it",
+      mediaIds: [3],
+      threadId: null,
+      screenHint: "goal",
+      source: "goal.continuation",
+    });
+
+    expect(result.status).toBe("ok");
+    expect(result.chat_jid).toBe("web:goal");
+    expect(result.row_id).toBe(9);
+    expect(result.thread_id).toBe(9);
+    expect(result.created).toBe(true);
+    expect(calls).toEqual([
+      "streaming:web:goal",
+      "active:web:goal",
+      "count:web:goal",
+      "store:web:goal:🎯 Continue goal: Ship it:0:3:undefined:goal",
+      "broadcast:new_post:9",
+      "resume:web:goal:9",
+    ]);
+  });
+
+  test("queues targeted runtime agent messages behind active chats without HTTP", async () => {
+    const calls: string[] = [];
+    const service = createWebChannelRuntimePublicSurfaceService({
+      agentPool: {
+        isStreaming: (chatJid) => {
+          calls.push(`streaming:${chatJid}`);
+          return false;
+        },
+        isActive: (chatJid) => {
+          calls.push(`active:${chatJid}`);
+          return true;
+        },
+      },
+      runtimeFollowupFacade: {
+        getQueuedFollowupCount: (chatJid) => {
+          calls.push(`count:${chatJid}`);
+          return 0;
+        },
+        enqueueQueuedFollowupItem: (chatJid, rowId, queuedContent, threadId, queuedAt, extras) => {
+          calls.push(`enqueue:${chatJid}:${rowId}:${queuedContent}:${threadId ?? "null"}:${typeof queuedAt}:${extras?.source ?? ""}`);
+          return 44;
+        },
+      } as any,
+      messageProcessingStorageService: {
+        storeMessage: () => {
+          calls.push("store-unexpected");
+          return null;
+        },
+      } as any,
+      sessionBroadcast: {
+        sse: {},
+        uiBridge: {},
+        broadcastEvent: (eventType, data) => {
+          calls.push(`broadcast:${eventType}:${(data as { row_id?: number }).row_id ?? ""}`);
+        },
+      } as any,
+    });
+
+    const result = await service.enqueueAgentMessage({
+      chatJid: "web:goal",
+      content: "Continue",
+      mode: "auto",
+      source: "goal.continuation",
+    });
+
+    expect(result).toEqual({
+      status: "ok",
+      chat_jid: "web:goal",
+      row_id: 44,
+      thread_id: null,
+      queued: "followup",
+      created: false,
+    });
+    expect(calls).toEqual([
+      "streaming:web:goal",
+      "active:web:goal",
+      "count:web:goal",
+      "enqueue:web:goal:0:Continue:null:string:goal.continuation",
+      "broadcast:agent_followup_queued:44",
+    ]);
+  });
+
   test("delegates runtime/session/storage surfaces to the extracted collaborators", async () => {
     const calls: string[] = [];
     const sse = { kind: "sse-hub" };

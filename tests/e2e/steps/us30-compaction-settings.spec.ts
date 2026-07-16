@@ -48,6 +48,38 @@ test.describe('US-30: Compaction Settings Pane', () => {
     await page.keyboard.press('Escape');
   });
 
+  test('processing method selector persists the canonical Pipelined value', async ({ authedPage: page }) => {
+    await page.waitForSelector(sel.timeline);
+    const postedMethods: string[] = [];
+    page.on('request', (request) => {
+      if (request.method() !== 'POST' || !request.url().includes('/agent/settings/compaction')) return;
+      try {
+        const body = request.postDataJSON() as Record<string, unknown>;
+        if (typeof body.smartCompactionMethod === 'string') postedMethods.push(body.smartCompactionMethod);
+      } catch {
+        // Ignore unrelated/non-JSON requests.
+      }
+    });
+
+    await page.keyboard.press('Meta+Comma');
+    const dialog = page.locator(sel.settingsDialog);
+    await dialog.waitFor({ timeout: 5000 });
+    const compactionNav = dialog.locator('button, [role="tab"]').filter({ hasText: /^Compaction$/ }).first();
+    if (await compactionNav.isVisible()) await compactionNav.click();
+
+    const methodSelect = dialog.locator('#smartCompactionMethod');
+    await expect(methodSelect).toBeVisible();
+    await expect(methodSelect.locator('option')).toHaveText(['Selective', 'Pipelined']);
+    await methodSelect.selectOption('pipelined');
+    await expect.poll(() => postedMethods.includes('pipelined'), { timeout: 5000 }).toBe(true);
+
+    // Restore the default so this test does not leak a persistent method into
+    // later E2E scenarios.
+    await methodSelect.selectOption('selective');
+    await expect.poll(() => postedMethods.at(-1), { timeout: 5000 }).toBe('selective');
+    await page.keyboard.press('Escape');
+  });
+
   test('model scope filter available in settings', async ({ authedPage: page }) => {
     await page.waitForSelector(sel.timeline);
 

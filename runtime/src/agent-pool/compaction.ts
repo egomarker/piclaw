@@ -34,10 +34,35 @@ export interface CompactionLifecycleOptions {
 const DEFAULT_IDLE_AUTO_COMPACTION_DELAY_MS = 5_000;
 const idleAutoCompactionTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-type CompactionOutcome<T> = { ok: true; result: T } | { ok: false; errorMessage: string };
-type ActiveCompaction = { outcome: Promise<CompactionOutcome<unknown>> };
+type BaseCompactionOutcome<T> = { ok: true; result: T } | { ok: false; errorMessage: string };
+export type CompactionOutcome<T> = BaseCompactionOutcome<T> & {
+  /** Stable generation that owns this physical compaction. */
+  readonly generationId: string;
+  /** True when this caller joined another caller's physical compaction. */
+  readonly joined: boolean;
+};
+type ActiveCompaction = {
+  session: AgentSession;
+  generationId: string;
+  outcome: Promise<CompactionOutcome<unknown>>;
+  timedOut: boolean;
+};
+
+function withCompactionOutcomeMetadata<T>(
+  outcome: BaseCompactionOutcome<T>,
+  generationId: string,
+  joined: boolean,
+): CompactionOutcome<T> {
+  // Keep metadata non-enumerable so existing public JSON/result shapes remain
+  // backwards compatible while lifecycle callers can prevent double-finalize.
+  return Object.defineProperties(outcome, {
+    generationId: { value: generationId, enumerable: false },
+    joined: { value: joined, enumerable: false },
+  }) as CompactionOutcome<T>;
+}
 
 const activeCompactions = new Map<string, ActiveCompaction>();
+let compactionGenerationSequence = 0;
 
 type AutoCompactionReason = "threshold" | "idle";
 
@@ -451,19 +476,46 @@ export function clearCompactionFailureBackoff(chatJid: string): void {
 
 export function noteCompactionFailure(chatJid: string, errorMessage: string, failedAtIso = new Date().toISOString()): ChatCompactionBackoffState {
   const previous = getChatCompactionBackoff(chatJid);
-  const failureCount = (previous?.failureCount ?? 0) + 1;
-  const failedAtMs = Date.parse(failedAtIso);
+  const parsedFailedAtMs = Date.parse(failedAtIso);
+  const failedAtMs = Number.isFinite(parsedFailedAtMs) ? parsedFailedAtMs : Date.now();
+  // Persisted failures are a bounded series, not a lifetime counter. Without
+  // this reset, one failure months later inherits the maximum exponential
+  // backoff from unrelated historical state.
+  const failureCount = (previous && isRecentCompactionFailure(previous, failedAtMs)
+    ? previous.failureCount
+    : 0) + 1;
   const backoffMs = computeCompactionBackoffMs(failureCount);
-  const backoffUntil = new Date((Number.isFinite(failedAtMs) ? failedAtMs : Date.now()) + backoffMs).toISOString();
+  const backoffUntil = new Date(failedAtMs + backoffMs).toISOString();
   const nextState: ChatCompactionBackoffState = {
     chatJid,
     failureCount,
-    lastFailedAt: failedAtIso,
+    lastFailedAt: new Date(failedAtMs).toISOString(),
     backoffUntil,
     lastErrorMessage: errorMessage || null,
   };
   setChatCompactionBackoff(chatJid, nextState);
   return nextState;
+}
+
+export function finalizeRecoveryCompactionOutcome<T>(
+  session: AgentSession,
+  chatJid: string,
+  outcome: CompactionOutcome<T>,
+  options: CompactionSuccessFinalizeOptions = {},
+): void {
+  // A joined caller observes the owner's result but must never mutate the
+  // shared backoff/window/counter lifecycle a second time.
+  if (outcome.joined) return;
+  if (outcome.ok) {
+    noteCompactionSuccess(session, chatJid, "recovery", {
+      ...options,
+      countSuccess: false,
+    });
+    return;
+  }
+  if (!isCompactionCancellationError(outcome.errorMessage)) {
+    noteCompactionFailure(chatJid, outcome.errorMessage);
+  }
 }
 
 export function getCompactionTimeoutMs(): number {
@@ -524,19 +576,28 @@ function defaultTriggerForReason(reason: string): PiclawCompactionTrigger {
   return reason;
 }
 
+function getCompactionMaxWorkUnits(): number {
+  const parsed = Number.parseInt(process.env.PICLAW_COMPACTION_MAX_WORK_UNITS || "1000000", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.max(1, Math.trunc(parsed)) : 1_000_000;
+}
+
 function buildCompactionTriggerMetadata(
   chatJid: string,
   reason: string,
   options: RunCompactionTriggerOptions = {},
 ): PiclawCompactionTriggerMetadata {
+  const timeoutMs = getCompactionTimeoutMs();
   return {
     chatJid,
     trigger: options.trigger ?? defaultTriggerForReason(reason),
+    generationId: `${Date.now().toString(36)}-${(++compactionGenerationSequence).toString(36)}`,
     willRetry: options.willRetry ?? (reason === "recovery" || reason === "overflow"),
     source: options.source ?? "piclaw",
     attempt: options.attempt,
     targetContextWindow: options.targetContextWindow,
     targetModelLabel: options.targetModelLabel,
+    deadlineAtMs: timeoutMs > 0 ? Date.now() + timeoutMs : undefined,
+    maxWorkUnits: getCompactionMaxWorkUnits(),
   };
 }
 
@@ -550,20 +611,60 @@ export async function runCompactionWithTimeout<T>(
 ): Promise<CompactionOutcome<T>> {
   const existing = activeCompactions.get(chatJid);
   if (existing) {
-    options.onWarn?.("Compaction already in progress; joining existing compaction", {
-      operation: "run_agent.join_active_compaction",
+    if (existing.session === session) {
+      options.onWarn?.("Compaction already in progress; joining existing compaction", {
+        operation: "run_agent.join_active_compaction",
+        chatJid,
+      });
+      const joinedOutcome = await existing.outcome as CompactionOutcome<T>;
+      const baseOutcome: BaseCompactionOutcome<T> = joinedOutcome.ok
+        ? { ok: true, result: joinedOutcome.result }
+        : { ok: false, errorMessage: joinedOutcome.errorMessage };
+      return withCompactionOutcomeMetadata(baseOutcome, existing.generationId, true);
+    }
+    if (existing.timedOut) {
+      // A timed-out compaction remains quarantined for its original mutable
+      // session until physical settlement. A replacement session may safely
+      // supersede the map entry; identity-gated late cleanup cannot touch it.
+      if (activeCompactions.get(chatJid) === existing) activeCompactions.delete(chatJid);
+      return await runCompactionWithTimeout(session, chatJid, options, runCompact, reason, triggerOptions);
+    }
+    options.onWarn?.("Compaction already in progress on a replaced session; waiting before starting a new generation", {
+      operation: "run_agent.wait_cross_session_compaction",
       chatJid,
     });
-    return await existing.outcome as CompactionOutcome<T>;
+    await existing.outcome;
+    return await runCompactionWithTimeout(session, chatJid, options, runCompact, reason, triggerOptions);
   }
 
-  const active: ActiveCompaction = { outcome: Promise.resolve({ ok: false, errorMessage: "Compaction did not start" }) };
-  const clearActive = () => {
-    if (activeCompactions.get(chatJid) === active) activeCompactions.delete(chatJid);
-  };
   const metadata = buildCompactionTriggerMetadata(chatJid, reason, triggerOptions);
+  const generationId = metadata.generationId!;
+  const active: ActiveCompaction = {
+    session,
+    generationId,
+    outcome: Promise.resolve(withCompactionOutcomeMetadata(
+      { ok: false, errorMessage: "Compaction did not start" },
+      generationId,
+      false,
+    )),
+    timedOut: false,
+  };
+  const clearActive = (): boolean => {
+    if (activeCompactions.get(chatJid) !== active) return false;
+    activeCompactions.delete(chatJid);
+    return true;
+  };
   const runCompactWithTrigger = () => runWithPiclawCompactionTrigger(metadata, runCompact);
-  const outcome = runCompactionWithTimeoutExclusive(session, chatJid, options, runCompactWithTrigger, clearActive, reason);
+  const outcome = runCompactionWithTimeoutExclusive(
+    session,
+    chatJid,
+    options,
+    runCompactWithTrigger,
+    clearActive,
+    () => { active.timedOut = true; },
+    reason,
+    generationId,
+  ).then((result) => withCompactionOutcomeMetadata(result, generationId, false));
   active.outcome = outcome as Promise<CompactionOutcome<unknown>>;
   activeCompactions.set(chatJid, active);
   return await outcome;
@@ -574,9 +675,11 @@ async function runCompactionWithTimeoutExclusive<T>(
   chatJid: string,
   options: Pick<CompactionLifecycleOptions, "onWarn">,
   runCompact: () => Promise<T>,
-  clearActive: () => void,
+  clearActive: () => boolean,
+  markTimedOut: () => void,
   reason: string,
-): Promise<CompactionOutcome<T>> {
+  generationId?: string,
+): Promise<BaseCompactionOutcome<T>> {
   const timeoutMs = getCompactionTimeoutMs();
   updateSessionCompacting(chatJid, true);
   markCompactionActiveBestEffort(chatJid, reason);
@@ -586,25 +689,26 @@ async function runCompactionWithTimeoutExclusive<T>(
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const recordedReason = isCompactionCancellationError(errorMessage)
-        ? consumeCompactionCancellationReason(session)
+        ? consumeCompactionCancellationReason(session, undefined, generationId)
         : null;
       return { ok: false, errorMessage: recordedReason ?? errorMessage };
     } finally {
       clearContextEstimateCache(session);
-      updateSessionCompacting(chatJid, false);
-      clearCompactionActiveBestEffort(chatJid);
-      clearActive();
+      if (clearActive()) {
+        updateSessionCompacting(chatJid, false);
+        clearCompactionActiveBestEffort(chatJid);
+      }
     }
   }
 
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   const compactionOutcome = Promise.resolve()
     .then(() => runCompact())
-    .then((result): CompactionOutcome<T> => ({ ok: true, result }))
-    .catch((error): CompactionOutcome<T> => {
+    .then((result): BaseCompactionOutcome<T> => ({ ok: true, result }))
+    .catch((error): BaseCompactionOutcome<T> => {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const recordedReason = isCompactionCancellationError(errorMessage)
-        ? consumeCompactionCancellationReason(session)
+        ? consumeCompactionCancellationReason(session, undefined, generationId)
         : null;
       return {
         ok: false,
@@ -614,9 +718,13 @@ async function runCompactionWithTimeoutExclusive<T>(
     .finally(() => {
       if (timeoutId) clearTimeout(timeoutId);
       clearContextEstimateCache(session);
-      updateSessionCompacting(chatJid, false);
-      clearCompactionActiveBestEffort(chatJid);
-      clearActive();
+      // A timed-out generation may settle after a replacement compaction has
+      // started for this chat. Only the generation still registered in the
+      // single-flight map owns the shared status/DB cleanup.
+      if (clearActive()) {
+        updateSessionCompacting(chatJid, false);
+        clearCompactionActiveBestEffort(chatJid);
+      }
     });
 
   const timedOut = Symbol("compaction-timeout");
@@ -635,18 +743,20 @@ async function runCompactionWithTimeoutExclusive<T>(
   // finish their cleanup (finally blocks, UI teardown) before the caller
   // can dispose the session.  Without this, emergency rotation can call
   // session.dispose() while the extension's ctx is still in use.
-  const SETTLEMENT_GRACE_MS = 5_000;
+  const settlementGraceMs = parseNonNegativeInt(
+    process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS,
+    5_000,
+  );
   await Promise.race([
     compactionOutcome,
-    new Promise<void>((r) => setTimeout(r, SETTLEMENT_GRACE_MS)),
+    new Promise<void>((r) => setTimeout(r, settlementGraceMs)),
   ]);
 
-  updateSessionCompacting(chatJid, false);
-  clearCompactionActiveBestEffort(chatJid);
-  // Release the in-memory single-flight lock after timeout+settlement grace
-  // even if the upstream compaction promise never resolves. A late settlement
-  // will run the promise's finally and call clearActive() again harmlessly.
-  clearActive();
+  // Keep the original mutable session quarantined until its physical compact
+  // settles. Releasing this lock after grace would permit a second compaction
+  // to rewrite the same session concurrently. A replacement session can still
+  // supersede the identity-gated map entry safely.
+  markTimedOut();
   return {
     ok: false,
     errorMessage: `Compaction timed out after ${formatTimeoutDuration(timeoutMs)}`,
@@ -802,13 +912,7 @@ function getAutoCompactionContext(
     );
   }
 
-  const settingsManager = (session as AgentSession & {
-    settingsManager?: { getCompactionSettings?: () => { enabled?: boolean; reserveTokens?: number } };
-  }).settingsManager;
-  const settings = typeof settingsManager?.getCompactionSettings === "function"
-    ? settingsManager.getCompactionSettings()
-    : null;
-  if (!settings) return null;
+  if (!getCompactionRuntimeConfig().autoCompactionEnabled) return null;
 
   const status = getAutoCompactionTokenStatusForSession(session, chatJid, { projectedAdditionalRawTokens });
   if (!status?.tokenStatus.tokenLimitReached) return null;
@@ -865,12 +969,6 @@ async function maybeAutoCompactSession(
 
   try {
     const activeBackoff = getActiveCompactionBackoff(chatJid);
-    const previousBackoff = getChatCompactionBackoff(chatJid);
-    const previousNonCancellationFailure = previousBackoff
-      && !isCompactionCancellationError(previousBackoff.lastErrorMessage)
-      && isRecentCompactionFailure(previousBackoff)
-      ? previousBackoff
-      : null;
     if (activeBackoff && isCompactionCancellationError(activeBackoff.lastErrorMessage) && reason === "idle") {
       clearCompactionFailureBackoff(chatJid);
       options.onWarn?.(
@@ -886,11 +984,9 @@ async function maybeAutoCompactSession(
           lastErrorMessage: activeBackoff.lastErrorMessage,
         },
       );
-    } else if (activeBackoff || previousNonCancellationFailure) {
-      const suppressionState = activeBackoff ?? previousNonCancellationFailure!;
-      const detail = activeBackoff
-        ? formatCompactionBackoffDetail(suppressionState)
-        : `Previous auto-compaction failed at ${suppressionState.lastFailedAt}; emergency rotation should run before retrying. Last error: ${(suppressionState.lastErrorMessage ?? "unknown").slice(0, 160)}`;
+    } else if (activeBackoff) {
+      const suppressionState = activeBackoff;
+      const detail = formatCompactionBackoffDetail(suppressionState);
       options.onWarn?.(
         reason === "idle"
           ? "Idle auto-compaction suppressed for chat after recent failures"
@@ -971,7 +1067,9 @@ async function maybeAutoCompactSession(
       // Idle compaction cancellation remains non-sticky so an explicit abort
       // does not suppress future idle maintenance.
       const shouldRecordFailure = !aborted || reason === "threshold";
-      const failureState = shouldRecordFailure ? noteCompactionFailure(chatJid, compactionResult.errorMessage) : null;
+      const failureState = shouldRecordFailure && !compactionResult.joined
+        ? noteCompactionFailure(chatJid, compactionResult.errorMessage)
+        : null;
       onEvent?.({
         type: "compaction_end",
         ...eventFields,
@@ -1015,11 +1113,13 @@ async function maybeAutoCompactSession(
       }
       throw new Error(compactionResult.errorMessage);
     }
-    noteCompactionSuccess(session, chatJid, reason, {
-      ...options,
-      onEvent,
-      countSuccess: true,
-    });
+    if (!compactionResult.joined) {
+      noteCompactionSuccess(session, chatJid, reason, {
+        ...options,
+        onEvent,
+        countSuccess: true,
+      });
+    }
     const contextReport = getCompactionContextReport(session, compactionResult.result as { tokensBefore?: unknown; estimatedTokensAfter?: unknown });
     onEvent?.({
       type: "compaction_end",

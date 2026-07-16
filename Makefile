@@ -193,6 +193,12 @@ local-install: pack ## Pack and install piclaw globally (no restart)
 		$(BUN_ROOT)/bin/bun install -g "$$TGZ" \
 		--registry https://registry.npmjs.org; \
 	sudo chmod -R a+rX $(BUN_ROOT); \
+	PICLAW_CLI=$$(readlink -f $(BUN_ROOT)/bin/piclaw || true); \
+	if [ -z "$$PICLAW_CLI" ] || [ ! -f "$$PICLAW_CLI" ]; then \
+		printf '%s\n' "[local-install] Installed piclaw CLI target was not found"; \
+		exit 1; \
+	fi; \
+	sudo chmod 755 "$$PICLAW_CLI"; \
 	rm -f "$$TGZ"; \
 	DEST_REAL=$(BUN_ROOT)/install/global/node_modules/piclaw; \
 	if [ -d "$$DEST_REAL/extensions" ] && [ -d "$$DEST_REAL/node_modules" ]; then \

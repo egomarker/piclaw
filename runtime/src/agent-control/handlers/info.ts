@@ -16,7 +16,7 @@ import type { AgentControlCommand, AgentControlResult } from "../agent-control-t
 import { formatBytes, formatCompactNumber, formatCurrency } from "../agent-control-helpers.js";
 import { CONTROL_COMMAND_DEFINITIONS } from "../command-registry.js";
 import { getChatJid } from "../../core/chat-context.js";
-import { getSessionStorageConfig } from "../../core/config.js";
+import { getCompactionRuntimeConfig, getSessionStorageConfig } from "../../core/config.js";
 import { getSessionFileLineCount } from "../../session-rotation.js";
 import { getAutoCompactionTokenStatusForSession } from "../../agent-pool/compaction.js";
 import { computePromptCacheWaste } from "../../agent-pool/cache-stats.js";
@@ -91,6 +91,7 @@ export async function handleState(session: AgentSession, _command: StateCommand)
   })();
 
   const sessionStorageConfig = getSessionStorageConfig();
+  const compactionConfig = getCompactionRuntimeConfig();
   const isOversizedSession = sessionFileSize !== null && sessionFileSize >= sessionStorageConfig.maxSizeBytes;
   const sessionLineCount = getSessionFileLineCount(session.sessionFile);
 
@@ -104,7 +105,7 @@ export async function handleState(session: AgentSession, _command: StateCommand)
     `| **Streaming** | ${session.isStreaming ? "yes" : "no"} |`,
     `| **Compacting** | ${session.isCompacting ? "yes" : "no"} |`,
     `| **Retrying** | ${session.isRetrying ? "yes" : "no"} |`,
-    `| **Auto-compaction** | ${session.autoCompactionEnabled ? "on" : "off"} |`,
+    `| **Auto-compaction** | ${compactionConfig.autoCompactionEnabled ? "on" : "off"} |`,
     `| **Auto-retry** | ${session.autoRetryEnabled ? "on" : "off"} |`,
     `| **Steering mode** | ${session.steeringMode} |`,
     `| **Follow-up mode** | ${session.followUpMode} |`,

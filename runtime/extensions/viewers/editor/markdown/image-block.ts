@@ -3,13 +3,11 @@ import {
     EditorView,
     StateField,
     WidgetType,
-    ensureSyntaxTree,
     syntaxTree,
 } from '#editor-vendor/codemirror';
-import type { DecorationSet, Extension, Range, Transaction } from '#editor-vendor/codemirror';
+import type { DecorationSet, EditorState, Extension, Range, Transaction } from '#editor-vendor/codemirror';
 import type { SyntaxNode } from '@lezer/common';
 import { normalizeLinkHref } from './link.js';
-import { livePreviewParsingSuspendedField } from './live-preview.js';
 import { treeGrowthEffect, treeProgressPlugin } from './tree-progress.js';
 
 const imageDimensionCache = new Map<string, { width: number; height: number }>();
@@ -109,67 +107,92 @@ function imageIsInsideTable(node: SyntaxNode): boolean {
     return false;
 }
 
-function buildImageBlocks(state: any): DecorationSet {
-    const ranges: Range<Decoration>[] = [];
-    const tree = ensureSyntaxTree(state, state.doc.length, 120) ?? syntaxTree(state);
-
-    tree.iterate({
-        enter(node) {
-            if (node.name !== 'Image') return;
-            if (imageIsInsideTable(node.node)) return;
-
-            const parsed = parseMarkdownImageSource(state.doc.sliceString(node.from, node.to));
-            if (!parsed) return;
-
-            const line = state.doc.lineAt(node.from);
-            ranges.push(Decoration.widget({
-                widget: new ImageBlockWidget(parsed.url, parsed.alt),
-                block: true,
-                side: 1,
-            }).range(line.to));
-        },
-    });
-
-    return Decoration.set(ranges, true);
+interface DocumentRange {
+    from: number;
+    to: number;
 }
 
-function changeAffectsImages(transaction: Transaction, existing: DecorationSet): boolean {
-    let affected = false;
-    transaction.changes.iterChanges((fromA, toA) => {
-        if (affected) return;
-        existing.between(fromA, toA, () => {
-            affected = true;
-            return false;
-        });
-    });
-    if (affected) return true;
+function expandedLineRange(state: EditorState, from: number, to: number): DocumentRange {
+    const safeFrom = Math.max(0, Math.min(from, state.doc.length));
+    const safeTo = Math.max(safeFrom, Math.min(to, state.doc.length));
+    const first = state.doc.lineAt(safeFrom);
+    const last = state.doc.lineAt(safeTo);
+    const firstLine = state.doc.line(Math.max(1, first.number - 1));
+    const lastLine = state.doc.line(Math.min(state.doc.lines, last.number + 1));
+    return { from: firstLine.from, to: lastLine.to };
+}
 
+function changedLineRanges(transaction: Transaction): DocumentRange[] {
+    const ranges: DocumentRange[] = [];
     transaction.changes.iterChanges((_fromA, _toA, fromB, toB) => {
-        if (affected) return;
-        const startLine = transaction.state.doc.lineAt(fromB);
-        const endLine = toB > startLine.to ? transaction.state.doc.lineAt(toB) : startLine;
-        for (let lineNo = startLine.number; lineNo <= endLine.number; lineNo++) {
-            if (transaction.state.doc.line(lineNo).text.includes('![')) {
-                affected = true;
-                break;
-            }
-        }
+        ranges.push(expandedLineRange(transaction.state, fromB, toB));
     });
+    return ranges;
+}
 
-    return affected;
+function imageBlockRanges(state: EditorState, scanRanges?: readonly DocumentRange[]): Range<Decoration>[] {
+    const ranges: Range<Decoration>[] = [];
+    const seen = new Set<string>();
+    const scans = scanRanges?.length ? scanRanges : [{ from: 0, to: state.doc.length }];
+
+    for (const scan of scans) {
+        syntaxTree(state).iterate({
+            from: scan.from,
+            to: scan.to,
+            enter(node) {
+                if (node.name !== 'Image' || imageIsInsideTable(node.node)) return;
+                const key = `${node.from}:${node.to}`;
+                if (seen.has(key)) return;
+                seen.add(key);
+
+                const parsed = parseMarkdownImageSource(state.doc.sliceString(node.from, node.to));
+                if (!parsed) return;
+
+                const line = state.doc.lineAt(node.from);
+                ranges.push(Decoration.widget({
+                    widget: new ImageBlockWidget(parsed.url, parsed.alt),
+                    block: true,
+                    side: 1,
+                }).range(line.to));
+            },
+        });
+    }
+    return ranges;
+}
+
+function buildImageBlocks(state: EditorState): DecorationSet {
+    return Decoration.set(imageBlockRanges(state), true);
+}
+
+function refreshImageBlocks(
+    decorations: DecorationSet,
+    state: EditorState,
+    scanRanges: readonly DocumentRange[],
+): DecorationSet {
+    if (!scanRanges.length) return decorations;
+    return decorations.update({
+        filter: (from, to) => !scanRanges.some((scan) => from <= scan.to && to >= scan.from),
+        add: imageBlockRanges(state, scanRanges),
+        sort: true,
+    });
 }
 
 const imageBlockField = StateField.define<DecorationSet>({
     create: (state) => buildImageBlocks(state),
     update(decorations, transaction) {
         for (const effect of transaction.effects) {
-            if (effect.is(treeGrowthEffect)) return buildImageBlocks(transaction.state);
+            if (effect.is(treeGrowthEffect)) {
+                return refreshImageBlocks(decorations, transaction.state, [
+                    expandedLineRange(transaction.state, effect.value.from, effect.value.to),
+                ]);
+            }
         }
         if (!transaction.docChanged) return decorations;
-        const mapped = decorations.map(transaction.changes);
-        if (transaction.state.field(livePreviewParsingSuspendedField, false)) return mapped;
-        if (!changeAffectsImages(transaction, decorations)) return mapped;
-        return buildImageBlocks(transaction.state);
+        return refreshImageBlocks(
+            decorations.map(transaction.changes),
+            transaction.state,
+            changedLineRanges(transaction),
+        );
     },
     provide: (field) => EditorView.decorations.from(field),
 });

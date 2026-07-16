@@ -52,6 +52,7 @@ import { rotateSession, type SessionRotationResult } from "./session-rotation.js
 import { type AvailableModelsResult } from "./agent-pool/runtime-facade.js";
 import { createAgentPoolServices, type AgentPoolServices } from "./agent-pool/service-factory.js";
 import { type AgentSessionManagerInstrumentationSnapshot, type PoolEntry } from "./agent-pool/session-manager.js";
+import { installLegacySessionAffinityCompatibility } from "./agent-pool/session-affinity-compat.js";
 import {
   type ChatBranchRecord,
   type MergeChatBranchIntoParentResult,
@@ -233,7 +234,9 @@ export class AgentPool {
   private logsDir = join(WORKSPACE_DIR, "logs");
   private createSession?: AgentPoolOptions["createSession"];
   private createSideSession?: AgentPoolOptions["createSideSession"];
-  private bashOperations = createTrackedBashOperations();
+  private bashOperations = createTrackedBashOperations({
+    shellPath: () => this.settingsManager.getShellPath(),
+  });
   private attachments: AgentPoolServices["attachments"];
   private sessionBinder: AgentPoolServices["sessionBinder"];
   private toolFactory: AgentPoolServices["toolFactory"];
@@ -249,6 +252,7 @@ export class AgentPool {
     this.createSideSession = options.createSideSession;
     this.authStorage = AuthStorage.create();
     this.modelRegistry = options.modelRegistry ?? ModelRegistry.create(this.authStorage);
+    installLegacySessionAffinityCompatibility(this.modelRegistry, (message, details) => log.warn(message, details));
     this.applyRateLimitRetryDefaults();
     ({
       attachments: this.attachments,

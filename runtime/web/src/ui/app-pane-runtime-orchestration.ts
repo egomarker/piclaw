@@ -131,6 +131,19 @@ export function isWorkspaceUpdateRelevantForPath(activePath: string, updates: un
   });
 }
 
+export function shouldApplyWorkspaceEditorRefresh(
+  requestedInstance: { isDirty?: () => boolean; getCurrentMtime?: () => string | null } | null | undefined,
+  activeInstance: unknown,
+  nextMtime: string,
+): boolean {
+  if (!requestedInstance || requestedInstance !== activeInstance) return false;
+  if (typeof requestedInstance.isDirty === 'function' && requestedInstance.isDirty()) return false;
+  const currentMtime = typeof requestedInstance.getCurrentMtime === 'function'
+    ? requestedInstance.getCurrentMtime()
+    : null;
+  return !currentMtime || currentMtime !== nextMtime;
+}
+
 export async function invokePaneAfterAttachToHost(
   instance: { afterAttachToHost?: (context: { path?: string; hostMode: 'main' | 'popout'; transferState?: Record<string, unknown> | null }) => Promise<void> | void } | null | undefined,
   context: { path?: string; hostMode: 'main' | 'popout'; transferState?: Record<string, unknown> | null },
@@ -1188,9 +1201,8 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
       const nextMtime = typeof payload?.mtime === 'string' && payload.mtime.trim()
         ? payload.mtime.trim()
         : new Date().toISOString();
-      // Skip if the mtime matches what the editor already has — this is our own save
-      const currentMtime = typeof instance.getCurrentMtime === 'function' ? instance.getCurrentMtime() : null;
-      if (currentMtime && currentMtime === nextMtime) return;
+      // Re-check after the fetch: the user may have typed or switched editors while it was in flight.
+      if (!shouldApplyWorkspaceEditorRefresh(instance, editorInstanceRef.current, nextMtime)) return;
       instance.setContent(nextText, nextMtime);
     } catch (error) {
       console.warn('[workspace_update] Failed to refresh active pane:', error);

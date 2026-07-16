@@ -34,6 +34,7 @@ export interface ModelInfo {
   thinking_level_label: string | null;
   supports_thinking: boolean;
   available_thinking_levels: string[];
+  available_thinking_level_labels?: string[];
   provider_usage?: ProviderUsage;
   oobe?: OobeStatus;
 }

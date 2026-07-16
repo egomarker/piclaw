@@ -593,6 +593,18 @@ type MessageKey =
   | 'settings.compaction.clearFailed'
   | 'settings.compaction.cleared'
   | 'settings.compaction.autoHeading'
+  | 'settings.compaction.enableAutomatic'
+  | 'settings.compaction.enableAutomaticHint'
+  | 'settings.compaction.processingMethod'
+  | 'settings.compaction.methodSelective'
+  | 'settings.compaction.methodSelectiveHint'
+  | 'settings.compaction.methodPipelined'
+  | 'settings.compaction.methodPipelinedHint'
+  | 'settings.compaction.remoteNative'
+  | 'settings.compaction.remoteNativeHint'
+  | 'settings.compaction.remoteTimeout'
+  | 'settings.compaction.remoteTimeoutAria'
+  | 'settings.compaction.remoteTimeoutHint'
   | 'settings.compaction.enableToolResult'
   | 'settings.compaction.enableToolResultHint'
   | 'settings.compaction.semanticSummaries'
@@ -911,7 +923,7 @@ const EN: Record<MessageKey, string> = {
   'settings.tools.andMode': 'All keywords (AND) — results must match every search term',
   'settings.tools.colEnabled': 'Enabled',
   'settings.tools.colTool': 'Tool',
-  'settings.tools.colCompact': 'Compact',
+  'settings.tools.colCompact': 'Result compaction',
   'settings.tools.colKind': 'Kind',
   'settings.tools.colSummary': 'Summary',
   'settings.tools.colSource': 'Source',
@@ -1203,6 +1215,18 @@ const EN: Record<MessageKey, string> = {
   'settings.compaction.clearFailed': 'Failed to clear compaction suppression.',
   'settings.compaction.cleared': 'Cleared compaction suppression for {chat}.',
   'settings.compaction.autoHeading': 'Automatic compaction',
+  'settings.compaction.enableAutomatic': 'Enable automatic compaction',
+  'settings.compaction.enableAutomaticHint': 'Piclaw-managed pre-prompt/idle compaction. The upstream agent auto-compactor stays suppressed internally.',
+  'settings.compaction.processingMethod': 'Processing method',
+  'settings.compaction.methodSelective': 'Selective',
+  'settings.compaction.methodSelectiveHint': 'Extract high-value continuity excerpts, using complete progressive coverage whenever a bounded prompt cannot represent every discarded source event.',
+  'settings.compaction.methodPipelined': 'Pipelined',
+  'settings.compaction.methodPipelinedHint': 'Canonicalize and classify every discarded source event with an auditable coverage ledger before summarizing.',
+  'settings.compaction.remoteNative': 'Provider-native compaction',
+  'settings.compaction.remoteNativeHint': 'Opt-in for explicitly supported providers only ({providers}). Any failure falls back atomically to the selected local method.',
+  'settings.compaction.remoteTimeout': 'Provider-native timeout (sec)',
+  'settings.compaction.remoteTimeoutAria': 'provider-native compaction timeout',
+  'settings.compaction.remoteTimeoutHint': 'Deadline for the remote pre-pass before local fallback.',
   'settings.compaction.enableToolResult': 'Enable tool-result compaction',
   'settings.compaction.enableToolResultHint': 'When disabled, large tool results stay inline and are not externalized into searchable tool-output handles.',
   'settings.compaction.semanticSummaries': 'Semantic summaries for compacted tool results',
@@ -1521,7 +1545,7 @@ const ZH_CN: Partial<Record<MessageKey, string>> = {
   'settings.tools.andMode': '所有关键词（AND）— 结果必须匹配每个搜索词',
   'settings.tools.colEnabled': '已启用',
   'settings.tools.colTool': '工具',
-  'settings.tools.colCompact': '压缩',
+  'settings.tools.colCompact': '结果压缩',
   'settings.tools.colKind': '类型',
   'settings.tools.colSummary': '摘要',
   'settings.tools.colSource': '来源',
@@ -1813,6 +1837,18 @@ const ZH_CN: Partial<Record<MessageKey, string>> = {
   'settings.compaction.clearFailed': '清除压缩抑制失败。',
   'settings.compaction.cleared': '已清除 {chat} 的压缩抑制。',
   'settings.compaction.autoHeading': '自动压缩',
+  'settings.compaction.enableAutomatic': '启用自动压缩',
+  'settings.compaction.enableAutomaticHint': '由 Piclaw 管理的提示前/空闲压缩。上游代理自动压缩器会继续在内部保持禁用。',
+  'settings.compaction.processingMethod': '处理方法',
+  'settings.compaction.methodSelective': '选择性',
+  'settings.compaction.methodSelectiveHint': '提取高价值的连续性片段；当有界提示无法表示所有被丢弃的源事件时，使用完整的渐进式覆盖。',
+  'settings.compaction.methodPipelined': '流水线',
+  'settings.compaction.methodPipelinedHint': '在摘要前，对每个被丢弃的源事件进行规范化和分类，并生成可审计的覆盖账本。',
+  'settings.compaction.remoteNative': '提供商原生压缩',
+  'settings.compaction.remoteNativeHint': '仅对明确支持的提供商启用（{providers}）。任何失败都会自动回退到所选的本地方法。',
+  'settings.compaction.remoteTimeout': '提供商原生超时（秒）',
+  'settings.compaction.remoteTimeoutAria': '提供商原生压缩超时',
+  'settings.compaction.remoteTimeoutHint': '远程预处理在回退到本地方法之前的截止时间。',
   'settings.compaction.enableToolResult': '启用工具结果压缩',
   'settings.compaction.enableToolResultHint': '禁用时，大型工具结果保持内联，不会外部化为可搜索的工具输出句柄。',
   'settings.compaction.semanticSummaries': '压缩工具结果的语义摘要',
@@ -2131,7 +2167,7 @@ const JA: Partial<Record<MessageKey, string>> = {
   'settings.tools.andMode': 'すべてのキーワード（AND）— すべての検索語に一致',
   'settings.tools.colEnabled': '有効',
   'settings.tools.colTool': 'ツール',
-  'settings.tools.colCompact': 'コンパクト',
+  'settings.tools.colCompact': '結果圧縮',
   'settings.tools.colKind': '種類',
   'settings.tools.colSummary': '概要',
   'settings.tools.colSource': 'ソース',
@@ -2423,6 +2459,18 @@ const JA: Partial<Record<MessageKey, string>> = {
   'settings.compaction.clearFailed': '圧縮抑制のクリアに失敗しました。',
   'settings.compaction.cleared': '{chat} の圧縮抑制をクリアしました。',
   'settings.compaction.autoHeading': '自動圧縮',
+  'settings.compaction.enableAutomatic': '自動圧縮を有効化',
+  'settings.compaction.enableAutomaticHint': 'Piclaw が管理するプロンプト前/アイドル時の圧縮です。上流エージェントの自動圧縮は内部的に抑制されたままです。',
+  'settings.compaction.processingMethod': '処理方式',
+  'settings.compaction.methodSelective': '選択型',
+  'settings.compaction.methodSelectiveHint': '重要な継続情報を抽出し、制限付きプロンプトですべての破棄対象イベントを表現できない場合は完全な段階的カバレッジを使用します。',
+  'settings.compaction.methodPipelined': 'パイプライン',
+  'settings.compaction.methodPipelinedHint': '要約前に、破棄対象の各ソースイベントを正規化・分類し、監査可能なカバレッジ台帳を作成します。',
+  'settings.compaction.remoteNative': 'プロバイダー・ネイティブ圧縮',
+  'settings.compaction.remoteNativeHint': '明示的に対応しているプロバイダー（{providers}）のみオプトインできます。失敗時は選択したローカル方式へアトミックにフォールバックします。',
+  'settings.compaction.remoteTimeout': 'プロバイダー・ネイティブのタイムアウト（秒）',
+  'settings.compaction.remoteTimeoutAria': 'プロバイダー・ネイティブ圧縮のタイムアウト',
+  'settings.compaction.remoteTimeoutHint': 'ローカル方式へフォールバックする前のリモート処理期限です。',
   'settings.compaction.enableToolResult': 'ツール結果の圧縮を有効化',
   'settings.compaction.enableToolResultHint': '無効にすると、大きなツール結果はインラインのまま残り、検索可能なツール出力ハンドルに外部化されません。',
   'settings.compaction.semanticSummaries': '圧縮されたツール結果のセマンティック要約',

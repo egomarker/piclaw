@@ -12,10 +12,7 @@ import { expect, test, describe, mock } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
 import "../helpers.js";
-import {
-    isFirefoxUserAgent,
-    shouldDisableWhitespaceMarkersForPerformance,
-} from "../../extensions/viewers/editor/editor-safety.ts";
+import { shouldDisableWhitespaceMarkersForPerformance } from "../../extensions/viewers/editor/editor-safety.ts";
 
 // ── Inline types (browser modules can't be imported in bun test) ────
 
@@ -88,27 +85,10 @@ describe("Editor status footer", () => {
         expect(source.indexOf("actionsDiv.appendChild(referenceBtn);")).toBeGreaterThan(source.indexOf("actionsDiv.appendChild(saveBtn);"));
     });
 
-    test("removes the whitespace feature in Firefox without disabling rich editor features", () => {
-        expect(isFirefoxUserAgent("Mozilla/5.0 Firefox/140.0")).toBe(true);
-        expect(isFirefoxUserAgent("Mozilla/5.0 Chrome/126.0 Safari/537.36")).toBe(false);
-        expect(shouldDisableWhitespaceMarkersForPerformance({
-            userAgent: "Mozilla/5.0 Firefox/140.0",
-            docLength: 100,
-        })).toBe(true);
-        expect(shouldDisableWhitespaceMarkersForPerformance({
-            userAgent: "Mozilla/5.0 Chrome/126.0 Safari/537.36",
-            docLength: 100,
-        })).toBe(false);
-        expect(shouldDisableWhitespaceMarkersForPerformance({
-            userAgent: "Mozilla/5.0 Chrome/126.0 Safari/537.36",
-            docLength: 100,
-            livePreviewActive: true,
-        })).toBe(true);
-        expect(shouldDisableWhitespaceMarkersForPerformance({
-            userAgent: "Mozilla/5.0 Chrome/126.0 Safari/537.36",
-            docLength: 100,
-            largeDocumentMode: true,
-        })).toBe(true);
+    test("uses browser-neutral CodeMirror behavior without user-agent branches", () => {
+        expect(shouldDisableWhitespaceMarkersForPerformance({})).toBe(false);
+        expect(shouldDisableWhitespaceMarkersForPerformance({ livePreviewActive: true })).toBe(true);
+        expect(shouldDisableWhitespaceMarkersForPerformance({ largeDocumentMode: true })).toBe(true);
 
         const source = readFileSync(join(import.meta.dir, "../../extensions/viewers/editor/editor-extension.ts"), "utf8");
         expect(source).toContain("const enableRichFeatures = !this.largeDocumentMode");
@@ -116,14 +96,23 @@ describe("Editor status footer", () => {
         expect(source).toContain("this.wrappingCompartment.of(enableRichFeatures ? EditorView.lineWrapping : [])");
         expect(source).toContain("...(enableRichFeatures ? [autocompletion({ activateOnTyping: false })] : [])");
         expect(source).toContain("this.languageCompartment.of(lang || [])");
-        expect(source).toContain("handleFirefoxMarkdownTypingBurst()");
-        expect(source).toContain("restoreMarkdownLanguageAfterTyping()");
-        expect(source).toContain("setLivePreviewParsingSuspended.of(suspended)");
-        expect(source).toContain("livePreviewEffects.forceRebuild()");
         expect(source).toContain("this.view !== targetView");
         expect(source).toContain("!this.livePreviewEnabled");
-        expect(source).toContain("this._wsBtn.hidden = firefox");
-        expect(source).toContain("Whitespace is unavailable in Firefox");
+        expect(source).not.toContain("languageCompartment.reconfigure");
+
+        const auditedSources = [
+            source,
+            ...[
+                "editor-safety.ts",
+                "markdown/index.ts",
+                "markdown/image-block.ts",
+                "markdown/live-preview.ts",
+                "markdown/table-editor.ts",
+                "markdown/tree-progress.ts",
+            ].map((path) => readFileSync(join(import.meta.dir, "../../extensions/viewers/editor", path), "utf8")),
+        ].join("\n").toLowerCase();
+        expect(auditedSources).not.toContain("firefox");
+        expect(auditedSources).not.toContain("useragent");
     });
 });
 

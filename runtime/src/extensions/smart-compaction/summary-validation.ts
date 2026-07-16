@@ -78,6 +78,113 @@ function extractResponseText(response: any): string {
     .trim();
 }
 
+function normalizeModelFileBlocks(
+  rawText: string,
+  schema: CompactionSummarySchema,
+  stopReason: string,
+): { ok: true; text: string } | CompactionSummaryValidationFailure {
+  const tagLikeMatches = [...rawText.matchAll(/<\/?(?:read-files|modified-files)\b[^>\n]*(?:>|$)/gi)];
+  if (tagLikeMatches.length === 0) return { ok: true, text: rawText };
+  for (const match of tagLikeMatches) {
+    if (!/^<\/?(?:read-files|modified-files)>$/i.test(match[0])) {
+      return failure("invalid_file_sections", `malformed deterministic file tag: ${match[0]}`, stopReason);
+    }
+  }
+
+  const terminalHeadingName = schema === "final" ? "Critical Context" : "Key Continuity Facts";
+  const terminalHeading = new RegExp(`^##\\s+${terminalHeadingName}\\s*$`, "gm").exec(rawText);
+  if (!terminalHeading) return { ok: true, text: rawText };
+  const terminalBodyStart = (terminalHeading.index ?? 0) + terminalHeading[0].length;
+  const ranges: Array<{ start: number; end: number }> = [];
+  let active: { tag: "read-files" | "modified-files"; start: number; bodyStart: number } | null = null;
+
+  for (const match of tagLikeMatches) {
+    const token = match[0];
+    const tagMatch = token.match(/^<\/?(read-files|modified-files)>$/i)!;
+    const tag = tagMatch[1].toLowerCase() as "read-files" | "modified-files";
+    const index = match.index ?? -1;
+    const closing = token.startsWith("</");
+    if (!closing) {
+      if (active) {
+        return failure("invalid_file_sections", "deterministic file blocks must not overlap or nest", stopReason);
+      }
+      active = { tag, start: index, bodyStart: index + token.length };
+      continue;
+    }
+    if (!active || active.tag !== tag || index <= active.start) {
+      return failure("invalid_file_sections", `${tag} must have balanced opening/closing pairs`, stopReason);
+    }
+    if (active.start < terminalBodyStart) {
+      return failure("invalid_file_sections", `${tag} blocks must appear after ## ${terminalHeadingName}`, stopReason);
+    }
+    if (!rawText.slice(active.bodyStart, index).trim()) {
+      return failure("invalid_file_sections", `${tag} block is empty`, stopReason);
+    }
+    ranges.push({ start: active.start, end: index + token.length });
+    active = null;
+  }
+  if (active) {
+    return failure("invalid_file_sections", `${active.tag} must have balanced opening/closing pairs`, stopReason);
+  }
+
+  for (let index = 1; index < ranges.length; index += 1) {
+    if (rawText.slice(ranges[index - 1].end, ranges[index].start).trim()) {
+      return failure("invalid_file_sections", "deterministic file blocks must form one trailing group", stopReason);
+    }
+  }
+  if (ranges.length > 0 && rawText.slice(ranges.at(-1)!.end).trim()) {
+    return failure("invalid_file_sections", "deterministic file blocks must be trailing", stopReason);
+  }
+
+  let text = rawText;
+  for (const range of [...ranges].reverse()) {
+    text = `${text.slice(0, range.start).trimEnd()}\n${text.slice(range.end).trimStart()}`;
+  }
+  return { ok: true, text: text.trim() };
+}
+
+function normalizeChunkProgressLabels(text: string): string {
+  const progressMatch = /^##\s+Progress\s*$([\s\S]*?)(?=^##\s+|(?![\s\S]))/gmi.exec(text);
+  if (!progressMatch) return text;
+  const body = progressMatch[1].trim();
+  const buckets: Record<"done" | "inProgress" | "blocked", string[]> = {
+    done: [],
+    inProgress: [],
+    blocked: [],
+  };
+  const marker = /^(?:###\s+|[-*]\s*)?(Done|Completed|In progress|In-progress|Current|Ongoing|Blocked|Blockers)\s*:?[ \t]*(.*)$/i;
+  let active: keyof typeof buckets | null = null;
+  const prelude: string[] = [];
+  for (const line of body.split("\n")) {
+    const match = line.trim().match(marker);
+    if (match) {
+      const label = match[1].toLowerCase();
+      active = label === "done" || label === "completed"
+        ? "done"
+        : label === "blocked" || label === "blockers"
+          ? "blocked"
+          : "inProgress";
+      if (match[2].trim()) buckets[active].push(match[2].trim());
+      continue;
+    }
+    (active ? buckets[active] : prelude).push(line);
+  }
+  if (prelude.some((line) => line.trim())) buckets.inProgress.unshift(...prelude);
+
+  const render = (label: string, lines: string[]): string => {
+    const meaningful = lines.map((line) => line.trimEnd()).filter((line) => line.trim());
+    if (meaningful.length === 0) return `- ${label}: (none reported)`;
+    return [`- ${label}: ${meaningful[0].trim()}`, ...meaningful.slice(1).map((line) => `  ${line.trim()}`)].join("\n");
+  };
+  const normalized = [
+    render("Done", buckets.done),
+    render("In progress", buckets.inProgress),
+    render("Blocked", buckets.blocked),
+  ].join("\n");
+  const bodyOffset = progressMatch.index! + progressMatch[0].indexOf(progressMatch[1]);
+  return `${text.slice(0, bodyOffset)}\n${normalized}\n\n${text.slice(bodyOffset + progressMatch[1].length).trimStart()}`.trim();
+}
+
 function hasSubstantiveSectionContent(content: string): boolean {
   return content
     .replace(/^###\s+.*$/gm, "")
@@ -102,13 +209,16 @@ export function validateCompactionSummaryResponse(
     );
   }
 
-  const text = extractResponseText(response);
-  if (!text) return failure("missing_text", "completion contained no text", stopReason);
+  const rawText = extractResponseText(response);
+  if (!rawText) return failure("missing_text", "completion contained no text", stopReason);
+  if (rawText.length > maxChars) {
+    return failure("too_large", `summary was ${rawText.length} characters; maximum is ${maxChars}`, stopReason);
+  }
+  const normalizedFiles = normalizeModelFileBlocks(rawText, schema, stopReason);
+  if (!normalizedFiles.ok) return normalizedFiles;
+  const text = schema === "chunk" ? normalizeChunkProgressLabels(normalizedFiles.text) : normalizedFiles.text;
   if (text.length < MIN_SUMMARY_CHARS) {
     return failure("too_short", `summary was ${text.length} characters; minimum is ${MIN_SUMMARY_CHARS}`, stopReason);
-  }
-  if (text.length > maxChars) {
-    return failure("too_large", `summary was ${text.length} characters; maximum is ${maxChars}`, stopReason);
   }
 
   const expected = schema === "final" ? FINAL_HEADINGS : CHUNK_HEADINGS;
@@ -168,44 +278,7 @@ export function validateCompactionSummaryResponse(
   }
 
   const terminalHeading = schema === "final" ? "Critical Context" : "Key Continuity Facts";
-  const terminalMatch = headingMatches.find((candidate) => candidate.heading === terminalHeading)!;
-  const fileSectionRanges: Array<{ start: number; end: number }> = [];
-  const tagLikeMatches = [...text.matchAll(/<\/?(?:read-files|modified-files)\b[^>\n]*(?:>|$)/gi)];
-  if (schema === "chunk" && tagLikeMatches.length > 0) {
-    return failure("invalid_file_sections", "chunk summaries must not contain deterministic file blocks", stopReason);
-  }
-  for (const match of tagLikeMatches) {
-    if (!/^<\/?(?:read-files|modified-files)>$/i.test(match[0])) {
-      return failure("invalid_file_sections", `malformed deterministic file tag: ${match[0]}`, stopReason);
-    }
-  }
-  for (const tag of ["read-files", "modified-files"] as const) {
-    const opens = [...text.matchAll(new RegExp(`<${tag}>`, "gi"))];
-    const closes = [...text.matchAll(new RegExp(`</${tag}>`, "gi"))];
-    if (opens.length !== closes.length || opens.length > 1) {
-      return failure("invalid_file_sections", `${tag} must have at most one balanced opening/closing pair`, stopReason);
-    }
-    if (opens.length === 0) continue;
-    const start = opens[0].index ?? -1;
-    const closeStart = closes[0].index ?? -1;
-    if (start < terminalMatch.bodyStart || closeStart <= start) {
-      return failure("invalid_file_sections", `${tag} must be a balanced block after ## ${terminalHeading}`, stopReason);
-    }
-    const end = closeStart + closes[0][0].length;
-    const body = text.slice(start + opens[0][0].length, closeStart).trim();
-    if (!body) return failure("invalid_file_sections", `${tag} block is empty`, stopReason);
-    fileSectionRanges.push({ start, end });
-  }
-  fileSectionRanges.sort((a, b) => a.start - b.start);
-  for (let index = 1; index < fileSectionRanges.length; index += 1) {
-    if (fileSectionRanges[index].start < fileSectionRanges[index - 1].end) {
-      return failure("invalid_file_sections", "deterministic file blocks must not overlap", stopReason);
-    }
-  }
-
-  const terminal = (sectionContent.get(terminalHeading) ?? "")
-    .replace(/<read-files>[\s\S]*?<\/read-files>/gi, "")
-    .replace(/<modified-files>[\s\S]*?<\/modified-files>/gi, "");
+  const terminal = sectionContent.get(terminalHeading) ?? "";
   const invalidTerminalLine = terminal
     .split("\n")
     .map((line) => line.trim())

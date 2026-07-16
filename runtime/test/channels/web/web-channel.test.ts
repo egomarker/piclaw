@@ -3454,6 +3454,63 @@ test("processChat broadcasts context usage after deferred compact command materi
   expect(contents).toContain("Compaction complete.");
 });
 
+test("processChat replaces a null-token compact result with live pool usage", async () => {
+  const ws = createTempWorkspace("piclaw-web-channel-");
+  cleanupWorkspace = ws.cleanup;
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+
+  const db = await import("../../../src/db.js");
+  db.initDatabase();
+  db.getDb().exec("DELETE FROM message_media; DELETE FROM messages; DELETE FROM chats; DELETE FROM chat_cursors; DELETE FROM chat_cursors;");
+  db.storeChatMetadata("web:default", new Date().toISOString(), "Web");
+
+  const broadcasts: Array<{ event: string; payload: any }> = [];
+  const webMod = await import("../../../src/channels/web.js");
+  const web = new (webMod.WebChannel as any)({
+    queue: { enqueue: async (fn: () => Promise<void>) => fn() },
+    agentPool: {
+      setSessionBinder: () => {},
+      applyControlCommand: async () => ({
+        status: "success",
+        message: "Compaction complete.",
+        contextUsage: {
+          tokens: null,
+          contextWindow: 200000,
+          percent: null,
+          estimated: true,
+          source: "compact_command",
+          phase: "after_manual_compaction",
+        },
+      }),
+      runAgent: async () => ({ status: "success", result: "should not run", attachments: [] }),
+      getContextUsageForChat: async () => ({ tokens: 21703, contextWindow: 200000, percent: 10.8515 }),
+    },
+  });
+  const originalBroadcast = web.broadcastEvent.bind(web);
+  web.broadcastEvent = (event: string, payload: any) => {
+    broadcasts.push({ event, payload });
+    return originalBroadcast(event, payload);
+  };
+
+  web.enqueueQueuedFollowupItem("web:default", 0, "/compact now");
+  await web.processChat("web:default", "default");
+
+  expect(web.getContextUsage("web:default")).toEqual({ tokens: 21703, contextWindow: 200000, percent: 10.8515 });
+  expect(broadcasts).toContainEqual(expect.objectContaining({
+    event: "agent_status",
+    payload: expect.objectContaining({
+      type: "context_usage",
+      context_usage: expect.objectContaining({
+        tokens: 21703,
+        contextWindow: 200000,
+        percent: 10.8515,
+        source: "agent_pool",
+        phase: "after_command",
+      }),
+    }),
+  }));
+});
+
 test("processChat drains multiple deferred queued follow-ups across resume tasks", async () => {
   const ws = createTempWorkspace("piclaw-web-channel-");
   cleanupWorkspace = ws.cleanup;

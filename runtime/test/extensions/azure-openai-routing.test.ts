@@ -289,6 +289,10 @@ describe("Slice 2: Tool-flow reasoning cap", () => {
     expect(capToolFlowReasoning("gpt-5-mini", "xhigh", true)).toBe("medium");
   });
 
+  test("gpt-5-mini at max is capped to medium when tools are present", () => {
+    expect(capToolFlowReasoning("gpt-5-mini", "max", true)).toBe("medium");
+  });
+
   test("gpt-5-mini at medium is NOT capped (already at or below cap)", () => {
     expect(capToolFlowReasoning("gpt-5-mini", "medium", true)).toBe("medium");
   });

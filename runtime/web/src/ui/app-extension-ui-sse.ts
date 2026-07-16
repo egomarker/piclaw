@@ -119,8 +119,12 @@ export function applyExtensionUiWorkingState(
     // extensions set the indicator separately from status text, and losing it
     // makes active tool/extension progress look stalled or invisible.
     if (payload?.key === 'context_usage') return undefined;
+    const rawText = typeof payload?.text === 'string' ? payload.text.trim() : '';
+    const message = payload?.key === 'smart_compaction'
+      ? rawText.replace(/^(?:(?:(?:Manual|Idle|Target-aware) smart compaction|Recovery compaction|Smart compaction):\s*)?(?:\d+%\s*[—-]\s*)?/i, '').trim()
+      : rawText;
     return {
-      message: typeof payload?.text === 'string' && payload.text.trim() ? payload.text.trim() : null,
+      message: message || null,
       indicator: previous.indicator,
       visible: previous.visible,
     };

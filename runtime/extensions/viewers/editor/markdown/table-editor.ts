@@ -8,7 +8,6 @@ import {
 import type { DecorationSet, EditorState, Extension, Range, Transaction } from '#editor-vendor/codemirror';
 import type { SyntaxNode } from '@lezer/common';
 import { normalizeLinkHref } from './link.js';
-import { livePreviewParsingSuspendedField } from './live-preview.js';
 import { treeGrowthEffect } from './tree-progress.js';
 
 export type TableAlign = 'left' | 'center' | 'right';
@@ -770,62 +769,88 @@ function readModelFromTable(table: HTMLTableElement, alignments: readonly TableA
     return normalizeTableModel({ header, alignments: Array.from(alignments), rows });
 }
 
-function buildEditableTableDecorations(state: EditorState): DecorationSet {
-    const ranges: Range<Decoration>[] = [];
-    syntaxTree(state).iterate({
-        enter(node) {
-            if (node.name !== 'Table') return;
-            const lines = tableNodeLines(state, node.node);
-            const model = parseMarkdownTableLines(lines);
-            if (!model) return;
-            ranges.push(Decoration.replace({
-                widget: new EditableTableWidget(node.from, node.to, model),
-                block: true,
-            }).range(node.from, node.to));
-        },
-    });
-    return Decoration.set(ranges, true);
+interface DocumentRange {
+    from: number;
+    to: number;
 }
 
-function transactionTouchesTable(transaction: Transaction, decorations: DecorationSet): boolean {
-    let touches = false;
-    transaction.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
-        if (touches) return;
-        decorations.between(Math.max(0, fromA - 1), Math.min(transaction.startState.doc.length, toA + 1), () => {
-            touches = true;
-            return false;
-        });
-        if (touches) return;
-        const insertedText = inserted.toString();
-        if (insertedText.includes('|')) {
-            touches = true;
-            return;
-        }
-        const startLine = transaction.state.doc.lineAt(Math.max(0, Math.min(fromB, transaction.state.doc.length)));
-        const endLine = transaction.state.doc.lineAt(Math.max(0, Math.min(toB, transaction.state.doc.length)));
-        for (let lineNo = startLine.number; lineNo <= endLine.number; lineNo++) {
-            if (transaction.state.doc.line(lineNo).text.includes('|')) {
-                touches = true;
-                break;
-            }
-        }
+function expandedLineRange(state: EditorState, from: number, to: number): DocumentRange {
+    const safeFrom = Math.max(0, Math.min(from, state.doc.length));
+    const safeTo = Math.max(safeFrom, Math.min(to, state.doc.length));
+    const first = state.doc.lineAt(safeFrom);
+    const last = state.doc.lineAt(safeTo);
+    const firstLine = state.doc.line(Math.max(1, first.number - 1));
+    const lastLine = state.doc.line(Math.min(state.doc.lines, last.number + 1));
+    return { from: firstLine.from, to: lastLine.to };
+}
+
+function changedLineRanges(transaction: Transaction): DocumentRange[] {
+    const ranges: DocumentRange[] = [];
+    transaction.changes.iterChanges((_fromA, _toA, fromB, toB) => {
+        ranges.push(expandedLineRange(transaction.state, fromB, toB));
     });
-    return touches;
+    return ranges;
+}
+
+function editableTableRanges(state: EditorState, scanRanges?: readonly DocumentRange[]): Range<Decoration>[] {
+    const ranges: Range<Decoration>[] = [];
+    const seen = new Set<string>();
+    const scans = scanRanges?.length ? scanRanges : [{ from: 0, to: state.doc.length }];
+    for (const scan of scans) {
+        syntaxTree(state).iterate({
+            from: scan.from,
+            to: scan.to,
+            enter(node) {
+                if (node.name !== 'Table') return;
+                const key = `${node.from}:${node.to}`;
+                if (seen.has(key)) return;
+                seen.add(key);
+                const lines = tableNodeLines(state, node.node);
+                const model = parseMarkdownTableLines(lines);
+                if (!model) return;
+                ranges.push(Decoration.replace({
+                    widget: new EditableTableWidget(node.from, node.to, model),
+                    block: true,
+                }).range(node.from, node.to));
+            },
+        });
+    }
+    return ranges;
+}
+
+function buildEditableTableDecorations(state: EditorState): DecorationSet {
+    return Decoration.set(editableTableRanges(state), true);
+}
+
+function refreshEditableTables(
+    decorations: DecorationSet,
+    state: EditorState,
+    scanRanges: readonly DocumentRange[],
+): DecorationSet {
+    if (!scanRanges.length) return decorations;
+    return decorations.update({
+        filter: (from, to) => !scanRanges.some((scan) => from <= scan.to && to >= scan.from),
+        add: editableTableRanges(state, scanRanges),
+        sort: true,
+    });
 }
 
 const editableTableField = StateField.define<DecorationSet>({
     create: (state) => buildEditableTableDecorations(state),
     update(decorations, transaction) {
-        if (!transaction.docChanged) {
-            // Rebuild when the parser discovers new Table nodes (tree growth)
-            const hasTreeGrowth = transaction.effects.some((effect) => effect.is(treeGrowthEffect));
-            if (hasTreeGrowth) return buildEditableTableDecorations(transaction.state);
-            return decorations;
+        for (const effect of transaction.effects) {
+            if (effect.is(treeGrowthEffect)) {
+                return refreshEditableTables(decorations, transaction.state, [
+                    expandedLineRange(transaction.state, effect.value.from, effect.value.to),
+                ]);
+            }
         }
-        const mapped = decorations.map(transaction.changes);
-        if (transaction.state.field(livePreviewParsingSuspendedField, false)) return mapped;
-        if (!transactionTouchesTable(transaction, decorations)) return mapped;
-        return buildEditableTableDecorations(transaction.state);
+        if (!transaction.docChanged) return decorations;
+        return refreshEditableTables(
+            decorations.map(transaction.changes),
+            transaction.state,
+            changedLineRanges(transaction),
+        );
     },
     provide: (field) => EditorView.decorations.from(field),
 });

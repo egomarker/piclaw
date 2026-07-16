@@ -5,6 +5,7 @@ import { createTempWorkspace, importFresh, withTempWorkspaceEnv } from "../helpe
 
 const RUNTIME_DIR = resolve(import.meta.dir, "../..");
 const CONFIG_SUBPROCESS = join(RUNTIME_DIR, "test", "config", "config-subprocess.ts");
+const COMPACTION_PERSISTENCE_SUBPROCESS = join(RUNTIME_DIR, "test", "config", "compaction-persistence-subprocess.ts");
 
 type ConfigSnapshot = Record<string, any>;
 
@@ -59,15 +60,199 @@ function loadConfigInSubprocess(
   return runConfigSubprocess(workspace, exports, options).snapshot;
 }
 
-test("uses 300s as the default compaction timeout", () => {
+test("compaction runtime settings survive a fresh process restart", () => {
+  const ws = createTempWorkspace("piclaw-compaction-persistence-");
+  try {
+    const write = Bun.spawnSync({
+      cmd: ["bun", COMPACTION_PERSISTENCE_SUBPROCESS],
+      cwd: ws.workspace,
+      env: {
+        PATH: process.env.PATH || "",
+        HOME: process.env.HOME || "/tmp",
+        PICLAW_WORKSPACE: ws.workspace,
+        PICLAW_STORE: ws.store,
+        PICLAW_DATA: ws.data,
+        PICLAW_DB_IN_MEMORY: "1",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(write.exitCode, write.stderr.toString()).toBe(0);
+    expect(JSON.parse(write.stdout.toString())).toMatchObject({
+      smartCompactionMethod: "pipelined",
+      remoteCompactionEnabled: true,
+      remoteCompactionTimeoutMs: 300_000,
+    });
+
+    const restarted = loadConfigInSubprocess(ws, ["call:getCompactionRuntimeConfig"], {
+      env: {
+        PICLAW_SMART_COMPACTION_METHOD: undefined,
+        PICLAW_REMOTE_COMPACTION_ENABLED: undefined,
+        PICLAW_REMOTE_COMPACTION_TIMEOUT_MS: undefined,
+      },
+    });
+    expect(restarted["call:getCompactionRuntimeConfig"]).toMatchObject({
+      smartCompactionMethod: "pipelined",
+      remoteCompactionEnabled: true,
+      remoteCompactionTimeoutMs: 300_000,
+    });
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test("uses proportional compaction thresholds with the 300s progress watchdog disabled by default", () => {
   const ws = createTempWorkspace("piclaw-config-");
 
   try {
     const snapshot = loadConfigInSubprocess(ws, ["call:getCompactionRuntimeConfig"], {
-      env: { PICLAW_COMPACTION_TIMEOUT_MS: undefined },
+      env: {
+        PICLAW_COMPACTION_TIMEOUT_MS: undefined,
+        PICLAW_PROGRESS_WATCHDOG_ENABLED: undefined,
+        PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS: undefined,
+      },
     });
 
+    expect(snapshot["call:getCompactionRuntimeConfig"].autoCompactionEnabled).toBe(true);
+    expect(snapshot["call:getCompactionRuntimeConfig"].smartCompactionMethod).toBe("selective");
     expect(snapshot["call:getCompactionRuntimeConfig"].timeoutMs).toBe(300_000);
+    expect(snapshot["call:getCompactionRuntimeConfig"].progressWatchdogEnabled).toBe(false);
+    expect(snapshot["call:getCompactionRuntimeConfig"].progressWatchdogTimeoutMs).toBe(300_000);
+    expect(snapshot["call:getCompactionRuntimeConfig"].thresholdPercent).toBe(80);
+    expect(snapshot["call:getCompactionRuntimeConfig"].maxThresholdTokens).toBe(0);
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test("loads Piclaw-owned auto-compaction enable state without honoring poisoned upstream settings", () => {
+  const ws = createTempWorkspace("piclaw-config-");
+
+  try {
+    writeWorkspaceConfig(ws.workspace, {
+      compaction: { enabled: false },
+    });
+
+    let snapshot = loadConfigInSubprocess(ws, ["call:getCompactionRuntimeConfig"], {
+      env: { PICLAW_AUTO_COMPACTION_ENABLED: undefined },
+    });
+    expect(snapshot["call:getCompactionRuntimeConfig"].autoCompactionEnabled).toBe(true);
+
+    writeWorkspaceConfig(ws.workspace, {
+      compaction: { enabled: false, autoCompactionEnabled: false },
+    });
+    snapshot = loadConfigInSubprocess(ws, ["call:getCompactionRuntimeConfig"], {
+      env: { PICLAW_AUTO_COMPACTION_ENABLED: undefined },
+    });
+    expect(snapshot["call:getCompactionRuntimeConfig"].autoCompactionEnabled).toBe(false);
+
+    snapshot = loadConfigInSubprocess(ws, ["call:getCompactionRuntimeConfig"], {
+      env: { PICLAW_AUTO_COMPACTION_ENABLED: "1" },
+    });
+    expect(snapshot["call:getCompactionRuntimeConfig"].autoCompactionEnabled).toBe(true);
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test("loads remote compaction settings from .env", () => {
+  const ws = createTempWorkspace("piclaw-compaction-dotenv-");
+  try {
+    writeFileSync(join(ws.workspace, ".env"), [
+      "PICLAW_SMART_COMPACTION_METHOD=pipelined",
+      "PICLAW_REMOTE_COMPACTION_ENABLED=1",
+      "PICLAW_REMOTE_COMPACTION_TIMEOUT_MS=300000",
+      "PICLAW_COMPACTION_TIMEOUT_MS=600000",
+      "PICLAW_COMPACTION_BACKOFF_BASE_MS=120000",
+      "PICLAW_COMPACTION_BACKOFF_MAX_MS=600000",
+      "PICLAW_COMPACTION_THRESHOLD_PERCENT=70",
+      "PICLAW_COMPACTION_MAX_THRESHOLD_TOKENS=123456",
+      "PICLAW_COMPACTION_BACKOFF_DECAY_FACTOR=0.25",
+    ].join("\n"), "utf8");
+    const snapshot = loadConfigInSubprocess(ws, ["call:getCompactionRuntimeConfig"], {
+      env: {
+        PICLAW_SMART_COMPACTION_METHOD: undefined,
+        PICLAW_REMOTE_COMPACTION_ENABLED: undefined,
+        PICLAW_REMOTE_COMPACTION_TIMEOUT_MS: undefined,
+        PICLAW_COMPACTION_TIMEOUT_MS: undefined,
+        PICLAW_COMPACTION_BACKOFF_BASE_MS: undefined,
+        PICLAW_COMPACTION_BACKOFF_MAX_MS: undefined,
+        PICLAW_COMPACTION_THRESHOLD_PERCENT: undefined,
+        PICLAW_COMPACTION_MAX_THRESHOLD_TOKENS: undefined,
+        PICLAW_COMPACTION_BACKOFF_DECAY_FACTOR: undefined,
+      },
+    });
+    expect(snapshot["call:getCompactionRuntimeConfig"]).toMatchObject({
+      smartCompactionMethod: "pipelined",
+      remoteCompactionEnabled: true,
+      remoteCompactionTimeoutMs: 300_000,
+      timeoutMs: 600_000,
+      backoffBaseMs: 120_000,
+      backoffMaxMs: 600_000,
+      thresholdPercent: 70,
+      maxThresholdTokens: 123456,
+      backoffDecayFactor: 0.25,
+    });
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test("normalizes smart-compaction method aliases and honors environment precedence", () => {
+  const ws = createTempWorkspace("piclaw-config-");
+
+  try {
+    writeWorkspaceConfig(ws.workspace, {
+      compaction: { smartCompactionMethod: "traditional-pipelined" },
+    });
+
+    let snapshot = loadConfigInSubprocess(ws, ["call:getCompactionRuntimeConfig"], {
+      env: { PICLAW_SMART_COMPACTION_METHOD: undefined },
+    });
+    expect(snapshot["call:getCompactionRuntimeConfig"].smartCompactionMethod).toBe("pipelined");
+
+    snapshot = loadConfigInSubprocess(ws, ["call:getCompactionRuntimeConfig"], {
+      env: { PICLAW_SMART_COMPACTION_METHOD: "selective" },
+    });
+    expect(snapshot["call:getCompactionRuntimeConfig"].smartCompactionMethod).toBe("selective");
+
+    for (const alias of ["traditional_pipelined", "traditional pipelined", "pipelined"]) {
+      snapshot = loadConfigInSubprocess(ws, ["call:getCompactionRuntimeConfig"], {
+        env: { PICLAW_SMART_COMPACTION_METHOD: alias },
+      });
+      expect(snapshot["call:getCompactionRuntimeConfig"].smartCompactionMethod).toBe("pipelined");
+    }
+
+    snapshot = loadConfigInSubprocess(ws, ["call:getCompactionRuntimeConfig"], {
+      env: { PICLAW_SMART_COMPACTION_METHOD: "not-a-method" },
+    });
+    expect(snapshot["call:getCompactionRuntimeConfig"].smartCompactionMethod).toBe("selective");
+
+    writeWorkspaceConfig(ws.workspace, {
+      compaction: { smart_compaction_method: "pipelined" },
+    });
+    snapshot = loadConfigInSubprocess(ws, ["call:getCompactionRuntimeConfig"], {
+      env: { PICLAW_SMART_COMPACTION_METHOD: undefined },
+    });
+    expect(snapshot["call:getCompactionRuntimeConfig"].smartCompactionMethod).toBe("pipelined");
+  } finally {
+    ws.cleanup();
+  }
+});
+
+test("normalizes direct compaction backoff overrides so max never falls below base", () => {
+  const ws = createTempWorkspace("piclaw-config-");
+
+  try {
+    const snapshot = loadConfigInSubprocess(ws, ["call:getCompactionRuntimeConfig"], {
+      env: {
+        PICLAW_COMPACTION_BACKOFF_BASE_MS: "900000",
+        PICLAW_COMPACTION_BACKOFF_MAX_MS: "60000",
+      },
+    });
+
+    expect(snapshot["call:getCompactionRuntimeConfig"].backoffBaseMs).toBe(900_000);
+    expect(snapshot["call:getCompactionRuntimeConfig"].backoffMaxMs).toBe(900_000);
   } finally {
     ws.cleanup();
   }

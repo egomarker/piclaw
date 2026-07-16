@@ -59,6 +59,20 @@ export interface WebChannelEndpointFactoryOptions {
 }
 
 /** Lazily built endpoint contexts consumed by WebChannel handlers. */
+function normalizeStoredContextUsage(value: Record<string, unknown> | null): {
+  tokens: number | null;
+  contextWindow: number;
+  percent: number | null;
+} | null {
+  if (!value) return null;
+  const tokens = typeof value.tokens === "number" && Number.isFinite(value.tokens) ? value.tokens : null;
+  const contextWindow = typeof value.contextWindow === "number" && Number.isFinite(value.contextWindow)
+    ? value.contextWindow
+    : null;
+  const percent = typeof value.percent === "number" && Number.isFinite(value.percent) ? value.percent : null;
+  return contextWindow !== null ? { tokens, contextWindow, percent } : null;
+}
+
 function getTokenUsageForChat(chatJid: string): AgentTokenUsageContext | null {
   try {
     const latest = getLatestTokenUsage(chatJid);
@@ -120,7 +134,14 @@ export function createWebChannelEndpointContexts(
           getExtensionWorkingState: (chatJid) => channel.getExtensionWorkingState?.(chatJid) ?? null,
           recoverStaleInflightRun: (chatJid, recoveryOptions) => channel.recoverStaleInflightRun(chatJid, recoveryOptions),
           getBuffer: (turnId, panel) => channel.getBuffer(turnId, panel),
-          getContextUsageForChat: (chatJid) => channel.agentPool.getContextUsageForChat(chatJid) ?? channel.getContextUsage(chatJid),
+          getContextUsageForChat: async (chatJid) => {
+            const runtimeUsage = await channel.agentPool.getContextUsageForChat(chatJid).catch(() => null);
+            if (runtimeUsage?.tokens !== null && runtimeUsage?.tokens !== undefined) return runtimeUsage;
+            const storedUsage = normalizeStoredContextUsage(channel.getContextUsage(chatJid));
+            return storedUsage?.tokens !== null && storedUsage?.tokens !== undefined
+              ? storedUsage
+              : (runtimeUsage ?? storedUsage);
+          },
           getTokenUsageForChat,
           getAvailableModels: (chatJid) => channel.agentPool.getAvailableModels(chatJid),
           getProviderReadyCompletedForInstance: () => isProviderReadyOobeCompletedForInstance(),

@@ -65,6 +65,7 @@ import {
 import { installPwaDisplayScaleSync } from './ui/pwa-display-scale.js';
 
 const CURRENT_APP_ASSET_VERSION = getCurrentAppAssetVersion();
+const resolveRegisteredPane = (context) => paneRegistry.resolve(context);
 
 installPwaDisplayScaleSync();
 await initializeAppShellRuntime();
@@ -243,7 +244,7 @@ function MainApp({ locationParams, navigate }) {
             intentToastTimerRef: surface.intentToastTimerRef,
             editorOpen: pane.editorState.editorOpen,
             openEditor: pane.editorState.openEditor,
-            resolvePane: (context) => paneRegistry.resolve(context),
+            resolvePane: resolveRegisteredPane,
             tabStripActiveId: pane.editorState.tabStripActiveId,
             setFileRefs: surface.setFileRefs,
             setFolderRefs: surface.setFolderRefs,

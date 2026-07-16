@@ -6,9 +6,11 @@ import {
   getAddonRecoveryExcludedChatJidPrefixes,
   getAddonStatusPanelPayload,
   getInstalledAddonRuntimeEntryPaths,
+  installAddonRuntimeApi,
   resetAddonRuntimeContributionsForTests,
   runAddonAdaptiveCardIntent,
   runAddonStatusPanelAction,
+  setAddonAgentMessageEnqueuer,
 } from "../../src/addons/runtime-contributions.js";
 import { withTempWorkspaceEnv } from "../helpers.js";
 
@@ -127,6 +129,28 @@ export {};
     expect(sessions[0].frames.map((frame: any) => frame.data)).toEqual(["line one", "line two"]);
     expect(runtimeApi.streamSessions.get(sessions[0].id)?.frames[1].metadata).toEqual({ seq: 2 });
   });
+  resetAddonRuntimeContributionsForTests();
+});
+
+test("runtime add-on API exposes the in-process targeted agent-message enqueuer", async () => {
+  resetAddonRuntimeContributionsForTests();
+  const runtimeApi = installAddonRuntimeApi();
+  await expect(runtimeApi.enqueueAgentMessage({ chatJid: "web:test", content: "before wire-up" })).rejects.toThrow("not available yet");
+
+  const requests: unknown[] = [];
+  setAddonAgentMessageEnqueuer(async (request) => {
+    requests.push(request);
+    return { status: "ok", chat_jid: request.chatJid, row_id: 12, thread_id: 12, created: true };
+  });
+
+  await expect(runtimeApi.enqueueAgentMessage({ chatJid: "web:test", content: "continue", source: "test.addon" })).resolves.toEqual({
+    status: "ok",
+    chat_jid: "web:test",
+    row_id: 12,
+    thread_id: 12,
+    created: true,
+  });
+  expect(requests).toEqual([{ chatJid: "web:test", content: "continue", source: "test.addon" }]);
   resetAddonRuntimeContributionsForTests();
 });
 

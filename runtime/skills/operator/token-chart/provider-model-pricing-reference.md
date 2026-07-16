@@ -1,64 +1,95 @@
 # Provider/model pricing reference
 
-_Reference tag (snapshot date): 2026-06-24_
+_Reference tag: 2026-07-14_
 
-This note documents the pricing snapshot used by the estimated provider/model cost chart.
+This is the audit trail for the token chart's **estimated API-equivalent** costs. The executable source of truth is `provider-model-pricing-reference.ts`.
 
-- Source of truth for the chart logic: `provider-model-pricing-reference.ts`
-- Primary source: `exports/ai-provider-pricing-2026-04.docx`
-- Codex GPT-5.5 source: OpenAI Codex pricing page, using its 2× GPT-5.4 credit ratio as the token-rate estimate
-- GPT-4o fallback source: `projects/openviktor/apps/bot/src/agent/pricing.ts`
-- GPT-OSS 120B fallback source: OpenRouter model pricing reference, used only as a Cerebras proxy until direct account pricing is confirmed
-- Kimi sources: Fireworks Fire Pass docs, Fireworks/Moonshot model rows, and OpenRouter provider row accessed 2026-05-25
-- MiniMax sources: MiniMax official PAYG pricing docs and OpenRouter/provider registry rows accessed 2026-05-25
-- GLM sources: Z.AI official pricing page (docs.z.ai/guides/overview/pricing) and OpenRouter API accessed 2026-06-24
+## Source hierarchy
 
-## Assumptions
+1. First-party provider pricing/documentation.
+2. The live OpenRouter `/api/v1/models` response for OpenRouter-specific routes.
+3. Explicitly labeled estimator fallbacks only when a provider does not publish a meter needed by local telemetry.
 
-- GitHub Copilot and Azure rows are estimated from underlying vendor token pricing, not seat plans or invoice meters.
-- OpenAI cache writes are estimated at the standard input rate when the pricing note only exposes cached-input read discounts.
-- Anthropic cache writes use 1.25× input pricing.
-- GPT-5.5 is estimated at 2× GPT-5.4 rates based on the Codex pricing page credit ratio.
-- GPT-5.1/5.2 Codex variants and Codex Spark are proxied to the GPT-5.3 Codex or GPT-5 Mini rates listed below.
-- Claude Opus 4.6 (1M) keeps standard Opus pricing; long-context premiums are not modeled.
-- GPT-OSS 120B uses an OpenRouter proxy rate until direct Cerebras account pricing is confirmed; current local rows have zero tokens.
-- Fire Pass is modeled as a $49/month subscription outside token charts; the covered `kimi-k2p6-turbo` router is represented as $0/token only when that pass is active.
-- Kimi and MiniMax provider pages publish input/cached-input/output rates; cache writes are modeled as the provider-published cache-write rate when available, otherwise at normal input.
-- Kimi K2.5 is retained only for historical rows; prefer Kimi K2.6, Kimi K2.6 Turbo under Fire Pass, or MiniMax M2.7 for new routing.
-- GLM cache-write rates are modeled at the standard input rate; Z.AI shows "Limited-time Free" for cached input storage which is not modeled as a permanent discount.
+Primary sources checked on 2026-07-14:
 
-## Reference rows
+- [OpenAI API pricing](https://developers.openai.com/api/docs/pricing)
+- [Anthropic API pricing](https://docs.anthropic.com/en/docs/about-claude/pricing)
+- [Z.AI pricing](https://docs.z.ai/guides/overview/pricing)
+- [MiniMax PAYG pricing](https://platform.minimax.io/docs/guides/pricing-paygo)
+- [Azure Foundry Mistral pricing](https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/mistral-ai/)
+- [Cerebras GPT-OSS pricing](https://inference-docs.cerebras.ai/models/openai-oss)
+- [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing)
+- [Azure Foundry DeepSeek pricing](https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/deepseek/)
+- [OpenRouter models API](https://openrouter.ai/api/v1/models)
 
-| Model key | Canonical model | Input / 1M | Output / 1M | Cache read / 1M | Cache write / 1M | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| `claude-opus-4.5` | Claude Opus 4.5 | $5.00 | $25.00 | $0.50 | $6.25 | Proxy to Opus 4.x pricing |
-| `claude-opus-4.6` | Claude Opus 4.6 | $5.00 | $25.00 | $0.50 | $6.25 |  |
-| `claude-opus-4.6-1m` | Claude Opus 4.6 (1M) | $5.00 | $25.00 | $0.50 | $6.25 | No long-context premium modeled |
-| `claude-opus-4.7` | Claude Opus 4.7 | $5.00 | $25.00 | $0.50 | $6.25 | Same API price as 4.6 per note |
-| `claude-opus-4.8` | Claude Opus 4.8 | $5.00 | $25.00 | $0.50 | $6.25 | Same as 4.7; Fast mode $10/$50 |
-| `claude-sonnet-4.6` | Claude Sonnet 4.6 | $3.00 | $15.00 | $0.30 | $3.75 |  |
-| `gpt-5.4` / `gpt-5-4` | GPT-5.4 | $2.50 | $15.00 | $0.25 | $2.50 | Cache write estimated at standard input |
-| `gpt-5.5` | GPT-5.5 | $5.00 | $30.00 | $0.50 | $5.00 | Estimated at 2× GPT-5.4 from Codex credit ratio |
-| `gpt-5.4-pro` / `gpt-5-4-pro` | GPT-5.4 Pro | $30.00 | $180.00 | $0.00 | $30.00 | No cached-input rate published |
-| `gpt-5-mini` | GPT-5 Mini | $0.75 | $4.50 | $0.075 | $0.75 | Proxy for GPT-5 Mini / Codex-mini variants |
-| `gpt-5.1-codex` / `gpt-5-1-codex` | GPT-5.1 Codex | $1.75 | $14.00 | $0.175 | $1.75 | Proxy to GPT-5.3 Codex |
-| `gpt-5.1-codex-mini` / `gpt-5-1-codex-mini` | GPT-5.1 Codex Mini | $0.75 | $4.50 | $0.075 | $0.75 | Proxy to GPT-5 Mini |
-| `gpt-5.2-codex` / `gpt-5-2-codex` | GPT-5.2 Codex | $1.75 | $14.00 | $0.175 | $1.75 | Proxy to GPT-5.3 Codex |
-| `gpt-5.3-codex` / `gpt-5-3-codex` | GPT-5.3 Codex | $1.75 | $14.00 | $0.175 | $1.75 | Cache write estimated at standard input |
-| `gpt-5.3-codex-spark` / `gpt-5-3-codex-spark` | GPT-5.3 Codex Spark | $1.75 | $14.00 | $0.175 | $1.75 | Proxy to GPT-5.3 Codex |
-| `gpt-4o` | GPT-4o | $2.50 | $10.00 | $0.00 | $0.00 | Fallback helper entry |
-| `mistral-large-3` | Mistral Large 3 | $2.00 | $6.00 | $0.00 | $0.00 | Azure Foundry usage proxied to Mistral Large |
-| `gpt-oss-120b` | GPT-OSS 120B | $0.039 | $0.10 | $0.00 | $0.00 | OpenRouter proxy for Cerebras rows until direct pricing is confirmed |
-| `minimax-m2.7` / `minimax/minimax-m2.7` | MiniMax M2.7 | $0.30 | $1.20 | $0.06 | $0.375 | Native/current MiniMax coding baseline |
-| `minimax-m2.7-highspeed` | MiniMax M2.7 Highspeed | $0.60 | $2.40 | $0.06 | $0.375 | 2× input/output high-speed row |
-| `minimax-m2.5` | MiniMax M2.5 | $0.30 | $1.20 | $0.03 | $0.375 | Official row; OpenRouter-routed row is cheaper |
-| `minimax/minimax-m2.5` | MiniMax M2.5 (OpenRouter) | $0.15 | $1.15 | $0.03 | $0.15 | Router-specific price |
-| `minimax/minimax-m2` | MiniMax M2 (OpenRouter) | $0.255 | $1.00 | $0.03 | $0.255 | Router-specific historical/current row |
-| `minimax/minimax-m2.1` | MiniMax M2.1 (OpenRouter) | $0.29 | $0.95 | $0.03 | $0.29 | Router-specific row |
-| `minimax/minimax-m1` | MiniMax M1 (OpenRouter) | $0.40 | $2.20 | $0.00 | $0.40 | Older 1M-context row retained for historical/router usage |
-| `kimi-k2p6-turbo` | Kimi K2.6 Turbo (Fire Pass router) | $0.00 | $0.00 | $0.00 | $0.00 | Covered by Fireworks Fire Pass while active; $49/month subscription tracked separately |
-| `moonshotai/kimi-k2.6` | Kimi K2.6 (OpenRouter) | $0.75 | $3.50 | $0.15 | $0.75 | Router-specific price |
-| `kimi-k2.6` / `kimi-k2p6` | Kimi K2.6 | $0.95 | $4.00 | $0.16 | $0.95 | Native/Fireworks PAYG; cache write modeled as normal input |
-| `kimi-k2.5` / `kimi-k2p5` | Kimi K2.5 (legacy/deprecated) | $0.60 | $3.00 | $0.10 | $0.60 | Legacy/historical row; avoid for new routing |
-| `glm-5.2` / `glm-5p2` | GLM 5.2 | $1.40 | $4.40 | $0.26 | $1.40 | Z.AI native PAYG; cached input storage limited-time free |
-| `z-ai/glm-5.2` | GLM 5.2 (OpenRouter) | $0.95 | $3.00 | $0.18 | $0.95 | ~32% cheaper than z.ai native; cache write at routed input |
+## Interpretation and limitations
+
+- GitHub Copilot, Codex, Claude subscriptions, Fire Pass, and Azure agreements are **not** token-priced invoices. Their rows show underlying public API-equivalent value unless a separate subscription analysis is performed.
+- Provider-specific routes are resolved separately where prices differ. A native model ID must not silently inherit an OpenRouter or Azure price.
+- A cache value marked `†` is an estimator fallback, not a published provider cache tariff. Because local telemetry can report cache reads/writes outside ordinary input, the estimator explicitly charges those tokens at ordinary input price rather than silently treating them as free.
+- GPT-5.6 has a published cache-write price; GPT-5.5, GPT-5.4, and older OpenAI rows do not. GPT-5.5's `$5/MTok` cache-write value is therefore an estimator fallback, not an official cache-write tariff.
+- OpenAI rates are the standard `<=272K` input tier. Higher long-context rates are not modeled.
+- Anthropic cache-write values are the 5-minute TTL rates. One-hour writes are higher and are not represented by the single local cache-write field.
+- Claude Opus 4.6 (1M) currently uses the standard Opus row; context-related premiums or geo multipliers are not modeled.
+- Fire Pass coverage is account-specific. Fireworks fast/turbo routers use PAYG rates here; a subscription comparison may subtract covered usage separately.
+- OpenRouter rows represent credits consumed at the displayed token rates. They exclude OpenRouter's separate 5.5% credit-purchase fee ($0.80 minimum), which cannot be allocated reliably per model or request.
+- Azure publishes only input/output prices for DeepSeek V4 Flash. Its cache-read and cache-write fields are conservatively modeled at ordinary input price and are not published Azure cache tariffs.
+- Local inference is `$0` only for metered API cost. Electricity, hardware depreciation, and operations are excluded.
+
+## Subscription-plan cross-check (not used by the resolver)
+
+Checked 2026-07-14. Subscription allowances are not interchangeable with PAYG token prices.
+
+| Product | Current individual tiers | Included allowance / reset | After included allowance |
+| --- | --- | --- | --- |
+| OpenAI Codex | Free $0; Go $8; Plus $20; Pro 5x $100; Pro 20x $200 per month | Variable local-message allowance shared in a 5-hour window, with additional weekly limits. For GPT-5.5, OpenAI currently estimates 15–80 messages on Plus, 75–400 on Pro 5x, and 300–1,600 on Pro 20x per 5 hours. | Eligible Plus/Pro users can opt to buy ChatGPT credits; Codex's current token credit card maps to standard API rates. API-key usage is separately billed PAYG. |
+| Claude | Pro $20; Max 5x $100; Max 20x $200 per month | Max provides 5x/20x Pro session usage; five-hour session and separate weekly limits apply. Anthropic does not publish a fixed monthly token or dollar allowance. | Optional usage credits continue at standard API rates; otherwise usage pauses until reset. API Console usage remains separate from the subscription. |
+| GitHub Copilot | Pro $10; Pro+ $39; Max $100 per month | Current primary table lists $15/$70/$200 in total monthly GitHub AI Credits respectively (base plus variable flex allotment); 1 GitHub AI Credit = $0.01. | Optional paid usage requires a dollar budget; otherwise wait for the monthly reset or use a cheaper model. GitHub's interaction-credit accounting is not the same as raw API-token costing. |
+| Z.AI GLM Coding Plan | List prices: Lite $18; Pro $72; Max $160 per month. The subscribe page displayed promotional $12.60/$50.40/$112 prices when checked. | About 80/400/1,600 prompts per 5 hours and 400/2,000/8,000 per week. GLM-5.2 is charged 2x off-peak or 3x peak against plan quota. | Published plan documentation describes quota resets, not automatic PAYG overage; native API PAYG is a separate route. |
+
+Sources: [Codex pricing](https://developers.openai.com/codex/pricing), [OpenAI Pro tiers](https://help.openai.com/en/articles/9793128-about-chatgpt-pro-plans), [Claude Max](https://support.claude.com/en/articles/11049741-what-is-the-max-plan), [Claude usage credits](https://support.claude.com/en/articles/12429409-manage-usage-credits-for-paid-claude-plans), [GitHub Copilot plans](https://github.com/features/copilot/plans), [Z.AI Coding Plan](https://docs.z.ai/devpack/overview), and [Z.AI subscribe](https://z.ai/subscribe).
+
+## Reference rows (USD per 1M tokens)
+
+| Model key / route | Input | Output | Cache read | Cache write | Provenance / note |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `claude-opus-4.5` | $5.00 | $25.00 | $0.50 | $6.25 | Anthropic standard; 5m write |
+| `claude-opus-4.6` | $5.00 | $25.00 | $0.50 | $6.25 | Anthropic standard; 5m write |
+| `claude-opus-4.6-1m` | $5.00 | $25.00 | $0.50 | $6.25 | Standard row; long-context premium not modeled |
+| `claude-opus-4.7` | $5.00 | $25.00 | $0.50 | $6.25 | Anthropic standard; 5m write |
+| `claude-opus-4.8` | $5.00 | $25.00 | $0.50 | $6.25 | Anthropic standard; 5m write; Fast mode excluded |
+| `claude-sonnet-4.6` | $3.00 | $15.00 | $0.30 | $3.75 | Anthropic standard; 5m write |
+| `gpt-5.4` | $2.50 | $15.00 | $0.25 | $2.50† | OpenAI standard tier |
+| `gpt-5.4-mini` | $0.75 | $4.50 | $0.075 | $0.75† | OpenAI standard tier; distinct from GPT-5 Mini |
+| `gpt-5.5` | $5.00 | $30.00 | $0.50 | $5.00† | Official token rates; cache-write fallback only |
+| `gpt-5.6-sol` / `gpt-5.6` | $5.00 | $30.00 | $0.50 | $6.25 | OpenAI published cache-write rate |
+| `gpt-5.6-terra` | $2.50 | $15.00 | $0.25 | $3.125 | OpenAI published cache-write rate |
+| `gpt-5.6-luna` | $1.00 | $6.00 | $0.10 | $1.25 | OpenAI published cache-write rate |
+| `gpt-5.4-pro` | $30.00 | $180.00 | $0.00 | $30.00† | No published cached-input/write rate |
+| `gpt-5-mini` | $0.25 | $2.00 | $0.025 | $0.25† | Legacy GPT-5 Mini row; no longer a 5.4-mini proxy |
+| `gpt-5.1-codex` | $1.25 | $10.00 | $0.125 | $1.25† | OpenAI row; corrected from 5.3 proxy |
+| `gpt-5.1-codex-mini` | $0.25 | $2.00 | $0.025 | $0.25† | OpenAI row; corrected from 5.4-mini proxy |
+| `gpt-5.2-codex` | $1.75 | $14.00 | $0.175 | $1.75† | OpenAI row |
+| `gpt-5.3-codex` | $1.75 | $14.00 | $0.175 | $1.75† | OpenAI row |
+| `gpt-5.3-codex-spark` | — | — | — | — | Research preview; no published API/PAYG rate, so the resolver leaves it unpriced |
+| `gpt-4o` | $2.50 | $10.00 | $1.25 | $2.50† | OpenAI row; cached-input price restored |
+| `mistral-large-3` on Azure Foundry | $0.50 | $1.50 | $0.00 | $0.50† | Azure Foundry PAYG |
+| `gpt-oss-120b` on Cerebras | $0.35 | $0.75 | $0.00 | $0.35† | Cerebras first-party, replacing OpenRouter proxy |
+| `minimax-m2.7` | $0.30 | $1.20 | $0.06 | $0.375 | MiniMax native/Fireworks standard |
+| `minimax/minimax-m2.7` on OpenRouter | $0.24 | $0.96 | $0.00 | $0.24† | Live OpenRouter route |
+| `minimax-m2.7-highspeed` | $0.60 | $2.40 | $0.06 | $0.375 | MiniMax high-speed |
+| `minimax-m2.5` | $0.30 | $1.20 | $0.03 | $0.375 | MiniMax native |
+| `minimax/minimax-m2.5` on OpenRouter | $0.15 | $0.90 | $0.05 | $0.15† | Live OpenRouter route |
+| `minimax/minimax-m2` on OpenRouter | $0.255 | $1.02 | $0.00 | $0.255† | Live OpenRouter route |
+| `minimax/minimax-m2.1` on OpenRouter | $0.30 | $1.20 | $0.03 | $0.30† | Live OpenRouter route |
+| `minimax/minimax-m1` on OpenRouter | $0.40 | $2.20 | $0.00 | $0.40† | Live OpenRouter historical row |
+| Fireworks `kimi-k2p6-{fast,turbo}` | $2.00 | $8.00 | $0.30 | $2.00† | PAYG; Fire Pass coverage not assumed |
+| `moonshotai/kimi-k2.6` on OpenRouter | $0.66 | $3.41 | $0.15 | $0.66† | Live OpenRouter route |
+| `kimi-k2.6` / `kimi-k2p6` | $0.95 | $4.00 | $0.16 | $0.95† | Moonshot/Fireworks standard |
+| `kimi-k2.5` / `kimi-k2p5` | $0.60 | $3.00 | $0.10 | $0.60† | Legacy historical row |
+| `glm-5.2` / `glm-5p2` | $1.40 | $4.40 | $0.26 | $1.40† | Z.AI native; limited-time cache-storage offer excluded |
+| `z-ai/glm-5.2` on OpenRouter | $0.9282 | $2.9172 | $0.17238 | $0.9282† | Live OpenRouter route |
+| `deepseek-v4-flash` on Azure Foundry | $0.19 | $0.51 | $0.19† | $0.19† | Azure Global PAYG; cache fields are conservative estimator fallbacks |
+| `deepseek-v4-flash` native | $0.14 | $0.28 | $0.0028 | $0.14† | DeepSeek native |
+| `deepseek/deepseek-v4-flash` on OpenRouter | $0.09 | $0.18 | $0.018 | $0.09† | Live OpenRouter route |
+| `gemma4-e4b-qat-mtp` on `milkv-local` | $0.00 | $0.00 | $0.00 | $0.00 | API meter only; infrastructure excluded |

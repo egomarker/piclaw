@@ -341,7 +341,7 @@ export function applySessionCorrelationHeaders(
   return next;
 }
 
-/** Clamp unsupported reasoning levels for providers that do not accept `xhigh`. */
+/** Clamp unsupported reasoning levels for providers that do not accept `xhigh` or `max`. */
 export function clampReasoning(effort: string | undefined): string | undefined {
-  return effort === "xhigh" ? "high" : effort;
+  return effort === "xhigh" || effort === "max" ? "high" : effort;
 }

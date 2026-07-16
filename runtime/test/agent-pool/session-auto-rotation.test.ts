@@ -8,6 +8,7 @@ import { existsSync, truncateSync } from "fs";
 import { basename, join } from "path";
 import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { initDatabase } from "../../src/db.js";
 import { createTempWorkspace, importFresh, setEnv, type TempWorkspace } from "../helpers.js";
 
 let restoreEnv: (() => void) | null = null;
@@ -139,6 +140,7 @@ test("agent pool auto-rotates oversized persisted sessions before prompting", as
     PICLAW_SESSION_AUTO_ROTATE: "1",
     PICLAW_SESSION_MAX_SIZE_MB: "1",
   });
+  initDatabase();
 
   const { ensureSessionDir } = await importFresh<typeof import("../src/agent-pool/session.js")>("../src/agent-pool/session.js");
   const { AgentPool } = await importFresh<typeof import("../src/agent-pool.js")>("../src/agent-pool.js");
@@ -184,6 +186,7 @@ test("agent pool waits for an oversized busy session to settle before auto-rotat
     PICLAW_SESSION_MAX_SIZE_MB: "1",
     PICLAW_SESSION_IDLE_MAX_WAIT_MS: "1000",
   });
+  initDatabase();
 
   const { ensureSessionDir } = await importFresh<typeof import("../src/agent-pool/session.js")>("../src/agent-pool/session.js");
   const { AgentPool } = await importFresh<typeof import("../src/agent-pool.js")>("../src/agent-pool.js");

@@ -184,14 +184,17 @@ This is still an early web-native BTW layer rather than the full final system, b
 
 The compose footer exposes current context-window usage through the `ContextPie` indicator, backed by `GET /agent/context`.
 
-The web client now refreshes this state on:
+The web client refreshes this state on:
 - initial connect
 - SSE reconnect
 - window focus
 - `pageshow`
 - `visibilitychange` when the document becomes visible again
+- successful manual `/compact`, through an immediate `context_usage` status event
 
-That keeps the context compaction affordance in sync when returning to the tab or reopening the webapp, rather than waiting for the slower backstop poller.
+After `/compact`, the backend prefers an estimate from the rebuilt session. If that estimate has null tokens—for example while a provider-native session rewrite is settling—it uses the compaction report's safety-adjusted estimate instead. Direct and deferred command paths do not persist or broadcast null-token updates. `GET /agent/context` awaits the live session lookup, then falls back to validated persisted channel usage when the session was evicted, lookup failed, or runtime tokens are null.
+
+Together, those paths keep the context compaction affordance in sync immediately after compaction and when returning to the tab or reopening the webapp, without requiring another agent turn or waiting for the slower backstop poller.
 
 The SSE reconnect handler also refreshes queue state (`refreshQueueState()`) so queued follow-ups submitted before a connection gap are restored in the compose stack immediately, rather than waiting for the next 60-second poll cycle.
 

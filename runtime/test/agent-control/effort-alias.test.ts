@@ -8,19 +8,23 @@ import {
   resolveThinkingAlias,
   isEffortProvider,
   formatThinkingLevelForDisplay,
-  EFFORT_PROVIDER_THINKING_LEVEL_ALIASES,
+  usesLegacyMaxThinkingAlias,
 } from "../../src/agent-control/agent-control-helpers.js";
 import { parseControlCommand } from "../../src/agent-control/index.js";
 
 describe("thinking level alias helpers", () => {
-  test("resolveThinkingAlias maps provider-native aliases to internal levels", () => {
-    expect(resolveThinkingAlias("max", "anthropic")).toBe("xhigh");
-    expect(resolveThinkingAlias("high", "anthropic")).toBe("high");
-    expect(resolveThinkingAlias("low", "anthropic")).toBe("low");
-    expect(resolveThinkingAlias("off", "anthropic")).toBe("off");
-    expect(resolveThinkingAlias("unknown", "anthropic")).toBe("unknown");
-    // max is NOT resolved on non-Anthropic providers
-    expect(resolveThinkingAlias("max", "openai")).toBe("max");
+  const legacyMax = { provider: "anthropic", thinkingLevelMap: { xhigh: "max" } } as any;
+  const legacyMaxWithExplicitNull = { provider: "anthropic", thinkingLevelMap: { xhigh: "max", max: null } } as any;
+  const nativeMax = { provider: "anthropic", thinkingLevelMap: { max: "max" } } as any;
+  const nativeBoth = { provider: "anthropic", thinkingLevelMap: { xhigh: "xhigh", max: "max" } } as any;
+
+  test("resolveThinkingAlias only maps legacy xhigh-as-max metadata", () => {
+    expect(resolveThinkingAlias("max", legacyMax)).toBe("xhigh");
+    expect(resolveThinkingAlias("max", legacyMaxWithExplicitNull)).toBe("xhigh");
+    expect(resolveThinkingAlias("max", nativeMax)).toBe("max");
+    expect(resolveThinkingAlias("max", nativeBoth)).toBe("max");
+    expect(resolveThinkingAlias("high", legacyMax)).toBe("high");
+    expect(resolveThinkingAlias("unknown", legacyMax)).toBe("unknown");
     expect(resolveThinkingAlias("max", null)).toBe("max");
   });
 
@@ -33,21 +37,20 @@ describe("thinking level alias helpers", () => {
     expect(isEffortProvider(undefined)).toBe(false);
   });
 
-  test("formatThinkingLevelForDisplay uses provider-native terms for Anthropic", () => {
-    expect(formatThinkingLevelForDisplay("xhigh", "anthropic")).toBe("max");
-    expect(formatThinkingLevelForDisplay("high", "anthropic")).toBe("high");
-    expect(formatThinkingLevelForDisplay("low", "anthropic")).toBe("low");
-    expect(formatThinkingLevelForDisplay("off", "anthropic")).toBe("off");
-  });
-
-  test("formatThinkingLevelForDisplay leaves non-Anthropic levels unchanged", () => {
-    expect(formatThinkingLevelForDisplay("xhigh", "openai")).toBe("xhigh");
+  test("formatThinkingLevelForDisplay preserves native xhigh and max", () => {
+    expect(formatThinkingLevelForDisplay("xhigh", legacyMax)).toBe("max");
+    expect(formatThinkingLevelForDisplay("xhigh", nativeBoth)).toBe("xhigh");
+    expect(formatThinkingLevelForDisplay("max", nativeBoth)).toBe("max");
+    expect(formatThinkingLevelForDisplay("high", nativeMax)).toBe("high");
     expect(formatThinkingLevelForDisplay("xhigh", null)).toBe("xhigh");
-    expect(formatThinkingLevelForDisplay("high", "openai")).toBe("high");
   });
 
-  test("EFFORT_PROVIDER_THINKING_LEVEL_ALIASES contains expected mappings", () => {
-    expect(EFFORT_PROVIDER_THINKING_LEVEL_ALIASES).toEqual({ max: "xhigh" });
+  test("legacy alias detection requires xhigh=max without native max support", () => {
+    expect(usesLegacyMaxThinkingAlias(legacyMax)).toBe(true);
+    expect(usesLegacyMaxThinkingAlias(legacyMaxWithExplicitNull)).toBe(true);
+    expect(usesLegacyMaxThinkingAlias(nativeMax)).toBe(false);
+    expect(usesLegacyMaxThinkingAlias(nativeBoth)).toBe(false);
+    expect(usesLegacyMaxThinkingAlias(null)).toBe(false);
   });
 });
 

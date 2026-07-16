@@ -134,7 +134,7 @@ See [docs/development.md](docs/development.md).
 |---|---|
 | Getting started | [Configuration](docs/configuration.md), [Web UI](docs/web-ui.md), [Install from repo](docs/install-from-repo.md) |
 | Operations | [Azure VM deployment](docs/azure/README.md), [Azure OpenAI extension](docs/azure/azure-openai-extension.md), [Reverse proxy](docs/reverse-proxy.md), [Release process](docs/release.md) |
-| Runtime internals | [Architecture](docs/architecture.md), [Runtime flows](docs/runtime-flows.md), [Runtime stream sessions](docs/runtime-stream-sessions.md), [Storage model](docs/storage.md), [Observability](docs/observability.md) |
+| Runtime internals | [Architecture](docs/architecture.md), [Pipelined smart compaction](docs/pipelined-compaction.md), [Runtime flows](docs/runtime-flows.md), [Runtime stream sessions](docs/runtime-stream-sessions.md), [Storage model](docs/storage.md), [Observability](docs/observability.md) |
 | UI extension model | [Web pane extensions](docs/web-pane-extensions.md), [Extension UI contract](docs/extension-ui-contract.md), [Vendored widget libraries](docs/vendored-widget-libraries.md) |
 | Agent capabilities | [Tools and skills](docs/tools-and-skills.md), [Visual artifact generator](docs/visual-artifact-generator.md), [MCP via pi-mcp-adapter](docs/mcp.md), [Keychain](docs/keychain.md) |
 | Other references | [Dream memory system](docs/dream-memory.md), [Thinking persistence](docs/thinking-persistence.md), [Web notification delivery policy](docs/web-notification-delivery-policy.md), [iOS PWA reference](docs/PWA.md), [WhatsApp](docs/whatsapp.md), [Cross-instance interop](docs/cross-instance-ipc.md), [Experimental M365 extension](docs/m365-experimental-extension.md), [Development](docs/development.md) |

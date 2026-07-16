@@ -109,7 +109,11 @@ export function normalizeRetryBackoffSettings(settings?: Partial<RetryBackoffSet
 export function getAutomaticRecoveryConfig(retrySettings?: Partial<RetryBackoffSettings> | null): Readonly<AutomaticRecoveryConfig> {
   const normalizedRetry = normalizeRetryBackoffSettings(retrySettings);
   return Object.freeze({
-    enabled: parseBoolean(process.env.PICLAW_TURN_AUTO_RECOVERY_ENABLED, normalizedRetry.enabled),
+    // The SDK retry toggle controls provider/request retries. Piclaw turn recovery
+    // is a separate safety mechanism for genuine context pressure and bounded
+    // transient retries. Tool-history ceilings are terminal and require an
+    // explicit continue instead of automatic compaction/replay.
+    enabled: parseBoolean(process.env.PICLAW_TURN_AUTO_RECOVERY_ENABLED, DEFAULT_AUTOMATIC_RECOVERY_CONFIG.enabled),
     maxAttempts: parsePositiveInt(process.env.PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS, normalizedRetry.maxRetries),
     totalBudgetMs: parsePositiveInt(process.env.PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS, DEFAULT_AUTOMATIC_RECOVERY_CONFIG.totalBudgetMs),
     baseDelayMs: normalizedRetry.baseDelayMs,
@@ -125,7 +129,7 @@ export function getAutomaticRecoveryDelayMs(config: Pick<AutomaticRecoveryConfig
 
 export function isContextPressureFailure(errorText: string | null | undefined): boolean {
   if (!errorText) return false;
-  return /context(?: window| length)?|maximum context length|context_length|token limit|too many tokens|prompt too long|reduce (?:the )?length|overflow|request too large|tool(?:-| )use budget exceeded|tool history pressure|too many tool (?:steps|calls)/i.test(errorText);
+  return /context(?: window| length)?|maximum context length|context_length|token limit|too many tokens|prompt too long|reduce (?:the )?length|overflow|request too large/i.test(errorText);
 }
 
 export function isTransientFailure(errorText: string | null | undefined): boolean {
@@ -140,7 +144,7 @@ export function isLengthStopFailure(errorText: string | null | undefined): boole
 
 export function isProviderAuthConfigFailure(errorText: string | null | undefined): boolean {
   if (!errorText) return false;
-  return /no api key for provider|no api key found|token refresh failed\s*:\s*401|authentication failed|credentials may have expired|re-authenticate|unauthorized|\b401\b|\b403\b|invalid.*api.*key|api.*key.*invalid|token.*expired|oauth.*expired|refresh.*token|provider login required|auth.*expired|missing provider credential|missing provider config/i.test(errorText);
+  return /no api key for provider|no api key found|token refresh failed\s*:\s*401|authentication failed|credentials may have expired|re-authenticate|unauthorized|\b401\b|\b403\b|invalid.*api.*key|api.*key.*invalid|token.*expired|oauth.*expired|refresh.*token|provider login required|auth.*expired|missing provider credential|missing provider config|provider\.getApiKey is not a function|getApiKeyAndHeaders is not a function/i.test(errorText);
 }
 
 export function isNonRecoverableFailure(errorText: string | null | undefined): boolean {
@@ -218,6 +222,15 @@ export function decideAutomaticRecovery(input: RecoveryDecisionInput): RecoveryD
     };
   }
 
+  if (isProviderAuthConfigFailure(errorText)) {
+    return {
+      recover: false,
+      classifier: "auth_config",
+      strategy: null,
+      reason: "Provider authentication/configuration failure; automatic recovery suppressed until credentials or login are fixed.",
+    };
+  }
+
   if (input.snapshot.compactionErrorMessage) {
     if (isTransientFailure(errorText)) {
       return {
@@ -237,34 +250,25 @@ export function decideAutomaticRecovery(input: RecoveryDecisionInput): RecoveryD
     };
   }
 
-  if (isProviderAuthConfigFailure(errorText)) {
-    return {
-      recover: false,
-      classifier: "auth_config",
-      strategy: null,
-      reason: "Provider authentication/configuration failure; automatic recovery suppressed until credentials or login are fixed.",
-    };
-  }
-
   if (input.snapshot.hadToolActivity) {
     // Conservative rule: once tool activity happened, automatic recovery is
     // only allowed for clearly context-related failures. Generic retries could
     // re-run side-effecting tools, so exhausted/no-terminal runs are held for
     // explicit retry/skip resolution instead.
-    if (toolHistoryPressure) {
-      return {
-        recover: true,
-        classifier: "tool_history_pressure",
-        strategy: "compact_then_retry",
-        reason: "Turn exceeded the tool-history budget before finalization; compacting before retrying.",
-      };
-    }
     if (isContextPressureFailure(errorText) || input.snapshot.sawCompactionIntent) {
       return {
         recover: true,
         classifier: "context_pressure",
         strategy: "compact_then_retry",
         reason: "Failure looks context-related despite tool activity; compacting before retrying.",
+      };
+    }
+    if (toolHistoryPressure) {
+      return {
+        recover: false,
+        classifier: "tool_history_pressure",
+        strategy: null,
+        reason: "Turn exceeded the tool-history budget before finalization without context pressure; wait for an explicit continue instead of compacting.",
       };
     }
     if (
@@ -324,24 +328,25 @@ export function decideAutomaticRecovery(input: RecoveryDecisionInput): RecoveryD
     };
   }
 
-  if (toolHistoryPressure) {
-    return {
-      recover: true,
-      classifier: "tool_history_pressure",
-      strategy: "compact_then_retry",
-      reason: "Turn exceeded the tool-history budget before finalization; compacting before retrying.",
-    };
-  }
-
-  // Context pressure must be checked before non-recoverable because error
-  // payloads like `invalid_request_error` with `context_length_exceeded` match
-  // both patterns.  Context overflow is always recoverable via compaction.
+  // Context pressure must be checked before tool-history/non-recoverable
+  // classification. Tool-count exhaustion alone is terminal, but a turn that
+  // independently crossed the model-aware threshold is recoverable by
+  // compaction even when it reached the tool ceiling at the same time.
   if (isContextPressureFailure(errorText) || input.snapshot.sawCompactionIntent) {
     return {
       recover: true,
       classifier: "context_pressure",
       strategy: "compact_then_retry",
       reason: "Failure looks context-related; compacting before retrying.",
+    };
+  }
+
+  if (toolHistoryPressure) {
+    return {
+      recover: false,
+      classifier: "tool_history_pressure",
+      strategy: null,
+      reason: "Turn exceeded the tool-history budget before finalization without context pressure; wait for an explicit continue instead of compacting.",
     };
   }
 
@@ -366,7 +371,7 @@ export function decideAutomaticRecovery(input: RecoveryDecisionInput): RecoveryD
   return {
     recover: true,
     classifier: "unknown",
-    strategy: input.snapshot.sawCompactionIntent ? "compact_then_retry" : "compact_then_retry",
-    reason: "Unknown mid-turn failure; compacting context before retrying.",
+    strategy: "retry",
+    reason: "Unknown mid-turn failure without context pressure; retrying without compaction.",
   };
 }

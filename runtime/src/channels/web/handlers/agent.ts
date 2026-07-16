@@ -1161,15 +1161,21 @@ export async function handleAgentMessage(
     payload: { threadId: string | number | null; turnId: string },
   ): Promise<void> => {
     let contextUsage = result.contextUsage;
-    if (!contextUsage) {
+    if (contextUsage?.tokens === null || contextUsage?.tokens === undefined) {
       const current = typeof channel.agentPool.getContextUsageForChat === "function"
         ? await channel.agentPool.getContextUsageForChat(chatJid).catch(() => null)
         : null;
-      contextUsage = current
-        ? { tokens: current.tokens, contextWindow: current.contextWindow, percent: current.percent, source: "agent_pool", phase: "after_command" }
-        : undefined;
+      if (current?.tokens !== null && current?.tokens !== undefined) {
+        contextUsage = {
+          tokens: current.tokens,
+          contextWindow: current.contextWindow,
+          percent: current.percent,
+          source: "agent_pool",
+          phase: "after_command",
+        };
+      }
     }
-    if (!contextUsage) return;
+    if (!contextUsage || contextUsage.tokens === null) return;
     const persistedUsage = {
       tokens: contextUsage.tokens,
       contextWindow: contextUsage.contextWindow,
@@ -1566,28 +1572,45 @@ export async function processChat(
     const formatted = formatOutbound(result.message, "web");
     const commandThreadId = message.threadId ?? effectiveThreadRootId ?? message.rowId ?? null;
 
-    if (result.status === "success" && persistedCommand.type === "compact" && result.contextUsage) {
-      const persistedUsage = {
-        tokens: result.contextUsage.tokens,
-        contextWindow: result.contextUsage.contextWindow,
-        percent: result.contextUsage.percent,
-      };
-      const statusPayload = {
-        chat_jid: chatJid,
-        thread_id: commandThreadId,
-        agent_id: agentId,
-        turn_id: createUuid("turn"),
-        type: "context_usage",
-        context_usage: {
-          ...persistedUsage,
-          estimated: result.contextUsage.estimated === true,
-          source: result.contextUsage.source ?? null,
-          phase: result.contextUsage.phase ?? null,
-        },
-      };
-      channel.setContextUsage(chatJid, persistedUsage);
-      channel.updateAgentStatus(chatJid, statusPayload);
-      channel.broadcastEvent("agent_status", statusPayload);
+    if (result.status === "success" && persistedCommand.type === "compact") {
+      let contextUsage = result.contextUsage;
+      if (contextUsage?.tokens === null || contextUsage?.tokens === undefined) {
+        const current = typeof channel.agentPool.getContextUsageForChat === "function"
+          ? await channel.agentPool.getContextUsageForChat(chatJid).catch(() => null)
+          : null;
+        if (current?.tokens !== null && current?.tokens !== undefined) {
+          contextUsage = {
+            tokens: current.tokens,
+            contextWindow: current.contextWindow,
+            percent: current.percent,
+            source: "agent_pool",
+            phase: "after_command",
+          };
+        }
+      }
+      if (contextUsage?.tokens !== null && contextUsage?.tokens !== undefined) {
+        const persistedUsage = {
+          tokens: contextUsage.tokens,
+          contextWindow: contextUsage.contextWindow,
+          percent: contextUsage.percent,
+        };
+        const statusPayload = {
+          chat_jid: chatJid,
+          thread_id: commandThreadId,
+          agent_id: agentId,
+          turn_id: createUuid("turn"),
+          type: "context_usage",
+          context_usage: {
+            ...persistedUsage,
+            estimated: contextUsage.estimated === true,
+            source: contextUsage.source ?? null,
+            phase: contextUsage.phase ?? null,
+          },
+        };
+        channel.setContextUsage(chatJid, persistedUsage);
+        channel.updateAgentStatus(chatJid, statusPayload);
+        channel.broadcastEvent("agent_status", statusPayload);
+      }
     }
 
     if (formatted || result.contentBlocks?.length) {
@@ -1872,11 +1895,28 @@ export async function processChat(
     effectiveThreadRootId
   );
 
+  const liveThinkingLevelLabels = new Map<string, string>();
+  try {
+    const modelState = await channel.agentPool.getAvailableModels(chatJid);
+    modelState.available_thinking_levels.forEach((level, index) => {
+      liveThinkingLevelLabels.set(level, modelState.available_thinking_level_labels[index] ?? level);
+    });
+    if (modelState.thinking_level && modelState.thinking_level_label) {
+      liveThinkingLevelLabels.set(modelState.thinking_level, modelState.thinking_level_label);
+    }
+  } catch (err) {
+    debugSuppressedError(log, "Failed to prepare live thinking-level labels.", err, {
+      operation: "process_chat.init_thinking_labels",
+      chatJid,
+    });
+  }
+
   const streamingHandler = createStreamingEventHandler({
     emitter: trackedEmitter,
     agentId,
     threadId,
     turnId,
+    formatThinkingLevel: (level) => liveThinkingLevelLabels.get(level) ?? level,
     thoughtPreviewLines: THOUGHT_PREVIEW_LINES,
     draftPreviewLines: DRAFT_PREVIEW_LINES,
     previewMaxCharsPerLine: PREVIEW_MAX_CHARS_PER_LINE,

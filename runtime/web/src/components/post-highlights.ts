@@ -244,6 +244,58 @@ function wrapPartOfTextNode(
 
 // ── Selection helpers ───────────────────────────────────────────
 
+type PostSelectionSubscription = {
+  notify: () => void;
+};
+
+const postSelectionSubscriptions = new WeakMap<HTMLElement, PostSelectionSubscription>();
+let postSelectionSubscriberCount = 0;
+let activePostSelectionElement: HTMLElement | null = null;
+
+function resolvePostSelectionElement(): HTMLElement | null {
+  const selection = window.getSelection();
+  const anchorNode = selection?.anchorNode;
+  const anchorElement = anchorNode instanceof Element ? anchorNode : anchorNode?.parentElement;
+  const postContent = anchorElement?.closest?.('.post-content');
+  return postContent instanceof HTMLElement && postSelectionSubscriptions.has(postContent)
+    ? postContent
+    : null;
+}
+
+function notifyPostSelectionChange(): void {
+  const nextElement = resolvePostSelectionElement();
+  if (activePostSelectionElement && activePostSelectionElement !== nextElement) {
+    postSelectionSubscriptions.get(activePostSelectionElement)?.notify();
+  }
+  if (nextElement) postSelectionSubscriptions.get(nextElement)?.notify();
+  activePostSelectionElement = nextElement;
+}
+
+/**
+ * Share one document-level selection listener across every rendered post.
+ * Selection work is routed only to the post that owns the selection (and the
+ * previously active post when its popup needs dismissing), instead of walking
+ * every historical post on each editor cursor movement.
+ */
+export function subscribePostSelectionChanges(element: HTMLElement, notify: () => void): () => void {
+  const subscription = { notify };
+  postSelectionSubscriptions.set(element, subscription);
+  postSelectionSubscriberCount += 1;
+  if (postSelectionSubscriberCount === 1) {
+    document.addEventListener('selectionchange', notifyPostSelectionChange);
+  }
+
+  return () => {
+    if (postSelectionSubscriptions.get(element) !== subscription) return;
+    postSelectionSubscriptions.delete(element);
+    postSelectionSubscriberCount = Math.max(0, postSelectionSubscriberCount - 1);
+    if (activePostSelectionElement === element) activePostSelectionElement = null;
+    if (postSelectionSubscriberCount === 0) {
+      document.removeEventListener('selectionchange', notifyPostSelectionChange);
+    }
+  };
+}
+
 export function getSelectionInElement(element: HTMLElement): {
   text: string;
   textOffset: number;

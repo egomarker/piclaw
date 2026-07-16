@@ -236,6 +236,22 @@ test('extension_ui_status updates working text for standard extension progress',
   });
 });
 
+test('extension_ui_status makes smart-compaction panel text concise and phase-explicit', () => {
+  const state = { message: null, indicator: { mode: 'custom' as const, frames: ['⠋'], intervalMs: 90 }, visible: true };
+  expect(applyExtensionUiWorkingState(state, 'extension_ui_status', {
+    key: 'smart_compaction',
+    text: 'Manual smart compaction: 18% — provider-native compaction in progress — openai-codex/gpt-5.5',
+  })).toEqual({
+    message: 'provider-native compaction in progress — openai-codex/gpt-5.5',
+    indicator: { mode: 'custom', frames: ['⠋'], intervalMs: 90 },
+    visible: true,
+  });
+  expect(applyExtensionUiWorkingState(state, 'extension_ui_status', {
+    key: 'smart_compaction',
+    text: 'Smart compaction: 26% — local pipelined fallback — provider-native malformed: canonical item missing',
+  })?.message).toBe('local pipelined fallback — provider-native malformed: canonical item missing');
+});
+
 test('extension_ui_status keeps structured context usage out of working text', () => {
   const state = { message: null, indicator: { mode: 'custom' as const, frames: ['⠋'], intervalMs: 90 }, visible: true };
   expect(applyExtensionUiWorkingState(state, 'extension_ui_status', { key: 'context_usage', text: '{"percent":42}' })).toBeUndefined();

@@ -66,6 +66,39 @@ describe("llm context normalizer", () => {
     });
   });
 
+  it("preserves reasoning signatures and dynamic-tool anchors while repairing compacted context", () => {
+    const thinkingSignature = JSON.stringify({
+      id: "rs_123",
+      encrypted_content: "encrypted-reasoning",
+    });
+    const normalized = normalizeLlmMessages([
+      {
+        role: "compactionSummary",
+        summary: "Earlier context",
+        tokensBefore: 12_000,
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "thinking", thinking: "", thinkingSignature }],
+        timestamp: "bad",
+      } as any,
+      {
+        role: "toolResult",
+        toolCallId: "activate-1",
+        toolName: "activate_tools",
+        content: [{ type: "text", text: "activated" }],
+        isError: false,
+        timestamp: "bad",
+        addedToolNames: ["deferred_tool"],
+      } as any,
+    ]);
+
+    expect(normalized.changed).toBe(true);
+    expect((normalized.value[1] as any).content[0].thinkingSignature).toBe(thinkingSignature);
+    expect((normalized.value[2] as any).addedToolNames).toEqual(["deferred_tool"]);
+  });
+
   it("normalizes summary messages before coding-agent convertToLlm string concatenation", () => {
     const normalized = normalizeLlmMessages([
       { role: "branchSummary", summary: Symbol.for("bad"), fromId: null, timestamp: "bad" } as any,

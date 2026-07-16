@@ -39,6 +39,12 @@ describe("model auth helper", () => {
     expect(auth).toEqual({ ok: false, error: "missing auth" });
   });
 
+  test("returns a stable error when the model registry is unavailable", async () => {
+    const auth = await resolveModelRequestAuth(undefined as any, model);
+
+    expect(auth).toEqual({ ok: false, error: "No model registry is available for openai/gpt-test." });
+  });
+
   test("returns error when getApiKey returns undefined", async () => {
     const auth = await resolveModelRequestAuth({
       getApiKey: async () => undefined,

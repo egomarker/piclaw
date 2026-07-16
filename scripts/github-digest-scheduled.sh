@@ -23,10 +23,16 @@ LATEST_JSON="$OUTPUT_DIR/latest-open-all-repos.json"
 LATEST_MD="$OUTPUT_DIR/latest-open-all-repos.md"
 LATEST_HISTORY="$NOTES_DIR/github-repo-metrics-history.yml"
 TARGET_CHAT_JID="${1:-${PICLAW_CHAT_JID:-web:chat:94b5b0fe-d4d6-4e37-b6fe-a73f0d8362ec}}"
+PICLAW_BIN="${PICLAW_BIN:-/usr/local/bin/piclaw}"
 
 if [[ ! -f "$COLLATE_SCRIPT" ]]; then
   echo "Missing collate script: $COLLATE_SCRIPT" >&2
   exit 1
+fi
+
+if [[ ! -x "$PICLAW_BIN" ]]; then
+  printf '%s\n' "[github-digest] Piclaw CLI is not executable: $PICLAW_BIN" >&2
+  exit 126
 fi
 
 mkdir -p "$OUTPUT_DIR" "$NOTES_DIR"
@@ -83,8 +89,10 @@ total_items="$(jq -r '.totals.total_items // 0' "$LATEST_JSON")"
 star_changes="$(jq -r '.totals.repos_with_star_changes // 0' "$LATEST_JSON")"
 
 if [[ "$total_items" == "0" && "$star_changes" == "0" ]]; then
+  printf '%s\n' "[github-digest] No qualifying open activity or star changes; nothing posted."
   exit 0
 fi
 
 POST_CONTENT="$(cat "$LATEST_MD")"
-/usr/local/bin/piclaw --post "$TARGET_CHAT_JID" "$POST_CONTENT" >/dev/null
+"$PICLAW_BIN" --post "$TARGET_CHAT_JID" "$POST_CONTENT" >/dev/null
+printf '%s\n' "[github-digest] Report posted to $TARGET_CHAT_JID."

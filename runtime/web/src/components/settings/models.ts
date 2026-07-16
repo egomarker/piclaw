@@ -2,14 +2,14 @@ import { html, useState, useEffect, useCallback } from '../../vendor/preact-htm.
 import { getAgentModels, sendAgentMessage } from '../../api.js';
 import { useTranslation } from '../../utils/i18n.js';
 
-const EFFORT_DISPLAY = { off: 'off', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'max' };
-const DEFAULT_DISPLAY = { off: 'off', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh' };
+const LEGACY_EFFORT_DISPLAY = { off: 'off', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'max', max: 'max' };
+const DEFAULT_DISPLAY = { off: 'off', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' };
 function isEffortProvider(p) { return typeof p === 'string' && p.toLowerCase() === 'anthropic'; }
 
 function ThinkingSlider({ thinkingLevel, supportsThinking, provider, availableLevels, onSetLevel, disabled }) {
     const { t } = useTranslation();
-    const displayMap = isEffortProvider(provider) ? EFFORT_DISPLAY : DEFAULT_DISPLAY;
     const levels = (availableLevels && availableLevels.length > 1) ? availableLevels : ['off', 'minimal', 'low', 'medium', 'high'];
+    const displayMap = isEffortProvider(provider) && !levels.includes('max') ? LEGACY_EFFORT_DISPLAY : DEFAULT_DISPLAY;
     const idx = Math.max(0, levels.indexOf(thinkingLevel ?? 'off'));
     if (!supportsThinking) return html`<div class="settings-thinking-slider"><label>${t('settings.models.thinkingLevel')}</label><p class="settings-hint" style="margin:4px 0 0">${t('settings.models.noThinking')}</p></div>`;
     return html`
@@ -40,11 +40,16 @@ export function ModelsSection({ filter = '' }) {
     const loadModels = useCallback(async () => {
         const data = await getAgentModels();
         setModels(data);
-        if (data.thinking_level) setThinkingLevel(data.thinking_level);
+        if (data.thinking_level_label || data.thinking_level) {
+            setThinkingLevel(data.thinking_level_label || data.thinking_level);
+        }
         setSupportsThinking(Boolean(data.supports_thinking));
         setScopedModelsOnly(Boolean(data.scoped_models_only));
-        if (Array.isArray(data.available_thinking_levels) && data.available_thinking_levels.length > 0) {
-            setAvailableLevels(data.available_thinking_levels);
+        const displayLevels = Array.isArray(data.available_thinking_level_labels) && data.available_thinking_level_labels.length > 0
+            ? data.available_thinking_level_labels
+            : data.available_thinking_levels;
+        if (Array.isArray(displayLevels) && displayLevels.length > 0) {
+            setAvailableLevels(displayLevels);
         }
         return data;
     }, []);
@@ -89,7 +94,9 @@ export function ModelsSection({ filter = '' }) {
         if (thinkingBusy) return; setThinkingBusy(true); setThinkingLevel(level);
         try {
             const resp = await sendAgentMessage('default', `/thinking ${level}`, null, []);
-            if (resp?.command?.thinking_level) setThinkingLevel(resp.command.thinking_level);
+            if (resp?.command?.thinking_level_label || resp?.command?.thinking_level) {
+                setThinkingLevel(resp.command.thinking_level_label || resp.command.thinking_level);
+            }
             setSupportsThinking(resp?.command?.supports_thinking !== false);
             // Reload to get updated available levels after model/thinking change
             await loadModels();

@@ -39,7 +39,17 @@ function makeOpus46Model(overrides: Partial<Model<any>> = {}): Model<any> {
     provider: "github-copilot",
     id: "claude-opus-4.6-1m",
     name: "Claude Opus 4.6 (1M)",
-    thinkingLevelMap: { xhigh: "xhigh" },
+    thinkingLevelMap: { max: "max" },
+    ...overrides,
+  });
+}
+
+function makeLegacyMaxModel(overrides: Partial<Model<any>> = {}): Model<any> {
+  return makeReasoningModel({
+    provider: "anthropic",
+    id: "claude-legacy",
+    name: "Claude Legacy",
+    thinkingLevelMap: { xhigh: "max" },
     ...overrides,
   });
 }
@@ -119,6 +129,7 @@ function createFakeApi() {
     handlers,
     makeCtx,
     setCurrentModel(m: Model<any> | undefined) { currentModel = m; },
+    getThinkingLevel() { return thinkingLevel; },
     setThinkingLevel(l: string) { thinkingLevel = l; },
     setSetModelResult(r: boolean) { setModelResult = r; },
   };
@@ -203,13 +214,23 @@ describe("model-control extension", () => {
     expect(result.details.available_thinking_levels).toContain("high");
   });
 
-  test("get_model_state exposes xhigh for Opus 4.6 variants", async () => {
+  test("get_model_state exposes native max for Opus 4.6 variants", async () => {
     fake.setCurrentModel(makeOpus46Model());
+    fake.setThinkingLevel("max");
+    const ctx = fake.makeCtx();
+    const result = await callTool(fake.tools, "get_model_state", {}, ctx);
+    expect(result.content[0].text).toContain("Thinking level: max");
+    expect(result.details.available_thinking_levels).toContain("max");
+  });
+
+  test("get_model_state presents legacy xhigh-as-max metadata as max", async () => {
+    fake.setCurrentModel(makeLegacyMaxModel());
     fake.setThinkingLevel("xhigh");
     const ctx = fake.makeCtx();
     const result = await callTool(fake.tools, "get_model_state", {}, ctx);
-    expect(result.content[0].text).toContain("Thinking level: xhigh");
-    expect(result.details.available_thinking_levels).toContain("xhigh");
+    expect(result.details.thinking_level).toBe("max");
+    expect(result.details.available_thinking_levels).toContain("max");
+    expect(result.details.available_thinking_levels).not.toContain("xhigh");
   });
 
   // -- list_models -----------------------------------------------------------
@@ -385,13 +406,25 @@ describe("model-control extension", () => {
     expect(result.details.supports_thinking).toBe(true);
   });
 
-  test("switch_thinking accepts xhigh for Opus 4.6 variants", async () => {
+  test("switch_thinking accepts native max for Opus 4.6 variants", async () => {
     fake.setCurrentModel(makeOpus46Model());
     fake.setThinkingLevel("high");
     const ctx = fake.makeCtx();
-    const result = await callTool(fake.tools, "switch_thinking", { level: "xhigh" }, ctx);
-    expect(result.content[0].text).toContain("Thinking level set to xhigh");
-    expect(result.details.available_levels).toContain("xhigh");
+    const result = await callTool(fake.tools, "switch_thinking", { level: "max" }, ctx);
+    expect(result.content[0].text).toContain("Thinking level set to max");
+    expect(result.details.available_levels).toContain("max");
+    expect(fake.getThinkingLevel()).toBe("max");
+  });
+
+  test("switch_thinking resolves legacy max requests to xhigh internally", async () => {
+    fake.setCurrentModel(makeLegacyMaxModel());
+    fake.setThinkingLevel("high");
+    const ctx = fake.makeCtx();
+    const result = await callTool(fake.tools, "switch_thinking", { level: "max" }, ctx);
+    expect(result.content[0].text).toContain("Thinking level set to max");
+    expect(result.details.available_levels).toContain("max");
+    expect(result.details.available_levels).not.toContain("xhigh");
+    expect(fake.getThinkingLevel()).toBe("xhigh");
   });
 
   test("switch_thinking unknown level", async () => {

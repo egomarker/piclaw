@@ -1,4 +1,5 @@
 import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
+import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { mkdirSync, writeFileSync, rmSync, readdirSync } from "fs";
 import { dirname, join } from "path";
 
@@ -198,7 +199,20 @@ export class TestAgentControlSession {
       thinkingLevel: "low",
       model: { provider: "openai", modelId: "gpt-test" },
     };
-    return { tokensBefore: 1200, estimatedTokensAfter: 42, firstKeptEntryId: "entry-1", summary: "Summary" } as any;
+    return {
+      tokensBefore: 1200,
+      estimatedTokensAfter: 42,
+      firstKeptEntryId: "entry-1",
+      summary: "Summary",
+      details: {
+        kind: "piclaw.smart_compaction",
+        version: 1,
+        method: "pipelined",
+        execution: "single_pass",
+        remoteCompaction: { outcome: "provider_failure", reason: "Remote endpoint returned HTTP 503" },
+        modelCallCount: 1,
+      },
+    } as any;
   }
 
   setAutoCompactionEnabled(enabled: boolean) {
@@ -234,11 +248,11 @@ export class TestAgentControlSession {
   }
 
   getAvailableThinkingLevels() {
-    return ["off", "low", "medium", "high"] as any;
+    return getSupportedThinkingLevels(this.model) as any;
   }
 
   setThinkingLevel(level: any) {
-    this.thinkingLevel = level;
+    this.thinkingLevel = clampThinkingLevel(this.model, level) as any;
   }
 
   async setModel(model: any) {

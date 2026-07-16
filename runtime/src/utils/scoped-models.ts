@@ -10,7 +10,7 @@ export interface EnabledModelsSettingsProvider {
   getEnabledModels?: () => string[] | undefined;
 }
 
-const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
+const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 function modelKey(model: Model<Api>): string {
   return `${model.provider}/${model.id}`;

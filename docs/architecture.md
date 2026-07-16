@@ -161,7 +161,7 @@ These are compiled into the package and registered via `extensionFactories` on t
 | `workspaceMemoryBootstrap` | startup memory bootstrap hook (`before_agent_start`) |
 | `dreamMaintenance` | `/dream` memory-consolidation slash command |
 | `uiThemeExtension` | `/theme`, `/tint` web UI theme controls |
-| `smartCompaction` | Smart compaction via `session_before_compact` hook (DB-driven file lists, junk-path filtering, working-indicator UI) |
+| `smartCompaction` | Smart compaction via `session_before_compact` hook (DB-driven file lists, junk-path filtering, working-indicator UI); see [Pipelined smart compaction](pipelined-compaction.md) for the exact-once discarded-source ledger method and its auxiliary prompt sections |
 | `sendAdaptiveCard` | `send_adaptive_card` for agent-owned Adaptive Card posting |
 | `sendDashboardWidget` | `send_dashboard_widget` |
 | `openWorkspaceFile` | `open_workspace_file` |
@@ -367,7 +367,7 @@ There is no longer a supported path where an empty terminal turn both:
 - **Timeline attachment previews** now syntax-highlight common text/code/config formats (for example YAML, JSON, JS/TS, Python, Go, shell, SQL, TOML, Dockerfile, PowerShell, and common dotfiles/config files) while Markdown keeps its rendered preview path.
 - **Message permalinks**: clicking a timeline timestamp inserts a `message:{id}` pill in the compose box; Ctrl+Click copies a shareable URL; clicking a reference scrolls to and highlights the target.
 - **Multi-turn threading**: when the agent produces multiple turns in a single response, subsequent turns are stored with a `thread_id` pointing to the first turn's message. The UI renders threaded replies indented with a left border.
-- **Context usage / compaction affordance**: the compose footer reads `/agent/context` for current context-window usage, and the web app refreshes that state on initial connect, SSE reconnect, focus, `pageshow`, and visible-again transitions so the compaction affordance restores promptly when returning to the tab.
+- **Context usage / compaction affordance**: the compose footer reads `/agent/context` for current context-window usage. The web app refreshes on initial connect, SSE reconnect, focus, `pageshow`, visible-again transitions, and immediately after successful manual `/compact`. Post-compaction usage prefers a rebuilt-session estimate and falls back to the safety-adjusted report estimate; null-token events are not persisted or broadcast. After session eviction or lookup failure, `/agent/context` falls back to validated persisted channel usage, so the indicator does not need a new agent turn to update.
 - **Recovery chip**: when the agent recovers from a transient mid-turn failure, a subtle recovery chip appears in the compose area so the user can see that retries happened without flooding the timeline.
 - **Blank turn detection**: empty or whitespace-only model completions are treated as failures rather than success. If automatic recovery still cannot produce a terminal persisted reply, the cursor is rewound and the failed run is held for explicit retry/skip resolution.
 - **Compaction stall guard**: compaction waits are now bounded — `PICLAW_SESSION_IDLE_COMPACTION_MAX_WAIT_MS` (default 5 min) prevents indefinite stalls during heavy summarisation. Progress state is preserved across the wait so the UI stays coherent.
@@ -414,4 +414,4 @@ for the full protocol and configuration reference.
 
 - [Web pane extensions](web-pane-extensions.md) — first-class pane host contract for editors/viewers/tools in tabs and dock
 - [Extension UI contract](extension-ui-contract.md) — when to use pane extensions vs timeline UI vs the `extension_ui_*` bridge
-- [Turn mechanism audit](turn-mechanism-audit.md) — full-stack audit: state machine, queue/steering, crash recovery, client architecture, and data flow diagrams
+- [Turn mechanism audit](archive/turn-mechanism-audit.md) — archived full-stack audit: state machine, queue/steering, crash recovery, client architecture, and data flow diagrams

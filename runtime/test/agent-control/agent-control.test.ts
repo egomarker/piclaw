@@ -213,11 +213,10 @@ test("applyControlCommand reports unsupported thinking", async () => {
   expect(session.thinkingLevel).toBe("off");
 });
 
-test("applyControlCommand resolves /effort max alias through thinking handler", async () => {
+test("applyControlCommand retains the legacy xhigh-as-max compatibility alias", async () => {
   const session = new StubSession();
   const runtime = createRuntime(session);
-  // max alias only resolves on Anthropic (effort provider)
-  session.model = { provider: "anthropic", id: "claude-test", reasoning: true } as any;
+  session.model = { provider: "anthropic", id: "claude-test", reasoning: true, thinkingLevelMap: { xhigh: "max" } } as any;
   session.thinkingLevel = "low";
 
   const result = await applyControlCommand(runtime as any, registry, {
@@ -227,7 +226,7 @@ test("applyControlCommand resolves /effort max alias through thinking handler", 
   });
 
   expect(result.status).toBe("success");
-  // max→xhigh via alias, StubSession clamps to "off" (xhigh not in available list)
+  // Legacy max→xhigh metadata is still honored; StubSession clamps unsupported xhigh to off.
   expect(result.message).toContain("requested max");
   expect(result.thinking_level).toBe("off");
   expect(result.thinking_level_label).toBeDefined();

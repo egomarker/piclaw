@@ -12,8 +12,8 @@ export interface CommandParam {
 
 const COMMAND_PARAMS: Record<string, CommandParam> = {
   "/model": { type: "autocomplete", fetch: "/agent/models", extractField: "models" },
-  "/thinking": { type: "autocomplete", fetch: "/agent/models", extractField: "available_thinking_levels" },
-  "/effort": { type: "autocomplete", fetch: "/agent/models", extractField: "available_thinking_levels" },
+  "/thinking": { type: "autocomplete", fetch: "/agent/models", extractField: "available_thinking_level_labels" },
+  "/effort": { type: "autocomplete", fetch: "/agent/models", extractField: "available_thinking_level_labels" },
   "/compact": { type: "text", placeholder: "Instructions (optional)", allowEmpty: true },
   "/stats": { type: "bare" },
   "/state": { type: "bare" },

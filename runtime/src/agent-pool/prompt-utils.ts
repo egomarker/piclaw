@@ -43,8 +43,8 @@ export function extractAssistantThinking(message: { content?: unknown[] } | null
 }
 
 /** Normalize supported side-prompt reasoning levels for streamSimple(). */
-export function toSideReasoning(level: unknown): "minimal" | "low" | "medium" | "high" | "xhigh" | undefined {
-  return level === "minimal" || level === "low" || level === "medium" || level === "high" || level === "xhigh"
+export function toSideReasoning(level: unknown): "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | undefined {
+  return level === "minimal" || level === "low" || level === "medium" || level === "high" || level === "xhigh" || level === "max"
     ? level
     : undefined;
 }

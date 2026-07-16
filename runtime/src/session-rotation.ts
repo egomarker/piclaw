@@ -8,11 +8,12 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AgentSession, AgentSessionRuntime, SessionContext, SessionManager } from "@earendil-works/pi-coding-agent";
 import { closeOpenAICodexWebSocketSessions } from "@earendil-works/pi-ai/api/openai-codex-responses";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { basename, dirname, extname, join } from "path";
 import { formatBytes } from "./agent-control/agent-control-helpers.js";
 import { runCompactionWithTimeout } from "./agent-pool/compaction.js";
 import { createLogger, debugSuppressedError } from "./utils/logger.js";
+import { writeMergedSessionArchive } from "./session-archive.js";
 
 const log = createLogger("session-rotation");
 
@@ -465,6 +466,7 @@ export async function rotateSession(
   }
 
   const context = session.sessionManager.buildSessionContext();
+  const priorTrimArchivePath = join(dirname(previousSessionFile), "archive", basename(previousSessionFile));
   const archivePath = getArchivePath(previousSessionFile);
   const previousSize = getSessionFileSize(previousSessionFile);
   const currentModel = session.model
@@ -476,7 +478,11 @@ export async function rotateSession(
   let committed = false;
   let replacementSessionFile: string | null = null;
   try {
-    copyFileSync(previousSessionFile, archivePath);
+    writeMergedSessionArchive(
+      previousSessionFile,
+      archivePath,
+      existsSync(priorTrimArchivePath) ? priorTrimArchivePath : undefined,
+    );
     archived = true;
 
     const result = await runtime.newSession({

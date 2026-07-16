@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import { createMedia, getMediaById } from "../db/media.js";
 import { postMessagesToolMessage } from "../extensions/messages-crud.js";
 import { getInstalledAddonRuntimeEntryPaths } from "./manifest-discovery.js";
+import type { RuntimeAgentMessageRequest, RuntimeAgentMessageResult } from "../channels/web/core/web-channel-runtime-public-surface-service.js";
 import { resetRuntimeStreamSessionsForTests, runtimeStreamSessions } from "./runtime-stream-sessions.js";
 
 export interface AddonStatusPanelProvider {
@@ -21,9 +22,12 @@ export interface AddonAdaptiveCardIntentContext {
 
 export type AddonAdaptiveCardIntentHandler = (context: AddonAdaptiveCardIntentContext) => Promise<void> | void;
 
+export type AddonAgentMessageEnqueuer = (request: RuntimeAgentMessageRequest) => Promise<RuntimeAgentMessageResult>;
+
 export interface PiclawRuntimeAddonApi {
   registerStatusPanelProvider: (provider: AddonStatusPanelProvider) => () => void;
   registerAdaptiveCardIntentHandler: (intent: string, handler: AddonAdaptiveCardIntentHandler) => () => void;
+  enqueueAgentMessage: AddonAgentMessageEnqueuer;
   createMedia: typeof createMedia;
   getMediaById: typeof getMediaById;
   postMessage: typeof postMessagesToolMessage;
@@ -39,6 +43,7 @@ const statusPanelProviders = new Map<string, AddonStatusPanelProvider>();
 const adaptiveCardIntentHandlers = new Map<string, AddonAdaptiveCardIntentHandler>();
 let runtimeApiInstalled = false;
 let runtimeEntriesLoadPromise: Promise<void> | null = null;
+let agentMessageEnqueuer: AddonAgentMessageEnqueuer | null = null;
 
 export {
   getAddonNonWebCommandPolicies,
@@ -72,6 +77,15 @@ export function registerAddonAdaptiveCardIntentHandler(intent: string, handler: 
   };
 }
 
+export function setAddonAgentMessageEnqueuer(enqueuer: AddonAgentMessageEnqueuer | null): void {
+  agentMessageEnqueuer = enqueuer;
+}
+
+async function enqueueAgentMessageViaRuntime(request: RuntimeAgentMessageRequest): Promise<RuntimeAgentMessageResult> {
+  if (!agentMessageEnqueuer) throw new Error("Piclaw runtime agent-message enqueue API is not available yet.");
+  return await agentMessageEnqueuer(request);
+}
+
 export function installAddonRuntimeApi(): PiclawRuntimeAddonApi {
   const runtimeGlobal = globalThis as RuntimeGlobal;
   if (runtimeApiInstalled && runtimeGlobal.__piclaw_runtime) {
@@ -81,6 +95,7 @@ export function installAddonRuntimeApi(): PiclawRuntimeAddonApi {
   const api: PiclawRuntimeAddonApi = {
     registerStatusPanelProvider: registerAddonStatusPanelProvider,
     registerAdaptiveCardIntentHandler: registerAddonAdaptiveCardIntentHandler,
+    enqueueAgentMessage: enqueueAgentMessageViaRuntime,
     createMedia,
     getMediaById,
     postMessage: postMessagesToolMessage,
@@ -144,6 +159,7 @@ export function resetAddonRuntimeContributionsForTests(): void {
   resetRuntimeStreamSessionsForTests();
   runtimeEntriesLoadPromise = null;
   runtimeApiInstalled = false;
+  agentMessageEnqueuer = null;
   const runtimeGlobal = globalThis as RuntimeGlobal;
   delete runtimeGlobal.__piclaw_runtime;
   delete runtimeGlobal.__piclaw_autoresearch_runtime_registered__;

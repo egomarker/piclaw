@@ -6,12 +6,16 @@
  */
 import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { findModel, parseModelInput } from "../utils/model-utils.js";
 import { resolveModelScope, type EnabledModelsSettingsProvider } from "../utils/scoped-models.js";
 import { getChatContext } from "../core/chat-context.js";
+import {
+  formatThinkingLevelForDisplay,
+  getAvailableThinkingLevelsForModel,
+  resolveThinkingAlias,
+} from "../agent-control/agent-control-helpers.js";
 import { updateSessionModel } from "./session-status.js";
 
 // ---------------------------------------------------------------------------
@@ -19,7 +23,7 @@ import { updateSessionModel } from "./session-status.js";
 // ---------------------------------------------------------------------------
 
 const THINKING_LEVELS: readonly string[] = [
-  "off", "minimal", "low", "medium", "high", "xhigh",
+  "off", "minimal", "low", "medium", "high", "xhigh", "max",
 ];
 
 const TOOL_HINT = [
@@ -41,7 +45,10 @@ function modelLabel(model: Model<Api> | null | undefined): string | null {
 
 function getAvailableLevels(model: Model<Api> | undefined): ThinkingLevel[] {
   if (!model) return ["off"];
-  return getSupportedThinkingLevels(model) as ThinkingLevel[];
+  return Array.from(new Set(
+    getAvailableThinkingLevelsForModel(model)
+      .map((level) => formatThinkingLevelForDisplay(level, model) as ThinkingLevel),
+  ));
 }
 
 function clamp(value: number | undefined, fallback: number, min: number, max: number): number {
@@ -83,7 +90,7 @@ export const modelControl: ExtensionFactory = (pi: ExtensionAPI) => {
     async execute(_id, _params, _signal, _update, ctx) {
       const model = ctx.model;
       const label = modelLabel(model);
-      const thinking = pi.getThinkingLevel();
+      const thinking = formatThinkingLevelForDisplay(pi.getThinkingLevel(), model);
       const available = getAvailableLevels(model);
       const supportsThinking = Boolean(model?.reasoning);
       const usage = ctx.getContextUsage();
@@ -209,7 +216,7 @@ export const modelControl: ExtensionFactory = (pi: ExtensionAPI) => {
         };
       }
 
-      const thinking = pi.getThinkingLevel();
+      const thinking = formatThinkingLevelForDisplay(pi.getThinkingLevel(), selected);
       const thinkingNote = selected.reasoning
         ? ` Thinking level: ${thinking}.`
         : " Thinking is off for this model.";
@@ -229,7 +236,7 @@ export const modelControl: ExtensionFactory = (pi: ExtensionAPI) => {
     promptSnippet: "switch_thinking: change the current reasoning/thinking effort level.",
     parameters: Type.Object({
       level: Type.Optional(
-        Type.String({ description: "Thinking level (off/minimal/low/medium/high/xhigh). Omit to see current." }),
+        Type.String({ description: "Thinking level (off/minimal/low/medium/high/xhigh/max). Omit to see current." }),
       ),
     }),
     async execute(_id, params, _signal, _update, ctx) {
@@ -241,16 +248,17 @@ export const modelControl: ExtensionFactory = (pi: ExtensionAPI) => {
       const available = getAvailableLevels(model);
       const supportsThinking = Boolean(model.reasoning);
       const requested = (params.level ?? "").trim().toLowerCase();
+      const current = formatThinkingLevelForDisplay(pi.getThinkingLevel(), model);
 
       if (!requested) {
         const msg = [
           `Current model: ${model.provider}/${model.id}.`,
-          `Current thinking level: ${pi.getThinkingLevel()}.`,
+          `Current thinking level: ${current}.`,
           `Available thinking levels: ${available.join(", ")}.`,
         ].join("\n") + (supportsThinking ? "" : " Thinking is off for this model.");
         return {
           content: [{ type: "text", text: msg }],
-          details: { current_level: pi.getThinkingLevel(), available_levels: available, supports_thinking: supportsThinking },
+          details: { current_level: current, available_levels: available, supports_thinking: supportsThinking },
         };
       }
 
@@ -261,8 +269,9 @@ export const modelControl: ExtensionFactory = (pi: ExtensionAPI) => {
         };
       }
 
-      pi.setThinkingLevel(requested as ThinkingLevel);
-      const applied = pi.getThinkingLevel();
+      const resolved = resolveThinkingAlias(requested, model) as ThinkingLevel;
+      pi.setThinkingLevel(resolved);
+      const applied = formatThinkingLevelForDisplay(pi.getThinkingLevel(), model);
 
       if (!supportsThinking) {
         const msg = requested === "off"

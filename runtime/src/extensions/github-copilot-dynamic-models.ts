@@ -176,7 +176,7 @@ function findTemplate(existing: Model<Api>[], id: string): Model<Api> | undefine
     const match = existing.find((model) => model.id === candidate);
     if (match) return match;
   }
-  return existing[0];
+  return undefined;
 }
 
 function inferApi(id: string, model: CopilotLiveModel, template?: Model<Api>): Api {
@@ -208,23 +208,41 @@ function inferCompat(id: string, api: Api, template?: Model<Api>): Model<Api>["c
 }
 
 function inferThinkingLevelMap(id: string, model: CopilotLiveModel, template?: Model<Api>): Model<Api>["thinkingLevelMap"] {
-  if (template?.thinkingLevelMap) return template.thinkingLevelMap;
-  const efforts = new Set(liveModelReasoningEfforts(model));
-  if (id.startsWith("claude")) {
-    if (id.includes("-xhigh")) return { off: null, minimal: null, low: null, medium: null, high: null, xhigh: "xhigh" } as Model<Api>["thinkingLevelMap"];
-    if (id.includes("-high")) return { off: null, minimal: null, low: null, medium: null, high: "high", xhigh: null } as Model<Api>["thinkingLevelMap"];
-    if (id.includes("4.6")) return { xhigh: "max" } as Model<Api>["thinkingLevelMap"];
-    return { xhigh: "xhigh" } as Model<Api>["thinkingLevelMap"];
+  const normalizedId = id.toLowerCase();
+  const efforts = new Set(liveModelReasoningEfforts(model).map((effort) => effort.toLowerCase()));
+
+  // Copilot sometimes publishes fixed-effort Claude variants. Do not inherit a
+  // broader base-model map for those IDs.
+  if (normalizedId.startsWith("claude") && normalizedId.includes("-xhigh")) {
+    return { off: null, minimal: null, low: null, medium: null, high: null, xhigh: "xhigh", max: null } as Model<Api>["thinkingLevelMap"];
   }
-  if (efforts.size === 0) return undefined;
-  return {
+  if (normalizedId.startsWith("claude") && normalizedId.includes("-high")) {
+    return { off: null, minimal: null, low: null, medium: null, high: "high", xhigh: null, max: null } as Model<Api>["thinkingLevelMap"];
+  }
+
+  // 0.80.6 gives native max its own slot. Live capabilities augment a static
+  // template instead of collapsing provider max into xhigh.
+  const liveMap = efforts.size === 0 ? undefined : {
     off: efforts.has("none") ? "none" : null,
     minimal: efforts.has("minimal") ? "minimal" : efforts.has("low") ? "low" : null,
-    low: efforts.has("low") ? "low" : undefined,
-    medium: efforts.has("medium") ? "medium" : undefined,
-    high: efforts.has("high") ? "high" : undefined,
-    xhigh: efforts.has("xhigh") ? "xhigh" : efforts.has("max") ? "max" : undefined,
+    ...(efforts.has("low") ? { low: "low" } : {}),
+    ...(efforts.has("medium") ? { medium: "medium" } : {}),
+    ...(efforts.has("high") ? { high: "high" } : {}),
+    ...(efforts.has("xhigh") ? { xhigh: "xhigh" } : {}),
+    ...(efforts.has("max") ? { max: "max" } : {}),
   } as Model<Api>["thinkingLevelMap"];
+
+  if (normalizedId.startsWith("claude")) {
+    if (template?.thinkingLevelMap) return { ...template.thinkingLevelMap, ...liveMap };
+    if (normalizedId.includes("4.6")) return { max: "max" } as Model<Api>["thinkingLevelMap"];
+    if (normalizedId.includes("4.7") || normalizedId.includes("4.8") || normalizedId.includes("sonnet-5") || normalizedId.includes("fable-5")) {
+      return { xhigh: "xhigh", max: "max" } as Model<Api>["thinkingLevelMap"];
+    }
+    return liveMap;
+  }
+
+  if (template?.thinkingLevelMap) return { ...template.thinkingLevelMap, ...liveMap };
+  return liveMap;
 }
 
 function inferReasoning(id: string, model: CopilotLiveModel, template?: Model<Api>): boolean {

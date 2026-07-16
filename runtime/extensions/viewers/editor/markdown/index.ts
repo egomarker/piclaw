@@ -26,7 +26,6 @@ import './tag.js';
 // Core engine + theme
 import {
     livePreviewFrozenField,
-    livePreviewParsingSuspendedField,
     livePreviewPlugin,
     livePreviewPointerFreeze,
 } from './live-preview.js';
@@ -66,7 +65,6 @@ export const markdownParserExtensions = [
  */
 export const markdownLivePreview: Extension = [
     livePreviewFrozenField,
-    livePreviewParsingSuspendedField,
     livePreviewPointerFreeze,
     imageBlocks(),
     editableTables(),
@@ -79,5 +77,3 @@ export const markdownLivePreview: Extension = [
     tightListEnterKeymap,
     markdownPreviewTheme,
 ];
-
-export { forceLivePreviewRebuild, setLivePreviewParsingSuspended } from './live-preview.js';

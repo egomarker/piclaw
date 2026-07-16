@@ -33,6 +33,22 @@ test("tracked bash executes commands and captures output", async () => {
   expect(output).toContain("hello");
 });
 
+test("resolveShellCandidates honors the explicit Pi shellPath without fallbacks", () => {
+  const candidates = resolveShellCandidates({
+    platform: "linux",
+    env: { SHELL: "/env/zsh" } as NodeJS.ProcessEnv,
+    shellPath: "/settings/bash",
+    pathExists: (path) => path === "/settings/bash" || path === "/env/zsh" || path === "/bin/bash",
+  });
+
+  expect(candidates).toEqual([{ shell: "/settings/bash", args: ["-c"], family: "posix" }]);
+});
+
+test("resolveShellCandidates rejects a missing explicit Pi shellPath", () => {
+  expect(() => resolveShellCandidates({ shellPath: "/missing/bash", pathExists: () => false }))
+    .toThrow("Custom shell path not found: /missing/bash");
+});
+
 test("resolveShellCandidates prefers a configured POSIX shell before bash fallback", () => {
   const candidates = resolveShellCandidates({
     platform: "linux",

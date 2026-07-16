@@ -11,7 +11,7 @@ import type { AgentSession, AgentSessionRuntime, ModelRegistry, AuthStorage, Set
 
 import { applyControlCommand, type AgentControlCommand, type AgentControlResult } from "../agent-control/index.js";
 import { getLatestTokenUsageModel } from "../db.js";
-import { formatThinkingLevelForDisplay } from "../agent-control/agent-control-helpers.js";
+import { formatThinkingLevelForDisplay, getAvailableThinkingLevelsForModel } from "../agent-control/agent-control-helpers.js";
 import { SESSIONS_DIR } from "../core/config.js";
 import { detectChannel } from "../router.js";
 import { executeSlashCommand } from "./slash-command.js";
@@ -494,6 +494,7 @@ export interface AvailableModelsResult {
   thinking_level_label: string | null;
   supports_thinking: boolean;
   available_thinking_levels: string[];
+  available_thinking_level_labels: string[];
   provider_usage: Awaited<ReturnType<typeof warmProviderUsage>>;
   latest_requested_model: string | null;
   latest_response_model: string | null;
@@ -565,13 +566,18 @@ export class AgentRuntimeFacade {
     const models = modelOptions.map((model) => model.label);
     const currentModel = session?.model ? `${session.model.provider}/${session.model.id}` : persistedState.current;
     const currentModelOption = currentModel ? modelOptions.find((model) => model.label === currentModel) ?? null : null;
+    const currentModelDescriptor = session?.model
+      ?? (currentModel ? available.find((model) => `${model.provider}/${model.id}` === currentModel) ?? null : null);
     const thinkingLevel = session?.thinkingLevel ?? persistedState.thinkingLevel ?? null;
     const supportsThinking = session && typeof (session as AgentSession & { supportsThinking?: () => boolean }).supportsThinking === "function"
       ? (session as AgentSession & { supportsThinking: () => boolean }).supportsThinking()
-      : Boolean(session?.model?.reasoning ?? currentModelOption?.reasoning);
-    const availableThinkingLevels: string[] = session && typeof (session as AgentSession & { getAvailableThinkingLevels?: () => string[] }).getAvailableThinkingLevels === "function"
+      : Boolean(currentModelDescriptor?.reasoning);
+    const baseThinkingLevels: string[] = session && typeof (session as AgentSession & { getAvailableThinkingLevels?: () => string[] }).getAvailableThinkingLevels === "function"
       ? (session as AgentSession & { getAvailableThinkingLevels: () => string[] }).getAvailableThinkingLevels()
-      : supportsThinking ? ["off", "minimal", "low", "medium", "high"] : ["off"];
+      : ["off"];
+    const availableThinkingLevels: string[] = currentModelDescriptor
+      ? getAvailableThinkingLevelsForModel(currentModelDescriptor, baseThinkingLevels)
+      : baseThinkingLevels;
     const providerUsage = session?.model?.provider
       ? (peekProviderUsage(session.model.provider, { allowStale: true }) ?? null)
       : currentModelOption?.provider
@@ -581,10 +587,12 @@ export class AgentRuntimeFacade {
     if (activeProvider) {
       void warmProviderUsage(this.options.authStorage, activeProvider);
     }
-    const thinkingProvider = session?.model?.provider ?? currentModelOption?.provider ?? null;
-    const thinkingLevelLabel = thinkingLevel && thinkingProvider
-      ? formatThinkingLevelForDisplay(thinkingLevel, thinkingProvider)
+    const thinkingLevelLabel = thinkingLevel && currentModelDescriptor
+      ? formatThinkingLevelForDisplay(thinkingLevel, currentModelDescriptor)
       : thinkingLevel;
+    const availableThinkingLevelLabels = availableThinkingLevels.map((level) => currentModelDescriptor
+      ? formatThinkingLevelForDisplay(level, currentModelDescriptor)
+      : level);
     const latestUsageModel = getLatestTokenUsageModelForStatus(chatJid);
     const latestRequestedModel = latestUsageModel
       ? formatLatestRequestedModel(latestUsageModel.provider, latestUsageModel.model)
@@ -598,6 +606,7 @@ export class AgentRuntimeFacade {
       thinking_level_label: thinkingLevelLabel,
       supports_thinking: supportsThinking,
       available_thinking_levels: availableThinkingLevels,
+      available_thinking_level_labels: availableThinkingLevelLabels,
       provider_usage: providerUsage,
       latest_requested_model: latestRequestedModel,
       latest_response_model: latestResponseModel,

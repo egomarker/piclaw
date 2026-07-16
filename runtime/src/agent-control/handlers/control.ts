@@ -11,6 +11,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { getCompactionRuntimeConfig, setCompactionRuntimeConfig } from "../../core/config.js";
 import type { AgentControlCommand, AgentControlResult } from "../agent-control-types.js";
 import { formatCompactNumber } from "../agent-control-helpers.js";
 import { createMedia, getChatCompactionBackoff } from "../../db.js";
@@ -20,6 +21,8 @@ import { createLogger, debugSuppressedError } from "../../utils/logger.js";
 import { killTrackedProcesses } from "../../utils/process-tracker.js";
 import { abortLiveSshCommand } from "../../extensions/ssh-core.js";
 import { pruneOrphanToolResults } from "../../agent-pool/orphan-tool-results.js";
+import { parsePiclawCompactionResultDetails, type PiclawCompactionResultDetails } from "../../extensions/smart-compaction/result-details.js";
+import { extractRemoteCompactionReadableCheckpoint } from "../../extensions/smart-compaction/remote-compaction.js";
 import {
   buildFreshContextUsageUpdateEvent,
   isCompactionCancellationError,
@@ -90,7 +93,7 @@ function formatCompactionTokenDelta(report: CompactionContextReport): string {
   const source = report.estimatedTokensAfterSource === "upstream" ? "upstream" : "Piclaw";
   const reduction = formatReductionPercent(report.reductionPercent);
   return [
-    `${formatCompactNumber(report.estimatedTokensAfter)} after (${source} estimate)`,
+    `${formatCompactNumber(report.estimatedTokensAfter)} (${source} estimate)`,
     reduction ? `${reduction} reduction` : null,
   ].filter(Boolean).join(" · ");
 }
@@ -108,14 +111,72 @@ function contextUsageFromEvent(event: unknown): AgentControlResult["contextUsage
   };
 }
 
+export function resolveManualCompactionContextUsage(
+  measured: AgentControlResult["contextUsage"] | undefined,
+  contextReport: CompactionContextReport,
+): NonNullable<AgentControlResult["contextUsage"]> {
+  if (measured?.tokens !== null && measured?.tokens !== undefined) return measured;
+  const contextWindow = measured?.contextWindow ?? null;
+  return {
+    tokens: contextReport.safetyAdjustedTokensAfter,
+    contextWindow,
+    percent: contextWindow && contextWindow > 0
+      ? (contextReport.safetyAdjustedTokensAfter / contextWindow) * 100
+      : null,
+    estimated: true,
+    source: "compaction_report",
+    phase: "after_manual_compaction",
+  };
+}
+
+function capitalizeLabel(value: string): string {
+  return value.split("_").map((part) => part ? part[0].toUpperCase() + part.slice(1) : part).join(" ");
+}
+
+function formatCompactionPath(details: PiclawCompactionResultDetails | null): {
+  method: string;
+  execution: string;
+  remote: string;
+} {
+  if (details?.kind === "piclaw.remote_compaction") {
+    return { method: "Provider-native", execution: "Provider-native", remote: "Success" };
+  }
+  if (details?.kind === "piclaw.smart_compaction") {
+    const remote = capitalizeLabel(details.remoteCompaction.outcome)
+      + (details.remoteCompaction.reason ? ` — ${details.remoteCompaction.reason}` : "");
+    return {
+      method: capitalizeLabel(details.method),
+      execution: capitalizeLabel(details.execution),
+      remote,
+    };
+  }
+  return {
+    method: "Unreported by compaction provider",
+    execution: "Unreported by compaction provider",
+    remote: "Unreported by compaction provider",
+  };
+}
+
 function buildCompactReport(
   summary: string,
   tokensBefore: number,
   firstKeptEntryId: string | number | null | undefined,
   timestamp: string,
-  contextReport: CompactionContextReport
+  contextReport: CompactionContextReport,
+  details: PiclawCompactionResultDetails | null,
 ): string {
   const reduction = formatReductionPercent(contextReport.reductionPercent);
+  const path = formatCompactionPath(details);
+  const readableCheckpoint = details?.kind === "piclaw.remote_compaction"
+    ? extractRemoteCompactionReadableCheckpoint(details)
+    : null;
+  const summaryHeading = details?.kind === "piclaw.remote_compaction"
+    ? (readableCheckpoint ? "## Readable continuity checkpoint" : "## Provider-native context")
+    : "## Summary";
+  const summaryContent = details?.kind === "piclaw.remote_compaction"
+    ? (readableCheckpoint
+      ?? "No human-readable checkpoint was returned. Continuity is preserved in encrypted provider-native state, which is intentionally omitted from this report.")
+    : (summary.trim() || "(empty summary)");
   return [
     "# Compaction report",
     "",
@@ -125,10 +186,13 @@ function buildCompactReport(
     `Safety-adjusted tokens after: ${formatCompactNumber(contextReport.safetyAdjustedTokensAfter)}`,
     reduction ? `Estimated reduction: ${reduction}` : null,
     `First kept entry: ${firstKeptEntryId ?? "unknown"}`,
+    `Method: ${path.method}`,
+    `Execution: ${path.execution}`,
+    `Provider-native pre-pass: ${path.remote}`,
     "",
-    "## Summary",
+    summaryHeading,
     "",
-    summary.trim() || "(empty summary)",
+    summaryContent,
     "",
   ].filter((line): line is string => line !== null).join("\n");
 }
@@ -138,11 +202,13 @@ function createCompactReportAttachment(
   tokensBefore: number,
   firstKeptEntryId: string | number | null | undefined,
   timestamp: string,
-  contextReport: CompactionContextReport
+  contextReport: CompactionContextReport,
+  details: PiclawCompactionResultDetails | null,
 ): number | null {
   try {
     const filename = toCompactReportFilename(timestamp);
-    const content = buildCompactReport(summary, tokensBefore, firstKeptEntryId, timestamp, contextReport);
+    const content = buildCompactReport(summary, tokensBefore, firstKeptEntryId, timestamp, contextReport, details);
+    const path = formatCompactionPath(details);
     return createMedia(
       filename,
       "text/markdown",
@@ -157,6 +223,9 @@ function createCompactReportAttachment(
         safety_adjusted_tokens_after: contextReport.safetyAdjustedTokensAfter,
         reduction_percent: contextReport.reductionPercent,
         first_kept_entry_id: firstKeptEntryId ?? null,
+        compaction_method: path.method,
+        compaction_execution: path.execution,
+        remote_compaction_outcome: path.remote,
       }
     );
   } catch (error) {
@@ -310,6 +379,7 @@ export async function handleCompact(session: AgentSession, command: CompactComma
     }
 
     const clearExternalFailsafe = startManualCompactionExternalFailsafe(chatJid);
+    let keepExternalFailsafeArmed = false;
     let compactionResult: Awaited<ReturnType<typeof runCompactionWithTimeout>>;
     try {
       const prunedToolResults = pruneOrphanToolResults(session, chatJid);
@@ -325,40 +395,49 @@ export async function handleCompact(session: AgentSession, command: CompactComma
         "manual",
         { trigger: "manual", willRetry: false, source: "compact_command" },
       );
-      clearExternalFailsafe?.();
       if (!compactionResult.ok) {
-        if (!isCompactionCancellationError(compactionResult.errorMessage)) {
+        if (!compactionResult.joined && !isCompactionCancellationError(compactionResult.errorMessage)) {
           noteCompactionFailure(chatJid, compactionResult.errorMessage);
         }
         const timedOut = /timed out/i.test(compactionResult.errorMessage);
+        keepExternalFailsafeArmed = timedOut;
         return {
           status: "error",
           message: timedOut
-            ? `${compactionResult.errorMessage}. Compaction was aborted and the session was not rewritten.`
+            ? `${compactionResult.errorMessage}. The physical compaction may still be settling; the external failsafe remains armed to prevent unsafe reuse.`
             : formatCompactFailureMessage(compactionResult.errorMessage),
         };
       }
 
-      noteCompactionSuccess(session, chatJid, "manual", {
-        onInfo: (message, details) => log.info(message, details),
-        onWarn: (message, details) => log.warn(message, details),
-        countSuccess: false,
-      });
-      const compactResult = compactionResult.result as { summary: string; tokensBefore: number; firstKeptEntryId: string | number | null | undefined; estimatedTokensAfter?: number };
+      if (!compactionResult.joined) {
+        noteCompactionSuccess(session, chatJid, "manual", {
+          onInfo: (message, details) => log.info(message, details),
+          onWarn: (message, details) => log.warn(message, details),
+          countSuccess: false,
+        });
+      }
+      const compactResult = compactionResult.result as { summary: string; tokensBefore: number; firstKeptEntryId: string | number | null | undefined; estimatedTokensAfter?: number; details?: unknown };
+      const compactionDetails = parsePiclawCompactionResultDetails(compactResult.details);
+      const compactionPath = formatCompactionPath(compactionDetails);
       const contextReport = getCompactionContextReport(session, compactResult);
-      const freshContextUsage = contextUsageFromEvent(buildFreshContextUsageUpdateEvent(session, chatJid, "after_manual_compaction", {
+      const measuredContextUsage = contextUsageFromEvent(buildFreshContextUsageUpdateEvent(session, chatJid, "after_manual_compaction", {
         source: "compact_command",
       }));
+      const freshContextUsage = resolveManualCompactionContextUsage(measuredContextUsage, contextReport);
       const generatedAt = new Date().toISOString();
       const attachmentId = createCompactReportAttachment(
         compactResult.summary,
         compactResult.tokensBefore,
         compactResult.firstKeptEntryId,
         generatedAt,
-        contextReport
+        contextReport,
+        compactionDetails,
       );
       const lines = [
         "Compaction complete.",
+        `Method: ${compactionPath.method}`,
+        `Execution: ${compactionPath.execution}`,
+        `Provider-native pre-pass: ${compactionPath.remote}`,
         prunedToolResults > 0 ? `Removed ${prunedToolResults} orphaned tool-result block${prunedToolResults === 1 ? "" : "s"} before rewriting the session.` : null,
         `Tokens before: ${formatCompactNumber(compactResult.tokensBefore)}`,
         `Estimated after: ${formatCompactionTokenDelta(contextReport)}`,
@@ -373,7 +452,7 @@ export async function handleCompact(session: AgentSession, command: CompactComma
         ...(freshContextUsage ? { contextUsage: freshContextUsage } : {}),
       };
     } finally {
-      clearExternalFailsafe?.();
+      if (!keepExternalFailsafeArmed) clearExternalFailsafe?.();
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -390,10 +469,11 @@ export async function handleAutoCompact(session: AgentSession, command: AutoComp
     }
     return {
       status: "success",
-      message: `Auto-compaction is ${session.autoCompactionEnabled ? "on" : "off"}.`,
+      message: `Auto-compaction is ${getCompactionRuntimeConfig().autoCompactionEnabled ? "on" : "off"}.`,
     };
   }
-  session.setAutoCompactionEnabled(command.enabled);
+  setCompactionRuntimeConfig({ autoCompactionEnabled: command.enabled });
+  if (typeof session.setAutoCompactionEnabled === "function") session.setAutoCompactionEnabled(false);
   return {
     status: "success",
     message: `Auto-compaction turned ${command.enabled ? "on" : "off"}.`,

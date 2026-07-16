@@ -7,9 +7,10 @@
  */
 
 import { resolve } from "path";
-import { expect, test } from "bun:test";
+import { beforeEach, expect, test } from "bun:test";
 
 import { createTempWorkspace } from "../helpers.js";
+import { recordCompactionCancellationReason } from "../../src/agent-pool/compaction-cancel-reason.js";
 import {
   extractTextFromContent,
   formatCompactNumber,
@@ -21,6 +22,9 @@ import {
   runPromptAndCapture,
   truncateText,
 } from "../../src/agent-control/agent-control-helpers.js";
+import { initDatabase } from "../../src/db.js";
+
+beforeEach(() => initDatabase());
 
 class PromptSession {
   private listeners: Array<(event: any) => void> = [];
@@ -105,18 +109,56 @@ test("normalizeModelMatch finds provider/id case-insensitively", () => {
   expect(match?.provider).toBe("OpenAI");
 });
 
-test("thinking aliases and labels are provider-aware", () => {
-  expect(resolveThinkingAlias("max", "anthropic")).toBe("xhigh");
-  expect(resolveThinkingAlias("max", "openai")).toBe("max");
-  expect(resolveThinkingAlias("high", "anthropic")).toBe("high");
-  expect(formatThinkingLevelForDisplay("xhigh", "anthropic")).toBe("max");
-  expect(formatThinkingLevelForDisplay("xhigh", "openai")).toBe("xhigh");
+test("thinking aliases preserve native max while supporting legacy model metadata", () => {
+  const legacy = { provider: "anthropic", thinkingLevelMap: { xhigh: "max" } } as any;
+  const legacyWithExplicitNull = { provider: "anthropic", thinkingLevelMap: { xhigh: "max", max: null } } as any;
+  const native = { provider: "anthropic", thinkingLevelMap: { xhigh: "xhigh", max: "max" } } as any;
+  expect(resolveThinkingAlias("max", legacy)).toBe("xhigh");
+  expect(resolveThinkingAlias("max", legacyWithExplicitNull)).toBe("xhigh");
+  expect(resolveThinkingAlias("max", native)).toBe("max");
+  expect(resolveThinkingAlias("high", legacy)).toBe("high");
+  expect(formatThinkingLevelForDisplay("xhigh", legacy)).toBe("max");
+  expect(formatThinkingLevelForDisplay("xhigh", native)).toBe("xhigh");
+  expect(formatThinkingLevelForDisplay("max", native)).toBe("max");
 });
 
 test("runPromptAndCapture captures assistant output", async () => {
   const session = new PromptSession();
   const result = await runPromptAndCapture(session as any, "hi");
   expect(result).toBe("Hello world");
+});
+
+test("runPromptAndCapture surfaces the recorded smart-compaction cancellation reason", async () => {
+  class FailedCompactionSession extends PromptSession {
+    promptCalls = 0;
+    sessionManager = {};
+
+    async compact() {
+      recordCompactionCancellationReason(this.sessionManager, "Smart compaction rejected an invalid terminal summary");
+      throw new Error("Compaction cancelled");
+    }
+
+    async prompt(_text: string) {
+      this.promptCalls += 1;
+      const listeners = (this as any).listeners as Array<(event: any) => void>;
+      for (const listener of listeners) {
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "error",
+            errorMessage: "OpenAI API error (400): Your input exceeds the context window of this model.",
+            content: [],
+          },
+        });
+      }
+    }
+  }
+
+  const session = new FailedCompactionSession();
+  await expect(runPromptAndCapture(session as any, "hi"))
+    .rejects.toThrow("Smart compaction rejected an invalid terminal summary");
+  expect(session.promptCalls).toBe(1);
 });
 
 test("runPromptAndCapture compacts and retries OpenAI context-window errors", async () => {

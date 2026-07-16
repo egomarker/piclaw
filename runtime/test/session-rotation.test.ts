@@ -48,6 +48,67 @@ function createPersistedSession(workspace: string, sessionDir: string, sessionNa
   };
 }
 
+test("rotateSession merges a prior trim archive into the final rotation archive", async () => {
+  const workspace = createTempWorkspace("piclaw-rotate-session-merged-archive-");
+  cleanupWorkspace = workspace.cleanup;
+  restoreEnv = setEnv({
+    PICLAW_WORKSPACE: workspace.workspace,
+    PICLAW_STORE: workspace.store,
+    PICLAW_DATA: workspace.data,
+  });
+
+  const { rotateSession, getArchivePath } = await importFresh<typeof import("../src/session-rotation.js")>("../src/session-rotation.js");
+  const sessionDir = join(workspace.workspace, "session-rotation-merged-archive");
+  const originalSession = createPersistedSession(workspace.workspace, sessionDir, "Merged archive session");
+  const previousSessionFile = originalSession.sessionFile!;
+  const header = originalSession.sessionManager.getHeader()!;
+  const oldEntry = originalSession.sessionManager.getEntries().at(-1)!;
+  const trimArchivePath = join(sessionDir, "archive", previousSessionFile.split(/[/\\]/).pop()!);
+  mkdirSync(join(sessionDir, "archive"), { recursive: true });
+  writeFileSync(trimArchivePath, `${JSON.stringify(header)}\n${JSON.stringify(oldEntry)}\n`);
+
+  originalSession.sessionManager.appendMessage({
+    role: "user",
+    content: "Added after the first destructive trim",
+    timestamp: Date.now(),
+  } as const);
+  const newEntry = originalSession.sessionManager.getEntries().at(-1)!;
+  // Simulate the active file after an earlier trim: only its header and newer
+  // tail remain while the prior archive owns the older entry.
+  writeFileSync(previousSessionFile, `${JSON.stringify(header)}\n${JSON.stringify(newEntry)}\n`);
+  const rotationArchivePath = getArchivePath(previousSessionFile);
+
+  const runtime = {
+    session: originalSession,
+    cwd: workspace.workspace,
+    diagnostics: [],
+    services: {} as any,
+    modelFallbackMessage: undefined,
+    newSession: async (options?: { parentSession?: string; setup?: (sessionManager: SessionManager) => Promise<void> | void }) => {
+      const nextManager = SessionManager.create(workspace.workspace, sessionDir);
+      nextManager.newSession({ parentSession: options?.parentSession });
+      await options?.setup?.(nextManager);
+      runtime.session = {
+        ...originalSession,
+        sessionManager: nextManager,
+        sessionFile: nextManager.getSessionFile(),
+      } as any;
+      return { cancelled: false };
+    },
+    switchSession: async () => ({ cancelled: false }),
+    fork: async () => ({ cancelled: false }),
+    importFromJsonl: async () => ({ cancelled: false }),
+    dispose: async () => {},
+  } as AgentSessionRuntime;
+
+  const result = await rotateSession(originalSession as any, runtime, { reason: "manual" });
+
+  expect(result.status).toBe("success");
+  const archived = readFileSync(rotationArchivePath, "utf8");
+  expect(archived).toContain("Preserve this context");
+  expect(archived).toContain("Added after the first destructive trim");
+});
+
 test("rotateSession times out stuck compaction and leaves the active session in place", async () => {
   const workspace = createTempWorkspace("piclaw-rotate-session-timeout-");
   cleanupWorkspace = workspace.cleanup;

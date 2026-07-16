@@ -12,6 +12,8 @@ import {
 } from "./web-channel-http-surface-service.js";
 import {
   getWebChannelRuntimePublicSurfaceService,
+  type RuntimeAgentMessageRequest,
+  type RuntimeAgentMessageResult,
   type WebChannelRuntimePublicSurfaceChannel,
   type WebChannelRuntimePublicSurfaceService,
   type WebChannelRuntimePublicSurfaceServiceCarrier,
@@ -37,6 +39,7 @@ export interface WebChannelPrototypeMembers extends WebChannelLike {
   stop(): Promise<void>;
   handleFetch(req: Request, server?: Bun.Server<WebSocketSessionData>): Promise<Response | undefined>;
   handleRequest(req: Request): Promise<Response>;
+  enqueueAgentMessage(request: RuntimeAgentMessageRequest): Promise<RuntimeAgentMessageResult>;
   recoverInflightRuns(): void;
   recoverStaleInflightRun(chatJid: string, options?: { hasActiveStatus?: boolean; minAgeMs?: number }): boolean;
   resumePendingChats(chatJid?: string): void;
@@ -149,6 +152,12 @@ export function installWebChannelPrototype(
         chatJid: string,
         options?: { threadId?: number | null; text?: string; widgetId?: string },
       ) => await service.postDashboardWidget(chatJid, options)),
+    },
+    enqueueAgentMessage: {
+      configurable: true,
+      writable: true,
+      value: withRuntimePublicSurface(async (service, request: RuntimeAgentMessageRequest): Promise<RuntimeAgentMessageResult> =>
+        await service.enqueueAgentMessage(request)),
     },
     queueFollowupPlaceholder: {
       configurable: true,

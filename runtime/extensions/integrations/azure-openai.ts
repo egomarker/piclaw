@@ -154,7 +154,7 @@ const MODEL_TOOL_FLOW_REASONING_CAP: Record<string, string> = {
   "gpt-5-mini": "medium",
 };
 
-const EFFORT_ORDER = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
+const EFFORT_ORDER = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 /**
  * Cap reasoning effort for models with known tool-flow instability at higher levels.
@@ -1569,7 +1569,9 @@ function streamAzureOpenAIResponses(model: any, context: any, options: any) {
 // Responses wrapper above. Keep policy in streamAzureOpenAIResponses, not here.
 function streamSimpleAzureOpenAIResponses(model: any, context: any, options: any) {
   const base = buildBaseOptions(model, context, options, options?.apiKey);
-  const reasoningEffort = getSupportedThinkingLevels(model).includes("xhigh") ? options?.reasoning : clampReasoning(options?.reasoning);
+  const reasoningEffort = getSupportedThinkingLevels(model).includes(options?.reasoning)
+    ? options?.reasoning
+    : clampReasoning(options?.reasoning);
 
   return streamAzureOpenAIResponses(model, context, {
     ...base,

@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { chromium, type Browser, type Page } from 'playwright';
+import { chromium, firefox, webkit, type Browser, type Page } from 'playwright';
 import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { $ } from 'bun';
@@ -10,6 +10,13 @@ const baselineRoot = join(runtimeRoot, 'generated/cache/markdown-editor-speed-ba
 const tmpRoot = join(runtimeRoot, 'generated/cache/markdown-editor-speed-audit');
 const baselineRef = process.env.BASELINE_REF || 'HEAD^';
 const skipBaselineTyping = process.env.SPEED_AUDIT_BASELINE_SKIP_TYPING !== '0';
+const browserTypes = { chromium, firefox, webkit } as const;
+type BrowserName = keyof typeof browserTypes;
+const requestedBrowser = process.env.SPEED_AUDIT_BROWSER || 'chromium';
+if (!(requestedBrowser in browserTypes)) {
+  throw new Error(`Unsupported SPEED_AUDIT_BROWSER: ${requestedBrowser}`);
+}
+const browserName = requestedBrowser as BrowserName;
 
 const viewports = [
   { name: 'desktop', width: 1280, height: 900 },
@@ -20,6 +27,8 @@ const viewports = [
 const runs = Number(process.env.SPEED_AUDIT_RUNS || 7);
 const warmups = Number(process.env.SPEED_AUDIT_WARMUPS || 2);
 const stressTables = process.env.SPEED_AUDIT_STRESS_TABLES === '1';
+const livePreviewEnabled = process.env.SPEED_AUDIT_LIVE_PREVIEW !== '0';
+const showWhitespace = process.env.SPEED_AUDIT_WHITESPACE === '1';
 
 function median(values: number[]): number {
   const sorted = values.slice().sort((a, b) => a - b);
@@ -34,7 +43,7 @@ function round(value: number): number {
 }
 
 function buildSource(): string {
-  const image = `![Inline chart](data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='320'%20height='120'%3E%3Crect%20width='320'%20height='120'%20fill='%23233'%2F%3E%3Ctext%20x='20'%20y='70'%20fill='white'%3Espeed%20audit%3C%2Ftext%3E%3C%2Fsvg%3E)`;
+  const image = (label: string) => `![Inline chart ${label}](https://example.com/speed-audit.png)`;
   const intro = [
     '---',
     'title: Speed Audit',
@@ -53,7 +62,7 @@ function buildSource(): string {
     '| Alpha | 10 | stable |',
     '| Beta | 20 | source-preserving |',
     '',
-    image,
+    image('intro'),
     '',
     '```ts',
     'const sample = "code block";',
@@ -64,13 +73,14 @@ function buildSource(): string {
   ].join('\n');
   const para = `Paragraph for typing and scroll audit with **strong** text, _emphasis_, #topic tags, and [links](https://example.com/path). `.repeat(2);
   const chunks: string[] = [intro];
-  for (let i = 0; i < 180; i++) {
+  const sectionCount = stressTables ? 50 : 120;
+  for (let i = 0; i < sectionCount; i++) {
     chunks.push(`\n## Section ${i}\n\n${para}\n\n- [ ] task ${i}\n- [x] done ${i}\n`);
     if (i % 20 === 0) chunks.push(`\n| Col A | Col B |\n| --- | --- |\n| ${i} | table row |\n`);
-    if (i % 30 === 0) chunks.push(`\n${image}\n`);
+    if (i % 30 === 0) chunks.push(`\n${image(String(i))}\n`);
   }
   if (stressTables) {
-    for (let table = 0; table < 48; table++) {
+    for (let table = 0; table < 20; table++) {
       chunks.push(`\n### Stress table ${table}\n\n| A | B | C | D | E | F |\n| --- | ---: | :---: | --- | --- | --- |\n`);
       for (let row = 0; row < 18; row++) {
         chunks.push(`| ${table}-${row}-0 | ${row} | center ${row} | text ${row} | pipe \\| value | tail |\n`);
@@ -83,6 +93,11 @@ function buildSource(): string {
 const source = buildSource();
 
 async function ensureBaselineWorktree() {
+  try {
+    await $`git -C ${repoRoot} worktree remove --force ${baselineRoot}`.quiet();
+  } catch (error) {
+    console.warn('[markdown-editor-speed-audit] baseline worktree was not registered before setup', error);
+  }
   rmSync(baselineRoot, { recursive: true, force: true });
   await $`git -C ${repoRoot} worktree add --detach --quiet ${baselineRoot} ${baselineRef}`;
   const currentNodeModules = join(repoRoot, 'node_modules');
@@ -107,36 +122,27 @@ function writeHarness(label: string, root: string): { workDir: string; entryPath
   const importPrefix = `${root}/runtime`;
 
   const entry = `
-import {
-  EditorState,
-  EditorView,
-  lineNumbers,
-  markdown,
-  markdownLanguage,
-  minimalSetup,
-} from ${JSON.stringify(`${importPrefix}/extensions/viewers/editor/vendor/codemirror.js`)};
-import { markdownLivePreview, markdownParserExtensions } from ${JSON.stringify(`${importPrefix}/extensions/viewers/editor/markdown/index.ts`)};
+import { editorPaneExtension } from ${JSON.stringify(`${importPrefix}/extensions/viewers/editor/editor-extension.ts`)};
 
 const source = ${JSON.stringify(source)};
 const root = document.getElementById('editor');
 if (!root) throw new Error('Missing #editor');
+localStorage.setItem('piclaw_md_live_preview', ${JSON.stringify(String(livePreviewEnabled))});
+localStorage.setItem('piclaw_show_whitespace', ${JSON.stringify(String(showWhitespace))});
+globalThis.fetch = async () => new Response(JSON.stringify({ branch: 'main', mtime: '1', size: source.length }), {
+  status: 200,
+  headers: { 'content-type': 'application/json' },
+});
 
 const mountStart = performance.now();
-const view = new EditorView({
-  parent: root,
-  state: EditorState.create({
-    doc: source,
-    extensions: [
-      minimalSetup,
-      lineNumbers(),
-      markdown({ base: markdownLanguage, extensions: markdownParserExtensions }),
-      EditorView.lineWrapping,
-      markdownLivePreview,
-    ],
-  }),
+const instance = editorPaneExtension.mount(root, {
+  path: 'markdown-editor-speed-audit.md',
+  content: source,
+  mtime: '1',
+  mode: 'edit',
 });
-let mountPaintMs = null;
-requestAnimationFrame(() => { mountPaintMs = performance.now() - mountStart; });
+const view = instance.view;
+if (!view) throw new Error('Editor did not create a CodeMirror view');
 
 function quantile(values, q) {
   const sorted = values.slice().sort((a, b) => a - b);
@@ -144,11 +150,26 @@ function quantile(values, q) {
 }
 function nextFrame() { return new Promise((resolve) => requestAnimationFrame(() => resolve())); }
 function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+async function revealFirstTable() {
+  const tablePos = view.state.doc.toString().indexOf('| Name | Value | Notes |');
+  if (tablePos < 0) return;
+  view.dispatch({ selection: { anchor: tablePos }, scrollIntoView: true });
+  await nextFrame();
+  await nextFrame();
+}
 
 window.__speedHarness = {
   source,
   view,
-  mountPaint: async () => { while (mountPaintMs == null) await nextFrame(); return mountPaintMs; },
+  mountPaint: async () => {
+    if (${JSON.stringify(livePreviewEnabled)}) {
+      while (!document.querySelector('.cm-md-editable-table')) await nextFrame();
+    } else {
+      await nextFrame();
+      await nextFrame();
+    }
+    return performance.now() - mountStart;
+  },
   docMatches: () => view.state.doc.toString() === source,
   decorationCounts: () => ({
     headings: document.querySelectorAll('.cm-md-h1-line,.cm-md-h2-line').length,
@@ -165,13 +186,26 @@ window.__speedHarness = {
     await nextFrame();
     const sample = ' abcdefghijklmnopqrstuvwxyz'.repeat(4);
     const times = [];
+    let settleMaxEventLoopLagMs = 0;
+    let expectedTick = performance.now() + 16;
+    const lagTimer = setInterval(() => {
+      const now = performance.now();
+      settleMaxEventLoopLagMs = Math.max(settleMaxEventLoopLagMs, now - expectedTick);
+      expectedTick = now + 16;
+    }, 16);
     for (const ch of sample) {
       const start = performance.now();
       view.dispatch({ changes: { from: pos, to: pos, insert: ch }, selection: { anchor: pos + ch.length } });
       times.push(performance.now() - start);
       pos += ch.length;
     }
+    // The tight dispatch loop is an intentional throughput stress. Reset the
+    // lag probe afterward so this measures delayed parser/widget work rather
+    // than the loop itself.
+    settleMaxEventLoopLagMs = 0;
+    expectedTick = performance.now() + 16;
     await wait(380);
+    clearInterval(lagTimer);
     const totalMs = times.reduce((a, b) => a + b, 0);
     const medianMs = quantile(times, 0.5);
     const p95Ms = quantile(times, 0.95);
@@ -179,7 +213,7 @@ window.__speedHarness = {
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: source }, selection: { anchor: pos - sample.length } });
       await nextFrame();
     }
-    return { totalMs, medianMs, p95Ms, chars: sample.length };
+    return { totalMs, medianMs, p95Ms, settleMaxEventLoopLagMs, chars: sample.length };
   },
   measureCursor: async () => {
     const positions = [];
@@ -215,15 +249,37 @@ window.__speedHarness = {
   measureScroll: async () => {
     const scroller = view.scrollDOM;
     const start = performance.now();
+    let maxImages = 0;
+    let maxTables = 0;
     for (let i = 0; i < 80; i++) {
-      scroller.scrollTop = Math.min(scroller.scrollHeight, i * 180);
+      const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      scroller.scrollTop = maxScrollTop * (i / 79);
       scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
-      if (i % 8 === 0) await nextFrame();
+      if (i % 8 === 0) {
+        await nextFrame();
+        maxImages = Math.max(maxImages, document.querySelectorAll('.cm-md-image-block,.cm-md-image-wrap').length);
+        maxTables = Math.max(maxTables, document.querySelectorAll('.cm-md-editable-table,.cm-md-table-line').length);
+      }
     }
     await nextFrame();
-    return { totalMs: performance.now() - start, steps: 80, scrollTop: scroller.scrollTop, scrollHeight: scroller.scrollHeight };
+    return { totalMs: performance.now() - start, steps: 80, scrollTop: scroller.scrollTop, scrollHeight: scroller.scrollHeight, maxImages, maxTables };
+  },
+  verifyImageWidgets: async () => {
+    const markdown = view.state.doc.toString();
+    const matches = Array.from(markdown.matchAll(/!\\[Inline chart ([^\\]]+)\\]/g));
+    let found = 0;
+    for (const match of matches) {
+      const pos = match.index || 0;
+      view.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
+      await nextFrame();
+      await nextFrame();
+      const labels = Array.from(document.querySelectorAll('.cm-md-image-caption')).map((node) => node.textContent || '');
+      if (labels.includes('Inline chart ' + match[1])) found++;
+    }
+    return { expected: matches.length, found };
   },
   measureTableEdit: async () => {
+    await revealFirstTable();
     const cell = document.querySelector('.cm-md-editable-table tbody td .cm-md-table-cell-source');
     if (!cell) return { totalMs: Number.NaN, p95Ms: Number.NaN, operations: 0, skipped: 'no editable table source' };
     const times = [];
@@ -244,6 +300,7 @@ window.__speedHarness = {
     return { totalMs: times.reduce((a, b) => a + b, 0), p95Ms: quantile(times, 0.95), operations: times.length };
   },
   measureTableMutation: async () => {
+    await revealFirstTable();
     const addRow = Array.from(document.querySelectorAll('.cm-md-editable-table-button')).find((button) => button.textContent === '+ row');
     const addCol = Array.from(document.querySelectorAll('.cm-md-editable-table-button')).find((button) => button.textContent === '+ col');
     if (!addRow || !addCol) return { totalMs: Number.NaN, operations: 0, skipped: 'no editable table controls' };
@@ -282,7 +339,7 @@ window.__speedHarness = {
 };
 `;
 
-  const html = `<!doctype html><html data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111;color:#ddd}#editor{width:100vw;height:100vh}.cm-editor{height:100%}</style></head><body><div id="editor"></div><script type="module" src="./dist/harness.js"></script></body></html>`;
+  const html = `<!doctype html><html data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111;color:#ddd}#editor,.editor-pane,.editor-body,.editor-codemirror{width:100%;height:100%}.cm-editor{height:100%}</style></head><body><div id="editor"></div><script type="module" src="./dist/harness.js"></script></body></html>`;
   const entryPath = join(workDir, 'harness.ts');
   writeFileSync(entryPath, entry);
   writeFileSync(join(workDir, 'index.html'), html);
@@ -320,6 +377,7 @@ async function runOne(page: Page, baseUrl: string, viewport: typeof viewports[nu
   await page.setViewportSize({ width: viewport.width, height: viewport.height });
   await page.goto(baseUrl, { waitUntil: 'load' });
   await page.waitForSelector('.cm-editor');
+  if (livePreviewEnabled) await page.waitForSelector('.cm-md-editable-table', { timeout: 20_000 });
   const mountPaintMs = await page.evaluate(() => (window as any).__speedHarness.mountPaint());
   const counts = await page.evaluate(() => (window as any).__speedHarness.decorationCounts());
   const docMatchesBefore = await page.evaluate(() => (window as any).__speedHarness.docMatches());
@@ -333,6 +391,8 @@ async function runOne(page: Page, baseUrl: string, viewport: typeof viewports[nu
   const pointer = await page.evaluate(() => (window as any).__speedHarness.measurePointerDispatch());
   console.log(`[audit] ${viewport.name}: scroll`);
   const scroll = await page.evaluate(() => (window as any).__speedHarness.measureScroll());
+  console.log(`[audit] ${viewport.name}: image widgets`);
+  const imageWidgets = await page.evaluate(() => (window as any).__speedHarness.verifyImageWidgets());
   console.log(`[audit] ${viewport.name}: table edit`);
   const tableEdit = await page.evaluate(() => (window as any).__speedHarness.measureTableEdit());
   console.log(`[audit] ${viewport.name}: table mutation`);
@@ -340,7 +400,7 @@ async function runOne(page: Page, baseUrl: string, viewport: typeof viewports[nu
   console.log(`[audit] ${viewport.name}: table`);
   const table = await page.evaluate(() => (window as any).__speedHarness.measureTableBoundary());
   const docMatchesAfter = await page.evaluate(() => (window as any).__speedHarness.docMatches());
-  return { mountPaintMs, counts, docMatchesBefore, docMatchesAfter, typing, cursor, pointer, scroll, tableEdit, tableMutation, table };
+  return { mountPaintMs, counts, docMatchesBefore, docMatchesAfter, typing, cursor, pointer, scroll, imageWidgets, tableEdit, tableMutation, table };
 }
 
 function summarize(samples: RunMetric[]) {
@@ -349,11 +409,16 @@ function summarize(samples: RunMetric[]) {
     mountPaintMs: { median: round(median(field('mountPaintMs'))), p95: round(p95(field('mountPaintMs'))) },
     typingTotalMs: { median: round(median(field('typing.totalMs'))), p95: round(p95(field('typing.totalMs'))) },
     typingP95PerCharMs: { median: round(median(field('typing.p95Ms'))), p95: round(p95(field('typing.p95Ms'))) },
+    typingSettleLagMs: { median: round(median(field('typing.settleMaxEventLoopLagMs'))), p95: round(p95(field('typing.settleMaxEventLoopLagMs'))) },
     cursorTotalMs: { median: round(median(field('cursor.totalMs'))), p95: round(p95(field('cursor.totalMs'))) },
     cursorP95Ms: { median: round(median(field('cursor.p95Ms'))), p95: round(p95(field('cursor.p95Ms'))) },
     pointerTotalMs: { median: round(median(field('pointer.totalMs'))), p95: round(p95(field('pointer.totalMs'))) },
     pointerP95Ms: { median: round(median(field('pointer.p95Ms'))), p95: round(p95(field('pointer.p95Ms'))) },
     scrollTotalMs: { median: round(median(field('scroll.totalMs'))), p95: round(p95(field('scroll.totalMs'))) },
+    scrollMaxImages: Math.max(0, ...field('scroll.maxImages')),
+    scrollMaxTables: Math.max(0, ...field('scroll.maxTables')),
+    imageWidgetsExpected: Math.max(0, ...field('imageWidgets.expected')),
+    imageWidgetsFound: Math.min(...field('imageWidgets.found')),
     tableEditMs: { median: round(median(field('tableEdit.totalMs'))), p95: round(p95(field('tableEdit.totalMs'))) },
     tableEditP95Ms: { median: round(median(field('tableEdit.p95Ms'))), p95: round(p95(field('tableEdit.p95Ms'))) },
     tableMutationMs: { median: round(median(field('tableMutation.totalMs'))), p95: round(p95(field('tableMutation.totalMs'))) },
@@ -390,7 +455,7 @@ async function runSuite(browser: Browser, label: string, root: string, options: 
 }
 
 function compare(base: any, head: any) {
-  const metrics = ['mountPaintMs', 'typingTotalMs', 'typingP95PerCharMs', 'cursorTotalMs', 'cursorP95Ms', 'pointerTotalMs', 'pointerP95Ms', 'scrollTotalMs', 'tableEditMs', 'tableEditP95Ms', 'tableMutationMs', 'tableBoundaryMs'];
+  const metrics = ['mountPaintMs', 'typingTotalMs', 'typingP95PerCharMs', 'typingSettleLagMs', 'cursorTotalMs', 'cursorP95Ms', 'pointerTotalMs', 'pointerP95Ms', 'scrollTotalMs', 'tableEditMs', 'tableEditP95Ms', 'tableMutationMs', 'tableBoundaryMs'];
   const rows: any[] = [];
   for (const viewport of viewports) {
     for (const metric of metrics) {
@@ -407,19 +472,20 @@ function compare(base: any, head: any) {
 async function main() {
   rmSync(tmpRoot, { recursive: true, force: true });
   mkdirSync(tmpRoot, { recursive: true });
-  await ensureBaselineWorktree();
-  const browser = await chromium.launch({ headless: true });
+  let browser: Browser | null = null;
   try {
-    const baseline = await runSuite(browser, 'baseline-head-parent', baselineRoot, { skipTyping: skipBaselineTyping });
-    const head = await runSuite(browser, 'atomic-port-head', repoRoot);
+    await ensureBaselineWorktree();
+    browser = await browserTypes[browserName].launch({ headless: true });
+    const baseline = await runSuite(browser, `baseline-head-parent-${browserName}`, baselineRoot, { skipTyping: skipBaselineTyping });
+    const head = await runSuite(browser, `working-tree-${browserName}`, repoRoot);
     const rows = compare(baseline, head);
-    const output = { baselineRef, headRef: 'working-tree', skipBaselineTyping, runs, warmups, stressTables, sourceLength: source.length, baseline, head, comparison: rows };
+    const output = { browserName, baselineRef, headRef: 'working-tree', skipBaselineTyping, runs, warmups, stressTables, livePreviewEnabled, showWhitespace, sourceLength: source.length, baseline, head, comparison: rows };
     const reportPath = process.env.SPEED_AUDIT_REPORT || join(runtimeRoot, 'generated/cache/markdown-editor-speed-audit.json');
     writeFileSync(reportPath, JSON.stringify(output, null, 2));
     console.log(`REPORT ${reportPath}`);
     console.table(rows);
   } finally {
-    await browser.close();
+    if (browser) await browser.close();
     await cleanupBaselineWorktree();
   }
 }

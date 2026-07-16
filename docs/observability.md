@@ -107,6 +107,12 @@ removeLogSink(mySink);  // stop
 | Operation | Level | Key fields | Emitted when |
 |---|---|---|---|
 | `maybe_auto_compact_session_before_prompt` | info | `chatJid`, `contextTokens`, `contextWindow` | Pre-prompt compaction triggered |
+| `smart_compaction.source_prepared` | debug | `method`, source/event counts | Local Selective/Pipelined source prepared after any remote pre-pass fallback |
+| `smart_compaction.pipeline_planned` | debug | `method`, source/group/unit counts, dispositions, coverage, audit ledger | Pipelined ledger validated |
+| `smart_compaction.completed` | debug | `method`, execution, token estimates, reductions, model/chunk counts, duration | Local compaction completed |
+| `smart_compaction.output_invalid` / `smart_compaction.progressive_output_invalid` | debug | `schema`, `stopReason`, `validationFailure`, retry count | Model output rejected before persistence |
+| `remote_compaction.attempt` / `remote_compaction.completed` | debug/info | provider/model identifiers, counts, usage, duration | Provider-native compaction attempted/completed |
+| `remote_compaction.fallback` | info | `outcome`, local method, provider/model, reason | Provider-native failure continued safely into the captured local method |
 | `maybe_auto_rotate_session` | info | `chatJid`, `previousSize`, `trigger` | Session file auto-rotated |
 
 ### Dream

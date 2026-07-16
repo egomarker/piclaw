@@ -88,7 +88,9 @@ export function useStatusPolling(): UseStatusPollingResult {
       if (modelsRes.ok) {
         const info = await modelsRes.json() as ModelInfo;
         if (info.current) currentModel.value = info.current;
-        if (info.thinking_level) currentThinkingLevel.value = info.thinking_level;
+        if (info.thinking_level_label || info.thinking_level) {
+          currentThinkingLevel.value = info.thinking_level_label ?? info.thinking_level!;
+        }
         // #60: store context_window from current model's definition
         const currentOpt = info.model_options?.find((m: Record<string, unknown>) => m.label === info.current || m.id === info.current);
         if (currentOpt?.context_window) modelContextWindow.value = currentOpt.context_window as number;

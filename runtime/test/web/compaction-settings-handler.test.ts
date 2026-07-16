@@ -3,13 +3,21 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import '../helpers.js';
+import { getCompactionRuntimeConfig, setCompactionRuntimeConfigForTests } from '../../src/core/config.js';
 import { importFresh, withTempWorkspaceEnv } from '../helpers.js';
 
 test('saveCompactionSettings persists and applies compaction settings immediately', async () => {
   await withTempWorkspaceEnv('piclaw-compaction-settings-', {
+    PICLAW_AUTO_COMPACTION_ENABLED: undefined,
+    PICLAW_SMART_COMPACTION_METHOD: undefined,
+    PICLAW_REMOTE_COMPACTION_ENABLED: undefined,
+    PICLAW_REMOTE_COMPACTION_TIMEOUT_MS: undefined,
     PICLAW_COMPACTION_TIMEOUT_MS: undefined,
     PICLAW_COMPACTION_BACKOFF_BASE_MS: undefined,
     PICLAW_COMPACTION_BACKOFF_MAX_MS: undefined,
+    PICLAW_COMPACTION_THRESHOLD_PERCENT: undefined,
+    PICLAW_COMPACTION_MAX_THRESHOLD_TOKENS: undefined,
+    PICLAW_COMPACTION_BACKOFF_DECAY_FACTOR: undefined,
     PICLAW_PROGRESS_WATCHDOG_ENABLED: undefined,
     PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS: undefined,
     PICLAW_TOOL_RESULT_COMPACTION_ENABLED: undefined,
@@ -19,6 +27,7 @@ test('saveCompactionSettings persists and applies compaction settings immediatel
     PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_TOKENS: undefined,
     PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS: undefined,
   }, async (workspace) => {
+    const runtimeBefore = getCompactionRuntimeConfig();
     const db = await importFresh<typeof import('../../src/db.js')>('../src/db.js');
     db.initDatabase();
     const handler = await importFresh<typeof import('../../src/channels/web/handlers/compaction-settings.js')>(
@@ -26,6 +35,10 @@ test('saveCompactionSettings persists and applies compaction settings immediatel
     );
 
     const saved = await handler.saveCompactionSettings({
+      autoCompactionEnabled: false,
+      smartCompactionMethod: 'traditional-pipelined',
+      remoteCompactionEnabled: true,
+      remoteCompactionTimeoutSec: 45,
       compactionTimeoutSec: 240,
       compactionBackoffBaseMin: 12,
       compactionBackoffMaxMin: 180,
@@ -42,6 +55,11 @@ test('saveCompactionSettings persists and applies compaction settings immediatel
     });
 
     expect(saved).toMatchObject({
+      autoCompactionEnabled: false,
+      smartCompactionMethod: 'pipelined',
+      remoteCompactionEnabled: true,
+      remoteCompactionTimeoutSec: 45,
+      remoteCompactionSupportedProviders: ['openai', 'openai-codex'],
       compactionTimeoutSec: 240,
       compactionBackoffBaseMin: 12,
       compactionBackoffMaxMin: 180,
@@ -56,10 +74,20 @@ test('saveCompactionSettings persists and applies compaction settings immediatel
       toolResultSemanticSummaryMaxTokens: 640,
       toolResultSemanticSummaryTimeoutSec: 30,
     });
+    expect(process.env.PICLAW_SMART_COMPACTION_METHOD).toBe('pipelined');
+    expect(process.env.PICLAW_REMOTE_COMPACTION_ENABLED).toBe('1');
+    expect(process.env.PICLAW_REMOTE_COMPACTION_TIMEOUT_MS).toBe('45000');
+    expect(process.env.PICLAW_COMPACTION_TIMEOUT_MS).toBe('240000');
+    expect(process.env.PICLAW_COMPACTION_BACKOFF_BASE_MS).toBe('720000');
+    expect(process.env.PICLAW_PROGRESS_WATCHDOG_ENABLED).toBe('1');
 
     const persisted = JSON.parse(readFileSync(join(workspace.workspace, '.piclaw', 'config.json'), 'utf8'));
     expect(persisted).toMatchObject({
       compaction: {
+        autoCompactionEnabled: false,
+        smartCompactionMethod: 'pipelined',
+        remoteCompactionEnabled: true,
+        remoteCompactionTimeoutMs: 45000,
         timeoutMs: 240000,
         backoffBaseMs: 720000,
         backoffMaxMs: 10800000,
@@ -75,6 +103,34 @@ test('saveCompactionSettings persists and applies compaction settings immediatel
         toolResultSemanticSummaryTimeoutMs: 30000,
       },
     });
+
+    setCompactionRuntimeConfigForTests({ ...runtimeBefore });
+    expect(getCompactionRuntimeConfig()).toEqual(runtimeBefore);
+  });
+});
+
+test('saveCompactionSettings preserves the current processing method for invalid input', async () => {
+  await withTempWorkspaceEnv('piclaw-compaction-method-invalid-', {
+    PICLAW_SMART_COMPACTION_METHOD: undefined,
+  }, async () => {
+    const db = await importFresh<typeof import('../../src/db.js')>('../src/db.js');
+    db.initDatabase();
+    const handler = await importFresh<typeof import('../../src/channels/web/handlers/compaction-settings.js')>(
+      '../src/channels/web/handlers/compaction-settings.js',
+    );
+
+    const before = await handler.saveCompactionSettings({
+      smartCompactionMethod: 'pipelined',
+      compactionTimeoutSec: 211,
+      compactionBackoffBaseMin: 17,
+      progressWatchdogEnabled: false,
+    });
+    const saved = await handler.saveCompactionSettings({ smartCompactionMethod: 'unsafe-unknown-method' });
+
+    expect(saved.smartCompactionMethod).toBe('pipelined');
+    expect(saved.compactionTimeoutSec).toBe(before.compactionTimeoutSec);
+    expect(saved.compactionBackoffBaseMin).toBe(before.compactionBackoffBaseMin);
+    expect(saved.progressWatchdogEnabled).toBe(before.progressWatchdogEnabled);
   });
 });
 
@@ -184,6 +240,32 @@ test('saveCompactionSettings can disable watchdog without clearing its timeout',
         progressWatchdogTimeoutMs: 120000,
       },
     });
+  });
+});
+
+test('runtime config honors an explicitly disabled progress watchdog in production', async () => {
+  await withTempWorkspaceEnv('piclaw-compaction-watchdog-enforce-', {
+    PICLAW_COMPACTION_TIMEOUT_MS: '300000',
+    PICLAW_PROGRESS_WATCHDOG_ENABLED: '0',
+    PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS: '0',
+    PICLAW_ALLOW_DISABLE_PROGRESS_WATCHDOG: undefined,
+  }, async () => {
+    const previousDbInMemory = process.env.PICLAW_DB_IN_MEMORY;
+    const previousNodeEnv = process.env.NODE_ENV;
+    delete process.env.PICLAW_DB_IN_MEMORY;
+    process.env.NODE_ENV = 'production';
+    try {
+      const config = await importFresh<typeof import('../../src/core/config.js')>('../src/core/config.js');
+      const runtimeConfig = config.getCompactionRuntimeConfig();
+      expect(runtimeConfig.progressWatchdogEnabled).toBe(false);
+      expect(runtimeConfig.progressWatchdogTimeoutMs).toBe(0);
+      expect(config.getProgressWatchdogSafetyWarning()).toBeNull();
+    } finally {
+      if (previousDbInMemory === undefined) delete process.env.PICLAW_DB_IN_MEMORY;
+      else process.env.PICLAW_DB_IN_MEMORY = previousDbInMemory;
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+    }
   });
 });
 

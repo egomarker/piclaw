@@ -4,6 +4,8 @@
  */
 
 import { expect, test } from "bun:test";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { EditorState, markdown, markdownLanguage } from "#editor-vendor/codemirror";
 import {
   isAlwaysDecoratedNode,
@@ -23,17 +25,18 @@ import {
   parseLinkLabelSegments,
 } from "../../extensions/viewers/editor/markdown/link.ts";
 import { isTableBoundaryPosition } from "../../extensions/viewers/editor/markdown/table-keymap.ts";
-import { shouldSignalTreeGrowth } from "../../extensions/viewers/editor/markdown/tree-progress.ts";
+import {
+  shouldSignalTreeGrowth,
+  TREE_PROGRESS_TICK_BUDGET_MS,
+} from "../../extensions/viewers/editor/markdown/tree-progress.ts";
 import {
   findMidTypingEmphasisRanges,
   getLivePreviewDecorationRanges,
   getSelectionLineSignature,
   livePreviewFrozenField,
-  livePreviewParsingSuspendedField,
   livePreviewRangesCover,
   pushSafeReplace,
   setLivePreviewFrozen,
-  setLivePreviewParsingSuspended,
   splitRangeByDocumentLines,
 } from "../../extensions/viewers/editor/markdown/live-preview.ts";
 
@@ -135,16 +138,6 @@ test("live preview freeze field toggles from pointer freeze effects", () => {
   expect(thawed.field(livePreviewFrozenField)).toBe(false);
 });
 
-test("live preview parsing suspension follows Firefox typing burst effects", () => {
-  const state = EditorState.create({ extensions: [livePreviewParsingSuspendedField] });
-  const suspended = state.update({ effects: setLivePreviewParsingSuspended.of(true) }).state;
-  const resumed = suspended.update({ effects: setLivePreviewParsingSuspended.of(false) }).state;
-
-  expect(state.field(livePreviewParsingSuspendedField)).toBe(false);
-  expect(suspended.field(livePreviewParsingSuspendedField)).toBe(true);
-  expect(resumed.field(livePreviewParsingSuspendedField)).toBe(false);
-});
-
 test("live preview viewport cache covers nearby scroll inside the decoration margin", () => {
   const doc = Array.from({ length: 1400 }, (_, index) => `line ${index} with **bold** text`).join("\n");
   const state = EditorState.create({ doc, selection: { anchor: 0 } });
@@ -161,10 +154,17 @@ test("live preview viewport cache covers nearby scroll inside the decoration mar
   expect(livePreviewRangesCover(cachedRanges, [{ from: farLine.from, to: farLine.to }])).toBe(false);
 });
 
-test("tree progress signals on bounded growth threshold or complete parse", () => {
+test("tree progress signals incrementally without monopolizing a frame", () => {
   expect(shouldSignalTreeGrowth(0, 1024, 10_000)).toBe(false);
   expect(shouldSignalTreeGrowth(0, 8192, 10_000)).toBe(true);
   expect(shouldSignalTreeGrowth(7000, 7999, 7999)).toBe(true);
+  expect(TREE_PROGRESS_TICK_BUDGET_MS).toBeLessThanOrEqual(8);
+
+  const imageBlockSource = readFileSync(
+    join(import.meta.dir, "../../extensions/viewers/editor/markdown/image-block.ts"),
+    "utf8",
+  );
+  expect(imageBlockSource).not.toContain("ensureSyntaxTree");
 });
 
 test("image block parser accepts common markdown image sources and rejects unsafe shapes", () => {

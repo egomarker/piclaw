@@ -70,7 +70,10 @@ export function startExternalProgressWatchdogMonitor(): boolean {
   if (isExternalProgressWatchdogDisabled() || isDbInMemoryForWatchdog()) return false;
   const timeoutMs = getProgressWatchdogTimeoutMs();
   if (timeoutMs <= 0) return false;
-  if (isChildStillActive(activeProgressWatchdogChild)) return false;
+  if (isChildStillActive(activeProgressWatchdogChild)) {
+    flushProgressWatchdogState();
+    return true;
+  }
 
   ensurePreShutdownHookRegistered();
 

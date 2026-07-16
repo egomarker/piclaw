@@ -1277,7 +1277,9 @@ function streamAzureOpenAIResponses(model: any, context: any, options: any) {
 
 function streamSimpleAzureOpenAIResponses(model: any, context: any, options: any) {
   const base = buildBaseOptions(model, options, options?.apiKey);
-  const reasoningEffort = getSupportedThinkingLevels(model).includes("xhigh") ? options?.reasoning : clampReasoning(options?.reasoning);
+  const reasoningEffort = getSupportedThinkingLevels(model).includes(options?.reasoning)
+    ? options?.reasoning
+    : clampReasoning(options?.reasoning);
 
   return streamAzureOpenAIResponses(model, context, {
     ...base,
