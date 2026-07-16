@@ -1941,6 +1941,27 @@ export async function processChat(
     },
     onDraftBuffer: (text, totalLines) => channel.updateDraftBuffer(turnId, text, totalLines),
   });
+  const clearCommittedDraft = () => {
+    channel.updateDraftBuffer(turnId, "", 0);
+    trackedEmitter.draft({
+      thread_id: threadId,
+      agent_id: agentId,
+      turn_id: turnId,
+      text: "",
+      total_lines: 0,
+      kind: "draft",
+      mode: "replace",
+    });
+    if (channel.isPanelExpanded(turnId, "draft")) {
+      trackedEmitter.draftDelta({
+        thread_id: threadId,
+        agent_id: agentId,
+        turn_id: turnId,
+        delta: "",
+        reset: true,
+      });
+    }
+  };
   const trackedStreamingHandler = (event: Record<string, unknown>) => {
     const type = typeof event?.type === "string" ? event.type : "";
     if (type === "message_update") {
@@ -2401,7 +2422,7 @@ export async function processChat(
     skipPrePromptCompaction: true,
     scheduleIdleAutoCompaction: true,
     onEvent: trackedStreamingHandler,
-    onTurnComplete: (turn: { text: string; attachments: unknown[]; usage?: unknown }) => {
+    onTurnComplete: (turn: { text: string; attachments: unknown[]; usage?: unknown; followedByToolUse?: boolean }) => {
       // Turn boundary: the first turn (index 0) is the original prompt's
       // response — skip placeholder consumption so it doesn't steal a
       // placeholder that belongs to a queued follow-up.
@@ -2419,6 +2440,7 @@ export async function processChat(
           threadId: resolvedThreadRootId,
           skipPlaceholder: isFirstTurn,
           extraContentBlocks: [buildAgentTimingBlock(turn.usage)],
+          onMessageStored: turn.followedByToolUse ? clearCommittedDraft : undefined,
         });
         if (!stored) {
           intermediatePersistFailed = true;

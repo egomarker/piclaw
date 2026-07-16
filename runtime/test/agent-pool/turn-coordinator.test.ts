@@ -294,8 +294,8 @@ test("AgentTurnCoordinator does not flush an incomplete turn when a new text_sta
   expect(tracker.getFinalText()).toBe("fallback answer");
 });
 
-test("AgentTurnCoordinator preserves assistant text that accompanies tool calls", () => {
-  const completed: Array<{ text: string; attachments: AttachmentInfo[] }> = [];
+test("AgentTurnCoordinator commits assistant text as soon as its tool-use message completes", () => {
+  const completed: Array<{ text: string; attachments: AttachmentInfo[]; followedByToolUse?: boolean }> = [];
   const coordinator = new AgentTurnCoordinator({
     takeAttachments: () => [],
     touchSession: () => {},
@@ -332,6 +332,15 @@ test("AgentTurnCoordinator preserves assistant text that accompanies tool calls"
       ],
     },
   } as any);
+
+  expect(completed).toEqual([{
+    text: "Now let me inspect that file:",
+    attachments: [],
+    followedByToolUse: true,
+  }]);
+  expect(tracker.getTurnCount()).toBe(1);
+  expect(tracker.getFinalText()).toBe("");
+
   tracker.handleMessageUpdate({
     type: "message_update",
     assistantMessageEvent: {
@@ -348,7 +357,11 @@ test("AgentTurnCoordinator preserves assistant text that accompanies tool calls"
     },
   } as any);
 
-  expect(completed).toEqual([{ text: "Now let me inspect that file:", attachments: [] }]);
+  expect(completed).toEqual([{
+    text: "Now let me inspect that file:",
+    attachments: [],
+    followedByToolUse: true,
+  }]);
   expect(tracker.getTurnCount()).toBe(1);
   expect(tracker.getFinalText()).toBe("done");
   expect(tracker.getLastAssistantState()).toEqual(expect.objectContaining({
@@ -357,8 +370,8 @@ test("AgentTurnCoordinator preserves assistant text that accompanies tool calls"
   }));
 });
 
-test("AgentTurnCoordinator retains streamed text when a tool-call message omits it", () => {
-  const completed: Array<{ text: string; attachments: AttachmentInfo[] }> = [];
+test("AgentTurnCoordinator commits streamed text at tool-use message_end when the finalized message omits it", () => {
+  const completed: Array<{ text: string; attachments: AttachmentInfo[]; followedByToolUse?: boolean }> = [];
   const coordinator = new AgentTurnCoordinator({
     takeAttachments: () => [],
     touchSession: () => {},
@@ -391,16 +404,77 @@ test("AgentTurnCoordinator retains streamed text when a tool-call message omits 
       content: [{ type: "toolCall", id: "tool-1", name: "edit", arguments: {} }],
     },
   } as any);
+  expect(completed).toEqual([{
+    text: "The review is complete; I will now apply the patch.",
+    attachments: [],
+    followedByToolUse: true,
+  }]);
+  expect(tracker.getFinalText()).toBe("");
+
   tracker.handleMessageUpdate({
     type: "message_update",
     assistantMessageEvent: { type: "text_start", contentIndex: 0, partial: { content: [{ type: "text" }] } },
   } as any);
 
-  expect(completed).toEqual([{
-    text: "The review is complete; I will now apply the patch.",
-    attachments: [],
-  }]);
+  expect(completed).toHaveLength(1);
   expect(tracker.getTurnCount()).toBe(1);
+});
+
+test("AgentTurnCoordinator clears a completed tool-use lead-in even without a turn callback", () => {
+  const coordinator = new AgentTurnCoordinator({
+    takeAttachments: () => [],
+    touchSession: () => {},
+    recordMessageUsage: () => {},
+  });
+  const tracker = coordinator.createTracker("web:default");
+
+  tracker.handleMessageUpdate({
+    type: "message_update",
+    assistantMessageEvent: { type: "text_delta", delta: "I will inspect that." },
+  } as any);
+  tracker.handleMessageUpdate({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      stopReason: "toolUse",
+      content: [
+        { type: "text", text: "I will inspect that." },
+        { type: "toolCall", id: "tool-1", name: "read", arguments: {} },
+      ],
+    },
+  } as any);
+
+  expect(tracker.getFinalText()).toBe("");
+  expect(tracker.getTurnCount()).toBe(0);
+});
+
+test("AgentTurnCoordinator does not commit a tool-call block without a toolUse stop", () => {
+  const completed: Array<{ text: string; attachments: AttachmentInfo[] }> = [];
+  const coordinator = new AgentTurnCoordinator({
+    takeAttachments: () => [],
+    touchSession: () => {},
+    recordMessageUsage: () => {},
+  });
+  const tracker = coordinator.createTracker("web:default", (turn) => completed.push(turn));
+
+  tracker.handleMessageUpdate({
+    type: "message_update",
+    assistantMessageEvent: { type: "text_delta", delta: "Final answer" },
+  } as any);
+  tracker.handleMessageUpdate({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      stopReason: "stop",
+      content: [
+        { type: "text", text: "Final answer" },
+        { type: "toolCall", id: "malformed-tool", name: "read", arguments: {} },
+      ],
+    },
+  } as any);
+
+  expect(completed).toEqual([]);
+  expect(tracker.getFinalText()).toBe("Final answer");
 });
 
 test("AgentTurnCoordinator captures provider error from assistant message_end", () => {

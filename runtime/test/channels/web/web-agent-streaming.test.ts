@@ -157,6 +157,129 @@ describe("web agent streaming", () => {
     }
   });
 
+  test("persists a completed tool-use lead-in before tool execution starts", async () => {
+    let inspectTimeline = (): any[] => [];
+    let timelineAtToolStart: any[] = [];
+    const agentPool = {
+      setSessionBinder: () => {},
+      runAgent: async (_prompt: string, _chatJid: string, options: any) => {
+        const leadIn = "I will inspect the workspace now.";
+        options.onEvent?.(makeEvent("message_update", {
+          assistantMessageEvent: { type: "text_start" },
+        }));
+        options.onEvent?.(makeEvent("message_update", {
+          assistantMessageEvent: { type: "text_delta", delta: leadIn },
+        }));
+        options.onEvent?.(makeEvent("message_end", {
+          message: {
+            role: "assistant",
+            stopReason: "toolUse",
+            content: [
+              { type: "text", text: leadIn },
+              { type: "toolCall", id: "tool-1", name: "read", arguments: { path: "README.md" } },
+            ],
+          },
+        }));
+        options.onTurnComplete?.({ text: leadIn, attachments: [], followedByToolUse: true });
+
+        timelineAtToolStart = inspectTimeline();
+        options.onEvent?.(makeEvent("tool_execution_start", {
+          toolCallId: "tool-1",
+          toolName: "read",
+          args: { path: "README.md" },
+        }));
+        options.onEvent?.(makeEvent("tool_execution_end", {
+          toolCallId: "tool-1",
+          toolName: "read",
+          isError: false,
+        }));
+        return { status: "success", result: "Inspection complete.", attachments: [] };
+      },
+      getContextUsageForChat: async () => null,
+    } as any;
+
+    const fixture = await createWebChannelTestFixture({
+      workspace: "temp",
+      queue: new AgentQueue(),
+      agentPool,
+      resetSql: "DELETE FROM message_media; DELETE FROM messages; DELETE FROM chats; DELETE FROM chat_cursors;",
+    });
+
+    try {
+      const { channel, db, events } = fixture;
+      inspectTimeline = () => db.getTimeline("web:default", 20);
+      expect(channel.storeMessage("web:default", "inspect it", false, [])).not.toBeNull();
+
+      await channel.processChat("web:default", "default");
+
+      expect(timelineAtToolStart.some((row) => row.data?.content === "I will inspect the workspace now.")).toBe(true);
+      const finalTimeline = inspectTimeline();
+      expect(finalTimeline.filter((row) => row.data?.content === "I will inspect the workspace now.")).toHaveLength(1);
+      expect(finalTimeline.filter((row) => row.data?.content === "Inspection complete.")).toHaveLength(1);
+
+      const clearDraftIndices = events.flatMap((event, index) => event.type === "agent_draft" && event.data?.text === "" ? [index] : []);
+      const committedResponseIndex = events.findIndex((event) => event.type === "agent_response" && event.data?.data?.content === "I will inspect the workspace now.");
+      const toolStartIndex = events.findIndex((event) => event.type === "agent_status" && event.data?.type === "tool_call" && event.data?.tool_name === "read");
+      expect(clearDraftIndices).toHaveLength(2);
+      expect(committedResponseIndex).toBeGreaterThan(clearDraftIndices.at(-1) ?? -1);
+      expect(toolStartIndex).toBeGreaterThan(committedResponseIndex);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test("keeps the draft available when the pre-tool intermediate post cannot be persisted", async () => {
+    const leadIn = "I will inspect the workspace now.";
+    const agentPool = {
+      setSessionBinder: () => {},
+      runAgent: async (_prompt: string, _chatJid: string, options: any) => {
+        options.onEvent?.(makeEvent("message_update", {
+          assistantMessageEvent: { type: "text_start" },
+        }));
+        options.onEvent?.(makeEvent("message_update", {
+          assistantMessageEvent: { type: "text_delta", delta: leadIn },
+        }));
+        options.onTurnComplete?.({ text: leadIn, attachments: [], followedByToolUse: true });
+        return { status: "tool_complete", result: null, attachments: [] };
+      },
+      getContextUsageForChat: async () => null,
+    } as any;
+
+    const fixture = await createWebChannelTestFixture({
+      workspace: "temp",
+      queue: new AgentQueue(),
+      agentPool,
+      resetSql: "DELETE FROM message_media; DELETE FROM messages; DELETE FROM chats; DELETE FROM chat_cursors;",
+    });
+
+    try {
+      const { channel, db, events } = fixture;
+      expect(channel.storeMessage("web:default", "inspect it", false, [])).not.toBeNull();
+      const originalStoreMessage = channel.storeMessage.bind(channel);
+      let rejectNextAgentPost = true;
+      channel.storeMessage = ((...args: any[]) => {
+        if (args[2] === true && rejectNextAgentPost) {
+          rejectNextAgentPost = false;
+          return null;
+        }
+        return originalStoreMessage(...args);
+      }) as typeof channel.storeMessage;
+
+      await channel.processChat("web:default", "default");
+
+      const timeline = db.getTimeline("web:default", 20);
+      expect(timeline.filter((row) => row.data?.content === leadIn)).toHaveLength(1);
+      expect(timeline.find((row) => row.data?.content === leadIn)?.data?.content_blocks).toContainEqual(expect.objectContaining({
+        type: "turn_outcome_marker",
+        kind: "tool_complete",
+        draft_recovered: true,
+      }));
+      expect(events.filter((event) => event.type === "agent_draft" && event.data?.text === "")).toHaveLength(1);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   test("streams live generated widget events for show_widget tool calls", async () => {
     const agentPool = {
       setSessionBinder: () => {},

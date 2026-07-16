@@ -61,6 +61,8 @@ export interface TurnOutput {
   text: string;
   attachments: AttachmentInfo[];
   usage?: Usage;
+  /** The completed assistant message committed immediately before tool dispatch. */
+  followedByToolUse?: boolean;
 }
 
 /** Result returned from a side prompt run. */
@@ -86,7 +88,7 @@ export interface SidePromptOptions {
 /** Options for AgentPool.runAgent(): chatJid, messages, callbacks. */
 export interface RunAgentOptions {
   onEvent?: (event: AgentSessionEvent) => void;
-  /** Called when a turn completes (text_start → next text_start or end). */
+  /** Called when a completed assistant message can be committed, including before tool dispatch. */
   onTurnComplete?: (turn: TurnOutput) => void;
   /** Stable runtime turn identifier for observability/correlation. */
   turnId?: string;

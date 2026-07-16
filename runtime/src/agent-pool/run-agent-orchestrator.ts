@@ -759,6 +759,7 @@ async function runPromptAttempt(
   let hadToolActivity = false;
   let hadPartialOutput = false;
   let hadCompletedTurnOutput = false;
+  let hadTerminalTurnOutput = false;
   let compactionErrorMessage: string | null = null;
   let sawCompactionIntent = false;
   let sawAssistantToolCallMessage = false;
@@ -856,8 +857,10 @@ async function runPromptAttempt(
 
   const originalOnTurnComplete = runOptions.onTurnComplete;
   const onTurnComplete = originalOnTurnComplete
-    ? ((turn: { text: string; attachments: AttachmentInfo[]; usage?: unknown }) => {
-        hadCompletedTurnOutput = hadCompletedTurnOutput || !!(turn.text || turn.attachments.length > 0);
+    ? ((turn: { text: string; attachments: AttachmentInfo[]; usage?: unknown; followedByToolUse?: boolean }) => {
+        const hadOutput = !!(turn.text || turn.attachments.length > 0);
+        hadCompletedTurnOutput = hadCompletedTurnOutput || hadOutput;
+        hadTerminalTurnOutput = hadTerminalTurnOutput || (hadOutput && !turn.followedByToolUse);
         originalOnTurnComplete(turn as Parameters<NonNullable<RunAgentOptions["onTurnComplete"]>>[0]);
       })
     : undefined;
@@ -1441,7 +1444,7 @@ async function runPromptAttempt(
       };
     } else {
       const blankTurnDelta = inspectBlankTurnSessionDelta(session, sessionEntryBaseline);
-      if (!finalText && finalAttachments.length === 0 && !hadCompletedTurnOutput) {
+      if (!finalText && finalAttachments.length === 0 && !hadTerminalTurnOutput) {
         let detail: string;
         if (!hadPartialOutput && !hadToolActivity && isBlankTurnSessionDelta(blankTurnDelta)) {
           detail = [

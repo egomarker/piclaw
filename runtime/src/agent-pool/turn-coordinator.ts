@@ -24,6 +24,8 @@ export interface AgentTurnOutput {
   text: string;
   attachments: AttachmentInfo[];
   usage?: Usage;
+  /** The completed assistant message committed immediately before tool dispatch. */
+  followedByToolUse?: boolean;
 }
 
 /** Error state captured from an assistant message with stopReason "error". */
@@ -145,7 +147,7 @@ export class AgentTurnCoordinator {
       messageComplete = false;
     };
 
-    const flushTurn = () => {
+    const flushTurn = (options: { followedByToolUse?: boolean } = {}) => {
       const text = currentTurnText.trim();
       if (!text && !onTurnComplete) {
         resetCurrentTurn();
@@ -156,6 +158,7 @@ export class AgentTurnCoordinator {
           text,
           attachments: this.options.takeAttachments(chatJid),
           ...(currentTurnUsage ? { usage: currentTurnUsage } : {}),
+          ...(options.followedByToolUse ? { followedByToolUse: true } : {}),
         });
         turnCount += 1;
       }
@@ -266,6 +269,21 @@ export class AgentTurnCoordinator {
             hadToolCallContent,
             hadThinkingContent,
           });
+
+          messageHasDelta = false;
+          messageComplete = true;
+          // A tool-call message is already authoritative and immutable at
+          // message_end. Persist its visible lead-in before dispatching tools
+          // instead of leaving stable prose in the transient Draft panel until
+          // another assistant text stream happens to begin.
+          if (message.stopReason === "toolUse" && hadToolCallContent) {
+            if (onTurnComplete) {
+              flushTurn({ followedByToolUse: true });
+            } else {
+              resetCurrentTurn();
+            }
+          }
+          return;
         }
         messageHasDelta = false;
         messageComplete = true;

@@ -3568,7 +3568,7 @@ test("runAgentPrompt treats terminal side-effect tool completion as informationa
   }
 });
 
-test("runAgentPrompt treats draft-backed provider stop after tool use as informational", async () => {
+test("runAgentPrompt keeps a committed tool-use lead-in intermediate when the provider stops without closing prose", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
@@ -3595,12 +3595,17 @@ test("runAgentPrompt treats draft-backed provider stop after tool use as informa
     async prompt() {
       this.promptCalls += 1;
       for (const listener of this.listeners) {
+        listener({ type: "message_update", assistantMessageEvent: { type: "text_start" } });
+        listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "I will run the tests now." } });
         listener({
           type: "message_end",
           message: {
             role: "assistant",
             stopReason: "toolUse",
-            content: [{ type: "toolCall", id: "tool-1", name: "bash", arguments: { command: "make test" } }],
+            content: [
+              { type: "text", text: "I will run the tests now." },
+              { type: "toolCall", id: "tool-1", name: "bash", arguments: { command: "make test" } },
+            ],
           },
         });
         this.entries.push({ id: "assistant-tool", type: "message" });
@@ -3631,8 +3636,10 @@ test("runAgentPrompt treats draft-backed provider stop after tool use as informa
       recordMessageUsage: () => {},
     });
 
+    const completedTurns: Array<{ text: string; followedByToolUse?: boolean }> = [];
     const result = await runAgentPrompt("run tests", "web:default", {
       timeoutMs: 0,
+      onTurnComplete: (turn) => completedTurns.push({ text: turn.text, followedByToolUse: turn.followedByToolUse }),
       onEvent: (event) => {
         if (event.type === "recovery_start" || event.type === "recovery_end") {
           recoveryEvents.push({ type: String(event.type) });
@@ -3651,6 +3658,7 @@ test("runAgentPrompt treats draft-backed provider stop after tool use as informa
     expect(result.status).toBe("tool_complete");
     expect(result.error).toBeUndefined();
     expect(session.promptCalls).toBe(1);
+    expect(completedTurns).toEqual([{ text: "I will run the tests now.", followedByToolUse: true }]);
     expect(recoveryEvents).toEqual([]);
   } finally {
     restoreEnv();
