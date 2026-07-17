@@ -1,10 +1,24 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { clearProviderUsageCache, getProviderUsage, peekProviderUsage, warmProviderUsage } from "../../src/agent-pool/provider-usage.js";
 
-function createAuthStorage(credentials: Record<string, unknown>) {
+const roots: string[] = [];
+function createAuthStorage(credentials: Record<string, any>) {
+  const root = mkdtempSync(join(tmpdir(), "piclaw-provider-usage-"));
+  roots.push(root);
+  const authPath = join(root, "auth.json");
+  writeFileSync(authPath, JSON.stringify(credentials), { mode: 0o600 });
   return {
-    get: (provider: string) => credentials[provider],
-    refreshOAuthTokenWithLock: async (_provider: string) => null,
+    authPath,
+    getAuth: async (provider: string) => {
+      const credential = credentials[provider];
+      if (credential?.type === "oauth") return { auth: { apiKey: credential.access }, source: "OAuth" };
+      if (credential?.type === "api_key" && credential.key) return { auth: { apiKey: credential.key }, source: "stored credential" };
+      if (provider === "zai" && process.env.ZAI_API_KEY) return { auth: { apiKey: process.env.ZAI_API_KEY }, source: "ZAI_API_KEY" };
+      return undefined;
+    },
   } as any;
 }
 
@@ -20,6 +34,7 @@ describe("provider usage", () => {
   afterEach(() => {
     if (previousZaiApiKey === undefined) delete process.env.ZAI_API_KEY;
     else process.env.ZAI_API_KEY = previousZaiApiKey;
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
 
   test("fetches Codex usage from ChatGPT usage API", async () => {

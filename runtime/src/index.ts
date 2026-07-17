@@ -8,6 +8,7 @@
  */
 
 import { handleCliOptions } from "./cli.js";
+import { syncUpstreamAgentDirEnv } from "./core/agent-dir.js";
 import { createLogger } from "./utils/logger.js";
 
 const log = createLogger("piclaw");
@@ -17,6 +18,7 @@ if (handled) {
   process.exit(process.exitCode ?? 0);
 }
 
+syncUpstreamAgentDirEnv();
 const { main } = await import("./runtime.js");
 main().catch((error) => {
   log.error("Fatal runtime error", {

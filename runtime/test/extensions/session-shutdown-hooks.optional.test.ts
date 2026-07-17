@@ -54,6 +54,7 @@ describe("session_shutdown upgrade regressions", () => {
       ensureModelCaps: async () => {},
       staticApiKey: "",
     });
+    await bootstrap.refresh();
     await waitFor(() => timers.scheduled.some((handle) => Number(handle?.ms) >= 60000), 1000, 10);
     const lastHandle = [...timers.scheduled].reverse().find((handle) => Number(handle?.ms) >= 60000);
     expect(lastHandle).toBeDefined();
@@ -63,29 +64,12 @@ describe("session_shutdown upgrade regressions", () => {
     expect(timers.cleared).toContain(lastHandle);
   });
 
-  test("azure-openai integration session_shutdown stops its active bootstrap", async () => {
+  test("azure-openai default extension owns no session provider lifecycle", async () => {
     const mod = await importFresh<any>("../extensions/integrations/azure-openai.ts");
-    let stopCalls = 0;
-    let refreshCalls = 0;
-    mod.setAzureProviderBootstrapFactoryForTests(() => ({
-      stop: () => { stopCalls++; },
-      refresh: async () => { refreshCalls++; },
-    }));
-    try {
-      const fake = createFakeExtensionApi({ allTools: [] });
-      mod.default(fake.api);
-
-      const start = getHandler(fake.handlers as FakeHandler[], "session_start");
-      const shutdown = getHandler(fake.handlers as FakeHandler[], "session_shutdown");
-
-      await start.handler({}, { hasUI: false });
-      expect(refreshCalls).toBe(1);
-
-      await shutdown.handler({ type: "session_shutdown", reason: "fork", targetSessionFile: "/tmp/forked.jsonl" });
-      expect(stopCalls).toBe(1);
-    } finally {
-      mod.setAzureProviderBootstrapFactoryForTests(null);
-    }
+    const fake = createFakeExtensionApi({ allTools: [] });
+    mod.default(fake.api);
+    expect((fake.handlers as FakeHandler[]).some((entry) => entry.event === "session_start")).toBe(false);
+    expect((fake.handlers as FakeHandler[]).some((entry) => entry.event === "session_shutdown")).toBe(false);
   });
 
   test("azure-openai harness clears its refresh timer on session shutdown", async () => {

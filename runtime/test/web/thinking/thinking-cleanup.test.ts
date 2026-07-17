@@ -232,8 +232,8 @@ describe("thinking_content cleanup across all delete paths", () => {
 
       const chatA = seedChat("chat-A", 3);
       const chatB = seedChat("chat-B", 2);
-      const dream1 = seedChat("dream:auto:1", 1);
-      const dream2 = seedChat("dream:manual:2", 1);
+      seedChat("dream:auto:1", 1);
+      seedChat("dream:manual:2", 1);
 
       // 1. delete a single message by rowid
       deleteMessageByRowId("chat-A", chatA[0]);

@@ -6,12 +6,12 @@ distribution: private
 
 # Close of Day
 
-One-shot daily maintenance for:
+Run this skill once per day to:
 
-1. generating a situation report
-2. optionally backing up state before cleanup
-3. cleaning low-value timeline traffic
-4. updating daily notes in the same task
+1. generate a situation report
+2. back up state before cleanup, if needed
+3. clean low-value timeline traffic
+4. update daily notes in the same task
 
 ## Workflow
 
@@ -27,7 +27,7 @@ Use the `messages` tool for cleanup and summarisation where available:
 - `search` + `delete` for cleanup candidate discovery/removal
 - `search` + `get` for daily-note summarisation work
 
-For `web:*`, the session scope includes **all web session trees** (root chats plus branches), not just the currently visible tab.
+For `web:*`, the session scope covers **all web session trees** (root chats plus branches), not just the visible tab.
 
 ## Usage
 
@@ -45,8 +45,8 @@ bun run /workspace/.pi/skills/close-of-day/close-of-day.ts \
 - `--apply` — perform deletions
 - `--include-media` — allow deletion of messages with attachments
 - `--skip-backup` — skip restic backup
-- `--situate-only` — generate/update the situation report only; this is **not** a full close-of-day run
-- `--cleanup-only` — run cleanup only; this is **not** a full close-of-day run
+- `--situate-only` — generate or update the situation report only; this is a partial maintenance pass
+- `--cleanup-only` — run cleanup only; this is a partial maintenance pass
 
 ## Flags
 
@@ -75,7 +75,7 @@ If you use `--situate-only` or `--cleanup-only`, treat the run as a partial main
 
 - cleanup defaults to dry-run so counts can be reviewed first
 - attachment-bearing threads are skipped unless `--include-media` is set
-- when `web:*` session trees diverged, preserve branch separation in the resulting daily summaries instead of blending them together
+- if `web:*` session trees diverge, preserve branch separation in the resulting daily summaries instead of blending them together
 - the generated close-of-day report is an intermediate working artifact for the daily-notes phase
 
 ## Output artifacts

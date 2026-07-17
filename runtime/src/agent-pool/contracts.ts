@@ -2,17 +2,14 @@
  * agent-pool/contracts.ts – Shared public contracts for AgentPool and its helpers.
  */
 
-import type { AgentSessionEvent, AgentSessionRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
-import type { streamSimple } from "@earendil-works/pi-ai/compat";
+import type { AgentSessionEvent, AgentSessionRuntime, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type {
-  Api,
   AssistantMessageEvent,
-  AssistantMessageEventStream,
-  Model,
   Usage,
 } from "@earendil-works/pi-ai";
 
 import type { AttachmentInfo } from "./attachments.js";
+import type { PiclawCredentialStore } from "./credential-store.js";
 
 export interface AgentRecoveryDiagnosticEntry {
   phase: "attempt_failure" | "compaction_failure";
@@ -133,10 +130,8 @@ export interface RetrySettingsProvider {
 export interface AgentPoolOptions {
   createSession?: (chatJid: string, sessionDir: string) => Promise<AgentSessionRuntime>;
   createSideSession?: (chatJid: string, sessionDir: string) => Promise<AgentSessionRuntime>;
+  credentialStore?: PiclawCredentialStore;
+  modelRuntime?: ModelRuntime;
   modelRegistry?: import("@earendil-works/pi-coding-agent").ModelRegistry;
-  sideStreamSimple?: (
-    model: Model<Api>,
-    context: Parameters<typeof streamSimple>[1],
-    options?: Parameters<typeof streamSimple>[2]
-  ) => AssistantMessageEventStream;
+  sideStreamSimple?: ModelRuntime["streamSimple"];
 }

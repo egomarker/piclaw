@@ -8,6 +8,9 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+type AzureHarnessProviderConfig = Parameters<ExtensionAPI["registerProvider"]>[1];
+type AzureHarnessProviderRegistrar = (name: string, config: AzureHarnessProviderConfig) => void;
 import OpenAI from "openai";
 import {
   AssistantMessageEventStream,
@@ -1295,7 +1298,7 @@ function streamSimpleFoundryOpenAICompletions(model: any, context: any, options:
   return streamSimpleOpenAICompletions(overrideModel, context, options);
 }
 
-export function registerAzureProviders(register: (name: string, config: any) => void, token: string) {
+export function registerAzureProviders(register: AzureHarnessProviderRegistrar, token: string): void {
   const openaiModels = MODEL_IDS.flatMap((id, idx) => {
     const spec = MODEL_SPECS[id] || DEFAULT_AZURE_SPEC;
     const caps = MODEL_CAPABILITIES[id];

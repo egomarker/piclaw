@@ -1,6 +1,6 @@
 # Session recordings and playback
 
-Piclaw can capture an opt-in, redacted chat/session trace and replay it through a playback-only UI for deterministic screen recordings.
+Piclaw can capture an opt-in, redacted chat/session trace and replay it in a playback-only UI for deterministic screen recordings.
 
 ## Management UI
 
@@ -17,7 +17,7 @@ Open **Settings → Recordings** to:
 
 ## Recording API
 
-All endpoints are authenticated web endpoints.
+All endpoints are authenticated web routes.
 
 | Endpoint | Method | Purpose |
 |---|---:|---|
@@ -102,7 +102,7 @@ Current event kinds include:
 
 Redaction controls are per recording and are stored in `meta.json` so exported artifacts remain auditable. Use `redact-preview` or the Settings UI preview before recording sensitive demos.
 
-## Standalone playback shim
+## Standalone playback page
 
 Open:
 
@@ -118,4 +118,4 @@ The page can also load a static JSON/JSONL fixture via:
 
 or by dragging a JSON/JSONL trace file onto the page. HTML exports embed the trace and do not need a Piclaw server.
 
-The playback shim is intentionally standalone and playback-only: it does not call live agent endpoints, execute tools, or mutate chat state. It supports play, pause, reset, step, and speed controls for screen-recording workflows.
+The playback page is playback-only: it does not execute tools or mutate chat state. The hosted page reads saved traces from `/agent/recordings`; exported HTML and static fixtures need no Piclaw server. Playback controls include play, pause, reset, step, and speed.

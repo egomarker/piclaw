@@ -15,6 +15,7 @@ export type ShutdownDeps = {
   pushover?: { stop: () => Promise<unknown> } | null;
   stopIpcWatcher: () => Promise<void>;
   stopSchedulerLoop: () => void;
+  stopOptionalProviders: () => void;
 };
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T | null> {
@@ -59,6 +60,7 @@ export function createShutdownHandler(deps: ShutdownDeps): (signal: string) => P
 
     await withTimeout(deps.stopIpcWatcher(), 4000, "ipc watcher stop");
     deps.stopSchedulerLoop();
+    deps.stopOptionalProviders();
     await withTimeout(deps.queue.shutdown(5000), 7000, "queue shutdown");
     await withTimeout(deps.agentPool.shutdown(), 8000, "agent pool shutdown");
     await withTimeout(deps.web.stop(), 4000, "web stop");

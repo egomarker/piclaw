@@ -7,7 +7,7 @@
  */
 
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, truncateSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, truncateSync, writeFileSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { withChatContext } from "../../src/core/chat-context.js";
 import { clearProviderUsageCache, warmProviderUsage } from "../../src/agent-pool/provider-usage.js";
@@ -153,7 +153,7 @@ test("agent control info and mode commands", async () => {
   })));
   globalThis.fetch = fetchMock as any;
   try {
-    await warmProviderUsage(authStorage as any, "zai");
+    await warmProviderUsage({ getAuth: async () => ({ auth: { apiKey: "test-key" } }) } as any, "zai");
     session.model = { provider: "zai", id: "glm-4.6", reasoning: true } as any;
     const warmQuota = await applyControlCommand(runtime as any, registry, { type: "quota", raw: "/quota" });
     expect(warmQuota.message).toBe("zai/glm-4.6\nPlan: Pro • 5h 62% • tools 41% • resets in ~1h 30m • resets in ~2d 0h");
@@ -239,7 +239,7 @@ test("agent control session and tree commands", async () => {
   mkdirSync(dirname(session.sessionFile), { recursive: true });
   writeFileSync(session.sessionFile, '{"type":"session","id":"active","version":3}\n{"type":"message","id":"m1","parentId":null,"timestamp":"2026-03-14T00:00:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Hello"}],"provider":"openai","model":"gpt-test","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1}}\n');
   const rotated = await applyControlCommand(runtime as any, registry, { type: "session_rotate", instructions: "keep active work", raw: "/session-rotate keep active work" });
-  expect(rotated.status).toBe("success");
+  expect(rotated.status, rotated.message).toBe("success");
   expect(rotated.message).toContain("Session rotated.");
   expect(rotated.message).toContain("Archived previous session:");
   expect(rotated.message).toContain("New session:");
@@ -534,30 +534,112 @@ test("login config writes stay inside the overridden pi-agent dir", async () => 
   const session = new TestAgentControlSession(ws.workspace, loginRegistry);
   const runtime = createTestSessionRuntime(session);
 
+  const apiKeyStart = await applyControlCommand(runtime as any, loginRegistry, {
+    type: "login",
+    provider: `__step1 ${JSON.stringify({ provider: "openai" })}`,
+    raw: "/login __step1",
+  });
+  expect((apiKeyStart.contentBlocks?.[0] as any)?.payload?.body).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: "auth_value", style: "password" }),
+  ]));
   const apiKeyResult = await applyControlCommand(runtime as any, loginRegistry, {
     type: "login",
-    provider: `__step2 ${JSON.stringify({ provider: "openai", method: "api_key", api_key: "new-key" })}`,
+    provider: `__step2 ${JSON.stringify({ provider: "openai", method: "runtime_continue", auth_type: "api_key", auth_value: "new-key" })}`,
     raw: "/login __step2",
   });
   expect(apiKeyResult.status).toBe("success");
   expect(apiKeyResult.model_label).toBe("openai/gpt-test");
   expect(session.model?.provider).toBe("openai");
   expect(session.model?.id).toBe("gpt-test");
-  const authBackups = readdirSync(piAgentDir).filter((name) => name.startsWith("auth.json.") && name.endsWith(".bak"));
-  expect(authBackups.length).toBeGreaterThan(0);
+  expect(loginRegistry.authStorage.get("openai")).toMatchObject({ type: "api_key", key: "new-key" });
 
+  let reloadConfigCalls = 0;
+  loginRegistry.modelRuntime.reloadConfig = async () => { reloadConfigCalls += 1; };
   const configureResult = await applyControlCommand(runtime as any, loginRegistry, {
     type: "login",
     provider: `__step2 ${JSON.stringify({ provider: "ollama", method: "configure", baseUrl: "http://127.0.0.1:11434/v1", modelId: "llama3:latest", modelIds: "qwen3:latest", contextWindow: "128000" })}`,
     raw: "/login __step2",
   });
   expect(configureResult.status).toBe("success");
+  expect(reloadConfigCalls).toBe(1);
 
   const modelsPath = join(piAgentDir, "models.json");
   expect(existsSync(modelsPath)).toBe(true);
   const modelsJson = JSON.parse(readFileSync(modelsPath, "utf-8"));
   expect(modelsJson.providers?.ollama?.baseUrl).toBe("http://127.0.0.1:11434/v1");
   expect(modelsJson.providers?.ollama?.models?.map((entry: { id: string }) => entry.id)).toEqual(["llama3:latest", "qwen3:latest"]);
+});
+
+test("provider-owned API-key login supports multiple prompts without direct credential writes", async () => {
+  const ws = getTestWorkspace();
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+  const applyControlCommand = await getControl();
+  const loginRegistry = createTestModelRegistry([{ provider: "cloudflare-ai-gateway", id: "model", name: "Model" }]);
+  loginRegistry.modelRuntime.login = async (_providerId: string, _type: string, interaction: any) => {
+    const key = await interaction.prompt({ type: "secret", message: "Enter Cloudflare API key" });
+    const account = await interaction.prompt({ type: "text", message: "Enter Cloudflare account ID" });
+    loginRegistry.authStorage.set("cloudflare-ai-gateway", { type: "api_key", key, env: { CLOUDFLARE_ACCOUNT_ID: account } });
+  };
+  const session = new TestAgentControlSession(ws.workspace, loginRegistry);
+  const runtime = createTestSessionRuntime(session);
+
+  const start = await applyControlCommand(runtime as any, loginRegistry, {
+    type: "login", provider: `__step1 ${JSON.stringify({ provider: "cloudflare-ai-gateway" })}`, raw: "/login __step1",
+  });
+  expect((start.contentBlocks?.[0] as any)?.payload?.body).toEqual(expect.arrayContaining([expect.objectContaining({ id: "auth_value", style: "password" })]));
+  const next = await applyControlCommand(runtime as any, loginRegistry, {
+    type: "login", provider: `__step2 ${JSON.stringify({ provider: "cloudflare-ai-gateway", method: "runtime_continue", auth_type: "api_key", auth_value: "secret-key" })}`, raw: "/login __step2",
+  });
+  expect((next.contentBlocks?.[0] as any)?.payload?.body).toEqual(expect.arrayContaining([expect.objectContaining({ id: "auth_value", style: "text" })]));
+  const done = await applyControlCommand(runtime as any, loginRegistry, {
+    type: "login", provider: `__step2 ${JSON.stringify({ provider: "cloudflare-ai-gateway", method: "runtime_continue", auth_type: "api_key", auth_value: "acct-1" })}`, raw: "/login __step2",
+  });
+  expect(done.status).toBe("success");
+  expect(loginRegistry.authStorage.get("cloudflare-ai-gateway")).toMatchObject({ key: "secret-key", env: { CLOUDFLARE_ACCOUNT_ID: "acct-1" } });
+});
+
+test("provider-owned auth cancellation aborts the runtime flow and clears pending prompts", async () => {
+  const ws = getTestWorkspace();
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+  const applyControlCommand = await getControl();
+  const loginRegistry = createTestModelRegistry([{ provider: "openai-codex", id: "gpt-5.5" }]);
+  let sawAbort = false;
+  loginRegistry.modelRuntime.login = async (_providerId: string, _type: string, interaction: any) => {
+    interaction.signal.addEventListener("abort", () => { sawAbort = true; }, { once: true });
+    await interaction.prompt({ type: "manual_code", message: "Paste redirect URL" });
+  };
+  const session = new TestAgentControlSession(ws.workspace, loginRegistry);
+  const runtime = createTestSessionRuntime(session);
+  await applyControlCommand(runtime as any, loginRegistry, {
+    type: "login", provider: `__step1 ${JSON.stringify({ provider: "openai-codex" })}`, raw: "/login __step1",
+  });
+  const cancelled = await applyControlCommand(runtime as any, loginRegistry, {
+    type: "login", provider: `__step2 ${JSON.stringify({ provider: "openai-codex", method: "runtime_cancel", auth_type: "oauth" })}`, raw: "/login __step2",
+  });
+  expect(cancelled.status).toBe("success");
+  expect(cancelled.message).toContain("cancelled");
+  expect(sawAbort).toBe(true);
+  const stale = await applyControlCommand(runtime as any, loginRegistry, {
+    type: "login", provider: `__step2 ${JSON.stringify({ provider: "openai-codex", method: "runtime_check", auth_type: "oauth" })}`, raw: "/login __step2",
+  });
+  expect(stale.status).toBe("error");
+  expect(stale.message).toContain("No active authentication flow");
+});
+
+test("logout delegates credential deletion to ModelRuntime", async () => {
+  const ws = getTestWorkspace();
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+  const applyControlCommand = await getControl();
+  const loginRegistry = createTestModelRegistry([{ provider: "openai", id: "gpt-test" }]);
+  loginRegistry.authStorage.set("openai", { type: "api_key", key: "secret" });
+  let logoutCalls = 0;
+  const originalLogout = loginRegistry.modelRuntime.logout;
+  loginRegistry.modelRuntime.logout = async (providerId: string) => { logoutCalls += 1; await originalLogout(providerId); };
+  const session = new TestAgentControlSession(ws.workspace, loginRegistry);
+  const result = await applyControlCommand(createTestSessionRuntime(session) as any, loginRegistry, { type: "logout", provider: "openai", raw: "/logout openai" });
+  expect(result.status).toBe("success");
+  expect(logoutCalls).toBe(1);
+  expect(loginRegistry.authStorage.get("openai")).toBeUndefined();
 });
 
 test("abort returns when session abort remains pending", async () => {
@@ -592,109 +674,69 @@ test("login refreshes model registry before activating newly authenticated provi
   restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
 
   const applyControlCommand = await getControl();
-  let refreshCalls = 0;
-  const loginRegistry = {
-    authStorage: {
-      get: (provider: string) => provider === "github-copilot" ? ({ type: "oauth" } as const) : undefined,
-      set: () => {},
-      reload: () => {},
-    },
-    refresh: () => { refreshCalls += 1; },
-    getAvailable: () => [],
-    getAll: () => refreshCalls > 0
-      ? [{ provider: "github-copilot", id: "gpt-4.1", name: "GPT 4.1", reasoning: true }]
-      : [],
-  };
+  const loginRegistry = createTestModelRegistry([
+    { provider: "github-copilot", id: "gpt-4.1", name: "GPT 4.1", reasoning: true },
+  ]);
   const session = new TestAgentControlSession(ws.workspace, loginRegistry);
   const runtime = createTestSessionRuntime(session);
 
+  const picker = await applyControlCommand(runtime as any, loginRegistry as any, {
+    type: "login",
+    provider: `__step1 ${JSON.stringify({ provider: "github-copilot" })}`,
+    raw: "/login __step1",
+  });
+  expect(picker.status).toBe("success");
   const result = await applyControlCommand(runtime as any, loginRegistry as any, {
     type: "login",
-    provider: `__step2 ${JSON.stringify({ provider: "github-copilot", method: "oauth_check" })}`,
-    raw: "/login __step2",
+    provider: `__step1method ${JSON.stringify({ provider: "github-copilot", action: "oauth" })}`,
+    raw: "/login __step1method",
   });
 
-  expect(refreshCalls).toBeGreaterThan(0);
   expect(result.status).toBe("success");
-  expect(result.model_label).toBe("github-copilot/gpt-4.1");
+  expect(loginRegistry.authStorage.get("github-copilot")?.type).toBe("oauth");
+  expect(result.model_label, result.message).toBe("github-copilot/gpt-4.1");
   expect(session.model?.provider).toBe("github-copilot");
   expect(session.model?.id).toBe("gpt-4.1");
 });
 
-test("OpenAI Codex OAuth defaults to device code and keeps browser fallback", async () => {
+test("provider-owned auth interaction renders select and device-code events", async () => {
   const ws = getTestWorkspace();
   restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
-
   const applyControlCommand = await getControl();
-
-  async function startOpenAiCodexLogin(options: Array<{ id: string; label: string }>) {
-    let selectedMethod: string | undefined;
-    const authStorage = {
-      getOAuthProviders: () => [{ id: "openai-codex", name: "ChatGPT Plus/Pro (Codex Subscription)", usesCallbackServer: true }],
-      get: () => undefined,
-      set: () => {},
-      reload: () => {},
-      login: async (_providerId: string, callbacks: any) => {
-        selectedMethod = await callbacks.onSelect({
-          message: "Select OpenAI Codex login method:",
-          options,
-        });
-        if (selectedMethod === "device_code") {
-          callbacks.onDeviceCode({
-            userCode: "ABCD-EFGH",
-            verificationUri: "https://auth.openai.com/codex/device",
-            intervalSeconds: 5,
-            expiresInSeconds: 900,
-          });
-        } else {
-          callbacks.onAuth({
-            url: "http://localhost:1455/auth/callback?code=fake",
-            instructions: "A browser window should open. Complete login to finish.",
-          });
-        }
-      },
-    };
-    const loginRegistry = createTestModelRegistry(
-      [{ provider: "openai-codex", id: "gpt-5.5", name: "GPT 5.5", reasoning: true }],
-      authStorage,
-    );
-    const session = new TestAgentControlSession(ws.workspace, loginRegistry);
-    const runtime = createTestSessionRuntime(session);
-    const result = await applyControlCommand(runtime as any, loginRegistry, {
-      type: "login",
-      provider: `__step1 ${JSON.stringify({ provider: "openai-codex" })}`,
-      raw: "/login __step1",
+  const loginRegistry = createTestModelRegistry([{ provider: "openai-codex", id: "gpt-5.5", name: "GPT 5.5", reasoning: true }]);
+  let selectedMethod: string | null = null;
+  loginRegistry.modelRuntime.login = async (_providerId: string, _type: string, interaction: any) => {
+    selectedMethod = await interaction.prompt({
+      type: "select",
+      message: "Select OpenAI Codex login method:",
+      options: [{ id: "browser", label: "Browser" }, { id: "device_code", label: "Device code" }],
     });
-    const card = result.contentBlocks?.[0] as any;
-    const body = card?.payload?.body ?? [];
-    const actions = card?.payload?.actions ?? [];
-    return {
-      result,
-      selectedMethod,
-      body,
-      openUrl: actions.find((action: any) => action.type === "Action.OpenUrl")?.url,
-      hasRedirectInput: body.some((item: any) => item.type === "Input.Text" && item.id === "redirect_url"),
-      deviceCodeBlock: body.find((item: any) => item.type === "TextBlock" && item.text === "ABCD-EFGH"),
-    };
-  }
+    interaction.notify({ type: "device_code", userCode: "ABCD-EFGH", verificationUri: "https://auth.openai.com/codex/device" });
+    await new Promise(() => {});
+  };
+  const session = new TestAgentControlSession(ws.workspace, loginRegistry);
+  const runtime = createTestSessionRuntime(session);
 
-  const deviceCode = await startOpenAiCodexLogin([
-    { id: "browser", label: "Browser login (default)" },
-    { id: "device_code", label: "Device code login (headless)" },
-  ]);
-  expect(deviceCode.result.status).toBe("success");
-  expect(deviceCode.selectedMethod).toBe("device_code");
-  expect(deviceCode.openUrl).toBe("https://auth.openai.com/codex/device");
-  expect(deviceCode.deviceCodeBlock).toMatchObject({ fontType: "Monospace", weight: "Bolder" });
-  expect(deviceCode.hasRedirectInput).toBe(false);
+  const start = await applyControlCommand(runtime as any, loginRegistry, {
+    type: "login",
+    provider: `__step1 ${JSON.stringify({ provider: "openai-codex" })}`,
+    raw: "/login __step1",
+  });
+  expect((start.contentBlocks?.[0] as any)?.payload?.body).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: "auth_value", style: "expanded" }),
+  ]));
 
-  const browserFallback = await startOpenAiCodexLogin([
-    { id: "browser", label: "Browser login (default)" },
-  ]);
-  expect(browserFallback.result.status).toBe("success");
-  expect(browserFallback.selectedMethod).toBe("browser");
-  expect(browserFallback.openUrl).toBe("http://localhost:1455/auth/callback?code=fake");
-  expect(browserFallback.hasRedirectInput).toBe(true);
+  const next = await applyControlCommand(runtime as any, loginRegistry, {
+    type: "login",
+    provider: `__step2 ${JSON.stringify({ provider: "openai-codex", method: "runtime_continue", auth_type: "oauth", auth_value: "device_code" })}`,
+    raw: "/login __step2",
+  });
+  expect(selectedMethod).toBe("device_code");
+  const card = next.contentBlocks?.[0] as any;
+  expect(card?.payload?.actions?.find((action: any) => action.type === "Action.OpenUrl")?.url).toBe("https://auth.openai.com/codex/device");
+  expect(card?.payload?.body).toEqual(expect.arrayContaining([
+    expect.objectContaining({ text: "ABCD-EFGH", fontType: "Monospace" }),
+  ]));
 });
 
 test("agent control cycle and agent identity commands", async () => {
@@ -702,15 +744,18 @@ test("agent control cycle and agent identity commands", async () => {
   restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
 
   const applyControlCommand = await getControl();
+  let cycleRefreshCalls = 0;
   const cycleRegistry = createTestModelRegistry([
     { provider: "openai", id: "gpt-test", reasoning: true, contextWindow: 200000 },
     { provider: "anthropic", id: "claude-test", reasoning: true, contextWindow: 200000 },
   ]);
+  cycleRegistry.refresh = async () => { cycleRefreshCalls += 1; };
   const session = new TestAgentControlSession(ws.workspace, cycleRegistry);
   const runtime = createTestSessionRuntime(session);
 
   const cycleModel = await applyControlCommand(runtime as any, cycleRegistry, { type: "cycle_model", direction: "forward", raw: "/cycle-model" });
   expect(cycleModel.message).toContain("Model set to");
+  expect(cycleRefreshCalls).toBe(1);
 
   session.isCompacting = true;
   const blockedCycleModel = await applyControlCommand(runtime as any, cycleRegistry, { type: "cycle_model", direction: "forward", raw: "/cycle-model" });

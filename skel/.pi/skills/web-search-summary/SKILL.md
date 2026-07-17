@@ -6,14 +6,14 @@ distribution: public
 
 # Web Search Summary
 
-Use this when you want **quick summaries of the top pages**, not full raw page content.
+Use this when you need short summaries of the top pages, not full page content.
 
-If you need the fetched Markdown itself as the main artifact, use `web-search` instead.
+If you need fetched Markdown as the main artifact, use `web-search`.
 
 ## Search engine selection
 
-- If `PICLAW_SEARX_URL` is set or `--searx-url` is passed, uses SearXNG.
-- Otherwise, falls back to **DuckDuckGo HTML search** (no API key required).
+- If `PICLAW_SEARX_URL` is set or `--searx-url` is passed, the script uses SearXNG.
+- Otherwise, it falls back to **DuckDuckGo HTML search** (no API key required).
 
 ## Examples
 

@@ -131,7 +131,12 @@ export const modelControl: ExtensionFactory = (pi: ExtensionAPI) => {
       offset: Type.Optional(Type.Integer({ description: "Offset for pagination.", minimum: 0 })),
     }),
     async execute(_id, params, _signal, _update, ctx) {
-      ctx.modelRegistry.refresh();
+      let refreshError: string | null = null;
+      try {
+        await ctx.modelRegistry.refresh();
+      } catch (error) {
+        refreshError = error instanceof Error ? error.message : String(error);
+      }
       const scopedModels = resolveModelScope(
         ctx.modelRegistry.getAvailable(),
         (ctx as { settingsManager?: EnabledModelsSettingsProvider }).settingsManager,
@@ -165,12 +170,14 @@ export const modelControl: ExtensionFactory = (pi: ExtensionAPI) => {
 
       if (page.length === 0) {
         const msg = query ? `No models found matching "${params.query}".` : "No available models found.";
-        return { content: [{ type: "text", text: msg }], details: { total: entries.length, count: 0, offset, limit, current_model: current, scoped_models_only: scopedModels.scoped, enabled_model_patterns: scopedModels.patterns, models: [] } };
+        const refreshNote = refreshError ? ` Catalog refresh failed: ${refreshError}` : "";
+        return { content: [{ type: "text", text: `${msg}${refreshNote}` }], details: { total: entries.length, count: 0, offset, limit, current_model: current, refresh_error: refreshError, scoped_models_only: scopedModels.scoped, enabled_model_patterns: scopedModels.patterns, models: [] } };
       }
 
       const header = query
         ? `Available models (filtered): ${page.length} of ${entries.length}.`
         : `Available models: ${page.length} of ${entries.length}.`;
+      const refreshNote = refreshError ? ` Catalog refresh failed; showing cached models: ${refreshError}` : "";
       const lines = page.map((e) => {
         const currentSuffix = e.label === current ? " (current)" : "";
         const rpm = e.rate_limits?.rpm;
@@ -180,8 +187,8 @@ export const modelControl: ExtensionFactory = (pi: ExtensionAPI) => {
       });
 
       return {
-        content: [{ type: "text", text: `${header}\n${lines.join("\n")}` }],
-        details: { total: entries.length, count: page.length, offset, limit, current_model: current, scoped_models_only: scopedModels.scoped, enabled_model_patterns: scopedModels.patterns, models: page },
+        content: [{ type: "text", text: `${header}${refreshNote}\n${lines.join("\n")}` }],
+        details: { total: entries.length, count: page.length, offset, limit, current_model: current, refresh_error: refreshError, scoped_models_only: scopedModels.scoped, enabled_model_patterns: scopedModels.patterns, models: page },
       };
     },
   });
@@ -201,10 +208,16 @@ export const modelControl: ExtensionFactory = (pi: ExtensionAPI) => {
         return { content: [{ type: "text", text: "Provide a model identifier." }], details: {} };
       }
 
-      ctx.modelRegistry.refresh();
+      let refreshError: string | null = null;
+      try {
+        await ctx.modelRegistry.refresh();
+      } catch (error) {
+        refreshError = error instanceof Error ? error.message : String(error);
+      }
       const { model: selected, error } = findModel(ctx.modelRegistry.getAll(), provider, modelId);
       if (error || !selected) {
-        return { content: [{ type: "text", text: error! }], details: {} };
+        const suffix = refreshError ? ` Catalog refresh failed: ${refreshError}` : "";
+        return { content: [{ type: "text", text: `${error!}${suffix}` }], details: { refresh_error: refreshError } };
       }
 
       const previous = modelLabel(ctx.model);

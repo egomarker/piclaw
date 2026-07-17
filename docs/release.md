@@ -26,7 +26,7 @@ The workflow also publishes the experimental Electrobun desktop shell for each r
 
 ## Cutting a release
 
-The authoritative workflow is documented in the [cut-release skill](/workspace/.pi/skills/cut-release/SKILL.md), which covers:
+The [cut-release skill](/workspace/.pi/skills/cut-release/SKILL.md) defines the full workflow:
 
 - Gathering the delta and drafting release notes
 - Local rebuild and CI verification (`make build-piclaw && make ci-fast`)
@@ -105,9 +105,9 @@ EXPECTED_RESTIC_VERSION=$(tr -d '[:space:]' < RESTIC_VERSION) \
 make publish-smoke
 ```
 
-Boundary note:
+Ownership boundary:
 - publish smoke is intentionally repo-owned (`make publish-smoke`)
-- release/tag/workflow/package pruning remains GitHub-native in `.github/workflows/publish.yml`
+- release/tag/workflow/package pruning is GitHub-native in `.github/workflows/publish.yml`
   because it depends directly on Actions context and GitHub APIs
 - Actions workflow runs and Actions artifacts are pruned after release publishing using the oldest timestamp among the latest 5 GitHub releases as the retention cutoff
 

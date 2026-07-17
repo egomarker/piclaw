@@ -411,6 +411,7 @@ const groupDefinitions: GroupDefinition[] = [
           "timeline-menu-dropdown.test.ts",
           "upload-limit-settings.test.ts",
           "compaction-settings-handler.test.ts",
+          "compaction-settings-ui.test.ts",
           "compose-speech.test.ts",
           "post-speech.test.ts",
           "markdown-surface-security.test.ts",
@@ -479,6 +480,7 @@ const groupDefinitions: GroupDefinition[] = [
           "post-copy-markdown.test.ts",
           "post-highlight-css.test.ts",
           "post-highlights.test.ts",
+          "provider-error-format.test.ts",
           "post-large-code-block.test.ts",
           "post-recovery-chip.test.ts",
           "post-runtime-safety.test.ts",
@@ -511,6 +513,11 @@ const groupDefinitions: GroupDefinition[] = [
           "zip-preview.test.ts",
           "status-hints.test.ts",
           "status-render.test.ts",
+          "persist-thinking.test.ts",
+          "scroll-anchor.test.ts",
+          "thinking-cleanup.test.ts",
+          "thinking-endpoint.test.ts",
+          "timeline-render-boundary.test.ts",
         ])
         || isAppRenderingPaneTest(relativePath)
       ),

@@ -7,7 +7,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentSession, AgentSessionRuntime, ModelRegistry, AuthStorage, SettingsManager } from "@earendil-works/pi-coding-agent";
+import type { AgentSession, AgentSessionRuntime, ModelRegistry, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 
 import { applyControlCommand, type AgentControlCommand, type AgentControlResult } from "../agent-control/index.js";
 import { getLatestTokenUsageModel } from "../db.js";
@@ -507,8 +507,9 @@ export interface AgentRuntimeFacadeOptions {
   pool: Map<string, PoolEntry>;
   getOrCreateRuntime: (chatJid: string) => Promise<AgentSessionRuntime>;
   modelRegistry: ModelRegistry;
+  modelRuntime: ModelRuntime;
   settingsManager?: SettingsManager;
-  authStorage: AuthStorage;
+  authPath: string;
   clearAttachments: (chatJid: string) => void;
   refreshRuntime: (chatJid: string, runtime: AgentSessionRuntime) => Promise<void>;
   onWarn?: (message: string, details: Record<string, unknown>) => void;
@@ -547,7 +548,6 @@ export class AgentRuntimeFacade {
     const session = this.options.pool.get(chatJid)?.runtime.session ?? null;
     const persistedState = session ? { current: null, thinkingLevel: null } : getPersistedSessionState(chatJid);
     const registry = (session as (AgentSession & { modelRegistry?: ModelRegistry }) | null)?.modelRegistry ?? this.options.modelRegistry;
-    registry.refresh();
     const scopedModels = resolveModelScope(
       registry.getAvailable(),
       (session as (AgentSession & { settingsManager?: SettingsManager }) | null)?.settingsManager ?? this.options.settingsManager,
@@ -585,7 +585,7 @@ export class AgentRuntimeFacade {
         : null;
     const activeProvider = session?.model?.provider ?? currentModelOption?.provider ?? null;
     if (activeProvider) {
-      void warmProviderUsage(this.options.authStorage, activeProvider);
+      void warmProviderUsage(this.options.modelRuntime, activeProvider, this.options.authPath);
     }
     const thinkingLevelLabel = thinkingLevel && currentModelDescriptor
       ? formatThinkingLevelForDisplay(thinkingLevel, currentModelDescriptor)

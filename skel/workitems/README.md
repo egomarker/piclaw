@@ -1,31 +1,13 @@
-# Project Workitems Board
+# Workitems compatibility scaffold
 
-This board is the **project-local workitems board** for the generated project.
+Use the current Git repository's GitHub Issues and GitHub Projects for active project work. Do not create new Markdown work-item files here unless this workspace explicitly adopts the legacy file-board workflow.
 
-## What belongs here
+The lane directories and `_templates/work-item.md` remain for compatibility with older workspaces and project templates.
 
-- project feature work
-- project bugs and regressions
-- project architecture, tooling, release, and UX tickets
+Confirm the repository before changing issues:
 
-## What does not belong here
-
-- tickets explicitly tagged `non-project`
-- unrelated infrastructure or side-project ideas
-- new-project exploration that should live outside this repository
-
-## Notes
-
-- This board mirrors the standard lane layout used elsewhere.
-- Prefer keeping project work here instead of in a shared global board.
-- Keep unrelated tickets on a separate/global board unless the user requests a different home.
-
-## Layout
-
-- `00-inbox/`
-- `10-next/`
-- `20-doing/`
-- `30-blocked/`
-- `40-review/`
-- `50-done/`
-- `_templates/`
+```bash
+repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+gh issue list -R "$repo" --state open
+gh issue create -R "$repo" --title "..." --body "..."
+```

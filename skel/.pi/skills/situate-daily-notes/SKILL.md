@@ -59,7 +59,7 @@ Rolling memory outputs live under `notes/memory/`:
 
 ## Writing summaries
 
-Daily notes are summaries only; the message database remains the source of truth for full transcripts.
+Daily notes summarise activity. The message database is the source of truth for the full transcript.
 
 When `situate.ts` or `daily-notes.ts` reports notes that need summary work:
 

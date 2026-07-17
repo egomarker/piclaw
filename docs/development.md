@@ -50,11 +50,11 @@ The implementation lives under `runtime/`, so direct Bun test runs should target
 cd runtime && bun test --max-concurrency=1
 ```
 
-## Recent focused integration notes
+## Focused integration notes
 
-### Earendil 0.80.6 runtime
+### Earendil 0.80.10 runtime
 
-Piclaw's Pi runtime packages are sourced from `@earendil-works/*` and are pinned together at `0.80.6`. The upgrade adopts the upstream model catalog, pricing, native `max` thinking, compaction estimation, Anthropic signature handling, and configurable `shellPath` changes while keeping a small set of Piclaw-owned compatibility layers.
+Piclaw's Pi runtime packages are sourced from `@earendil-works/*` and are pinned together at `0.80.10`. The runtime uses upstream model/auth services, catalogs, pricing, native `max` thinking, compaction estimation, Anthropic signature handling, and configurable `shellPath` behavior while keeping a small set of Piclaw-owned compatibility layers.
 
 | Compatibility layer | Why Piclaw still owns it | Focused coverage |
 |---|---|---|
@@ -84,7 +84,7 @@ User/operator behavior is documented in [configuration.md](configuration.md), [t
 
 ### MCP adapter
 
-PiClaw now bundles `pi-mcp-adapter` as a normal package dependency and loads it as a packaged session extension from `node_modules/`.
+PiClaw bundles `pi-mcp-adapter` as a normal package dependency and loads it as a packaged session extension from `node_modules/`.
 
 Relevant files when working on MCP integration:
 
@@ -95,7 +95,7 @@ Relevant files when working on MCP integration:
 - `skel/.pi/mcp.json.example`
 - `skel/.pi/skills/mcp-adapter/SKILL.md`
 
-The `0.80.6` package set includes `pi-mcp-adapter` `2.11.0`, which forwards abort signals and applies its configured `requestTimeoutMs` to protocol requests. Piclaw independently wraps the MCP tools after their `session_start` registration so existing `PICLAW_MCP_TOOL_TIMEOUT_MS` behavior remains stable across adapter upgrades.
+Piclaw uses `pi-mcp-adapter` `2.11.0`, which forwards abort signals and applies its configured `requestTimeoutMs` to protocol requests. Piclaw independently wraps MCP tools after their `session_start` registration so existing `PICLAW_MCP_TOOL_TIMEOUT_MS` behavior remains stable across adapter upgrades.
 
 Focused regression tests:
 
@@ -129,7 +129,7 @@ Notes:
 
 - `/image --transparent` requests transparent PNG output on the Azure OpenAI image path.
 - `/flux` still rejects transparent background requests.
-- Successful image runs now format results as workspace-backed inline images plus file listings rather than raw download links.
+- Successful image runs format results as workspace-backed inline images plus file listings rather than raw download links.
 
 ### Azure OpenAI / Foundry harness
 
@@ -154,10 +154,10 @@ AOAI_EXPERIMENT_AZURE_CLIENT_REQUEST_ID=1 bun run scripts/azure-openai-harness.t
 Notes:
 
 - the harness bundles to `/workspace/piclaw/.tmp/azure-openai.harness.bundle.mjs` so Bun resolves this repo's dependencies correctly
-- the live Azure extension now aligns `prompt_cache_key`, `session_id`, and `x-client-request-id` from the active session id on the Azure Responses path
-- the harness now checks those correlation fields automatically and fails if they drift
+- the live Azure extension aligns `prompt_cache_key`, `session_id`, and `x-client-request-id` from the active session id on the Azure Responses path
+- the harness checks those correlation fields automatically and fails if they drift
 - the harness also fails if replayed request payloads still contain leaked `partialJson` scratch buffers
-- historical `0.67.2` live-provider evidence for `gpt-5-3-codex` and `gpt-5-4` is recorded in [azure-openai-extension.md](azure/azure-openai-extension.md); deterministic `0.80.6` behavior is covered by the focused tests in the Earendil section above
+- historical `0.67.2` live-provider evidence for `gpt-5-3-codex` and `gpt-5-4` is recorded in [azure-openai-extension.md](azure/azure-openai-extension.md); deterministic `0.80.10` behavior is covered by the focused tests in the Earendil section above
 - `AOAI_EXPERIMENT_AZURE_CLIENT_REQUEST_ID=1` remains available for the optional `x-ms-client-request-id` experiment
 
 ### Workspace search / reindex UI
@@ -193,7 +193,7 @@ Default command:
 bun run test:oobe:local-container
 ```
 
-What it does:
+The script:
 
 - ensures Playwright Chromium is available
 - builds a local image (`piclaw-oobe-test:local`) unless skipped
@@ -231,7 +231,7 @@ Notes:
 
 ### Editor file conflict detection
 
-The editor pane now monitors for external file changes via `GET /workspace/stat?path=<file>` (polled every 5s while the tab is focused) and shows a conflict resolution bar when the on-disk mtime advances past the last known mtime. The same `FileConflictMonitor` can be reused by pane-style editors, and add-ons can vendor the same pattern for specialized editors like `kanban-editor`.
+The editor pane polls `GET /workspace/stat?path=<file>` every 5s while the tab is focused and shows a conflict resolution bar when the on-disk mtime advances past the last known mtime. The same `FileConflictMonitor` can be reused by pane-style editors, and add-ons can vendor the same pattern for specialized editors such as `kanban-editor`.
 
 Relevant files:
 - `runtime/extensions/viewers/editor/editor-extension.ts`

@@ -9,7 +9,6 @@
  */
 import { createHash } from "node:crypto";
 import type { Message } from "@earendil-works/pi-ai";
-import { completeSimple } from "@earendil-works/pi-ai/compat";
 
 import {
   buildPreview,
@@ -20,9 +19,9 @@ import {
   getToolResultCompactionTools,
   getToolResultSemanticSummaryConfig,
   readToolOutputFile,
-  resolveModelRequestAuth,
   saveToolOutput,
 } from "../../src/extensions/context-mode-api.js";
+import { getRuntimeModelExecutor } from "../../src/extensions/model-execution-runtime.js";
 
 const DEFAULT_STORE_THRESHOLD_BYTES = parseInt(process.env.PICLAW_TOOL_OUTPUT_STORE_BYTES || "4096", 10);
 const DEFAULT_STORE_THRESHOLD_LINES = parseInt(process.env.PICLAW_TOOL_OUTPUT_STORE_LINES || "40", 10);
@@ -112,12 +111,11 @@ async function summarizeToolOutputSemantically(
 
   const config = getToolResultSemanticSummaryConfig();
   if (!config.enabled) return null;
-  if (!extensionContext?.model || !extensionContext?.modelRegistry) return null;
+  if (!extensionContext?.model) return null;
+  const executor = getRuntimeModelExecutor();
+  if (!executor) return null;
 
   try {
-    const auth = await resolveModelRequestAuth(extensionContext.modelRegistry, extensionContext.model);
-    if (!auth.ok) return null;
-
     const sampledOutput = buildSemanticSummaryInput(request.fullOutput, config.maxInputChars);
     const promptText = [
       `Tool: ${request.toolName || "unknown"}`,
@@ -143,12 +141,11 @@ async function summarizeToolOutputSemantically(
     if (extensionContext.signal?.aborted) controller.abort();
 
     try {
-      const response = await completeSimple(
+      const response = await executor.completeSimple(
         extensionContext.model,
         { systemPrompt: TOOL_RESULT_SEMANTIC_SYSTEM_PROMPT, messages },
         {
           maxTokens: config.maxTokens,
-          apiKey: auth.apiKey,
           signal: controller.signal,
         },
       );

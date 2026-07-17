@@ -85,7 +85,14 @@ export async function handleModel(session: AgentSession, modelRegistry: ModelReg
   if (blocked) return blocked;
 
   const registry = ((session as AgentSession & { modelRegistry?: ModelRegistry }).modelRegistry ?? modelRegistry);
-  registry.refresh();
+  try {
+    await registry.refresh();
+  } catch (error) {
+    log.warn("Model refresh failed; continuing with the cached catalog", {
+      operation: "agent_control.model.refresh_failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   if (!command.modelId) {
     if (command.provider) {
@@ -323,7 +330,14 @@ export async function handleCycleModel(session: AgentSession, modelRegistry: Mod
   if (blocked) return blocked;
 
   const registry = ((session as AgentSession & { modelRegistry?: ModelRegistry }).modelRegistry ?? modelRegistry);
-  registry.refresh?.();
+  try {
+    await registry.refresh();
+  } catch (error) {
+    log.warn("Model refresh failed before cycling; continuing with the cached catalog", {
+      operation: "agent_control.model.cycle_refresh_failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
   const availableModels = listUniqueAvailableModels(registry);
   if (availableModels.length <= 1) {
     return { status: "success", message: "Only one model is available to cycle." };

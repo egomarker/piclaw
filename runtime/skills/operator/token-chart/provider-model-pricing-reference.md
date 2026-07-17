@@ -2,7 +2,7 @@
 
 _Reference tag: 2026-07-14_
 
-This is the audit trail for the token chart's **estimated API-equivalent** costs. The executable source of truth is `provider-model-pricing-reference.ts`.
+This file records the sources and assumptions behind the token chart's **estimated API-equivalent** costs. The executable source of truth is `provider-model-pricing-reference.ts`.
 
 ## Source hierarchy
 
@@ -38,7 +38,7 @@ Primary sources checked on 2026-07-14:
 
 ## Subscription-plan cross-check (not used by the resolver)
 
-Checked 2026-07-14. Subscription allowances are not interchangeable with PAYG token prices.
+Checked 2026-07-14. Subscription allowances and PAYG token prices are not interchangeable.
 
 | Product | Current individual tiers | Included allowance / reset | After included allowance |
 | --- | --- | --- | --- |

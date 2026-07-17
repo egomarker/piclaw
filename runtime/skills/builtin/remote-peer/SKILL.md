@@ -101,7 +101,7 @@ Same semantics as `decide` but applied to every pending proposal at once.
 
 ## Environment
 
-The script reads these env vars (all have sensible defaults, overridable via CLI flags):
+The script reads these env vars. CLI flags can override them:
 
 | Var | Default | Purpose |
 |-----|---------|---------|
@@ -120,4 +120,4 @@ piclaw's bash tool injects these automatically when available.
 4. POSTs to `/api/remote/execute` (short-circuit peers) or `/api/remote/proposal` (mediated peers)
 5. Returns the peer's response inline
 
-This mirrors exactly what piclaw's `/ask` slash command does internally.
+This matches piclaw's internal `/ask` flow.

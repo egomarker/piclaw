@@ -9,15 +9,16 @@
  * Logout: Card 1 → confirmation card → done (no Card 3).
  * Custom providers: Card 2 saves config → "restart + /model" (no Card 3).
  *
- * Edits ~/.pi/agent/auth.json and models.json directly with backups.
- * Works without a running model.
+ * Credentials are owned by ModelRuntime login/logout. Piclaw writes only
+ * custom-provider models.json configuration, with backups and awaited reload.
  */
 
-import type { AgentSession, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { AgentSession, ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type { AuthEvent, AuthPrompt, AuthType, CredentialInfo } from "@earendil-works/pi-ai";
 import type { AgentControlCommand, AgentControlResult } from "../agent-control-types.js";
 import { writeFileSync, readFileSync, existsSync, copyFileSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
+import { getPiclawAgentDir } from "../../core/agent-dir.js";
 import { createLogger } from "../../utils/logger.js";
 import { getProviderDefs, type ProviderDef } from "../provider-defs.js";
 import { handleModel } from "./model.js";
@@ -29,31 +30,8 @@ type LogoutCommand = Extract<AgentControlCommand, { type: "logout" }>;
 
 // ── Types ───────────────────────────────────────────────────────
 
-interface AuthStorageLike {
-  getOAuthProviders(): Array<{ id: string; name: string; usesCallbackServer?: boolean }>;
-  get(provider: string): { type?: string; [key: string]: unknown } | undefined;
-  set(provider: string, credential: Record<string, unknown>): void;
-  login(
-    providerId: string,
-    callbacks: {
-      onAuth: (info: { url: string; instructions?: string }) => void;
-      onPrompt: (prompt: { message: string; placeholder?: string }) => Promise<string>;
-      onProgress?: (message: string) => void;
-      onManualCodeInput?: () => Promise<string>;
-      onSelect?: (prompt: { message: string; options: Array<{ id: string; label: string }> }) => Promise<string>;
-      onDeviceCode?: (device: {
-        userCode: string;
-        verificationUri: string;
-        intervalSeconds?: number;
-        expiresInSeconds?: number;
-      }) => void;
-    },
-  ): Promise<void>;
-  reload(): void;
-}
-
 interface ModelRegistryLike {
-  refresh?: () => void;
+  refresh?: () => Promise<void>;
   getAll(): Array<{ id: string; name: string; provider: string; contextWindow?: number }>;
   getProviderAuthStatus?: (provider: string) => { configured: boolean; source?: string; label?: string };
   getProviderDisplayName?: (provider: string) => string;
@@ -61,16 +39,12 @@ interface ModelRegistryLike {
 
 // ── Config paths ────────────────────────────────────────────────
 
-function getPiAgentDir(): string {
-  return process.env.PICLAW_PI_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent");
-}
-
 function getAuthJsonPath(): string {
-  return join(getPiAgentDir(), "auth.json");
+  return join(getPiclawAgentDir(), "auth.json");
 }
 
 function getModelsJsonPath(): string {
-  return join(getPiAgentDir(), "models.json");
+  return join(getPiclawAgentDir(), "models.json");
 }
 
 function backupFile(path: string): void {
@@ -92,17 +66,12 @@ function writeJsonFile(path: string, data: unknown): void {
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-function getAuthStorage(session: AgentSession, modelRegistry: ModelRegistry): AuthStorageLike | null {
-  const registry = (session as AgentSession & { modelRegistry?: ModelRegistry }).modelRegistry ?? modelRegistry;
-  return (registry as unknown as { authStorage?: AuthStorageLike })?.authStorage ?? null;
+function getModelRuntime(session: AgentSession): ModelRuntime {
+  return session.modelRuntime;
 }
 
 function getModelRegistry(session: AgentSession, modelRegistry: ModelRegistry): ModelRegistryLike {
   return ((session as AgentSession & { modelRegistry?: ModelRegistryLike }).modelRegistry ?? modelRegistry) as ModelRegistryLike;
-}
-
-function refreshModelRegistry(registry: ModelRegistryLike): void {
-  registry.refresh?.();
 }
 
 interface ProviderStatus {
@@ -110,31 +79,29 @@ interface ProviderStatus {
   authType: "oauth" | "api_key" | "custom" | "external" | "none";
 }
 
-function getProviderDef(authStorage: AuthStorageLike, registry: ModelRegistryLike, providerId: string): ProviderDef | undefined {
-  return getProviderDefs(registry, authStorage).find((provider) => provider.id === providerId);
+function getProviderDef(modelRuntime: ModelRuntime, registry: ModelRegistryLike, providerId: string): ProviderDef | undefined {
+  return getProviderDefs(registry, modelRuntime).find((provider) => provider.id === providerId);
 }
 
-function getProviderStatuses(authStorage: AuthStorageLike, registry?: ModelRegistryLike): ProviderStatus[] {
-  return getProviderDefs(registry, authStorage).map((def) => {
-    const cred = authStorage.get(def.id);
-    let authType: ProviderStatus["authType"] = "none";
-    if (cred?.type === "oauth") authType = "oauth";
-    else if (cred?.type === "api_key") authType = "api_key";
-    else if (def.isCustom) {
+async function getProviderStatuses(modelRuntime: ModelRuntime, registry?: ModelRegistryLike): Promise<ProviderStatus[]> {
+  const credentials = new Map<string, CredentialInfo>((await modelRuntime.listCredentials()).map((entry) => [entry.providerId, entry]));
+  return getProviderDefs(registry, modelRuntime).map((def) => {
+    const credential = credentials.get(def.id);
+    let authType: ProviderStatus["authType"] = credential?.type === "oauth"
+      ? "oauth"
+      : credential?.type === "api_key"
+        ? "api_key"
+        : "none";
+    if (authType === "none" && def.isCustom) {
       const models = readJsonFile(getModelsJsonPath()) as { providers?: Record<string, unknown> };
       if (models.providers?.[def.id]) authType = "custom";
     }
-
     if (authType === "none") {
-      const registryStatus = registry?.getProviderAuthStatus?.(def.id);
-      if (registryStatus?.configured) {
-        const source = registryStatus.source || "";
-        if (source === "environment") authType = "api_key";
-        else if (source.startsWith("models_json")) authType = "custom";
-        else authType = "external";
+      const runtimeStatus = modelRuntime.getProviderAuthStatus(def.id);
+      if (runtimeStatus.configured) {
+        authType = runtimeStatus.source === "environment" ? "api_key" : "external";
       }
     }
-
     return { def, authType };
   });
 }
@@ -203,71 +170,13 @@ function buildCard1(statuses: ProviderStatus[]): Record<string, unknown> {
 
 // ── Card 2: Auth Form ───────────────────────────────────────────
 
-function buildCard2ApiKey(def: ProviderDef): Record<string, unknown> {
-  return {
-    type: "adaptive_card",
-    card_id: `login-2-apikey-${def.id}-${Date.now()}`,
-    schema_version: "1.5", state: "active",
-    fallback_text: `Enter API key for ${def.name}.`,
-    payload: {
-      type: "AdaptiveCard", version: "1.5",
-      body: [
-        { type: "TextBlock", text: `${def.name} — API Key`, weight: "Bolder", size: "Medium" },
-        { type: "TextBlock", text: "Saved to `~/.pi/agent/auth.json` (backup created first).", wrap: true, isSubtle: true },
-        ...(def.authNote ? [{ type: "TextBlock", text: def.authNote, wrap: true, isSubtle: true }] : []),
-        { type: "Input.Text", id: "api_key", label: "API Key", placeholder: def.apiKeyHint || "Enter key...", style: "password" },
-      ],
-      actions: [
-        { type: "Action.Submit", title: "Save & Continue →", data: { intent: "login-step2", provider: def.id, method: "api_key" } },
-      ],
-    },
-  };
-}
-
-function buildCard2OAuth(def: ProviderDef, authUrl: string, instructions: string, deviceCode?: string): Record<string, unknown> {
-  const isOpenAIDeviceCodeLogin = def.id === "openai-codex" && Boolean(deviceCode);
-  const body: unknown[] = [
-    { type: "TextBlock", text: `${def.name} — OAuth Login`, weight: "Bolder", size: "Medium" },
-    { type: "TextBlock", text: "1. Click below to open the login page in your browser.", wrap: true },
-  ];
-  if (isOpenAIDeviceCodeLogin) {
-    body.push(
-      { type: "TextBlock", text: instructions, wrap: true, isSubtle: true },
-      { type: "TextBlock", text: deviceCode || "", wrap: true, weight: "Bolder", fontType: "Monospace" },
-    );
-  } else if (instructions) {
-    body.push({ type: "TextBlock", text: instructions, wrap: true, isSubtle: true });
-  }
-  body.push({ type: "TextBlock", text: "2. Complete login, then click Check below.", wrap: true, spacing: "medium" });
-  if (!isOpenAIDeviceCodeLogin) {
-    body.push(
-      { type: "TextBlock", text: "3. If the callback didn't work, paste the redirect URL:", wrap: true },
-      { type: "Input.Text", id: "redirect_url", label: "Redirect URL (if needed)", placeholder: "http://localhost:..." },
-    );
-  }
-
-  return {
-    type: "adaptive_card",
-    card_id: `login-2-oauth-${def.id}-${Date.now()}`,
-    schema_version: "1.5", state: "active",
-    fallback_text: `OAuth login for ${def.name}: ${authUrl}`,
-    payload: {
-      type: "AdaptiveCard", version: "1.5", body,
-      actions: [
-        { type: "Action.OpenUrl", title: "Open login page ↗", url: authUrl },
-        { type: "Action.Submit", title: "Check & Continue →", data: { intent: "login-step2", provider: def.id, method: "oauth_check" } },
-      ],
-    },
-  };
-}
-
 function buildCard2Config(def: ProviderDef): Record<string, unknown> {
   const models = readJsonFile(getModelsJsonPath()) as { providers?: Record<string, Record<string, unknown>> };
   const existing = models.providers?.[def.id] || {};
 
   const body: unknown[] = [
     { type: "TextBlock", text: `${def.name} — Configuration`, weight: "Bolder", size: "Medium" },
-    { type: "TextBlock", text: "Saved to `~/.pi/agent/models.json` (backup created first). Restart needed to apply.", wrap: true, isSubtle: true },
+    { type: "TextBlock", text: "Saved to `~/.pi/agent/models.json` (backup created first) and applied immediately.", wrap: true, isSubtle: true },
   ];
 
   for (const field of def.customFields || []) {
@@ -398,110 +307,232 @@ function buildCard3(def: ProviderDef, models: Array<{ id: string; name: string }
   };
 }
 
-// ── OAuth helper ────────────────────────────────────────────────
+// ── Provider-owned auth interaction ─────────────────────────────
 
-/**
- * Pending OAuth flows keyed by provider ID. When the user pastes a redirect
- * URL into the card, resolveOAuthManualInput() feeds it to the waiting
- * onManualCodeInput callback so the SDK can exchange it for credentials.
- */
-const pendingOAuthInputs = new Map<string, { resolve: (url: string) => void; reject: (err: Error) => void }>();
+type PendingAuthPrompt = {
+  prompt: AuthPrompt;
+  resolve(value: string): void;
+  reject(error: Error): void;
+};
 
-function resolveOAuthManualInput(providerId: string, redirectUrl: string): boolean {
-  const pending = pendingOAuthInputs.get(providerId);
-  if (!pending) return false;
-  pendingOAuthInputs.delete(providerId);
-  pending.resolve(redirectUrl);
-  return true;
+type RuntimeAuthFlow = {
+  providerId: string;
+  authType: AuthType;
+  controller: AbortController;
+  pending: PendingAuthPrompt | null;
+  events: AuthEvent[];
+  status: "running" | "completed" | "failed";
+  error: string | null;
+  version: number;
+  expiry: ReturnType<typeof setTimeout>;
+};
+
+const runtimeAuthFlows = new Map<string, RuntimeAuthFlow>();
+
+function flowKey(providerId: string, authType: AuthType): string {
+  return `${providerId}\u0000${authType}`;
 }
 
-async function startOAuthBackground(
-  authStorage: AuthStorageLike,
-  providerId: string,
-): Promise<{ authUrl: string; instructions: string; deviceCode?: string } | null> {
-  let authUrl = "";
-  let instructions = "";
-  let deviceCode: string | undefined;
-  let authReceived: (() => void) | null = null;
-  const authReady = new Promise<void>((resolve) => { authReceived = resolve; });
+function updateAuthFlow(flow: RuntimeAuthFlow): void {
+  flow.version += 1;
+}
 
-  // Clean up any stale pending input for this provider.
-  const stalePending = pendingOAuthInputs.get(providerId);
-  if (stalePending) {
-    stalePending.reject(new Error("Superseded by new OAuth flow"));
-    pendingOAuthInputs.delete(providerId);
+function beginRuntimeAuthFlow(modelRuntime: ModelRuntime, providerId: string, authType: AuthType): RuntimeAuthFlow {
+  const key = flowKey(providerId, authType);
+  const previous = runtimeAuthFlows.get(key);
+  if (previous) {
+    clearTimeout(previous.expiry);
+    previous.controller.abort(new Error("Superseded by a new authentication flow"));
+    previous.pending?.reject(new Error("Superseded by a new authentication flow"));
   }
 
-  const loginPromise = authStorage.login(providerId, {
-    onAuth: (info) => { authUrl = info.url; instructions = info.instructions || ""; authReceived?.(); },
-    onProgress: () => {},
-    onPrompt: async () => "",
-    onSelect: async (prompt) => prompt.options.find((option) => option.id === "device_code")?.id || prompt.options[0]?.id || "",
-    onDeviceCode: (device) => {
-      if (providerId === "openai-codex") {
-        instructions = `Open ${device.verificationUri} and enter code:`;
-        deviceCode = device.userCode;
-      } else {
-        instructions = `Open ${device.verificationUri} and enter code ${device.userCode}.`;
-      }
-      authUrl = device.verificationUri;
-      authReceived?.();
-    },
-    onManualCodeInput: () => new Promise<string>((resolve, reject) => {
-      pendingOAuthInputs.set(providerId, { resolve, reject });
-      // Safety timeout — if no card submission arrives within 5 minutes, reject.
-      setTimeout(() => {
-        if (pendingOAuthInputs.get(providerId)?.resolve === resolve) {
-          pendingOAuthInputs.delete(providerId);
-          reject(new Error("Timed out waiting for redirect URL"));
-        }
-      }, 300_000);
+  const flow: RuntimeAuthFlow = {
+    providerId,
+    authType,
+    controller: new AbortController(),
+    pending: null,
+    events: [],
+    status: "running",
+    error: null,
+    version: 0,
+    expiry: undefined as unknown as ReturnType<typeof setTimeout>,
+  };
+  flow.expiry = setTimeout(() => {
+    if (runtimeAuthFlows.get(key) !== flow) return;
+    flow.controller.abort(new Error("Authentication flow expired"));
+    flow.pending?.reject(new Error("Authentication flow expired"));
+    runtimeAuthFlows.delete(key);
+  }, 300_000);
+  (flow.expiry as { unref?: () => void }).unref?.();
+  runtimeAuthFlows.set(key, flow);
+
+  void modelRuntime.login(providerId, authType, {
+    signal: flow.controller.signal,
+    prompt: (prompt) => new Promise<string>((resolve, reject) => {
+      const finish = (value: string | Error) => {
+        prompt.signal?.removeEventListener("abort", onAbort);
+        if (flow.pending?.resolve === finishValue) flow.pending = null;
+        if (value instanceof Error) reject(value);
+        else resolve(value);
+        updateAuthFlow(flow);
+      };
+      const finishValue = (value: string) => finish(value);
+      const onAbort = () => finish(new Error("Authentication prompt cancelled"));
+      prompt.signal?.addEventListener("abort", onAbort, { once: true });
+      flow.pending = { prompt, resolve: finishValue, reject: (error) => finish(error) };
+      updateAuthFlow(flow);
+      if (prompt.signal?.aborted) onAbort();
     }),
+    notify: (event) => {
+      flow.events.push(event);
+      if (flow.events.length > 8) flow.events.shift();
+      updateAuthFlow(flow);
+    },
+  }).then(() => {
+    flow.status = "completed";
+    updateAuthFlow(flow);
+    log.info("Provider authentication completed", {
+      operation: "agent_control_login.runtime_login_completed",
+      providerId,
+      authType,
+    });
+  }).catch((error) => {
+    flow.status = "failed";
+    flow.error = error instanceof Error ? error.message : String(error);
+    updateAuthFlow(flow);
+    log.warn("Provider authentication failed", {
+      operation: "agent_control_login.runtime_login_failed",
+      providerId,
+      authType,
+      error: flow.error,
+    });
   });
 
-  loginPromise
-    .then(() => {
-      authStorage.reload();
-      log.info("OAuth completed", { providerId });
-    })
-    .catch((error) => {
-      log.warn("OAuth failed", {
-        operation: "agent_control_login.start_oauth_login",
-        providerId,
-        err: error,
-      });
+  return flow;
+}
+
+async function waitForAuthFlowUpdate(flow: RuntimeAuthFlow, previousVersion: number, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (flow.version === previousVersion && flow.status === "running" && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+async function waitForRenderableAuthFlow(flow: RuntimeAuthFlow, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (flow.status === "running" && !flow.pending && flow.events.length === 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+function deleteRuntimeAuthFlow(flow: RuntimeAuthFlow): void {
+  clearTimeout(flow.expiry);
+  runtimeAuthFlows.delete(flowKey(flow.providerId, flow.authType));
+}
+
+function buildRuntimeAuthCard(def: ProviderDef, flow: RuntimeAuthFlow): Record<string, unknown> {
+  const body: Record<string, unknown>[] = [
+    { type: "TextBlock", text: `${def.name} — ${flow.authType === "oauth" ? "OAuth" : "API Key"} Login`, weight: "Bolder", size: "Medium" },
+  ];
+  const actions: Record<string, unknown>[] = [];
+  for (const event of flow.events) {
+    if (event.type === "auth_url") {
+      body.push({ type: "TextBlock", text: event.instructions || "Open the login page and complete authentication.", wrap: true });
+      actions.push({ type: "Action.OpenUrl", title: "Open login page ↗", url: event.url });
+    } else if (event.type === "device_code") {
+      body.push(
+        { type: "TextBlock", text: `Open ${event.verificationUri} and enter code:`, wrap: true },
+        { type: "TextBlock", text: event.userCode, wrap: true, weight: "Bolder", fontType: "Monospace" },
+      );
+      actions.push({ type: "Action.OpenUrl", title: "Open login page ↗", url: event.verificationUri });
+    } else if (event.type === "info") {
+      body.push({ type: "TextBlock", text: event.message, wrap: true, isSubtle: true });
+      for (const link of event.links ?? []) actions.push({ type: "Action.OpenUrl", title: link.label || "Open link ↗", url: link.url });
+    } else {
+      body.push({ type: "TextBlock", text: event.message, wrap: true, isSubtle: true });
+    }
+  }
+
+  const prompt = flow.pending?.prompt;
+  if (prompt?.type === "select") {
+    body.push({
+      type: "Input.ChoiceSet",
+      id: "auth_value",
+      label: prompt.message,
+      style: "expanded",
+      choices: prompt.options.map((option) => ({ title: option.description ? `${option.label} — ${option.description}` : option.label, value: option.id })),
+      value: prompt.options[0]?.id || "",
     });
+  } else if (prompt) {
+    body.push({
+      type: "Input.Text",
+      id: "auth_value",
+      label: prompt.message,
+      placeholder: prompt.placeholder || "",
+      style: prompt.type === "secret" ? "password" : "text",
+    });
+  }
 
-  const timeout = new Promise<void>((resolve) => setTimeout(resolve, 10_000));
-  await Promise.race([authReady, timeout]);
+  if (prompt) {
+    actions.push({ type: "Action.Submit", title: "Continue →", data: { intent: "login-step2", provider: def.id, method: "runtime_continue", auth_type: flow.authType } });
+  } else if (flow.status === "running") {
+    actions.push({ type: "Action.Submit", title: "Check & Continue →", data: { intent: "login-step2", provider: def.id, method: "runtime_check", auth_type: flow.authType } });
+  }
+  if (flow.status === "running") {
+    actions.push({ type: "Action.Submit", title: "Cancel", data: { intent: "login-step2", provider: def.id, method: "runtime_cancel", auth_type: flow.authType } });
+  }
 
-  return authUrl ? { authUrl, instructions, deviceCode } : null;
+  return {
+    type: "adaptive_card",
+    card_id: `login-runtime-${def.id}-${Date.now()}`,
+    schema_version: "1.5",
+    state: "active",
+    fallback_text: `Authentication for ${def.name}.`,
+    payload: { type: "AdaptiveCard", version: "1.5", body, actions },
+  };
+}
+
+async function startRuntimeAuth(
+  modelRuntime: ModelRuntime,
+  def: ProviderDef,
+  authType: AuthType,
+  onComplete?: () => Promise<AgentControlResult>,
+): Promise<AgentControlResult> {
+  const flow = beginRuntimeAuthFlow(modelRuntime, def.id, authType);
+  await waitForRenderableAuthFlow(flow);
+  if (flow.status === "completed") {
+    deleteRuntimeAuthFlow(flow);
+    return onComplete ? await onComplete() : { status: "success", message: `✓ **${def.name}** authenticated.` };
+  }
+  if (flow.status === "failed") {
+    deleteRuntimeAuthFlow(flow);
+    return { status: "error", message: `Could not start authentication for **${def.name}**: ${flow.error}` };
+  }
+  return { status: "success", message: `Authentication for ${def.name}`, contentBlocks: [buildRuntimeAuthCard(def, flow)] };
 }
 
 // ── Step handlers ───────────────────────────────────────────────
 
 /** Card 1 submitted → show Card 2 (auth method picker or direct form). */
 async function handleStep1(
-  authStorage: AuthStorageLike,
+  modelRuntime: ModelRuntime,
   registry: ModelRegistryLike,
   data: Record<string, unknown>,
 ): Promise<AgentControlResult> {
   const providerId = String(data.provider || "").trim();
-  const def = getProviderDef(authStorage, registry, providerId);
+  const def = getProviderDef(modelRuntime, registry, providerId);
   if (!def) return { status: "error", message: `Unknown provider "${providerId}".` };
 
   // Count applicable methods
   const methods = [def.hasOAuth, def.hasApiKey, def.isCustom, def.hasExternalAuth].filter(Boolean).length;
-  const hasLogoutOption = getProviderStatuses(authStorage, registry).find((s) => s.def.id === providerId)?.authType !== "none";
+  const hasLogoutOption = (await getProviderStatuses(modelRuntime, registry)).find((s) => s.def.id === providerId)?.authType !== "none";
 
   // If only one auth method (+ optional logout), go straight to the form
   if (methods === 1 && !hasLogoutOption) {
     if (def.hasOAuth) {
-      const result = await startOAuthBackground(authStorage, providerId);
-      if (!result) return { status: "error", message: `Could not start OAuth for **${def.name}**.` };
-      return { status: "success", message: `OAuth login for ${def.name}`, contentBlocks: [buildCard2OAuth(def, result.authUrl, result.instructions, result.deviceCode)] };
+      return await startRuntimeAuth(modelRuntime, def, "oauth");
     }
-    if (def.hasApiKey) return { status: "success", message: `Enter API key for ${def.name}`, contentBlocks: [buildCard2ApiKey(def)] };
+    if (def.hasApiKey) return await startRuntimeAuth(modelRuntime, def, "api_key");
     if (def.isCustom) return { status: "success", message: `Configure ${def.name}`, contentBlocks: [buildCard2Config(def)] };
     if (def.hasExternalAuth) return { status: "success", message: `${def.name} uses external authentication`, contentBlocks: [buildCard2ExternalInfo(def)] };
   }
@@ -512,24 +543,24 @@ async function handleStep1(
 
 /** Card 2 method picker submitted → show the actual auth form. */
 async function handleStep1Method(
-  authStorage: AuthStorageLike,
+  session: AgentSession,
+  modelRuntime: ModelRuntime,
+  modelRegistry: ModelRegistry,
   registry: ModelRegistryLike,
   data: Record<string, unknown>,
 ): Promise<AgentControlResult> {
   const providerId = String(data.provider || "").trim();
   const action = String(data.action || "").trim();
-  const def = getProviderDef(authStorage, registry, providerId);
+  const def = getProviderDef(modelRuntime, registry, providerId);
   if (!def) return { status: "error", message: `Unknown provider "${providerId}".` };
 
   if (action === "oauth") {
     if (!def.hasOAuth) return { status: "error", message: `**${def.name}** doesn't support OAuth.` };
-    const result = await startOAuthBackground(authStorage, providerId);
-    if (!result) return { status: "error", message: `Could not start OAuth for **${def.name}**.` };
-    return { status: "success", message: `OAuth login for ${def.name}`, contentBlocks: [buildCard2OAuth(def, result.authUrl, result.instructions, result.deviceCode)] };
+    return await startRuntimeAuth(modelRuntime, def, "oauth", () => showCard3OrComplete(session, modelRegistry, def, providerId, def.name, registry));
   }
   if (action === "api_key") {
     if (!def.hasApiKey) return { status: "error", message: `**${def.name}** doesn't support API key auth.` };
-    return { status: "success", message: `Enter API key for ${def.name}`, contentBlocks: [buildCard2ApiKey(def)] };
+    return await startRuntimeAuth(modelRuntime, def, "api_key", () => showCard3OrComplete(session, modelRegistry, def, providerId, def.name, registry));
   }
   if (action === "configure") {
     if (!def.isCustom) return { status: "error", message: `**${def.name}** doesn't need configuration.` };
@@ -540,7 +571,7 @@ async function handleStep1Method(
     return { status: "success", message: `${def.name} uses external authentication`, contentBlocks: [buildCard2ExternalInfo(def)] };
   }
   if (action === "logout") {
-    const status = getProviderStatuses(authStorage, registry).find((s) => s.def.id === providerId);
+    const status = (await getProviderStatuses(modelRuntime, registry)).find((s) => s.def.id === providerId);
     if (!status || status.authType === "none") return { status: "error", message: `**${def.name}** is not configured.` };
     return { status: "success", message: `Confirm removal for ${def.name}`, contentBlocks: [buildCard2Logout(def, statusLabel(status))] };
   }
@@ -548,49 +579,49 @@ async function handleStep1Method(
   return { status: "error", message: `Unknown action: ${action}` };
 }
 
-/** Card 2 auth form submitted → execute auth, show Card 3 or completion. */
+/** Card 2 auth/config form submitted → continue the provider-owned flow. */
 async function handleStep2(
   session: AgentSession,
-  authStorage: AuthStorageLike,
+  modelRuntime: ModelRuntime,
   modelRegistry: ModelRegistry,
   registry: ModelRegistryLike,
   data: Record<string, unknown>,
 ): Promise<AgentControlResult> {
   const providerId = String(data.provider || "").trim();
   const method = String(data.method || "").trim();
-  const def = getProviderDef(authStorage, registry, providerId);
+  const def = getProviderDef(modelRuntime, registry, providerId);
   const name = def?.name || providerId;
 
-  if (method === "api_key") {
-    const apiKey = String(data.api_key || "").trim();
-    if (!apiKey) return { status: "error", message: "API key cannot be empty." };
-    backupFile(getAuthJsonPath());
-    authStorage.set(providerId, { type: "api_key", key: apiKey });
-    authStorage.reload();
-    refreshModelRegistry(registry);
-    // Show Card 3 with models for this provider, or activate directly when only one exists.
-    return await showCard3OrComplete(session, modelRegistry, def, providerId, name, registry);
-  }
-
-  if (method === "oauth_check") {
-    const redirectUrl = String(data.redirect_url || "").trim();
-
-    // If the user pasted a redirect URL, feed it to the pending OAuth flow.
-    if (redirectUrl) {
-      const fed = resolveOAuthManualInput(providerId, redirectUrl);
-      if (fed) {
-        // Give the SDK a moment to exchange the code for credentials.
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-      }
+  if (method === "runtime_continue" || method === "runtime_check" || method === "runtime_cancel" || method === "oauth_check" || method === "api_key") {
+    const authType = String(data.auth_type || (method === "api_key" ? "api_key" : "oauth")) as AuthType;
+    if (authType !== "api_key" && authType !== "oauth") return { status: "error", message: "Invalid authentication type." };
+    const flow = runtimeAuthFlows.get(flowKey(providerId, authType));
+    if (!flow) return { status: "error", message: `No active authentication flow for **${name}**. Start again with \`/login\`.` };
+    if (method === "runtime_cancel") {
+      flow.controller.abort(new Error("Authentication cancelled by user"));
+      flow.pending?.reject(new Error("Authentication cancelled by user"));
+      deleteRuntimeAuthFlow(flow);
+      return { status: "success", message: `Authentication for **${name}** cancelled.` };
     }
 
-    authStorage.reload();
-    refreshModelRegistry(registry);
-    const cred = authStorage.get(providerId);
-    if (cred?.type === "oauth") {
+    let previousVersion = flow.version;
+    if (method === "runtime_continue" || method === "oauth_check" || method === "api_key") {
+      const value = String(data.auth_value ?? data.redirect_url ?? data.api_key ?? "");
+      if (!flow.pending) return { status: "error", message: `**${name}** is not waiting for input. Use Check & Continue.` };
+      flow.pending.resolve(value);
+      previousVersion = flow.version;
+    }
+    await waitForAuthFlowUpdate(flow, previousVersion, method === "runtime_check" ? 2_000 : 10_000);
+
+    if (flow.status === "completed") {
+      deleteRuntimeAuthFlow(flow);
       return await showCard3OrComplete(session, modelRegistry, def, providerId, name, registry);
     }
-    return { status: "error", message: `OAuth for **${name}** didn't complete yet. Try clicking "Check & Continue" again after completing login in your browser.` };
+    if (flow.status === "failed") {
+      deleteRuntimeAuthFlow(flow);
+      return { status: "error", message: `Authentication for **${name}** failed: ${flow.error || "unknown error"}` };
+    }
+    return { status: "success", message: `Authentication for ${name}`, contentBlocks: [buildRuntimeAuthCard(def!, flow)] };
   }
 
   if (method === "configure" || method === "custom") {
@@ -613,27 +644,21 @@ async function handleStep2(
     if (!modelsJson.providers) modelsJson.providers = {};
     modelsJson.providers[providerId] = { baseUrl, api: def.customApi || "openai-completions", ...(apiKey ? { apiKey } : {}), models };
     writeJsonFile(getModelsJsonPath(), modelsJson);
+    await modelRuntime.reloadConfig();
 
-    return {
-      status: "success",
-      message: `✓ **${name}** saved to \`models.json\` (backup created).\n\nModels: ${allIds.join(", ")}\n\nRun \`/restart\` to load the new configuration, then \`/model\` to select a model.`,
-    };
+    return await showCard3OrComplete(session, modelRegistry, def, providerId, name, registry);
   }
 
   if (method === "logout") {
-    const cred = authStorage.get(providerId);
-    if (cred) {
-      backupFile(getAuthJsonPath());
-      authStorage.set(providerId, undefined as unknown as Record<string, unknown>);
-      authStorage.reload();
-    }
-    refreshModelRegistry(registry);
+    backupFile(getAuthJsonPath());
+    await modelRuntime.logout(providerId);
     if (def?.isCustom) {
       const modelsJson = readJsonFile(getModelsJsonPath()) as { providers?: Record<string, unknown> };
       if (modelsJson.providers?.[providerId]) {
         backupFile(getModelsJsonPath());
         delete modelsJson.providers[providerId];
         writeJsonFile(getModelsJsonPath(), modelsJson);
+        await modelRuntime.reloadConfig();
       }
     }
     return { status: "success", message: `✓ **${name}** removed. Backups created.` };
@@ -665,14 +690,6 @@ async function showCard3OrComplete(
   name: string,
   registry: ModelRegistryLike,
 ): Promise<AgentControlResult> {
-  // Custom providers need a restart before models appear in the registry
-  if (def?.isCustom) {
-    return {
-      status: "success",
-      message: `✓ **${name}** configured. Run \`/restart\` to load, then \`/model\` to select a model.`,
-    };
-  }
-
   const models = registry.getAll().filter((m) => m.provider === providerId);
   if (models.length === 0) {
     return { status: "success", message: `✓ **${name}** authenticated, but no models found for this provider. Use \`/model\` to check available models.` };
@@ -709,30 +726,38 @@ export async function handleLogin(
   modelRegistry: ModelRegistry,
   command: LoginCommand,
 ): Promise<AgentControlResult> {
-  const authStorage = getAuthStorage(session, modelRegistry);
-  if (!authStorage) return { status: "error", message: "Auth storage is not available." };
+  const modelRuntime = getModelRuntime(session);
   const registry = getModelRegistry(session, modelRegistry);
 
-  // Internal routing from card submissions
+  // Internal routing from card submissions. Parse errors are UI errors, while
+  // provider/runtime failures must retain their actionable messages.
+  const parseCardData = (json: string): Record<string, unknown> | null => {
+    try {
+      const parsed = JSON.parse(json) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+    } catch {
+      return null;
+    }
+  };
   if (command.provider?.startsWith("__step1 ")) {
-    const json = command.provider.slice(8);
-    try { return await handleStep1(authStorage, registry, JSON.parse(json)); } catch { return { status: "error", message: "Invalid data." }; }
+    const data = parseCardData(command.provider.slice(8));
+    return data ? handleStep1(modelRuntime, registry, data) : { status: "error", message: "Invalid card data." };
   }
   if (command.provider?.startsWith("__step1method ")) {
-    const json = command.provider.slice(14);
-    try { return await handleStep1Method(authStorage, registry, JSON.parse(json)); } catch { return { status: "error", message: "Invalid data." }; }
+    const data = parseCardData(command.provider.slice(14));
+    return data ? handleStep1Method(session, modelRuntime, modelRegistry, registry, data) : { status: "error", message: "Invalid card data." };
   }
   if (command.provider?.startsWith("__step2 ")) {
-    const json = command.provider.slice(8);
-    try { return await handleStep2(session, authStorage, modelRegistry, registry, JSON.parse(json)); } catch { return { status: "error", message: "Invalid data." }; }
+    const data = parseCardData(command.provider.slice(8));
+    return data ? handleStep2(session, modelRuntime, modelRegistry, registry, data) : { status: "error", message: "Invalid card data." };
   }
   if (command.provider?.startsWith("__step3 ")) {
-    const json = command.provider.slice(8);
-    try { return await handleStep3(session, modelRegistry, JSON.parse(json)); } catch { return { status: "error", message: "Invalid data." }; }
+    const data = parseCardData(command.provider.slice(8));
+    return data ? handleStep3(session, modelRegistry, data) : { status: "error", message: "Invalid card data." };
   }
 
   // No args → show Card 1
-  const statuses = getProviderStatuses(authStorage, registry);
+  const statuses = await getProviderStatuses(modelRuntime, registry);
   return { status: "success", message: "Provider authentication", contentBlocks: [buildCard1(statuses)] };
 }
 
@@ -741,20 +766,18 @@ export async function handleLogout(
   modelRegistry: ModelRegistry,
   command: LogoutCommand,
 ): Promise<AgentControlResult> {
-  const authStorage = getAuthStorage(session, modelRegistry);
-  if (!authStorage) return { status: "error", message: "Auth storage is not available." };
+  const modelRuntime = getModelRuntime(session);
   const registry = getModelRegistry(session, modelRegistry);
 
   if (command.provider) {
     const providerId = command.provider.trim().toLowerCase();
-    const cred = authStorage.get(providerId);
-    if (!cred) return { status: "error", message: `**${providerId}** is not logged in.` };
+    const credentials = await modelRuntime.listCredentials();
+    if (!credentials.some((entry) => entry.providerId === providerId)) return { status: "error", message: `**${providerId}** is not logged in.` };
     backupFile(getAuthJsonPath());
-    authStorage.set(providerId, undefined as unknown as Record<string, unknown>);
-    authStorage.reload();
+    await modelRuntime.logout(providerId);
     return { status: "success", message: `✓ Logged out from **${providerId}**.` };
   }
 
-  const statuses = getProviderStatuses(authStorage, registry);
+  const statuses = await getProviderStatuses(modelRuntime, registry);
   return { status: "success", message: "Provider authentication", contentBlocks: [buildCard1(statuses)] };
 }

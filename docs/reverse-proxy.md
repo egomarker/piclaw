@@ -1,15 +1,15 @@
 # Reverse proxy and tunnel setup
 
-This page documents how to run piclaw's web UI behind a reverse proxy or tunnel.
+Piclaw's web UI can run behind a reverse proxy or tunnel.
 
-Use this guidance when the browser reaches piclaw through an external hostname such as:
+Use this guide when the browser reaches piclaw through an external hostname such as:
 
 - Cloudflare Tunnel
 - Caddy / Nginx / Traefik TLS termination
 - a load balancer or ingress controller
 - any setup where piclaw itself only sees an internal `http://host:port` hop
 
-## Why this matters
+## Effects of proxying
 
 When piclaw is proxied, the external browser origin may differ from the direct origin seen by the app.
 Without proxy trust, that can break:
@@ -91,7 +91,7 @@ PICLAW_TRUST_PROXY=1
 # through both a public proxy hostname and direct LAN access.
 ```
 
-If you run inside the standard container, keep the container/web binding consistent with your deployment model. The key point is that the tunnel connects to piclaw over an internal hop while the browser uses the public HTTPS hostname.
+If you run inside the standard container, keep the container/web binding consistent with your deployment model. The tunnel connects to piclaw over an internal hop while the browser uses the public HTTPS hostname.
 
 Piclaw remembers the browser origin from forwarded headers on authenticated web requests. That remembered origin is used for generated web links and remote-pair callback URLs when `PICLAW_WEB_EXTERNAL_URL` is unset, so public proxy access and LAN access can coexist without pinning the instance to one hostname.
 
@@ -112,7 +112,7 @@ Cloudflare Tunnel will supply the external host/proto context. With `PICLAW_TRUS
 ### Notes for passkeys
 
 If WebAuthn/passkeys are enabled, the browser hostname used during enrolment/login must match the public hostname users actually visit.
-That is exactly why proxy trust must be enabled behind the tunnel.
+Enable proxy trust behind the tunnel.
 
 ## Caddy example
 

@@ -144,7 +144,7 @@ export function isLengthStopFailure(errorText: string | null | undefined): boole
 
 export function isProviderAuthConfigFailure(errorText: string | null | undefined): boolean {
   if (!errorText) return false;
-  return /no api key for provider|no api key found|token refresh failed\s*:\s*401|authentication failed|credentials may have expired|re-authenticate|unauthorized|\b401\b|\b403\b|invalid.*api.*key|api.*key.*invalid|token.*expired|oauth.*expired|refresh.*token|provider login required|auth.*expired|missing provider credential|missing provider config|provider\.getApiKey is not a function|getApiKeyAndHeaders is not a function/i.test(errorText);
+  return /no api key for provider|no api key found|token refresh failed\s*:\s*401|authentication failed|credentials may have expired|re-authenticate|unauthorized|\b401\b|\b403\b|invalid.*api.*key|api.*key.*invalid|token.*expired|oauth.*expired|refresh.*token|provider login required|auth.*expired|missing provider credential|missing provider config|provider\.getApiKey is not a function/i.test(errorText);
 }
 
 export function isNonRecoverableFailure(errorText: string | null | undefined): boolean {

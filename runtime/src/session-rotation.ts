@@ -350,15 +350,13 @@ function cleanupInactiveReplacementSessionFile(
 export function syncRotatedSessionModel(session: AgentSession, model: RotationModel | null): boolean {
   if (!model) return false;
   const sessionLike = session as AgentSession & {
-    modelRegistry?: AgentSession["modelRegistry"];
     agent?: { state?: { model?: unknown } };
   };
-  if (!sessionLike.modelRegistry || !sessionLike.agent?.state) return false;
-  if (typeof sessionLike.modelRegistry.find !== "function") return false;
+  if (!sessionLike.modelRuntime || !sessionLike.agent?.state) return false;
 
   let resolvedModel: any;
   try {
-    resolvedModel = sessionLike.modelRegistry.find(model.provider, model.modelId);
+    resolvedModel = sessionLike.modelRuntime.getModel(model.provider, model.modelId);
   } catch {
     return false;
   }
@@ -370,7 +368,7 @@ export function syncRotatedSessionModel(session: AgentSession, model: RotationMo
     });
     return false;
   }
-  if (typeof sessionLike.modelRegistry.hasConfiguredAuth === "function" && !sessionLike.modelRegistry.hasConfiguredAuth(resolvedModel)) {
+  if (!sessionLike.modelRuntime.hasConfiguredAuth(resolvedModel.provider)) {
     log.warn("Unable to sync rotated session model because it has no configured auth", {
       operation: "session_rotation.sync_model_no_auth",
       provider: model.provider,

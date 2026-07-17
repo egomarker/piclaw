@@ -1,46 +1,46 @@
-import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 
-/** Resolved auth payload for provider requests in Piclaw runtime helpers. */
+/** Canonical request auth needed only by direct provider-native HTTP helpers. */
 export type ModelRequestAuth =
-  | { ok: true; apiKey?: string; headers?: Record<string, string>; env?: Record<string, string> }
+  | { ok: true; apiKey?: string; headers?: Record<string, string>; env?: Record<string, string>; baseUrl?: string }
   | { ok: false; error: string };
 
+function stringHeaders(headers: Record<string, string | null> | undefined): Record<string, string> | undefined {
+  if (!headers) return undefined;
+  const entries = Object.entries(headers).filter((entry): entry is [string, string] => entry[1] !== null);
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
 /**
- * Resolve per-request auth from the Pi model registry.
- *
- * Current Earendil exposes request auth through `getApiKeyAndHeaders()`, which
- * can include model/provider headers and provider-scoped env values. Forward all
- * fields to the provider call so custom models and stored credentials keep their
- * request-specific configuration.
- *
- * The `getApiKey()` fallback is only for older test doubles or older embedded
- * registries that predate the request-auth surface.
+ * Resolve auth through the process-wide ModelRuntime for a direct HTTP request.
+ * Normal model completions must call ModelRuntime.stream/streamSimple instead,
+ * which keeps auth, provider environment, and credential-specific base URL
+ * inside the canonical request assembly path.
  */
 export async function resolveModelRequestAuth(
-  registry: ModelRegistry,
+  modelRuntime: Pick<ModelRuntime, "getAuth">,
   model: Model<Api>,
 ): Promise<ModelRequestAuth> {
-  if (!registry || (typeof registry !== "object" && typeof registry !== "function")) {
-    return { ok: false, error: `No model registry is available for ${model.provider}/${model.id}.` };
+  if (!modelRuntime || typeof modelRuntime.getAuth !== "function") {
+    return { ok: false, error: `No model runtime is available for ${model.provider}/${model.id}.` };
   }
 
-  const reg = registry as ModelRegistry & {
-    getApiKeyAndHeaders?: (model: Model<Api>) => Promise<{ ok: boolean; apiKey?: string; headers?: Record<string, string>; env?: Record<string, string>; error?: string }>;
-    getApiKey?: (model: Model<Api>) => Promise<string | undefined>;
-  };
-
-  if (typeof reg.getApiKeyAndHeaders === "function") {
-    const auth = await reg.getApiKeyAndHeaders(model);
-    if (auth.ok) return { ok: true, apiKey: auth.apiKey, headers: auth.headers, env: auth.env };
-    return { ok: false, error: auth.error || `No credentials available for ${model.provider}/${model.id}.` };
+  try {
+    const resolved = await modelRuntime.getAuth(model);
+    if (!resolved) return { ok: false, error: `No credentials available for ${model.provider}/${model.id}.` };
+    return {
+      ok: true,
+      apiKey: resolved.auth.apiKey,
+      headers: stringHeaders(resolved.auth.headers),
+      env: resolved.env,
+      baseUrl: resolved.auth.baseUrl,
+    };
+  } catch (error) {
+    const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
+    return {
+      ok: false,
+      error: cause instanceof Error ? cause.message : String(cause),
+    };
   }
-
-  // Legacy fallback.
-  if (typeof reg.getApiKey === "function") {
-    const apiKey = await reg.getApiKey(model);
-    if (apiKey) return { ok: true, apiKey };
-  }
-
-  return { ok: false, error: `No credentials available for ${model.provider}/${model.id}.` };
 }

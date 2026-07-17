@@ -11,10 +11,7 @@ bun add -g github:rcarmo/piclaw
 This is the intended **Docker-free** install path for people who want the
 packaged PiClaw CLI and web assets without building from source manually.
 
-One reason this path exists is to support people who want to run PiClaw on
-low-end ARM SBCs, lightweight VMs, or other sandboxed environments where
-Docker is not the best fit or is not available. That said, this is still an
-experimental path and not a generally supported deployment target.
+This path exists for low-end ARM SBCs, lightweight VMs, and other sandboxed environments where Docker is not the best fit or is unavailable. It is still experimental and is not a generally supported deployment target.
 
 The repository root is the package/install boundary for this flow. The nested
 `runtime/` directory is the packaged implementation subtree that contains the
@@ -65,11 +62,11 @@ For shell execution specifically, PiClaw now uses a platform split:
 
 That tradeoff favors reliable shell output on Windows over strict parity with Unix process-group behavior.
 
-It is **not** the same as a development/source install flow.
+This path installs packaged artifacts from the repository. It does not rebuild from source.
 
-## What you should get
+## Expected result
 
-After install, the goal is that:
+After install:
 
 - `piclaw` is available in PATH
 - the CLI runs without a manual build

@@ -88,11 +88,15 @@ test.describe('US-17: Instant Submission Visibility', () => {
     const post1 = page.locator(sel.postContent, { hasText: msg1 });
     await expect(post1).toBeVisible({ timeout: 5000 });
 
-    const post2 = page.locator(sel.postContent, { hasText: msg2 });
-    const queued2 = page.locator(sel.queueItem, { hasText: msg2 });
-    const post2Visible = await post2.isVisible({ timeout: 3000 }).catch(() => false);
-    if (!post2Visible) await expect(queued2).toBeVisible({ timeout: 3000 });
+    const post2 = page.locator(sel.postContent).filter({ hasText: msg2 }).first();
+    const queued2 = page.locator(sel.queueItem).filter({ hasText: msg2 }).first();
+    await expect.poll(async () => {
+      if (await post2.isVisible().catch(() => false)) return 'post';
+      if (await queued2.isVisible().catch(() => false)) return 'queue';
+      return 'missing';
+    }, { timeout: 5000 }).not.toBe('missing');
 
+    const post2Visible = await post2.isVisible().catch(() => false);
     if (post2Visible) {
       const allPosts = await page.locator(sel.postContent).allTextContents();
       const idx1 = allPosts.findIndex(t => t.includes(msg1));

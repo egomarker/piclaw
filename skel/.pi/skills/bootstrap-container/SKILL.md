@@ -6,7 +6,7 @@ distribution: public
 
 # Bootstrap container
 
-Use this on a fresh container to ensure required CLI tools and workspace dependencies are present.
+Use this on a fresh container to install missing CLI tools and workspace dependencies.
 
 ## Steps
 
@@ -17,7 +17,7 @@ Use this on a fresh container to ensure required CLI tools and workspace depende
 
 2. Review the summary output for missing or failed steps.
 
-## What it does
+## Actions
 
 - Installs required CLI tools (curl, wget, git, jq, rg, sqlite3, restic, openssh-client, supervisorctl, iproute2, etc.) if missing.
 - Ensures `/workspace/package.json` exists and installs JS deps (`linkedom`, `turndown`, `playwright`).

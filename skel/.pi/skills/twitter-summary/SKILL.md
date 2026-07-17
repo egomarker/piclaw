@@ -9,8 +9,8 @@ distribution: public
 Scrape a public Twitter/X profile via Nitter front-ends and return a compact JSON listing of tweets, replies, and retweets within a time window.
 
 Two scrapers are included:
-- `playwright-twitter-summary.ts` — uses Playwright for full browser rendering (more reliable)
-- `quick-twitter-summary.ts` — uses linkedom for lightweight HTML parsing (no browser needed)
+- `playwright-twitter-summary.ts` — uses Playwright for browser rendering
+- `quick-twitter-summary.ts` — uses linkedom for HTML parsing without a browser
 
 ## Prerequisites
 
@@ -56,7 +56,7 @@ JSON with `handle`, `instance`, `count`, and `items` array. Each item has:
 ## Notes
 
 - The scrapers try several public Nitter instances and use the first that responds.
-- Coverage varies by instance; combining outputs from multiple instances often yields the best results.
+- Coverage varies by instance. Combining outputs from multiple instances can improve coverage.
 - Network restrictions or anti-bot protections may affect results.
 - Logs are written to stderr; JSON output goes to stdout.
 - A log file is written to /tmp/twitter-summary.log when using the wrapper.

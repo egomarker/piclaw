@@ -1,6 +1,6 @@
 # Experimental M365 extension
 
-Piclaw can bundle an experimental Microsoft 365 extension under:
+Piclaw ships an experimental Microsoft 365 extension bundle at:
 
 - `runtime/extensions/experimental/m365/`
 
@@ -16,7 +16,7 @@ The session loader will then add the packaged extension entry:
 
 - `runtime/extensions/experimental/m365/index.ts`
 
-## What it provides
+## Capabilities
 
 The extension exposes tools for:
 
@@ -58,7 +58,7 @@ Partial list failures are tolerated; errors are reported in `details.errors`.
 
 ## Account support
 
-Consumer-account support now exists for the Graph-backed part of the extension.
+The Graph-backed part of the extension supports consumer Microsoft accounts.
 
 ### Works with personal Microsoft accounts
 
@@ -100,19 +100,19 @@ Stale browser/CDP cleanup also has platform-aware support:
 
 ## Operational notes
 
-This extension remains **experimental**.
+The bundled extension is still **experimental**.
 
-Important behavior:
+Current behaviour:
 
-- primarily validated on Windows
-- by design, the extension requires user consent to operate and access M365
-- Leverages browser authentication to ensure full compliance with security policies (you authenticate in the browser with whatever security mechanisms are already configured for your personal or business Microsoft account)
-- only supports a single active account/browser session at a time (by design)
-- safe behaviors by design: dry-run mode, only drafts e-mails, doesn't send them, etc.
+- validated mainly on Windows
+- reuses an existing browser session when possible; fresh authentication shows an explicit consent interstitial unless `PICLAW_M365_YOLO=1`
+- browser sign-in follows the MFA and policy controls already applied to the account
+- supports one active account/browser session at a time
+- supports `dryRun` where available; mail flows draft messages instead of sending them
 - `PICLAW_M365_YOLO=1` skips the explicit consent interstitial and was the main Windows validation mode
-- auth/token/cookie caching is RAM-only in this redistributed copy
-- destructive/send actions are guarded with `confirm` and generally support `dryRun`
-- Teams token refresh/browser reuse now follows the current Teams web-app entry host instead of the old `teams.microsoft.com/v2` route, so browser reuse and token capture match the path normal users actually see today
+- this redistributed copy keeps auth, token, and cookie caches in RAM only
+- state-changing and send actions use `confirm`; supported flows offer `dryRun` previews
+- Teams token refresh and browser reuse follow the current Teams web-app entry host instead of the old `teams.microsoft.com/v2` route
 
 ## Audit summary
 

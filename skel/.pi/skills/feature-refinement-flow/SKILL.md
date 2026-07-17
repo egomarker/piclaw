@@ -6,18 +6,18 @@ distribution: public
 
 # Feature Refinement Flow
 
-Use this skill to turn a feature request into a clear, implementation-ready work item.
+Use this skill to turn a feature request into an implementation-ready work item.
 
 ## When to use
 
-Invoke when a request includes:
+Use it when a request includes:
 
 - behavior changes,
 - new integrations,
 - UI/editor workflow changes,
 - or non-trivial architectural decisions.
 
-## Goal
+## Outcome
 
 Turn vague ideas into:
 
@@ -69,7 +69,7 @@ Keep answers in a feature-scoped notes/work-item file or `notes/preferences/feat
 
 ## Web UI / Adaptive Card note
 
-When the user is in the PiClaw **web UI**, you may use a compact **Adaptive Card** for refinement questions when it is materially better than markdown — especially for:
+When the user is in the PiClaw **web UI**, you may use a compact **Adaptive Card** for refinement questions when it is clearer than markdown — especially for:
 
 - single-choice follow-up questions
 - short structured confirmations
@@ -83,6 +83,6 @@ Rules:
 - keep cards compact, with concise fallback text and supported actions only
 - do not turn the whole 20-question flow into a giant form; cards are for selective structured steps, not bulk interrogation
 
-## Practical tip
+## Start narrow
 
-Prefer *narrow first, iterate later*: lock scope by answering 1–10 first, then expand with dependency/testing details only after behavior is clear.
+Answer questions 1–10 first to lock scope. Then add dependency and test details once the behaviour is clear.

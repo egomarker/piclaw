@@ -6,7 +6,7 @@ distribution: public
 
 # Debug
 
-Diagnose and fix issues with the Pibox container environment.
+Use this skill to diagnose and fix Pibox container issues.
 
 ## Steps
 
@@ -39,7 +39,7 @@ Diagnose and fix issues with the Pibox container environment.
    ls -la data/ipc/ 2>/dev/null || echo "no IPC directory"
    ```
 
-5. Report findings and suggest fixes.
+5. Report the findings and suggest fixes.
 
 ## Common Issues
 

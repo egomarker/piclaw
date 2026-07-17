@@ -1,6 +1,6 @@
 # Runtime stream sessions
 
-Piclaw exposes a small runtime-owned stream/session primitive for add-ons that need long-lived output or interactive attach semantics.
+Piclaw exposes a runtime-owned stream/session primitive for add-ons that need long-lived output or interactive attach semantics.
 
 This is the runtime side of issue [#429](https://github.com/rcarmo/piclaw/issues/429). It is intentionally transport-agnostic: Proxmox, Portainer, SSH, or future infra add-ons own their protocol details and publish lifecycle/output frames through the shared session registry.
 
@@ -23,7 +23,7 @@ Installed runtime/add-on code can access the API through:
 const runtime = globalThis.__piclaw_runtime;
 ```
 
-The stream/session registry is available at:
+The registry is at:
 
 ```ts
 runtime.streamSessions
@@ -106,15 +106,15 @@ The registry provides:
 
 The registry does not hardcode any Proxmox, Portainer, Docker, SSH, VNC, or SPICE protocol logic.
 
-## Pilot shape for infra add-ons
+## Pilot uses in infra add-ons
 
-The intended first pilots are:
+Initial pilot targets:
 
 - `portainer.logs.follow` — follow a Docker log stream and publish stdout frames
 - `portainer.exec.attach` — interactive Docker exec/attach with input/output frames
 - `proxmox.console.*` — VNC/SPICE/serial/termproxy adapters that publish lifecycle and connection frames
 
-Bounded workflows should remain normal request/response tools. For example, `container.logs` with a fixed tail remains a normal Portainer workflow; only follow-mode logs need a runtime stream session.
+Keep bounded workflows as normal request/response tools. For example, `container.logs` with a fixed tail remains a normal Portainer workflow; only follow-mode logs need a runtime stream session.
 
 ## Related files
 

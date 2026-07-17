@@ -123,6 +123,14 @@ const compactionStreamFn = (model: any, context: any, options: any) => ({
   async *[Symbol.asyncIterator]() {},
   result: () => completeSimple(model, context, options),
 });
+const testAuthByModel = new WeakMap<object, () => Promise<any>>();
+const testModelRuntime = {
+  streamSimple: compactionStreamFn,
+  getAuth: async (model: any) => {
+    const resolve = model && typeof model === "object" ? testAuthByModel.get(model) : undefined;
+    return resolve ? await resolve() : { auth: { apiKey: "test-key" } };
+  },
+};
 
 // Mock convertToLlm with the upstream behaviors we care about in these tests.
 vi.mock("@earendil-works/pi-coding-agent", () => {
@@ -384,7 +392,7 @@ describe("smart-compaction", () => {
       },
       getAllTools: () => [],
     };
-    createSmartCompactionExtension({ streamFn: compactionStreamFn })(mockPi as any);
+    createSmartCompactionExtension({ streamFn: compactionStreamFn, modelRuntime: testModelRuntime as any })(mockPi as any);
     vi.clearAllMocks();
   });
 
@@ -394,7 +402,7 @@ describe("smart-compaction", () => {
   });
 
   function makeCtx(overrides: Partial<any> = {}) {
-    return {
+    const ctx = {
       ui: { notify: vi.fn(), setWorkingIndicator: vi.fn(), clearWorkingIndicator: vi.fn(), setWorkingMessage: vi.fn(), setStatus: vi.fn() },
       model: { provider: "test", id: "test-model", reasoning: false, contextWindow: 128000 },
       modelRegistry: {
@@ -405,6 +413,14 @@ describe("smart-compaction", () => {
       getSystemPrompt: () => "test system prompt",
       ...overrides,
     };
+    if (ctx.model && typeof ctx.model === "object") {
+      testAuthByModel.set(ctx.model, async () => {
+        const resolved = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
+        if (!resolved.ok) throw new Error(resolved.error ?? "Missing compaction credentials");
+        return { auth: { apiKey: resolved.apiKey, headers: resolved.headers }, env: resolved.env };
+      });
+    }
+    return ctx;
   }
 
   function makePreparation(messageCount: number, overrides: Partial<any> = {}) {
@@ -431,7 +447,7 @@ describe("smart-compaction", () => {
 
   it("rehydrates persisted opaque state at the provider request boundary", () => {
     const handlers = new Map<string, any>();
-    createSmartCompactionExtension({ streamFn: compactionStreamFn })({
+    createSmartCompactionExtension({ streamFn: compactionStreamFn, modelRuntime: testModelRuntime as any })({
       on: (eventName: string, fn: any) => handlers.set(eventName, fn),
       getAllTools: () => [],
     } as any);
@@ -1456,11 +1472,11 @@ describe("smart-compaction", () => {
       expect(chunkPrompts.join("\n")).toContain("PIPELINED_FACT_19");
       expect(chunkPrompts.join("\n")).toContain("g0001");
       expect(result.compaction.summary).toContain("Pipelined progressive goal");
-      expect(authResolver).toHaveBeenCalledTimes(1);
+      expect(authResolver).not.toHaveBeenCalled();
       expect((completeSimple as any).mock.calls.every((call: any[]) =>
-        call[2]?.apiKey === "pipelined-key"
-        && call[2]?.headers?.["X-Pipelined"] === "1"
-        && call[2]?.env?.PIPELINED_ENDPOINT === "https://provider.test"
+        call[2]?.apiKey === undefined
+        && call[2]?.headers === undefined
+        && call[2]?.env === undefined
       )).toBe(true);
     } finally {
       if (previousMethod === undefined) delete process.env.PICLAW_SMART_COMPACTION_METHOD;
@@ -1588,7 +1604,7 @@ describe("smart-compaction", () => {
     expect(prompt).toContain("context_tree_query");
   });
 
-  it("forwards apiKey-only auth to completeSimple", async () => {
+  it("does not manually forward apiKey-only auth to local compaction", async () => {
     const summaryText = "## Goal\nApiKey auth\n\n## Current Active Topic\n- test\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- none\n\n## Progress\n### Done\n- [x] auth\n\n### In Progress\n\n### Blocked\n\n## Key Decisions\n\n## Next Steps\n\n## Critical Context\n- context";
 
     (completeSimple as any).mockResolvedValueOnce({
@@ -1613,16 +1629,11 @@ describe("smart-compaction", () => {
     );
 
     expect(result).toBeDefined();
-    expect(completeSimple).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({
-        apiKey: "simple-key",
-      }),
-    );
+    expect(completeSimple).toHaveBeenCalled();
+    expect((completeSimple as any).mock.calls[0][2].apiKey).toBeUndefined();
   });
 
-  it("forwards provider-scoped auth environment to single-pass compaction", async () => {
+  it("leaves provider-scoped auth environment to the runtime stream boundary", async () => {
     const summaryText = "## Goal\nProvider env auth\n\n## Current Active Topic\n- test\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- none\n\n## Progress\n### Done\n- [x] auth forwarded\n\n### In Progress\n- [ ] continue\n\n### Blocked\n- none\n\n## Key Decisions\n- preserve provider env\n\n## Next Steps\n1. continue\n\n## Critical Context\n- context";
     (completeSimple as any).mockResolvedValueOnce({
       content: [{ type: "text", text: summaryText }],
@@ -1646,15 +1657,12 @@ describe("smart-compaction", () => {
     );
 
     expect(result).toBeDefined();
-    expect(completeSimple).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({
-        apiKey: "env-key",
-        headers: { "X-Test": "1" },
-        env: { TEST_BASE_URL: "https://provider.test" },
-      }),
-    );
+    expect(completeSimple).toHaveBeenCalled();
+    expect((completeSimple as any).mock.calls[0][2]).toMatchObject({
+      apiKey: undefined,
+      headers: undefined,
+      env: undefined,
+    });
   });
 
   it("appends deterministic file lists to summary", async () => {
@@ -1995,9 +2003,9 @@ describe("smart-compaction", () => {
     expect(consumeCompactionCancellationReason(ctx)).toContain(`completion stop reason was ${stopReason}`);
   });
 
-  it("cancels with a recorded reason when no auth is available instead of falling through upstream", async () => {
+  it("cancels with the runtime stream auth error instead of falling through upstream", async () => {
+    (completeSimple as any).mockRejectedValueOnce(new Error("Missing compaction credentials"));
     const ctx = makeCtx();
-    ctx.modelRegistry.getApiKeyAndHeaders.mockResolvedValueOnce({ ok: false, error: "Missing compaction credentials" });
 
     const result = await handler!(
       {
@@ -2010,7 +2018,7 @@ describe("smart-compaction", () => {
 
     expect(result).toEqual({ cancel: true });
     expect(consumeCompactionCancellationReason(ctx)).toBe("Missing compaction credentials");
-    expect(completeSimple).not.toHaveBeenCalled();
+    expect(completeSimple).toHaveBeenCalledTimes(1);
   });
 
   it("cancels with a recorded reason on exception instead of falling back to upstream full-pass compaction", async () => {
@@ -3715,8 +3723,8 @@ describe("smart-compaction", () => {
         },
       };
 
-      createSmartCompactionExtension({ streamFn: compactionStreamFn })(mockPi1 as any);
-      createSmartCompactionExtension({ streamFn: compactionStreamFn })(mockPi2 as any);
+      createSmartCompactionExtension({ streamFn: compactionStreamFn, modelRuntime: testModelRuntime as any })(mockPi1 as any);
+      createSmartCompactionExtension({ streamFn: compactionStreamFn, modelRuntime: testModelRuntime as any })(mockPi2 as any);
 
       // Both handlers exist and are independent function references
       expect(handler1).toBeTypeOf("function");

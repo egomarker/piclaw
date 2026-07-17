@@ -3,11 +3,12 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Type } from "typebox";
-import { AuthStorage, ModelRegistry, SettingsManager, getAgentDir, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { SettingsManager, getAgentDir, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage, ToolCall } from "@earendil-works/pi-ai";
 import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import "../helpers.js";
 import { createSessionInDir } from "../../src/agent-pool/session.ts";
+import { createRealTestModelServices } from "../model-services-fixture.js";
 
 function fauxToolCall(name: string, args: Record<string, unknown>): ToolCall {
   return {
@@ -55,8 +56,6 @@ const customExtension: ExtensionFactory = (pi) => {
 
 describe("same-turn tool activation live update", () => {
   test("extension tools activated via activate_tools are callable in the same turn", async () => {
-    const authStorage = AuthStorage.create();
-    const modelRegistry = ModelRegistry.inMemory(authStorage);
     const settingsManager = SettingsManager.create("/workspace", getAgentDir());
     const tempRoot = mkdtempSync(join(tmpdir(), "piclaw-issue13-"));
     const workspaceDir = join(tempRoot, "workspace");
@@ -74,12 +73,19 @@ describe("same-turn tool activation live update", () => {
       provider: providerId,
       models: [{ id: providerId, name: `Faux ${namespace}` }],
     });
-    authStorage.set(providerId, { type: "api_key", key: "test-key" });
+    const { credentialStore, modelRuntime } = await createRealTestModelServices(join(tempRoot, "agent"));
+    await credentialStore.modify(providerId, async () => ({ type: "api_key", key: "test-key" }));
+    modelRuntime.registerProvider(providerId, {
+      baseUrl: "https://example.invalid/v1",
+      api: providerId,
+      apiKey: "test-key",
+      models: [faux.getModel()],
+    });
+    await modelRuntime.refresh({ allowNetwork: false });
 
     try {
       const runtime = await createSessionInDir(sessionDir, {
-        authStorage,
-        modelRegistry,
+        modelRuntime,
         settingsManager,
         tools: [],
         extensionFactories: [customExtension],
@@ -125,5 +131,5 @@ describe("same-turn tool activation live update", () => {
       else process.env.PICLAW_WORKSPACE = previousWorkspace;
       rmSync(tempRoot, { recursive: true, force: true });
     }
-  }, 10_000);
+  }, 30_000);
 });

@@ -1,6 +1,6 @@
 # Atomic Editor live-preview port notes
 
-## Decision summary
+## Porting decision
 
 Piclaw keeps its source-preserving Markdown live-preview engine as the integration shell and ports Atomic Editor hardening at the logical-extension level. The React wrapper is not adopted.
 

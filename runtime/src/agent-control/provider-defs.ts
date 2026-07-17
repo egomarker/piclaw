@@ -23,8 +23,17 @@ type ModelRegistryLike = {
   getProviderDisplayName?: (provider: string) => string;
 };
 
-type AuthStorageLike = {
-  getOAuthProviders?: () => Array<{ id: string; name?: string }>;
+type RuntimeProviderLike = {
+  id: string;
+  name: string;
+  auth: {
+    apiKey?: { login?: unknown };
+    oauth?: { login?: unknown };
+  };
+};
+
+type ModelRuntimeLike = {
+  getProviders?: () => readonly RuntimeProviderLike[];
 };
 
 const REMOVED_PROVIDER_IDS = new Set([
@@ -210,16 +219,12 @@ function titleCaseProvider(providerId: string): string {
     .join(" ");
 }
 
-function getOAuthProviderIds(authStorage?: AuthStorageLike | null): Set<string> {
+function getRuntimeProviders(modelRuntime?: ModelRuntimeLike | null): Map<string, RuntimeProviderLike> {
   try {
-    return new Set(authStorage?.getOAuthProviders?.().map((provider) => provider.id) ?? []);
+    return new Map((modelRuntime?.getProviders?.() ?? []).map((provider) => [provider.id, provider]));
   } catch {
-    return new Set();
+    return new Map();
   }
-}
-
-function providerHasApiKey(providerId: string): boolean {
-  return Boolean(API_KEY_HINTS[providerId]);
 }
 
 export function getProviderDisplayName(providerId: string, registry?: ModelRegistryLike | null): string {
@@ -237,20 +242,26 @@ export function getProviderDisplayName(providerId: string, registry?: ModelRegis
 
 export function getProviderDefs(
   registry?: ModelRegistryLike | null,
-  authStorage?: AuthStorageLike | null,
+  modelRuntime?: ModelRuntimeLike | null,
 ): ProviderDef[] {
-  const oauthProviderIds = getOAuthProviderIds(authStorage);
+  const runtimeProviders = getRuntimeProviders(modelRuntime);
   const defs = PROVIDER_DEFS
     .filter((provider) => !REMOVED_PROVIDER_IDS.has(provider.id))
-    .map((provider) => ({
-      ...provider,
-      name: getProviderDisplayName(provider.id, registry),
-      hasOAuth: provider.hasOAuth || oauthProviderIds.has(provider.id),
-      hasApiKey: provider.hasApiKey || (!provider.isCustom && providerHasApiKey(provider.id)),
-    }));
+    .map((provider) => {
+      const runtimeProvider = runtimeProviders.get(provider.id);
+      return {
+        ...provider,
+        name: runtimeProvider?.name || getProviderDisplayName(provider.id, registry),
+        hasOAuth: runtimeProvider ? typeof runtimeProvider.auth.oauth?.login === "function" : provider.hasOAuth,
+        hasApiKey: runtimeProvider ? typeof runtimeProvider.auth.apiKey?.login === "function" : provider.hasApiKey,
+        hasExternalAuth: runtimeProvider
+          ? Boolean(runtimeProvider.auth.apiKey && typeof runtimeProvider.auth.apiKey.login !== "function")
+          : provider.hasExternalAuth,
+      };
+    });
 
   const byId = new Map(defs.map((provider) => [provider.id, provider]));
-  const dynamicProviderIds = new Set<string>();
+  const dynamicProviderIds = new Set(runtimeProviders.keys());
   try {
     for (const model of registry?.getAll?.() ?? []) {
       if (model.provider && !REMOVED_PROVIDER_IDS.has(model.provider)) dynamicProviderIds.add(model.provider);
@@ -263,21 +274,23 @@ export function getProviderDefs(
   for (const providerId of dynamicProviderIds) {
     const existing = byId.get(providerId);
     if (existing) {
-      existing.name = getProviderDisplayName(providerId, registry);
-      existing.hasOAuth ||= oauthProviderIds.has(providerId);
-      existing.hasApiKey ||= providerHasApiKey(providerId);
+      const runtimeProvider = runtimeProviders.get(providerId);
+      existing.name = runtimeProvider?.name || getProviderDisplayName(providerId, registry);
+      existing.hasOAuth = runtimeProvider ? typeof runtimeProvider.auth.oauth?.login === "function" : existing.hasOAuth;
+      existing.hasApiKey = runtimeProvider ? typeof runtimeProvider.auth.apiKey?.login === "function" : existing.hasApiKey;
       continue;
     }
 
-    const hasOAuth = oauthProviderIds.has(providerId);
-    const hasApiKey = providerHasApiKey(providerId);
+    const runtimeProvider = runtimeProviders.get(providerId);
+    const hasOAuth = typeof runtimeProvider?.auth.oauth?.login === "function";
+    const hasApiKey = typeof runtimeProvider?.auth.apiKey?.login === "function";
     byId.set(providerId, {
       id: providerId,
-      name: getProviderDisplayName(providerId, registry),
+      name: runtimeProvider?.name || getProviderDisplayName(providerId, registry),
       hasOAuth,
       hasApiKey,
       apiKeyHint: API_KEY_HINTS[providerId],
-      hasExternalAuth: !hasOAuth && !hasApiKey,
+      hasExternalAuth: Boolean(runtimeProvider?.auth.apiKey) && !hasApiKey,
       authNote: EXTERNAL_AUTH_NOTES[providerId] || "This provider is available in the model registry but does not expose a Piclaw-managed login method. Configure its credentials externally.",
     });
   }

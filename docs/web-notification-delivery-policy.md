@@ -1,6 +1,6 @@
 # Web notification delivery policy
 
-PiClaw uses a per-**device**, per-**chat** delivery coordinator to decide whether a finished agent reply should surface as a local in-page notification or as server-side Web Push.
+PiClaw uses a per-**device**, per-**chat** delivery coordinator to choose between a local in-page notification and server-side Web Push for a finished agent reply.
 
 ## Rule
 
@@ -11,16 +11,16 @@ For a given **device + chat_jid** pair:
 - **Hidden iPhone/iPad PWA live client(s) only** → **Web Push allowed** on that device for that chat
 - **No live client** → **Web Push only** on that device for that chat
 
-## Why this is chat-scoped instead of device-scoped
+## Why routing uses `chat_jid`
 
 PiClaw can have multiple chats running at once. A user may be actively viewing one thread while other threads continue working in the background.
 
-Because of that, notification routing is based on the specific `chat_jid` that produced the reply:
+Notification routing keys off the specific `chat_jid` that produced the reply:
 
 - If you are actively viewing chat **A**, replies in chat **A** should stay quiet on that device.
 - If chat **B** finishes while no live client for **B** exists on that device, PiClaw should still notify you for **B** even if chat **A** is currently visible.
 
-This ensures non-active threads still notify when they complete.
+Replies from non-active threads still notify on that device.
 
 ## Local notification election
 

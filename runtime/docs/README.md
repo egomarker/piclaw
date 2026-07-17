@@ -1,19 +1,19 @@
 # runtime/docs
 
-This directory is for packaged runtime-facing documentation that ships with
+This directory contains packaged runtime documentation that ships with
 piclaw.
 
-Use it for documents that describe shipped runtime surfaces, for example:
+Store docs here when they describe shipped runtime surfaces, for example:
 
 - packaged extension-route behavior
 - packaged web API/SSE inventories
 - runtime-facing implementation notes that are useful in the published tree
 - shipped operational/runtime features such as Dream/AutoDream memory maintenance
 
-Do **not** use this directory for repo-only planning, audits, or reorg notes.
-Those belong under the repo-root `docs/` directory.
+Do **not** store repo-only planning, audits, or reorg notes here. Keep those
+under the repo-root `docs/` directory.
 
-Key docs here:
+Key docs in this directory:
 - `dream-memory.md`
 
 Related:

@@ -1,6 +1,6 @@
 # Runtime flows
 
-This document covers the primary web‑first flows. WhatsApp is documented separately in [whatsapp.md](whatsapp.md).
+Piclaw uses the following web-first authentication, message, agent, media, and lifecycle flows. [whatsapp.md](whatsapp.md) describes the WhatsApp channel.
 
 ## Authentication flow (TOTP + passkeys)
 
@@ -157,9 +157,9 @@ The web UI can render `adaptive_card` content blocks inline in timeline posts an
 - Finished cards then lock those inputs read-only, hide action buttons, and show a concise theme-consistent status banner rather than echoing the full submission in banner text.
 - Validation cards can be posted through the internal `send_adaptive_card` tool, including cases that exercise bad URL handling, submit errors, keep-active cards, and terminal-state transitions.
 
-## Side prompts / Phase 3 groundwork
+## Side prompts and early `/btw` UI
 
-Piclaw now has a side-prompt primitive for work that should reuse the chat's current model and thinking level without touching the main session tree.
+Piclaw has a side-prompt primitive for work that should reuse the chat's current model and thinking level without touching the main session tree.
 
 - Backend primitive: `AgentPool.runSidePrompt(chatJid, prompt, options)`
 - Web endpoints:
@@ -169,7 +169,7 @@ Piclaw now has a side-prompt primitive for work that should reuse the chat's cur
 - Does not append to the main agent session tree
 - Intended as the substrate for future `/btw` / side-conversation UI work
 
-The web UI now has a first thin consumer for this substrate:
+The first web UI consumer is the thin `/btw <question>` flow:
 
 - `/btw <question>` is handled locally in the web compose box
 - it opens a lightweight side-conversation panel
@@ -178,7 +178,7 @@ The web UI now has a first thin consumer for this substrate:
 - the side run uses a separate side session so it can stay isolated from the main visible conversation while still inheriting current context and model/thinking state
 - `Inject into chat` sends the final BTW answer back through the normal message path, so it respects the same queue/follow-up rules as any other user submission
 
-This is still an early web-native BTW layer rather than the full final system, but the separation of concerns is now in place: core provides the side-prompt/side-session substrate, while BTW remains a thin UI consumer on top.
+Core provides the reusable side-prompt and side-session substrate. The current `/btw` panel is an early consumer, not the final side-conversation system.
 
 ## Context usage / compaction affordance restore
 
@@ -218,7 +218,7 @@ Browser side:
 - `runtime/web/src/ui/app-perf-tracing.ts` keeps bounded in-memory trace/request buffers for live inspection in the browser
 - failed requests that never receive a response are still recorded as failed-before-response entries so the client-side picture does not quietly omit them
 
-This gives piclaw a cheap request-correlation surface now, while leaving room for a fuller observability/export story later.
+This provides bounded request correlation in browser and backend logs. It is not a full tracing or telemetry-export system.
 
 ## Recent-thread timeline cache / nearby-thread prewarm
 
@@ -230,7 +230,7 @@ The web UI now keeps a bounded cache of recent timeline snapshots and uses nearb
 - prewarm is shutdown-aware: once session-manager shutdown starts, queued prewarms are cleared and new prewarm/create requests are rejected so teardown cannot race with fresh runtime creation
 - the cache is used together with the newer refresh-coalescing/warm-session work so thread switches can often render from something fresher than a cold network round-trip
 
-This is not backend truth — it is browser-local performance state intended purely to reduce visible latency around timeline revisits and nearby-thread navigation.
+This cache is browser-local performance state, not backend truth. It reduces visible latency when revisiting timelines or nearby threads.
 
 ## Branch JID rename behavior
 
@@ -240,14 +240,14 @@ That means renaming a branch like `web:default:research` to `web:default:researc
 
 ## Model restore across reloads
 
-Piclaw now persists the active model choice strongly enough that a runtime reload or restart can restore it on the next warm session instead of quietly dropping back to whatever happened to be convenient.
+Piclaw persists the active model choice so a warm session can restore it after a reload or restart.
 
 There are two practical consequences:
 
 - post-reload UI state can show the last known model/context footprint immediately from browser-local memory while the backend finishes hydrating
 - session-manager/runtime restoration paths reapply the resolved provider/model when the session comes back, so a reload is less likely to feel like a personality transplant
 
-This is especially relevant for web flows that depend on quick restarts or recovery, because the restored model state now survives the same turbulence as the pending-turn recovery path.
+This reduces model resets during reload and recovery flows, but restoration still depends on successful session hydration.
 
 ## Scheduled tasks / IPC
 

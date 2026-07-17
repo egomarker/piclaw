@@ -6,11 +6,11 @@ distribution: public
 
 # Extension design notes
 
-Use this when creating or reviewing extensions to avoid the broken import pattern.
+Use this skill when creating or reviewing extensions so imports keep working after reloads.
 
 ## Avoid this pattern
 Do **not** import from the workspace source tree (for example `/workspace/piclaw/runtime/src/...` or `/workspace/.../node_modules`).
-The running agent uses the **installed** package, and workspace paths can drift or break after reloads.
+The running agent uses the **installed** package. Workspace paths can drift or break after reloads.
 
 ## Use the installed package instead
 Reference the installed dist paths, for example:

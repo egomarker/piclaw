@@ -4,52 +4,41 @@ import { resolveModelRequestAuth } from "../../src/utils/model-auth.js";
 describe("model auth helper", () => {
   const model = { provider: "openai", id: "gpt-test" } as any;
 
-  test("uses getApiKeyAndHeaders request auth when available", async () => {
+  test("uses ModelRuntime auth including headers, env, and credential base URL", async () => {
     const auth = await resolveModelRequestAuth({
-      getApiKeyAndHeaders: async () => ({
-        ok: true,
-        apiKey: "header-key",
-        headers: { "X-Test": "1" },
+      getAuth: async () => ({
+        auth: {
+          apiKey: "runtime-key",
+          headers: { "X-Test": "1", "X-Delete": null },
+          baseUrl: "https://credential.example.test/v1",
+        },
         env: { TEST_BASE_URL: "https://example.test" },
       }),
-      getApiKey: async () => "legacy-key",
     } as any, model);
 
     expect(auth).toEqual({
       ok: true,
-      apiKey: "header-key",
+      apiKey: "runtime-key",
       headers: { "X-Test": "1" },
       env: { TEST_BASE_URL: "https://example.test" },
+      baseUrl: "https://credential.example.test/v1",
     });
   });
 
-  test("uses getApiKey only as a legacy fallback", async () => {
-    const auth = await resolveModelRequestAuth({
-      getApiKey: async () => "direct-key",
-    } as any, model);
-
-    expect(auth).toEqual({ ok: true, apiKey: "direct-key" });
-  });
-
   test("returns a stable error when no credentials are available", async () => {
-    const auth = await resolveModelRequestAuth({
-      getApiKeyAndHeaders: async () => ({ ok: false, error: "missing auth" }),
-    } as any, model);
-
-    expect(auth).toEqual({ ok: false, error: "missing auth" });
-  });
-
-  test("returns a stable error when the model registry is unavailable", async () => {
-    const auth = await resolveModelRequestAuth(undefined as any, model);
-
-    expect(auth).toEqual({ ok: false, error: "No model registry is available for openai/gpt-test." });
-  });
-
-  test("returns error when getApiKey returns undefined", async () => {
-    const auth = await resolveModelRequestAuth({
-      getApiKey: async () => undefined,
-    } as any, model);
-
+    const auth = await resolveModelRequestAuth({ getAuth: async () => undefined } as any, model);
     expect(auth).toEqual({ ok: false, error: "No credentials available for openai/gpt-test." });
+  });
+
+  test("unwraps runtime auth failure causes", async () => {
+    const auth = await resolveModelRequestAuth({
+      getAuth: async () => { throw new Error("auth wrapper", { cause: new Error("refresh denied") }); },
+    } as any, model);
+    expect(auth).toEqual({ ok: false, error: "refresh denied" });
+  });
+
+  test("returns a stable error when the model runtime is unavailable", async () => {
+    const auth = await resolveModelRequestAuth(undefined as any, model);
+    expect(auth).toEqual({ ok: false, error: "No model runtime is available for openai/gpt-test." });
   });
 });

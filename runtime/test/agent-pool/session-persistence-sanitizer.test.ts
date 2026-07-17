@@ -2,9 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AuthStorage, ModelRegistry, SessionManager, SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { SessionManager, SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
 import "../helpers.js";
 import { createSessionInDir } from "../../src/agent-pool/session.ts";
+import { createRealTestModelServices } from "../model-services-fixture.js";
 
 function makeAssistantMessage(text = "ready") {
   return {
@@ -47,8 +48,7 @@ describe("session persistence sanitizer", () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "piclaw-session-sanitize-resume-"));
     const sessionDir = join(tempRoot, "session");
     const workspaceDir = process.env.PICLAW_WORKSPACE || "/workspace";
-    const authStorage = AuthStorage.create();
-    const modelRegistry = ModelRegistry.inMemory(authStorage);
+    const { modelRuntime } = await createRealTestModelServices(join(tempRoot, "agent"));
     const settingsManager = SettingsManager.create(workspaceDir, getAgentDir());
 
     try {
@@ -64,8 +64,7 @@ describe("session persistence sanitizer", () => {
       expect(beforeText).toContain('"type":"image"');
 
       const runtime = await createSessionInDir(sessionDir, {
-        authStorage,
-        modelRegistry,
+        modelRuntime,
         settingsManager,
         tools: [],
         chatJid: "web:test",
@@ -94,14 +93,12 @@ describe("session persistence sanitizer", () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "piclaw-session-sanitize-append-"));
     const sessionDir = join(tempRoot, "session");
     const workspaceDir = process.env.PICLAW_WORKSPACE || "/workspace";
-    const authStorage = AuthStorage.create();
-    const modelRegistry = ModelRegistry.inMemory(authStorage);
+    const { modelRuntime } = await createRealTestModelServices(join(tempRoot, "agent"));
     const settingsManager = SettingsManager.create(workspaceDir, getAgentDir());
 
     try {
       const runtime = await createSessionInDir(sessionDir, {
-        authStorage,
-        modelRegistry,
+        modelRuntime,
         settingsManager,
         tools: [],
         chatJid: "web:test",

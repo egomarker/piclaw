@@ -1,23 +1,26 @@
-# `piclaw` — your self-hosted AI workspace
+# PiClaw — self-hosted AI workspace
 
 ![PiClaw](docs/icon-256.png)
 
 Languages: **English** · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
 
-PiClaw packages the [Pi Coding Agent](https://github.com/badlogic/pi-mono) into a self-hosted workspace with a trilingual streaming web UI, persistent state, multi-provider LLM support, and a practical built-in toolset that includes [many add-ons](https://rcarmo.github.io/piclaw-addons/).
+PiClaw packages the [Pi Coding Agent](https://github.com/badlogic/pi-mono) into a self-hosted workspace with a trilingual streaming web UI, persistent state, multi-provider LLM support, and built-in tools. [Optional add-ons](https://rcarmo.github.io/piclaw-addons/) extend the runtime and web UI.
 
-It is for people who want one stateful agent workspace they can run locally or in a container without stitching together half a dozen separate services.
+Run it locally or in a container as one stateful agent workspace.
 
-## Why PiClaw
+## Capabilities
 
 ![Demo Animation](docs/demo.gif)
 
-- **One workspace, one app** — chat, editor, terminal, viewers, boards, uploads, and automation in the same web UI
-- **Persistent state** — SQLite-backed messages, media, tasks, token usage, encrypted keychain, and session-scoped SSH / Proxmox / Portainer profiles
-- **Practical built-ins** — code editing, Office/PDF/CSV/image/video viewing, draw.io, VNC, browser automation, image processing, MCP, infra tools, and optional cross-instance IPC for paired remote peers
-- **Agent-first workflows** — steering, queued follow-ups, side prompts, autoresearch loops, scheduled tasks, and visual artifact generation
-- **Context conservation** — small always-active tool baseline with staged discovery via `list_tools` / `list_scripts`
-- **Optional auth/channels** — passkeys/TOTP for the web UI, plus optional WhatsApp integration
+| Capability | Details |
+|---|---|
+| Web workspace | Chat, editor, terminal, viewers, uploads, and automation in the same UI |
+| Persistent state | SQLite-backed messages, media, tasks, token usage, encrypted keychain, and session-scoped SSH profiles |
+| Built-in tools | Code editing, CSV/PDF/image/video viewing, VNC, browser automation, image processing, MCP, and optional cross-instance IPC for paired remote peers |
+| Agent workflows | Steering, queued follow-ups, side prompts, scheduled tasks, and visual artifact generation; the optional autoresearch add-on supplies experiment loops |
+| Staged tool loading | A small always-active tool set with discovery through `list_tools` and `list_scripts` |
+| Optional authentication and channels | Passkeys or TOTP for the web UI, plus optional WhatsApp integration |
+| Optional add-ons | Extra tools, skills, viewers, terminals, settings panes, Draw.io, Office document rendering and tools, Windows desktop automation, Proxmox, and Portainer |
 
 ## Quick start
 
@@ -35,34 +38,32 @@ docker run -d \
   ghcr.io/rcarmo/piclaw:latest
 ```
 
-Open `http://localhost:8080` and type `/login` to configure your LLM provider, including custom OpenAI-compatible endpoints when you are not using one of the built-in hosted providers. The web UI currently ships with English, Simplified Chinese, and Japanese strings; use the Settings language switcher when English is not the hill you want to die on today.
+Open `http://localhost:8080` and type `/login` to configure your LLM provider, including custom OpenAI-compatible endpoints. The web UI ships with English, Simplified Chinese, and Japanese strings; switch languages in Settings.
 
 > [!TIP]
 > Keep `--init` enabled for `docker run` / `podman run` so the runtime inserts a tiny init process for signal forwarding and zombie reaping. The bundled `docker-compose.yml` now sets the equivalent `init: true` flag.
 
 | Mount | Container path | Contents |
 |---|---|---|
-| Home | `/config` | Agent home (`.pi/`, `.gitconfig`, `.bashrc`) |
+| Home | `/config` | Persistent Pi state (`.pi/`) and Git configuration (`.gitconfig`) |
 | Workspace | `/workspace` | Projects, notes, and piclaw state |
 
 > [!NOTE]
-> In the container image, `/home/agent/.pi` is backed by `/config/.pi`. With the stock `docker run` / `docker-compose.yml` examples above, Pi home state therefore persists on the host under `./home/.pi/agent/`.
+> In the container image, `/home/agent/.pi` is backed by `/config/.pi`. With the `docker run` example above or the bundled [`docker-compose.yml`](docker-compose.yml), Pi home state persists on the host under `./home/.pi/agent/`.
 >
 > That means provider login state and model metadata should survive rebuilds/recreates when stored under files such as:
 >
 > - `./home/.pi/agent/auth.json`
 > - `./home/.pi/agent/models.json`
->
-> Mounting directly to `/home/agent` or `/home/agent/.pi/agent` can also work, but `/config` is the canonical documented persistence path for the container image.
 
 > [!WARNING]
-> Never delete `/workspace/.piclaw/store/messages.db`. It contains chat history, media, and task state.
+> Never delete `/workspace/.piclaw/store/messages.db`. It is the source of truth for chat history, media, tasks and run logs, token usage, encrypted keychain entries, passkeys, web sessions, chat branches, and remote-peer state.
 
 > [!IMPORTANT]
 > You do **not** need to set provider API keys in piclaw environment variables. PiClaw reuses provider credentials configured in Pi Agent settings.
 
 > [!NOTE]
-> Power users can place workspace-scoped shell environment overrides in `/workspace/.env.sh`. PiClaw sources that file for the embedded terminal and on runtime startup, which is useful for things like `PATH` tweaks or persisting `gh auth login` with `GH_CONFIG_DIR=/workspace/.config/gh`. This hook is user-controlled: if its contents break PiClaw startup, shell behavior, or tool resolution, that breakage is the user's responsibility.
+> Workspace-scoped shell environment overrides can go in `/workspace/.env.sh`. PiClaw sources that file for the embedded terminal and during runtime startup. Use it for settings such as `PATH` changes or a persistent GitHub CLI directory with `GH_CONFIG_DIR=/workspace/.config/gh`. Invalid contents can break startup, shell behavior, or tool resolution.
 
 ## Web UI at a glance
 
@@ -76,17 +77,17 @@ PiClaw is single-user, mobile-friendly, and streams updates over SSE.
 | Workspace | Sidebar browser, drag-and-drop uploads, file-reference pills, explorer search/reindex status |
 | Editor | CodeMirror 6, search/replace, dirty-state tracking, syntax highlighting, lazy local bundle |
 | Terminal | Bundled xterm.js web terminal as dock or tab; detachable popouts; Ghostty is available separately as an optional add-on |
-| Viewers | Draw.io, Office docs, CSV/TSV, PDF, images, video, code previews, kanban boards, VNC |
-| Automation | `/image`, `/flux`, `image_process`, `cdp_browser`, `mcp`, experimental `m365`, Windows-only `win_*` tools |
+| Viewers | Built-in CSV/TSV, PDF, image, video, code-preview, and VNC panes; optional add-ons supply Draw.io, the Office viewer backend, and kanban support |
+| Automation | Built-in `image_process`, `cdp_browser`, and `mcp`; experimental `m365`; `/image` and `/flux` when Azure OpenAI/Foundry is configured; Windows desktop automation through the optional `win-ui` add-on |
 
 For the full feature tour, see [docs/web-ui.md](docs/web-ui.md).
 
 > [!NOTE]
-> The default terminal renderer is now the bundled xterm.js implementation. The former Ghostty/WASM renderer was moved out of core and is available as the optional [`@rcarmo/piclaw-addon-ghostty-terminal`](https://rcarmo.github.io/piclaw-addons/addons/ghostty-terminal/) add-on for high-end browsers.
+> The bundled xterm.js implementation is the default terminal renderer. The Ghostty/WASM renderer is available separately through the optional [`@rcarmo/piclaw-addon-ghostty-terminal`](https://rcarmo.github.io/piclaw-addons/addons/ghostty-terminal/) add-on.
 
 ## Configuration
 
-Most users only need a few environment variables:
+Common environment variables:
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -100,7 +101,7 @@ Most users only need a few environment variables:
 | `PICLAW_KEYCHAIN_KEY` | _(empty)_ | Master key for encrypted secret storage |
 | `PICLAW_TRUST_PROXY` | `0` | Enable when behind a reverse proxy or tunnel |
 
-For the full list, auth setup (TOTP/passkeys), session-scoped SSH-backed remote tools, reverse proxy configuration, SSHFS/FUSE support, and the workspace environment hook, see [docs/configuration.md](docs/configuration.md).
+For the full list, TOTP/passkey setup, session-scoped SSH-backed remote tools, reverse proxy configuration, and the workspace environment hook, see [docs/configuration.md](docs/configuration.md).
 
 ## Other install methods
 
@@ -112,7 +113,7 @@ bun add -g github:rcarmo/piclaw
 
 Experimental. Linux/macOS/Windows. See [docs/install-from-repo.md](docs/install-from-repo.md).
 
-On Windows, PiClaw remains a secondary / not-officially-supported target. Shell-like child processes now run attached there (`detached=false`) so stdout/stderr remain capturable; Unix-like hosts still use detached process groups for cleaner tree termination on abort/shutdown.
+Windows support is experimental. Shell-like child processes run attached there (`detached=false`) so stdout and stderr remain capturable. Unix-like hosts use detached process groups so abort and shutdown can terminate the process tree.
 
 ### Experimental desktop shell
 
@@ -152,7 +153,7 @@ Use the issue templates and project board labels for lane definitions and triage
 
 ## Credits
 
-- [pi.dev](http://pi.dev) for a stupendously flexible and extensible core
+- [pi.dev](http://pi.dev) for the Pi core used by piclaw
 - [rcarmo/agentbox](https://github.com/rcarmo/agentbox)
 - [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw)
 - [badlogic/pi-mono](https://github.com/badlogic/pi-mono)
@@ -160,7 +161,7 @@ Use the issue templates and project board labels for lane definitions and triage
 - [nicobailon/visual-explainer](https://github.com/nicobailon/visual-explainer) — visual artifact generation skill philosophy, prompt workflow, and template patterns by Nico Bailon (adapted, not vendored)
 
 > [!NOTE]
-> piclaw is **not** directly affiliated with [pi.dev](https://pi.dev). It is a derivative work that leverages all of its core Pi functionality and builds additional runtime, tooling, and UI layers around it.
+> piclaw is **not directly affiliated** with [pi.dev](https://pi.dev). It is a derivative work built on the Pi core and adds its own runtime, tooling, and UI layers.
 
 ## Licence
 

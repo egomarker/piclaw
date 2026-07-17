@@ -285,14 +285,14 @@ test("rotateSession syncs active in-memory model to carried model after emergenc
 
   const carriedModel = { provider: "github-copilot", id: "gpt-5.5", api: "openai-responses" };
   const staleDefaultModel = { provider: "openai-codex", id: "gpt-5.5", api: "openai-codex-responses" };
-  const modelRegistry = {
-    find(provider: string, modelId: string) {
+  const modelRuntime = {
+    getModel(provider: string, modelId: string) {
       if (provider === carriedModel.provider && modelId === carriedModel.id) return carriedModel;
       if (provider === staleDefaultModel.provider && modelId === staleDefaultModel.id) return staleDefaultModel;
       return undefined;
     },
-    hasConfiguredAuth(model: { provider: string }) {
-      return model.provider === carriedModel.provider;
+    hasConfiguredAuth(provider: string) {
+      return provider === carriedModel.provider;
     },
   };
   const makeSession = (manager: SessionManager, file: string | undefined, activeModel: typeof carriedModel | typeof staleDefaultModel) => ({
@@ -300,7 +300,7 @@ test("rotateSession syncs active in-memory model to carried model after emergenc
     sessionFile: file,
     sessionName: "Model sync session",
     agent: { state: { model: activeModel } },
-    modelRegistry,
+    modelRuntime,
     get model() { return this.agent.state.model; },
     isStreaming: false,
     isCompacting: false,

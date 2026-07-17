@@ -1,76 +1,57 @@
 ---
 name: reload
-description: Reinstall piclaw from workspace source and force-restart the running process. Use after making code changes to piclaw.
+description: Reinstall piclaw from workspace source, then gracefully restart the managed process. Use after making code changes to piclaw.
 distribution: public
 ---
 
 # Reload Piclaw
 
-Reinstall piclaw from workspace source, then restart the managed process.
+Install the workspace build, then let the active service manager start a new process after graceful shutdown.
 
-> ⚠️ In this container runtime, always install to `/usr/local/lib/bun/install/global/node_modules/piclaw`. Do **not** deploy to `/home/agent/.bun/...` or the running service may keep using an older build.
+> ⚠️ In the container runtime, install to `/usr/local/lib/bun/install/global/node_modules/piclaw`. Do **not** deploy to `/home/agent/.bun/...`; the service may keep running another installation.
 
-## Preferred workflow
+## Agent-driven workflow
+
+1. Build, pack, and install without restarting:
+
+   ```bash
+   cd /workspace/piclaw && make local-install
+   ```
+
+2. Use `session_status` to check for other active sessions.
+3. If another session is working, report it and wait for approval. A restart interrupts that work.
+4. Send the final user-facing response.
+5. Call `exit_process` as the last tool action. It schedules graceful shutdown after the response is persisted. Supervisor restarts supervised containers; other installs need their service manager to start the process again.
+
+`make restart` is an intentional no-op guard. It prevents an active agent turn from killing its own response.
+
+## Manual shell workflow
+
+Outside an agent turn, install and restart as separate commands:
 
 ```bash
 cd /workspace/piclaw && make local-install
+systemctl --user restart piclaw.service
 ```
 
-This is the canonical repo path for this environment. It already handles the build, pack, install, and restart sequence correctly.
+Use the service manager configured for that host. Container installs commonly use Supervisor; host-native installs commonly use `systemd --user`.
 
-## Useful variants
+## Build commands
 
-Build only:
+Build Piclaw without installing:
 
 ```bash
 cd /workspace/piclaw && make build-piclaw
 ```
 
-Vendor bundle only:
+Build only the vendor bundle:
 
 ```bash
 cd /workspace/piclaw && make vendor
 ```
 
-Restart only:
-
-```bash
-cd /workspace/piclaw && make restart
-```
-
-## Service-manager detection order
-
-The restart flow auto-detects the manager in this order:
-
-| Priority | Check | Restart method |
-|---|---|---|
-| 0 | `PICLAW_SERVICE_MANAGER` set | use its value directly (`supervisor`, `systemd`, `manual`) |
-| 1 | `supervisorctl` exists and a `piclaw` program is registered | `supervisorctl restart piclaw` |
-| 2 | `systemctl` exists and a `piclaw.service` user unit exists | `systemctl --user restart piclaw.service` |
-| 3 | neither found | manual kill + start fallback |
-
-## Environment variables
-
-### Commonly used
-
-| Variable | Default | Description |
-|---|---|---|
-| `PICLAW_SERVICE_MANAGER` | auto | Force `supervisor`, `systemd`, or `manual` |
-| `PICLAW_RELOAD_ASYNC` | `1` | Set `0` for synchronous foreground mode |
-
-### Rarely needed overrides
-
-| Variable | Default | Description |
-|---|---|---|
-| `PICLAW_SUPERVISOR_SERVICE` | `piclaw` | Supervisor program name |
-| `PICLAW_SUPERVISORCTL_BIN` | `supervisorctl` | supervisorctl binary |
-| `PICLAW_SUPERVISORCTL_CONFIG` | auto | Supervisor config path |
-| `PICLAW_SYSTEMD_UNIT` | `piclaw.service` | systemd user unit name |
-| `PICLAW_WEB_PORT` | `8080` | Port used by the runtime / readiness checks |
-| `PICLAW_RELOAD_LOG` | `/tmp/restart-piclaw-force.log` | Async log path |
-
 ## Notes
 
-- Prefer `make local-install` over hand-written pack/install/restart sequences.
-- Bun and piclaw are installed globally under `/usr/local/lib/bun` in this environment.
-- If something goes wrong, inspect `/tmp/restart-piclaw-force.log`.
+- `make local-install` is install-only.
+- `exit_process` accepts an optional `reason`; it has no delay parameter.
+- Bun and Piclaw are installed globally under `/usr/local/lib/bun` in the container layout.

@@ -261,7 +261,7 @@ You can extend that baseline with `.piclaw/config.json`:
 
   ![ECharts treemap widget example](echarts-treemap-widget.png)
 - `open_workspace_file` — ask the active web UI to open a workspace file in an editor tab or popout window; popout requests are blocked on small viewports so the agent does not force unusable layouts
-- `image_process` — comprehensive workspace image manipulation via sharp, including resize/crop/convert/optimise, colour and geometry transforms, text/SVG/composite operations, metadata/info inspection, frame extraction, and spritesheet-to-GIF assembly; especially useful for icons, favicons, transparent PNGs, screenshots, avatars, and GIF workflows
+- `image_process` — workspace image manipulation via sharp: resize, crop, convert, optimise, transform colours and geometry, add text or composites, inspect metadata, extract frames, and assemble spritesheet GIFs
 - `exec_batch` — run multiple shell commands and return concise summaries for each
 - `powershell` — Windows-only replacement for the default shell tool; active instead of `bash` on Windows hosts
 - `bun_run` — run a workspace Bun script directly; kept in the default active baseline on Windows so there is still a first-party script runner alongside PowerShell
@@ -543,6 +543,7 @@ Each skill keeps its script alongside its `SKILL.md` for portability. Current se
 | `close-of-day` | End-of-day sweep: situate, backup, timeline cleanup, daily-notes summarisation |
 | `export-timeline-pdf` | Export a chat timeline to PDF via Playwright |
 | `feature-refinement-flow` | Structured 20-question refinement flow before implementation |
+| `technical-docs` | Write and review concise READMEs, design notes, runbooks, API documentation, release notes, and pull-request text |
 | `visual-design` | Apply the saved visual-design profile (charts, diagrams, Mermaid, layouts, styling defaults) consistently across generated outputs |
 | `visual-artifact-generator` | Generate polished self-contained HTML pages, diagrams, data tables, diff reviews, slide decks, and draw.io files using Piclaw vendored libraries. See [visual-artifact-generator.md](visual-artifact-generator.md). |
 | `situate-daily-notes` | Situation report and Obsidian-style daily summary notes |

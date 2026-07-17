@@ -6,8 +6,8 @@ distribution: public
 
 # Feed Digest
 
-Build a deduped markdown digest from all feeds on https://feeds.carmo.io, filtered by a time window.
-The script stores:
+Use this skill to build a deduped markdown digest from https://feeds.carmo.io for a chosen time window.
+It writes:
 - Markdown digest: `/workspace/notes/feeds-digest.md`
 - Link index (JSON): `/workspace/notes/feeds-digest-links.json`
 

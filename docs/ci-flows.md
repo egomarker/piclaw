@@ -1,6 +1,6 @@
 # CI workflows and dependencies
 
-This map documents the current GitHub Actions CI/release flow across all workflow files in `.github/workflows/`.
+This page maps the GitHub Actions CI and release flow defined in `.github/workflows/`.
 
 ```mermaid
 flowchart TB
@@ -81,7 +81,7 @@ flowchart TB
   end
 ```
 
-## Source files
+## Workflow files
 
 - `.github/workflows/ci.yml`
 - `.github/workflows/e2e.yml`

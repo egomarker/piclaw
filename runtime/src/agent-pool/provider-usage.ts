@@ -1,5 +1,8 @@
-import type { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { join } from "node:path";
 
+import { readStoredCredential, type ModelRuntime } from "@earendil-works/pi-coding-agent";
+
+import { getPiclawAgentDir } from "../core/agent-dir.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
 
 export interface ProviderUsageWindow {
@@ -23,12 +26,9 @@ export interface ProviderUsageSnapshot {
   hint_short: string;
 }
 
-type CachedUsage = {
-  expiresAt: number;
-  value: ProviderUsageSnapshot | null;
-};
-
+type CachedUsage = { expiresAt: number; value: ProviderUsageSnapshot | null };
 type SupportedProviderId = ProviderUsageSnapshot["provider"];
+type UsageModelRuntime = Pick<ModelRuntime, "getAuth">;
 
 const USAGE_CACHE_TTL_MS = Number(process.env.PICLAW_PROVIDER_USAGE_TTL_MS || "60000");
 const usageCache = new Map<string, CachedUsage>();
@@ -37,15 +37,11 @@ const log = createLogger("agent-pool.provider-usage");
 
 function clampPercent(value: unknown): number | null {
   const num = Number(value);
-  if (!Number.isFinite(num)) return null;
-  return Math.max(0, Math.min(100, num));
+  return Number.isFinite(num) ? Math.max(0, Math.min(100, num)) : null;
 }
 
 function parseDate(value: unknown): Date | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    // Shared helper expects Unix seconds for numeric inputs.
-    return new Date(value * 1000);
-  }
+  if (typeof value === "number" && Number.isFinite(value)) return new Date(value * 1000);
   if (typeof value === "string" && value.trim()) {
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? null : date;
@@ -58,345 +54,167 @@ function formatResetDescription(date: Date | null): string | null {
   const deltaMs = date.getTime() - Date.now();
   if (!Number.isFinite(deltaMs)) return null;
   if (deltaMs <= 0) return "resets soon";
-
   const totalMinutes = Math.max(1, Math.round(deltaMs / 60000));
   if (totalMinutes < 60) return `resets in ~${totalMinutes}m`;
-
   const totalHours = Math.floor(totalMinutes / 60);
   if (totalHours < 24) {
     const mins = totalMinutes % 60;
     return mins > 0 ? `resets in ~${totalHours}h ${mins}m` : `resets in ~${totalHours}h`;
   }
-
   const days = Math.floor(totalHours / 24);
   const hours = totalHours % 24;
   return `resets in ~${days}d ${hours}h`;
 }
 
-function makeWindow(
-  label: string,
-  usedPercentInput: unknown,
-  resetInput: unknown,
-  windowMinutes: number | null
-): ProviderUsageWindow | null {
-  const usedPercent = clampPercent(usedPercentInput);
-  if (usedPercent == null) return null;
-  const remaining = clampPercent(100 - usedPercent);
+function makeWindow(label: string, usedInput: unknown, resetInput: unknown, windowMinutes: number | null): ProviderUsageWindow | null {
+  const used = clampPercent(usedInput);
+  if (used == null) return null;
   const resetDate = parseDate(resetInput);
   return {
     label,
-    used_percent: usedPercent,
-    remaining_percent: remaining,
+    used_percent: used,
+    remaining_percent: clampPercent(100 - used),
     window_minutes: windowMinutes,
-    resets_at: resetDate ? resetDate.toISOString() : null,
+    resets_at: resetDate?.toISOString() ?? null,
     reset_description: formatResetDescription(resetDate),
   };
 }
 
 function compactPercent(value: number | null): string | null {
-  if (value == null) return null;
-  return `${Math.round(value)}%`;
+  return value == null ? null : `${Math.round(value)}%`;
 }
 
-function buildCodexHint(
-  primary: ProviderUsageWindow | null,
-  secondary: ProviderUsageWindow | null,
-  creditsRemaining: number | null,
-  creditsUnlimited: boolean
-): string {
+function buildCodexHint(primary: ProviderUsageWindow | null, secondary: ProviderUsageWindow | null, credits: number | null, unlimited: boolean): string {
   const parts: string[] = [];
   const p1 = compactPercent(primary?.remaining_percent ?? null);
   const p2 = compactPercent(secondary?.remaining_percent ?? null);
   if (p1) parts.push(`5h ${p1}`);
   if (p2) parts.push(`wk ${p2}`);
-  if (creditsUnlimited) parts.push("credits ∞");
-  else if (creditsRemaining != null && Number.isFinite(creditsRemaining)) {
-    parts.push(`credits ${creditsRemaining.toFixed(creditsRemaining >= 100 ? 0 : 1).replace(/\.0$/, "")}`);
-  }
+  if (unlimited) parts.push("credits ∞");
+  else if (credits != null && Number.isFinite(credits)) parts.push(`credits ${credits.toFixed(credits >= 100 ? 0 : 1).replace(/\.0$/, "")}`);
   return parts.join(" • ");
 }
 
 function buildCopilotHint(primary: ProviderUsageWindow | null, secondary: ProviderUsageWindow | null): string {
-  const parts: string[] = [];
-  const premium = compactPercent(primary?.remaining_percent ?? null);
-  const chat = compactPercent(secondary?.remaining_percent ?? null);
-  if (premium) parts.push(`premium ${premium}`);
-  if (chat) parts.push(`chat ${chat}`);
-  return parts.join(" • ");
+  return [
+    primary?.remaining_percent != null ? `premium ${compactPercent(primary.remaining_percent)}` : null,
+    secondary?.remaining_percent != null ? `chat ${compactPercent(secondary.remaining_percent)}` : null,
+  ].filter(Boolean).join(" • ");
 }
 
 function buildZaiHint(primary: ProviderUsageWindow | null, secondary: ProviderUsageWindow | null): string {
-  const parts: string[] = [];
-  const shortWindow = compactPercent(primary?.remaining_percent ?? null);
-  const tools = compactPercent(secondary?.remaining_percent ?? null);
-  if (shortWindow) parts.push(`5h ${shortWindow}`);
-  if (tools) parts.push(`tools ${tools}`);
-  return parts.join(" • ");
+  return [
+    primary?.remaining_percent != null ? `5h ${compactPercent(primary.remaining_percent)}` : null,
+    secondary?.remaining_percent != null ? `tools ${compactPercent(secondary.remaining_percent)}` : null,
+  ].filter(Boolean).join(" • ");
 }
 
-const PROVIDER_API_KEY_ENV: Partial<Record<SupportedProviderId, string[]>> = {
-  zai: ["ZAI_API_KEY"],
-};
-
-function getApiKeyCredential(authStorage: AuthStorage, providerId: SupportedProviderId): { key: string } | null {
-  const current = (authStorage.get(providerId) as any) ?? null;
-  if (current && current.type === "api_key" && typeof current.key === "string" && current.key.trim()) {
-    return { key: current.key.trim() };
-  }
-
-  for (const envName of PROVIDER_API_KEY_ENV[providerId] ?? []) {
-    const value = process.env[envName]?.trim();
-    if (value) return { key: value };
-  }
-
-  return null;
-}
-
-async function getOAuthCredential(authStorage: AuthStorage, providerId: string): Promise<any | null> {
-  const current = (authStorage.get(providerId) as any) ?? null;
-  if (!current || current.type !== "oauth") return null;
-  if (typeof current.expires === "number" && Number.isFinite(current.expires) && Date.now() >= current.expires) {
-    try {
-      await (authStorage as any).refreshOAuthTokenWithLock(providerId);
-    } catch (error) {
-      debugSuppressedError(log, "Failed to refresh provider OAuth credentials before usage lookup; using current credentials.", error, {
-        providerId,
-      });
-    }
-  }
-  const refreshed = (authStorage.get(providerId) as any) ?? null;
-  return refreshed && refreshed.type === "oauth" ? refreshed : null;
-}
-
-async function fetchCodexUsage(authStorage: AuthStorage): Promise<ProviderUsageSnapshot | null> {
-  const credential = await getOAuthCredential(authStorage, "openai-codex");
-  if (!credential?.access || !credential?.accountId) return null;
-
+async function fetchCodexUsage(modelRuntime: UsageModelRuntime, authPath: string): Promise<ProviderUsageSnapshot | null> {
+  const resolved = await modelRuntime.getAuth("openai-codex");
+  const stored = readStoredCredential("openai-codex", authPath) as { accountId?: unknown } | undefined;
+  const token = resolved?.auth.apiKey;
+  const accountId = typeof stored?.accountId === "string" ? stored.accountId : null;
+  if (!token || !accountId) return null;
   const res = await fetch("https://chatgpt.com/backend-api/wham/usage", {
-    headers: {
-      Authorization: `Bearer ${credential.access}`,
-      Accept: "application/json",
-      "ChatGPT-Account-Id": credential.accountId,
-      "User-Agent": "PiClaw",
-    },
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json", "ChatGPT-Account-Id": accountId, "User-Agent": "PiClaw" },
   });
-
   if (!res.ok) return null;
   const payload = (await res.json()) as any;
-  const primary = makeWindow(
-    "5h",
-    payload?.rate_limit?.primary_window?.used_percent,
-    payload?.rate_limit?.primary_window?.reset_at,
-    Number.isFinite(payload?.rate_limit?.primary_window?.limit_window_seconds)
-      ? Math.round(payload.rate_limit.primary_window.limit_window_seconds / 60)
-      : 300
-  );
-  const secondary = makeWindow(
-    "week",
-    payload?.rate_limit?.secondary_window?.used_percent,
-    payload?.rate_limit?.secondary_window?.reset_at,
-    Number.isFinite(payload?.rate_limit?.secondary_window?.limit_window_seconds)
-      ? Math.round(payload.rate_limit.secondary_window.limit_window_seconds / 60)
-      : null
-  );
-  const creditsRemaining = payload?.credits?.balance != null ? Number(payload.credits.balance) : null;
-  const creditsUnlimited = Boolean(payload?.credits?.unlimited);
-
-  return {
-    provider: "openai-codex",
-    source: "chatgpt-usage-api",
-    plan: typeof payload?.plan_type === "string" ? payload.plan_type : null,
-    fetched_at: new Date().toISOString(),
-    primary,
-    secondary,
-    credits_remaining: Number.isFinite(creditsRemaining) ? creditsRemaining : null,
-    credits_unlimited: creditsUnlimited,
-    hint_short: buildCodexHint(primary, secondary, Number.isFinite(creditsRemaining) ? creditsRemaining : null, creditsUnlimited),
-  };
+  const primary = makeWindow("5h", payload?.rate_limit?.primary_window?.used_percent, payload?.rate_limit?.primary_window?.reset_at, Number.isFinite(payload?.rate_limit?.primary_window?.limit_window_seconds) ? Math.round(payload.rate_limit.primary_window.limit_window_seconds / 60) : 300);
+  const secondary = makeWindow("week", payload?.rate_limit?.secondary_window?.used_percent, payload?.rate_limit?.secondary_window?.reset_at, Number.isFinite(payload?.rate_limit?.secondary_window?.limit_window_seconds) ? Math.round(payload.rate_limit.secondary_window.limit_window_seconds / 60) : null);
+  const credits = payload?.credits?.balance != null ? Number(payload.credits.balance) : null;
+  const unlimited = Boolean(payload?.credits?.unlimited);
+  return { provider: "openai-codex", source: "chatgpt-usage-api", plan: typeof payload?.plan_type === "string" ? payload.plan_type : null, fetched_at: new Date().toISOString(), primary, secondary, credits_remaining: Number.isFinite(credits) ? credits : null, credits_unlimited: unlimited, hint_short: buildCodexHint(primary, secondary, Number.isFinite(credits) ? credits : null, unlimited) };
 }
 
-async function fetchGitHubCopilotUsage(authStorage: AuthStorage): Promise<ProviderUsageSnapshot | null> {
-  const credential = await getOAuthCredential(authStorage, "github-copilot");
-  const githubToken = typeof credential?.refresh === "string" ? credential.refresh : null;
+async function fetchGitHubCopilotUsage(modelRuntime: UsageModelRuntime, authPath: string): Promise<ProviderUsageSnapshot | null> {
+  const resolved = await modelRuntime.getAuth("github-copilot"); // canonical refresh/serialization owner
+  if (!resolved) return null;
+  const stored = readStoredCredential("github-copilot", authPath) as { refresh?: unknown } | undefined;
+  const githubToken = typeof stored?.refresh === "string" ? stored.refresh : null;
   if (!githubToken) return null;
-
   const res = await fetch("https://api.github.com/copilot_internal/user", {
-    headers: {
-      Authorization: `token ${githubToken}`,
-      Accept: "application/json",
-      "Editor-Version": "vscode/1.96.2",
-      "Editor-Plugin-Version": "copilot-chat/0.26.7",
-      "User-Agent": "GitHubCopilotChat/0.26.7",
-      "X-Github-Api-Version": "2025-04-01",
-    },
+    headers: { Authorization: `token ${githubToken}`, Accept: "application/json", "Editor-Version": "vscode/1.96.2", "Editor-Plugin-Version": "copilot-chat/0.26.7", "User-Agent": "GitHubCopilotChat/0.26.7", "X-Github-Api-Version": "2025-04-01" },
   });
-
   if (!res.ok) return null;
   const payload = (await res.json()) as any;
-  const premium = payload?.quota_snapshots?.premium_interactions;
-  const chat = payload?.quota_snapshots?.chat;
-  const primary = premium
-    ? {
-        label: "premium",
-        used_percent: clampPercent(100 - Number(premium.percent_remaining ?? premium.remaining / premium.entitlement * 100)),
-        remaining_percent: clampPercent(premium.percent_remaining ?? premium.remaining / premium.entitlement * 100),
-        window_minutes: null,
-        resets_at: parseDate(payload?.quota_reset_date)?.toISOString() ?? null,
-        reset_description: formatResetDescription(parseDate(payload?.quota_reset_date)),
-      }
-    : null;
-  const secondary = chat
-    ? {
-        label: "chat",
-        used_percent: clampPercent(100 - Number(chat.percent_remaining ?? chat.remaining / chat.entitlement * 100)),
-        remaining_percent: clampPercent(chat.percent_remaining ?? chat.remaining / chat.entitlement * 100),
-        window_minutes: null,
-        resets_at: parseDate(payload?.quota_reset_date)?.toISOString() ?? null,
-        reset_description: formatResetDescription(parseDate(payload?.quota_reset_date)),
-      }
-    : null;
-
-  return {
-    provider: "github-copilot",
-    source: "github-copilot-internal-api",
-    plan: typeof payload?.copilot_plan === "string" ? payload.copilot_plan : null,
-    fetched_at: new Date().toISOString(),
-    primary,
-    secondary,
-    credits_remaining: null,
-    credits_unlimited: false,
-    hint_short: buildCopilotHint(primary, secondary),
-  };
+  const reset = parseDate(payload?.quota_reset_date);
+  const window = (label: string, value: any): ProviderUsageWindow | null => value ? {
+    label,
+    used_percent: clampPercent(100 - Number(value.percent_remaining ?? value.remaining / value.entitlement * 100)),
+    remaining_percent: clampPercent(value.percent_remaining ?? value.remaining / value.entitlement * 100),
+    window_minutes: null,
+    resets_at: reset?.toISOString() ?? null,
+    reset_description: formatResetDescription(reset),
+  } : null;
+  const primary = window("premium", payload?.quota_snapshots?.premium_interactions);
+  const secondary = window("chat", payload?.quota_snapshots?.chat);
+  return { provider: "github-copilot", source: "github-copilot-internal-api", plan: typeof payload?.copilot_plan === "string" ? payload.copilot_plan : null, fetched_at: new Date().toISOString(), primary, secondary, credits_remaining: null, credits_unlimited: false, hint_short: buildCopilotHint(primary, secondary) };
 }
 
-async function fetchZaiUsage(authStorage: AuthStorage): Promise<ProviderUsageSnapshot | null> {
-  const credential = getApiKeyCredential(authStorage, "zai");
-  if (!credential?.key) return null;
-
-  const res = await fetch("https://api.z.ai/api/monitor/usage/quota/limit", {
-    headers: {
-      Authorization: `Bearer ${credential.key}`,
-      Accept: "application/json",
-      "User-Agent": "PiClaw",
-    },
-  });
-
+async function fetchZaiUsage(modelRuntime: UsageModelRuntime): Promise<ProviderUsageSnapshot | null> {
+  const token = (await modelRuntime.getAuth("zai"))?.auth.apiKey;
+  if (!token) return null;
+  const res = await fetch("https://api.z.ai/api/monitor/usage/quota/limit", { headers: { Authorization: `Bearer ${token}`, Accept: "application/json", "User-Agent": "PiClaw" } });
   if (!res.ok) return null;
   const payload = (await res.json()) as any;
   const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : null;
   if (!limits) return null;
-
-  const tokensLimit = limits.find((limit: any) => limit?.type === "TOKENS_LIMIT") ?? null;
-  const toolsLimit = limits.find((limit: any) => limit?.type === "TIME_LIMIT") ?? null;
-  const primary = makeWindow(
-    "5h",
-    tokensLimit?.percentage,
-    typeof tokensLimit?.nextResetTime === "number"
-      ? tokensLimit.nextResetTime / 1000 // zai returns ms; parseDate expects seconds.
-      : tokensLimit?.nextResetTime,
-    300
-  );
-  const secondary = makeWindow(
-    "tools",
-    toolsLimit?.percentage,
-    typeof toolsLimit?.nextResetTime === "number"
-      ? toolsLimit.nextResetTime / 1000 // zai returns ms; parseDate expects seconds.
-      : toolsLimit?.nextResetTime,
-    null
-  );
-
-  return {
-    provider: "zai",
-    source: "zai-usage-api",
-    plan: typeof payload?.data?.level === "string" ? payload.data.level : null,
-    fetched_at: new Date().toISOString(),
-    primary,
-    secondary,
-    credits_remaining: null,
-    credits_unlimited: false,
-    hint_short: buildZaiHint(primary, secondary),
-  };
+  const tokens = limits.find((limit: any) => limit?.type === "TOKENS_LIMIT") ?? null;
+  const tools = limits.find((limit: any) => limit?.type === "TIME_LIMIT") ?? null;
+  const reset = (value: unknown) => typeof value === "number" ? value / 1000 : value;
+  const primary = makeWindow("5h", tokens?.percentage, reset(tokens?.nextResetTime), 300);
+  const secondary = makeWindow("tools", tools?.percentage, reset(tools?.nextResetTime), null);
+  return { provider: "zai", source: "zai-usage-api", plan: typeof payload?.data?.level === "string" ? payload.data.level : null, fetched_at: new Date().toISOString(), primary, secondary, credits_remaining: null, credits_unlimited: false, hint_short: buildZaiHint(primary, secondary) };
 }
 
 function isSupportedProviderId(providerId: string): providerId is SupportedProviderId {
   return providerId === "openai-codex" || providerId === "github-copilot" || providerId === "zai";
 }
 
-function getCachedUsageEntry(providerId: string): CachedUsage | null {
-  return usageCache.get(providerId) ?? null;
-}
-
-function hasFreshCachedUsage(providerId: string): boolean {
-  const cached = getCachedUsageEntry(providerId);
-  return Boolean(cached && cached.expiresAt > Date.now());
-}
-
-async function fetchProviderUsage(authStorage: AuthStorage, providerId: SupportedProviderId): Promise<ProviderUsageSnapshot | null> {
-  switch (providerId) {
-    case "openai-codex":
-      return await fetchCodexUsage(authStorage);
-    case "github-copilot":
-      return await fetchGitHubCopilotUsage(authStorage);
-    case "zai":
-      return await fetchZaiUsage(authStorage);
-  }
+async function fetchProviderUsage(modelRuntime: UsageModelRuntime, providerId: SupportedProviderId, authPath: string): Promise<ProviderUsageSnapshot | null> {
+  if (providerId === "openai-codex") return fetchCodexUsage(modelRuntime, authPath);
+  if (providerId === "github-copilot") return fetchGitHubCopilotUsage(modelRuntime, authPath);
+  return fetchZaiUsage(modelRuntime);
 }
 
 export function peekProviderUsage(providerId: string, options: { allowStale?: boolean } = {}): ProviderUsageSnapshot | null {
   if (!isSupportedProviderId(providerId)) return null;
-  const cached = getCachedUsageEntry(providerId);
+  const cached = usageCache.get(providerId);
   if (!cached) return null;
-  if (options.allowStale === true) {
-    return cached.value;
-  }
-  return cached.expiresAt > Date.now() ? cached.value : null;
+  return options.allowStale === true || cached.expiresAt > Date.now() ? cached.value : null;
 }
 
-export async function warmProviderUsage(authStorage: AuthStorage, providerId: string): Promise<ProviderUsageSnapshot | null> {
+function resolveUsageAuthPath(modelRuntime: UsageModelRuntime, authPath?: string): string {
+  return authPath ?? (modelRuntime as UsageModelRuntime & { authPath?: string }).authPath ?? join(getPiclawAgentDir(), "auth.json");
+}
+
+export async function warmProviderUsage(modelRuntime: UsageModelRuntime, providerId: string, authPath?: string): Promise<ProviderUsageSnapshot | null> {
   if (!isSupportedProviderId(providerId)) return null;
-  if (hasFreshCachedUsage(providerId)) {
-    return peekProviderUsage(providerId);
-  }
-
+  const cached = usageCache.get(providerId);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
   const existing = usageRefreshInFlight.get(providerId);
-  if (existing) {
-    return await existing;
-  }
-
-  const cached = getCachedUsageEntry(providerId);
+  if (existing) return existing;
   const refreshPromise = (async () => {
     let value: ProviderUsageSnapshot | null;
     try {
-      value = await fetchProviderUsage(authStorage, providerId);
+      value = await fetchProviderUsage(modelRuntime, providerId, resolveUsageAuthPath(modelRuntime, authPath));
     } catch (error) {
-      debugSuppressedError(log, "Provider usage refresh failed; returning the cached usage snapshot when available.", error, {
-        providerId,
-        hasCachedValue: cached?.value != null,
-      });
+      debugSuppressedError(log, "Provider usage refresh failed; returning the cached usage snapshot when available.", error, { providerId, hasCachedValue: cached?.value != null });
       value = cached?.value ?? null;
     }
-
-    usageCache.set(providerId, {
-      expiresAt: Date.now() + USAGE_CACHE_TTL_MS,
-      value,
-    });
+    usageCache.set(providerId, { expiresAt: Date.now() + USAGE_CACHE_TTL_MS, value });
     usageRefreshInFlight.delete(providerId);
     return value;
   })();
-
   usageRefreshInFlight.set(providerId, refreshPromise);
-  return await refreshPromise;
+  return refreshPromise;
 }
 
-export async function getProviderUsage(authStorage: AuthStorage, providerId: string): Promise<ProviderUsageSnapshot | null> {
+export async function getProviderUsage(modelRuntime: UsageModelRuntime, providerId: string, authPath?: string): Promise<ProviderUsageSnapshot | null> {
   if (!isSupportedProviderId(providerId)) return null;
-
-  const cached = getCachedUsageEntry(providerId);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.value;
-  }
-
-  return await warmProviderUsage(authStorage, providerId);
+  const cached = usageCache.get(providerId);
+  return cached && cached.expiresAt > Date.now() ? cached.value : warmProviderUsage(modelRuntime, providerId, authPath);
 }
 
 export function clearProviderUsageCache(): void {

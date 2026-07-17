@@ -6,14 +6,14 @@ distribution: public
 
 # Web Search
 
-Use this when you want **search results plus raw fetched page content**.
+Use this when you need search results and fetched page content.
 
-If you only need short summaries rather than full converted page content, use `web-search-summary` instead.
+If you only need short summaries, use `web-search-summary`.
 
 ## Search engine selection
 
-- If `PICLAW_SEARX_URL` is set or `--searx-url` is passed, uses SearXNG.
-- Otherwise, falls back to **DuckDuckGo HTML search** (no API key required).
+- If `PICLAW_SEARX_URL` is set or `--searx-url` is passed, the script uses SearXNG.
+- Otherwise, it falls back to **DuckDuckGo HTML search** (no API key required).
 
 ## Examples
 

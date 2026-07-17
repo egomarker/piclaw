@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, expect, setDefaultTimeout, test } from 'bun:test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AuthStorage, ModelRegistry, SettingsManager, getAgentDir } from '@earendil-works/pi-coding-agent';
+import { SettingsManager, getAgentDir } from '@earendil-works/pi-coding-agent';
 import '../helpers.js';
 import { withTempWorkspaceEnv } from '../helpers.js';
 import { createSessionInDir, getInstalledAddonExtensionPaths } from '../../src/agent-pool/session.ts';
+import { createRealTestModelServices } from "../model-services-fixture.js";
 import { clearExtensionRoutes, getRegisteredRoutes, handleExtensionRoutes, isExtensionRouteRegistryFrozen } from '../../src/channels/web/http/extension-routes.js';
 
 setDefaultTimeout(10_000);
@@ -60,16 +61,14 @@ test('web sessions load installed addon extensions from the workspace extensions
       '',
     ].join('\n'));
 
-    const authStorage = AuthStorage.create();
-    const modelRegistry = ModelRegistry.inMemory(authStorage);
+    const { modelRuntime } = await createRealTestModelServices(join(workspace.base, "agent"));
     const settingsManager = SettingsManager.create(workspace.workspace, getAgentDir());
     const sessionDir = join(workspace.workspace, 'sessions', 'web-test');
 
     expect(isExtensionRouteRegistryFrozen()).toBe(false);
 
     const runtime = await createSessionInDir(sessionDir, {
-      authStorage,
-      modelRegistry,
+      modelRuntime,
       settingsManager,
       tools: [],
       chatJid: 'web:test',
@@ -96,14 +95,12 @@ test('installed eml addon registers the attachment preview route', async () => {
     writeFileSync(join(addonDir, 'package.json'), readFileSync(join(sourceDir, 'package.json'), 'utf8'));
     writeFileSync(join(addonDir, 'index.ts'), readFileSync(join(sourceDir, 'index.ts'), 'utf8'));
 
-    const authStorage = AuthStorage.create();
-    const modelRegistry = ModelRegistry.inMemory(authStorage);
+    const { modelRuntime } = await createRealTestModelServices(join(workspace.base, "agent"));
     const settingsManager = SettingsManager.create(workspace.workspace, getAgentDir());
     const sessionDir = join(workspace.workspace, 'sessions', 'web-eml-test');
 
     const runtime = await createSessionInDir(sessionDir, {
-      authStorage,
-      modelRegistry,
+      modelRuntime,
       settingsManager,
       tools: [],
       chatJid: 'web:test',

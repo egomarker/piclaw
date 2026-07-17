@@ -1,7 +1,6 @@
 # Configuration
 
-This document covers all `piclaw` configuration options: environment variables,
-config files, secrets, authentication, and notifications.
+This page lists Piclaw's environment variables, config files, secrets, authentication settings, and notification settings.
 
 **Jump to:**
 [Paths](#path-overrides) ·
@@ -81,7 +80,7 @@ Or in `.piclaw/config.json`:
 }
 ```
 
-When direct-connect is disabled and no saved targets exist, the VNC pane now shows an explicit empty-state message instead of suggesting a direct connection path that the host will reject anyway.
+When direct-connect is disabled and no saved targets exist, the VNC pane shows an explicit empty state instead of suggesting a connection path that the host will reject.
 
 CLI overrides: `piclaw --port`, `--host`, `--idle-timeout`, `--tls-cert`, `--tls-key`.
 
@@ -89,7 +88,7 @@ CLI overrides: `piclaw --port`, `--host`, `--idle-timeout`, `--tls-cert`, `--tls
 
 By default, PiClaw keeps browser-local notifications and service-worker Web Push titles clean.
 
-If you want explicit source markers while validating delivery routing, set:
+To label delivery source while validating routing, set:
 
 ```bash
 PICLAW_WEB_NOTIFICATION_DEBUG_LABELS=1
@@ -160,14 +159,13 @@ writes a managed block into `/workspace/.env.sh`, persists the source of truth
 under `/workspace/.piclaw/env-tool.json`, and updates `process.env`
 immediately for later tool calls in the same runtime.
 
-This file is still a **power-user feature** for intentionally customizing the
-environment seen by:
+This file is a **power-user feature** for customizing the environment seen by:
 
 - the embedded web terminal
 - interactive shells in the container/workspace
 - the supervisor-managed PiClaw runtime startup path
 
-Typical uses include:
+Common uses:
 
 - extending `PATH` for workspace-local binaries
 - redirecting tool config into the mounted workspace
@@ -184,7 +182,7 @@ mkdir -p /workspace/.config/gh
 
 With that in place, you can install `gh` into `/workspace/.local/bin`, open the embedded terminal, run `gh auth login`, and keep the GitHub CLI auth state under the mounted workspace instead of ephemeral container-local config.
 
-If you want a ready-made helper, PiClaw ships an example installer script here:
+PiClaw ships an example installer script here:
 
 ```text
 docs/helpers/install-gh.sh
@@ -218,17 +216,17 @@ That helper installs the latest GitHub CLI release into `/workspace/.local/bin/g
 
 PiClaw reuses the upstream Pi provider/auth model rather than inventing a second provider-config system.
 
-Practical consequences:
+As a result:
 
 - hosted providers are usually configured through `/login` in the web UI or `pi /login` in the terminal
-- custom providers that speak the common OpenAI-style API can now be configured directly from the `/login` card flow
+- custom providers that speak the common OpenAI-style API can be configured directly from the `/login` card flow
 - the built-in custom-card variants cover at least:
   - Azure OpenAI (`openai-responses` style endpoint)
   - Ollama (`openai-completions` style local endpoint)
   - generic OpenAI-compatible endpoints (base URL + API key + model id)
 - provider credentials and configured models live in Pi-managed auth/config storage rather than a separate piclaw-only env-var matrix
 
-That means most users should prefer `/login` over setting raw provider env vars by hand unless they are deliberately operating one of the packaged integration-specific paths.
+Most users should prefer `/login` over setting raw provider env vars by hand unless they are deliberately using one of the packaged integration-specific paths.
 
 ### GitHub Copilot live model discovery
 
@@ -271,7 +269,7 @@ For the packaged Azure managed-identity/static-key path and its additional token
 | `PICLAW_REMOTE_COMPACTION_ENABLED` | `0` | Opt in to provider-native compaction before the selected local method |
 | `PICLAW_REMOTE_COMPACTION_TIMEOUT_MS` | `300000` | Provider-native compaction request deadline before deterministic local fallback; aligned with Codex's long-running compact endpoint |
 | `PICLAW_WHATSAPP_PHONE` | _(empty)_ | Alias for `WHATSAPP_PHONE` |
-| `PICLAW_TOOL_OUTPUT_RETENTION_MS` | `14400000` (4 h) | Milliseconds to retain stored tool outputs (preferred; overrides `_DAYS`) |
+| `PICLAW_TOOL_OUTPUT_RETENTION_MS` | `2592000000` (30 days) | Milliseconds to retain stored tool outputs (preferred; overrides `_DAYS`; values are capped at 30 days) |
 | `PICLAW_TOOL_OUTPUT_RETENTION_DAYS` | _(legacy)_ | Days to retain stored tool outputs (deprecated; use `_MS`) |
 | `PICLAW_TOOL_OUTPUT_CLEANUP_INTERVAL_MS` | `900000` (15 min) | Cleanup interval (ms) |
 | `PICLAW_TOOL_OUTPUT_STORE_BYTES` | `4096` | Store tool output externally when payload exceeds this byte threshold |
@@ -287,28 +285,28 @@ For the packaged Azure managed-identity/static-key path and its additional token
 | `PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS` | `12000` | Timeout for semantic summary generation before preview fallback |
 | `PICLAW_SESSION_IDLE_MAX_WAIT_MS` | `10000` | Max ms to wait for session idle before sending a turn response |
 | `PICLAW_SESSION_IDLE_COMPACTION_MAX_WAIT_MS` | `300000` | Max ms to wait for idle when a compaction is in progress |
-| `PICLAW_MAIN_SESSION_IDLE_TTL_MS` | _(empty)_ | Idle TTL for the main (interactive) session |
-| `PICLAW_SIDE_SESSION_IDLE_TTL_MS` | _(empty)_ | Idle TTL for side/background sessions (falls back to `PICLAW_SESSION_IDLE_TTL_MS`) |
-| `PICLAW_SESSION_IDLE_TTL_MS` | _(empty)_ | Shared idle TTL fallback for all sessions |
-| `PICLAW_MAIN_SESSION_POOL_MAX_SIZE` | `2` | Max number of warm main chat sessions kept cached under normal conditions |
-| `PICLAW_MAIN_SESSION_PRESSURE_RSS_BYTES` | `536870912` (512 MB) | RSS threshold that enables memory-pressure session eviction mode |
+| `PICLAW_MAIN_SESSION_IDLE_TTL_MS` | `180000` (3 min) | Idle TTL for the main interactive session; `PICLAW_SESSION_IDLE_TTL_MS` overrides the fallback when set |
+| `PICLAW_SIDE_SESSION_IDLE_TTL_MS` | `60000` (1 min) | Idle TTL for side/background sessions; `PICLAW_SESSION_IDLE_TTL_MS` overrides the fallback when set |
+| `PICLAW_SESSION_IDLE_TTL_MS` | _(empty)_ | Shared idle TTL override for main and side sessions when their specific variables are unset |
+| `PICLAW_MAIN_SESSION_POOL_MAX_SIZE` | `1` | Max number of warm main chat sessions kept cached under normal conditions |
+| `PICLAW_MAIN_SESSION_PRESSURE_RSS_BYTES` | `402653184` (384 MB) | RSS threshold that enables memory-pressure session eviction mode |
 | `PICLAW_MAIN_SESSION_PRESSURE_IDLE_TTL_MS` | `60000` | Main-session idle TTL while memory pressure mode is active |
 | `PICLAW_MAIN_SESSION_PRESSURE_POOL_MAX_SIZE` | `1` | Max cached main sessions while memory pressure mode is active |
 
 Notes:
 
 - `PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING` is separate from `PICLAW_TURN_MAX_TOOL_USE_MESSAGES`: the former counts executed tools inside one prompt attempt as a safety abort, while the latter is the visible per-turn tool-use budget.
-- Tool output retention now defaults to **4 hours** (`PICLAW_TOOL_OUTPUT_RETENTION_MS`). The legacy `PICLAW_TOOL_OUTPUT_RETENTION_DAYS` is still accepted but superseded.
-- Tool-result compaction now supports both a global gate (`PICLAW_TOOL_RESULT_COMPACTION_ENABLED`) and per-tool allowlisting (`PICLAW_TOOL_RESULT_COMPACTION_TOOLS`).
+- Tool output retention defaults to **30 days** and is capped at 30 days. `PICLAW_TOOL_OUTPUT_RETENTION_MS` overrides the legacy `PICLAW_TOOL_OUTPUT_RETENTION_DAYS`.
+- Tool-result compaction supports both a global gate (`PICLAW_TOOL_RESULT_COMPACTION_ENABLED`) and per-tool allowlisting (`PICLAW_TOOL_RESULT_COMPACTION_TOOLS`).
 - Semantic summaries are enabled by default for compacted tool results; if generation fails or times out (`PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS`), Piclaw falls back to preview-based summaries.
-- Session idle timeouts are now tunable: `PICLAW_SESSION_IDLE_MAX_WAIT_MS` controls interactive turn flushing; `PICLAW_SESSION_IDLE_COMPACTION_MAX_WAIT_MS` (default 5 min) allows extra wait time during compaction so the agent does not cut off mid-summarisation.
-- Background/scheduled turns use `PICLAW_BACKGROUND_AGENT_TIMEOUT` when set, otherwise they fall back to `PICLAW_AGENT_TIMEOUT`.
+- Session idle timeouts are configurable: `PICLAW_SESSION_IDLE_MAX_WAIT_MS` controls interactive turn flushing; `PICLAW_SESSION_IDLE_COMPACTION_MAX_WAIT_MS` (default 5 min) allows extra wait time during compaction so the agent does not cut off mid-summarisation.
+- Background and scheduled turns use `PICLAW_BACKGROUND_AGENT_TIMEOUT` when set; otherwise they fall back to `PICLAW_AGENT_TIMEOUT`.
 - On `systemd --user` installs, keep `PICLAW_WORKSPACE`, `PICLAW_STORE`, and `PICLAW_DATA` stable across restarts. Startup recovery relies on the persisted SQLite state plus writable IPC files under `PICLAW_DATA/ipc/tasks`.
-- Session auto-rotation now defaults to a safer operational ceiling (`32 MB`). This is intentionally conservative because pathological persisted sessions can hydrate to much larger in-memory footprints than their on-disk JSONL size suggests.
-- Warm-session pressure mode now defaults to **512 MB RSS** before clamping the main-session cache. This is intentionally above ordinary multi-session web usage so normal chats are not thrashed into repeated cold starts.
+- Session auto-rotation defaults to `32 MB`. Persisted sessions can hydrate to much larger in-memory footprints than their on-disk JSONL size suggests.
+- Warm-session pressure mode defaults to **384 MB RSS** before clamping the main-session cache. Set `PICLAW_MAIN_SESSION_PRESSURE_RSS_BYTES` to override the threshold.
 - In pressure mode, the main-session pool clamps to `PICLAW_MAIN_SESSION_PRESSURE_POOL_MAX_SIZE` (default `1`) and uses the shorter `PICLAW_MAIN_SESSION_PRESSURE_IDLE_TTL_MS` (default `60000`).
 - Oversized persisted `toolResult` payloads are sanitized before session resume and at append-time so inline image/blob payloads do not keep re-accumulating inside session files.
-- Blank/no-terminal-output turns are no longer considered successful consumption. Automatic recovery still runs first; if no terminal assistant reply is persisted, the cursor is rewound and the failed run is held for explicit retry/skip resolution.
+- Blank or no-terminal-output turns are not considered successful consumption. Automatic recovery still runs first; if no terminal assistant reply is persisted, the cursor is rewound and the failed run is held for explicit retry or skip resolution.
 
 ### Smart-compaction processing method
 
@@ -341,7 +339,7 @@ The legacy aliases `traditional_pipelined`, `traditional-pipelined`, and `tradit
 
 ### Provider-native remote compaction
 
-Provider-native compaction is an **opt-in pre-pass** after shared source preparation, tool analysis, and file-operation reconciliation. When enabled, Piclaw attempts it before the configured Selective or Pipelined method's ledger/prompt construction and model execution. The local method remains the atomic fallback for disabled or unsupported providers, unverified endpoints, missing authentication, timeouts, malformed responses, provider errors, and remote-backoff suppression. A remote failure does not partially mutate the session or skip local compaction.
+Provider-native compaction is an **opt-in pre-pass** after shared source preparation, tool analysis, and file-operation reconciliation. When enabled, Piclaw attempts it before the configured Selective or Pipelined method's ledger or prompt construction and model execution. If the provider is disabled, unsupported, unverified, unauthenticated, timed out, malformed, or in remote-backoff suppression, Piclaw runs the captured local method instead. A remote failure does not partially mutate the session or skip local compaction.
 
 Support is capability-gated by exact provider, API, and endpoint metadata. Piclaw does not infer support from a model name or from generic `openai-responses` compatibility. The initial supported matrix is:
 
@@ -387,7 +385,7 @@ Deprecated env names (still supported): `ASSISTANT_NAME`, `ASSISTANT_AVATAR`, `A
 
 Notes:
 
-- Graph-backed consumer-account support now exists when an Outlook Live session is visible in the browser.
+- Graph-backed consumer-account support works when an Outlook Live session is visible in the browser.
 - Teams chat tools still require a work/school M365 account.
 - For operational details, platform notes, and account-scope guidance, see [m365-experimental-extension.md](m365-experimental-extension.md).
 
@@ -409,7 +407,7 @@ There are two ways to enable it:
    - `ssh { action: "get" }`
    - `ssh { action: "clear" }`
 
-The `ssh` tool stores chat-scoped profiles in SQLite and applies them immediately to live sessions when possible. That means the agent can switch a chat from local → remote → local again in the same turn without recreating the session runtime. Live SSH redirection is automatically cleared at the end of each agent turn; the stored profile remains available for later inspection or re-application.
+The `ssh` tool stores chat-scoped profiles in SQLite and applies them immediately to live sessions when possible. The agent can switch a chat from local → remote → local again in the same turn without recreating the session runtime. Live SSH redirection is automatically cleared at the end of each agent turn; the stored profile remains available for later inspection or re-application.
 
 ### Required key material
 
@@ -499,7 +497,7 @@ The same `/config/.pi/agent/` path also holds Pi-managed provider auth/model met
 Notes:
 
 - prefer the project-local file when MCP servers are part of the current workspace
-- config now prefers shared MCP files first (`~/.config/mcp/mcp.json`, then project `.mcp.json`), with Pi-owned config layers used for Pi-specific imports/overrides and project-local `.pi/mcp.json` as the final override
+- config lookup prefers shared MCP files first (`~/.config/mcp/mcp.json`, then project `.mcp.json`), with Pi-owned config layers used for Pi-specific imports or overrides and project-local `.pi/mcp.json` as the final override
 - start a new chat/session or restart PiClaw after changing MCP config
 - the adapter exposes the `mcp` tool plus `/mcp`, `/mcp status`, `/mcp tools`, `/mcp reconnect [server]`, and `/mcp-auth` commands
 - `/mcp` opens the MCP management panel in the web UI and falls back to text status elsewhere
@@ -507,8 +505,7 @@ Notes:
 
 ### Default active tools
 
-Piclaw keeps the agent's always-active baseline intentionally small and uses
-`list_tools` and `activate_tools` to enable extra capabilities on demand.
+Piclaw keeps the always-active baseline small and uses `list_tools` and `activate_tools` to enable extra capabilities on demand.
 
 #### How tool activation affects token usage
 
@@ -550,12 +547,11 @@ default set when they are already safe/cheap:
   `scheduled_tasks`, `read_attachment`, `export_attachment`),
 - `attach_file` and `keychain` when available.
 
-This keeps common read/inspect workflows fast while leaving more expensive tools
-opt-in via activation.
+Common read and inspect workflows stay fast while more expensive tools stay opt-in via activation.
 
-#### How to unlock additional tools
+#### Activate additional tools
 
-Follow the existing path:
+Use this sequence:
 
 1. `list_tools` with `query` or `intent` for compact discovery.
 2. Activate only the needed tool(s) via `activate_tools`.
@@ -634,7 +630,7 @@ Rules:
 - Configured roots are indexed automatically at session start
 - `search_workspace` can still refresh indexing on demand per call
 - `refresh_workspace_index` forces a full rebuild for the configured roots
-- the web workspace explorer now shows the current index status, last indexed time, indexed file count, configured roots, and a one-click reindex control
+- the web workspace explorer shows the current index status, last indexed time, indexed file count, configured roots, and a one-click reindex control
 - `scope: notes` and `scope: skills` remain the built-in convenience filters; `scope: all` searches across the configured root set
 
 ### Dream and AutoDream
@@ -644,14 +640,13 @@ Memory maintenance has two trigger modes:
 - `Dream` — manual `/dream [days]`
 - `AutoDream` — built-in nightly scheduled task (`builtin-dream-midnight`)
 
-Both modes now run as out-of-band model turns on a temporary `dream:` channel.
-The dream channel is cleaned up after the cycle ends.
+Both modes run as out-of-band model turns on a temporary `dream:` channel. The dream channel is cleaned up after the cycle ends.
 Before the model turn begins, runtime creates a pre-Dream `.zip` backup of `notes/daily/` and `notes/memory/`, prunes older Dream backups (default keep: 10), and refreshes/seeds in-window daily notes from the messages database.
 
 Default windows:
 
 - manual `Dream` keeps the historical default of 7 days unless you pass `/dream <days>`
-- nightly `AutoDream` now defaults to a narrower 2-day window
+- nightly `AutoDream` defaults to a 2-day window
 
 AutoDream is gated, but nightly cadence no longer waits for a full 24-hour gap.
 It runs when there has been activity since the last consolidation.
@@ -836,8 +831,7 @@ WORKSPACE_PATH=/mnt/data/piclaw-workspace docker compose up -d
 ## Container UID/GID remapping
 
 The compose stack passes `PUID` and `PGID` into the container. On startup,
-`/entrypoint.sh` now remaps the runtime `agent` user/group to those ids before
-it initializes the home directory and piclaw-managed persistent state.
+`/entrypoint.sh` remaps the runtime `agent` user/group to those ids before it initializes the home directory and piclaw-managed persistent state.
 
 The entrypoint validates the Supervisor configuration using a Python INI parser
 (not the `supervisord` binary itself) before launching the process manager.
@@ -860,9 +854,7 @@ Notes:
 
 - Remapping applies to piclaw-managed paths such as `/home/agent`, `/config`,
   `/workspace/.piclaw`, and `/workspace/.pi`.
-- The entrypoint intentionally does **not** recursively chown the entire
-  `/workspace` bind mount, so existing project files outside piclaw-managed
-  state keep their host ownership.
+- The entrypoint does **not** recursively chown the entire `/workspace` bind mount, so existing project files outside piclaw-managed state keep their host ownership.
 - If the requested uid/gid is already claimed by a different user/group inside
   the container, startup aborts with a clear error instead of silently picking a
   conflicting mapping.

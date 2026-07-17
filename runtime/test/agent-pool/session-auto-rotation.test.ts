@@ -10,6 +10,7 @@ import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { initDatabase } from "../../src/db.js";
 import { createTempWorkspace, importFresh, setEnv, type TempWorkspace } from "../helpers.js";
+import { createAgentPoolModelOptions } from "../model-services-fixture.js";
 
 let restoreEnv: (() => void) | null = null;
 let tempWorkspace: TempWorkspace | null = null;
@@ -152,6 +153,7 @@ test("agent pool auto-rotates oversized persisted sessions before prompting", as
   truncateSync(previousSessionFile!, 2 * 1024 * 1024);
 
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => createRuntime(session) as any,
   });
 
@@ -202,6 +204,7 @@ test("agent pool waits for an oversized busy session to settle before auto-rotat
   }, 120);
 
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => createRuntime(session) as any,
   });
 

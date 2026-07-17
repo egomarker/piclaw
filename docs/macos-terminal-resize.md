@@ -1,13 +1,8 @@
-# macOS Terminal Resize — Known Limitation & Architecture Notes
+# macOS terminal resize limitation
+
+macOS `/usr/bin/top` (setuid root) does **not** resize when the PTY master fd is held in a child process that communicates via pipes—the `pty_spawn` architecture. Other terminal applications, including `nano`, `vim`, `htop`, ncurses apps, and shell scripts, resize correctly.
 
 > Reference for future PRs touching the web terminal on macOS.
-
-## Summary
-
-macOS `/usr/bin/top` (setuid root) does **not** resize when the PTY master fd
-is held in a **child process** that communicates via pipes (the `pty_spawn`
-architecture). All other terminal applications (nano, vim, htop, ncurses apps,
-shell scripts) resize correctly.
 
 ## What works
 
@@ -65,7 +60,7 @@ top's output volume before and after `ioctl(TIOCSWINSZ)`:
 A ratio near **0.16** indicates resize (area ratio of 60×15 / 140×40).
 Values near **0.8–1.0** mean no resize occurred.
 
-### Why only `top`?
+### Setuid `top` behaviour
 
 `/usr/bin/top` is a **setuid root** binary with the entitlement
 `com.apple.system-task-ports.read`. macOS applies stricter security checks
@@ -95,9 +90,9 @@ piclaw falls back to the existing `expect`-based PTY.
 | `pty_native.c` | ~80 | Native PTY addon (C source, compiled on first use) |
 | `terminal-session-service.ts` | +150 | macOS PTY integration: load dylib, spawn, I/O, resize |
 
-### What changes for Linux
+### Linux impact
 
-Nothing. All macOS code is gated by `IS_MACOS`. Zero code paths change on Linux.
+All macOS code is gated by `IS_MACOS`. Linux code paths do not change.
 
 ## References
 

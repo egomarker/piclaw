@@ -1,16 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { createAssistantMessageEventStream, type AssistantMessage, type Model } from "@earendil-works/pi-ai";
 import {
-  AuthStorage,
   createAgentSession,
-  ModelRegistry,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+
+import { FileCredentialStore } from "../../src/agent-pool/credential-store.js";
 
 const model: Model<"openai-responses"> = {
   id: "ambient-auth-test",
@@ -33,11 +34,7 @@ function assistant(text: string): AssistantMessage {
     provider: model.provider,
     model: model.id,
     usage: {
-      input: 1,
-      output: 1,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 2,
+      input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     },
     stopReason: "stop",
@@ -45,12 +42,20 @@ function assistant(text: string): AssistantMessage {
   };
 }
 
-describe("Earendil 0.80.7 ambient auth", () => {
+describe("Earendil 0.80.10 ambient auth", () => {
   test("branch summarization can use a provider that supplies auth outside Pi", async () => {
     const root = mkdtempSync(join(tmpdir(), "piclaw-ambient-auth-"));
     try {
-      const authStorage = AuthStorage.create(join(root, "auth.json"));
-      const modelRegistry = ModelRegistry.inMemory(authStorage, [model]);
+      const credentials = new FileCredentialStore(join(root, "auth.json"));
+      const modelRuntime = await ModelRuntime.create({ credentials, modelsPath: null, allowModelNetwork: false });
+      modelRuntime.registerProvider(model.provider, {
+        baseUrl: model.baseUrl,
+        api: model.api,
+        apiKey: "ambient-placeholder",
+        models: [model],
+      });
+      await modelRuntime.refresh({ allowNetwork: false });
+
       const settingsManager = SettingsManager.inMemory({
         compaction: { enabled: false },
         retry: { enabled: false },
@@ -59,8 +64,7 @@ describe("Earendil 0.80.7 ambient auth", () => {
       const { session } = await createAgentSession({
         cwd: root,
         sessionManager,
-        authStorage,
-        modelRegistry,
+        modelRuntime,
         settingsManager,
         model,
         tools: [],
@@ -69,23 +73,15 @@ describe("Earendil 0.80.7 ambient auth", () => {
       let streamCalls = 0;
       session.agent.streamFn = (_selectedModel, _context, options) => {
         streamCalls += 1;
-        expect(options?.apiKey).toBeUndefined();
+        expect(options?.apiKey).toBe("ambient-placeholder");
         const stream = createAssistantMessageEventStream();
         stream.push({ type: "done", reason: "stop", message: assistant("branch summary text") });
         return stream;
       };
 
-      const targetId = sessionManager.appendMessage({
-        role: "user",
-        content: "first branch",
-        timestamp: Date.now(),
-      });
+      const targetId = sessionManager.appendMessage({ role: "user", content: "first branch", timestamp: Date.now() });
       sessionManager.appendMessage(assistant("first reply"));
-      sessionManager.appendMessage({
-        role: "user",
-        content: "abandoned branch work",
-        timestamp: Date.now(),
-      });
+      sessionManager.appendMessage({ role: "user", content: "abandoned branch work", timestamp: Date.now() });
       sessionManager.appendMessage(assistant("abandoned reply"));
 
       const result = await session.navigateTree(targetId, { summarize: true });
@@ -98,5 +94,5 @@ describe("Earendil 0.80.7 ambient auth", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });

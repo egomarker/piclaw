@@ -1,11 +1,8 @@
 # runtime/extensions
 
-This directory contains filesystem-backed packaged runtime extensions.
+This directory contains filesystem-backed packaged runtime extensions. It is separate from `runtime/src/extensions/`, which contains code-registered built-in extension factories wired directly into the runtime.
 
-It is intentionally separate from `runtime/src/extensions/`, which contains
-code-registered built-in extension factories wired directly into the runtime.
-
-## Current grouping
+## Subdirectories
 
 - `browser/` — packaged browser automation extensions
 - `platform/windows/` — packaged Windows-specific platform extensions
@@ -14,14 +11,14 @@ code-registered built-in extension factories wired directly into the runtime.
 - `experimental/` — packaged experimental or harness-only extension entries
   - `experimental/m365/` — Microsoft 365 tool bundle (env-gated; browser/CDP-assisted, primarily validated on Windows, with cross-platform Edge → Chrome → Chromium lookup; Graph-backed consumer-account support now exists, while Teams chat flows still require a work/school tenant)
 
-## Guardrail
+## Compatibility boundary
 
 Do not confuse this tree with workspace/project-local `.pi/extensions/` or
-agent-local `.pi/agent/extensions/` convention paths. Those are compatibility-
-sensitive user-facing surfaces and are not the same as packaged runtime
-extension layout.
+agent-local `.pi/agent/extensions/` convention paths. Those user-facing
+surfaces are compatibility-sensitive and are not the same as the packaged
+runtime extension layout.
 
-Some packaged extensions also contribute colocated skills via the Pi
+Some packaged extensions also ship colocated skills through the Pi
 `resources_discover` hook. Keep those skill assets beside the extension when the
 skill is tightly coupled to that integration's native tool contract.
 

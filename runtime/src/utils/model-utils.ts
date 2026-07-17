@@ -69,8 +69,8 @@ export function findModel(
 }
 
 /**
- * High-level convenience: refresh the registry, resolve the input, and return
- * the canonical "provider/modelId" label or an error message.
+ * High-level convenience: resolve from the coherent cached registry snapshot
+ * and return the canonical "provider/modelId" label or an error message.
  *
  * Used by extensions/model-control.ts and agent-pool.ts.
  */
@@ -80,7 +80,6 @@ export function resolveModelLabel(
 ): { model?: string; error?: string } {
   const { provider, modelId } = parseModelInput(input);
   if (!modelId) return { error: "Model identifier is required." };
-  modelRegistry.refresh();
   const { model, error } = findModel(modelRegistry.getAll(), provider, modelId);
   if (!model || error) return { error: error ?? "Model not found." };
   return { model: `${model.provider}/${model.id}` };

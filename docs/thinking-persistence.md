@@ -1,13 +1,13 @@
 # Thinking persistence
 
-Persist the model's reasoning traces ("thinking" or "extended thinking" blocks)
-into the messages database so they survive page reloads and can be re-opened
-later from the chat timeline.
+Persist model reasoning traces ("thinking" or "extended thinking" blocks)
+in the messages database so they survive page reloads and can be reopened from
+the chat timeline.
 
-**Default: OFF.** This feature is strictly opt-in because durable storage of
-reasoning traces has privacy and security implications beyond regular chat
-messages. Read the [Privacy & security](#privacy--security) section before
-turning it on.
+**Default: OFF.** This feature is opt-in because durable storage of reasoning
+traces has privacy and security implications beyond regular chat messages.
+Read the [Privacy & security](#privacy--security) section before you enable
+it.
 
 ---
 
@@ -29,8 +29,8 @@ After enabling, any agent turn whose model emits thinking blocks
 3. The web UI renders a collapsible "Thought for Ns" pill under the message;
    clicking it lazy-loads the full trace from `/agent/thinking`.
 
-When the feature is OFF, none of that happens — the live `Thinking...` panel
-that streams during a turn still works, but nothing is written to the DB.
+When the feature is off, the live `Thinking...` panel still streams during
+a turn, but PiClaw does not write anything to the database.
 
 ---
 
@@ -41,12 +41,12 @@ that streams during a turn still works, but nothing is written to the DB.
 | `PICLAW_WEB_PERSIST_THINKING` | `0` | Enable capture-and-persist. Accepts `1`/`true`/`yes`. |
 | `PICLAW_WEB_PERSIST_THINKING_MAX_CHARS` | `100000` | Hard cap on stored characters per turn. Values ≤ 0 fall back to the default. Truncation is UTF-16 surrogate-safe (emoji at the boundary get dropped, not half-stored). |
 
-Both knobs are also readable from the JSON `web` config block under the keys
-`persistThinking` and `persistThinkingMaxChars` (or the same names in snake_case).
+Both settings are also readable from the JSON `web` config block under the
+keys `persistThinking` and `persistThinkingMaxChars` (or the same names in
+snake_case).
 
-The feature flag is checked per-turn, so toggling it does not require a
-process restart — but the environment variable change will only take effect
-on restart.
+PiClaw checks the resolved setting on each turn. A running process only sees
+new environment variable values after restart.
 
 ---
 
@@ -75,7 +75,7 @@ The block carries only the metrics so the timeline can render the pill
 without fetching the full text. The text loads lazily on first expand via
 `GET /agent/thinking?message_id=N&chat_jid=...`.
 
-### Summarized thinking — what you actually get
+### Summarized thinking
 
 Starting with Claude 4 (Opus 4.6, Opus 4.7, Sonnet 4.6, etc.), Anthropic
 returns **summarized thinking** by default — a condensed reformulation of the
@@ -85,9 +85,8 @@ so what reaches PiClaw is already the summary, not the raw internal reasoning.
 
 Practical implications:
 
-- The 100 KB default cap is much larger than typical summaries need (~3 KB
-  average observed on production traffic via the GitHub Copilot enterprise
-  proxy).
+- The 100 KB default cap is far above typical summaries. Production traffic
+  through the GitHub Copilot enterprise proxy averages about 3 KB.
 - `duration_ms` reflects wall-clock time of the full original thinking phase,
   even though the stored text is the summary.
 - Older models (pre-Claude 4) or models accessed with full thinking enabled
@@ -141,15 +140,15 @@ content because:
   receiver with reasoning traces.
 - Run periodic purges if you don't need long-term thinking history (see
   [Cleanup & retention](#cleanup--retention)).
-- Consider the threat model: a single-user, local self-hosted tool is
-  fundamentally different from a shared service.
+- Evaluate the threat model for the deployment. A shared service exposes
+  reasoning traces to more users and systems than a single-user local install.
 
 ---
 
 ## Cleanup & retention
 
-Thinking content is auto-cleaned whenever the parent message is deleted, via
-every code path that removes messages:
+PiClaw deletes thinking content whenever it deletes the parent message.
+These code paths perform that cleanup:
 
 | Path | Trigger |
 |---|---|
@@ -187,8 +186,8 @@ bun run runtime/scripts/purge-thinking-content.ts --chat-jid web:default
 bun run runtime/scripts/purge-thinking-content.ts --all --vacuum
 ```
 
-PiClaw does NOT need to be stopped — SQLite WAL mode lets the runtime keep
-reading while the script holds a brief write transaction.
+PiClaw can stay running. SQLite WAL mode lets the runtime keep reading while
+the script holds a brief write transaction.
 
 ### Or hand-written SQL
 
@@ -214,11 +213,12 @@ VACUUM;
 ### Disabling the feature
 
 Unsetting `PICLAW_WEB_PERSIST_THINKING` (or setting it to `0`) stops new
-captures on the next restart. **Existing thinking_ref pills on old messages
-will still render**, and clicking them will still load the historical
-content — disabling controls capture, not display.
+captures after the next restart. Existing `thinking_ref` pills on old
+messages still render, and clicking them still loads the historical content.
+Disabling the feature stops capture; it does not remove stored traces from the
+UI.
 
-If you want pills to disappear from old messages too, you have to either:
+To remove old pills from existing messages, either:
 - Delete the messages (deletes the pill via `content_blocks`)
 - Manually rewrite `content_blocks` to drop `thinking_ref` entries (no
   built-in tool)
@@ -260,8 +260,8 @@ Anthropic occasionally returns `redacted_thinking` blocks where the actual
 reasoning is replaced with an opaque payload and a placeholder string
 (`"[Reasoning redacted]"`). pi-ai surfaces these as normal `thinking` blocks
 to the streaming handler, so the placeholder string ends up in stored
-thinking. This is technically correct (the model did "think" for that
-duration) but the persisted text is not useful — known limitation.
+thinking. `duration_ms` still reflects the thinking interval, but the stored
+text is not useful. This is a known limitation.
 
 ---
 

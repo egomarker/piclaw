@@ -1,6 +1,6 @@
 # PiClaw Adaptive Card Templates
 
-These templates are designed for the **currently shipped** PiClaw web runtime.
+These templates target the current PiClaw web runtime.
 
 All examples assume:
 - `schema_version: "1.5"`
@@ -300,7 +300,7 @@ Use Action.OpenUrl buttons only, with a concise fallback message.
 
 ## Authoring notes
 
-- Keep card IDs descriptive and stable enough for the current interaction.
+- Keep card IDs descriptive and stable within the current interaction.
 - Keep fallback text short and human-readable.
 - Prefer simple bodies and few actions.
 - If markdown is clearer, use markdown instead of a card.

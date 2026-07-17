@@ -49,24 +49,24 @@ systemctl --user status piclaw.service --no-pager -l | head -n 15
 ```
 
 ## Bun + global installs
-- Bun should live at `/usr/local/bun/bin/bun`
-- PATH should include `/usr/local/bun/bin` in `~/.bashrc` for interactive shells
+- Bun should live at `/usr/local/lib/bun/bin/bun`
+- PATH should include `/usr/local/lib/bun/bin` in `~/.bashrc` for interactive shells
 
 Reinstall bun (if missing):
 ```
-sudo BUN_INSTALL=/usr/local/bun bash -c "$(curl -fsSL https://bun.sh/install)"
+sudo BUN_INSTALL=/usr/local/lib/bun bash -c "$(curl -fsSL https://bun.sh/install)"
 ```
 
 Global installs:
 ```
 # pi CLI
-sudo /usr/local/bun/bin/bun add -g @earendil-works/pi-coding-agent
+sudo /usr/local/lib/bun/bin/bun add -g @earendil-works/pi-coding-agent
 
 # piclaw from workspace repo root
-sudo /usr/local/bun/bin/bun add -g --no-save file:/workspace/piclaw
+sudo /usr/local/lib/bun/bin/bun add -g --no-save file:/workspace/piclaw
 
 # ensure wrapper is reachable
-sudo ln -sf /usr/local/bun/bin/piclaw /usr/local/bin/piclaw
+sudo ln -sf /usr/local/lib/bun/bin/piclaw /usr/local/bin/piclaw
 ```
 
 ## Remote changes audit + import

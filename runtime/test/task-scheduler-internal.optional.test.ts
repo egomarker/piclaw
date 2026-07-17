@@ -12,7 +12,7 @@ let dream: typeof import("../src/dream.js") | null = null;
 function writeDailyNote(workspace: string, date: string, summary: string) {
   const dir = join(workspace, "notes/daily");
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, `${date}.md`), `---\ndate: ${date}\nsummarised_until: ${date}T23:59:59.000Z\nmessages_total: 4\nmessages_user: 2\nmessages_assistant: 2\nsession_trees: 1\nsession_chats: 1\nfirst_message: ${date}T12:00:00.000Z\nlast_message: ${date}T12:15:00.000Z\nscope_mode: all-web-session-trees\nscope_anchor: web:default\n---\n# ${date}\n\n## Summary\n\n${summary}\n`, "utf8");
+  writeFileSync(join(dir, `${date}.md`), `---\ndate: ${date}\nsummarised_until: ${date}T23:59:59.000Z\nmessages_total: 4\nmessages_user: 2\nmessages_assistant: 2\nsession_trees: 1\nsession_chats: 1\nfirst_message: ${date}T12:00:00.000Z\nlast_message: ${date}T12:15:00.000Z\nscope_mode: all-web-session-trees\nscope_anchor: web:default\n---\n# ${date}\n\n## Summary\n\n${summary}\n\n## Summary update (12:30 UTC)\n\n<!-- NEEDS_SUMMARY_UPDATE -->\n`, "utf8");
 }
 
 function isoDateDaysAgo(daysAgo: number): string {
@@ -35,7 +35,7 @@ test("internal Dream flows keep notes/memory/days model-owned and AutoDream stay
   rmSync(join(config.DATA_DIR, "workspace-search"), { recursive: true, force: true });
   rmSync(join(config.DATA_DIR, "sessions"), { recursive: true, force: true });
 
-  const recentDate = isoDateDaysAgo(1);
+  const recentDate = isoDateDaysAgo(0);
   writeDailyNote(config.WORKSPACE_DIR, recentDate, "Infra tooling and memory maintenance landed.");
 
   db = await importFresh("../src/db.js");

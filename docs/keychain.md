@@ -254,7 +254,7 @@ registerKeychainProvider({
 | `set` | optional | `(entry: Entry) => Promise<boolean>` | Store a secret |
 | `delete` | optional | `(name: string) => Promise<boolean>` | Remove a secret |
 
-### What's seamless
+### Compatibility
 
 All existing keychain consumers work without changes:
 
@@ -268,7 +268,7 @@ All existing keychain consumers work without changes:
 ### Error handling
 
 - Providers that throw during `get()` or `list()` are skipped with a warning log; other providers continue to be queried.
-- A broken provider never blocks lookups — the system degrades gracefully.
+- A broken provider never blocks lookups.
 
 ### Example use cases
 

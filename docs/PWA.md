@@ -464,7 +464,7 @@ function measureSafeAreaInset(property) {
 }
 ```
 
-This is not currently used in our code but is documented here for reference.
+Piclaw uses a variant of this DOM-probe pattern in `runtime/web/src/ui/mobile-viewport.ts`: it measures computed safe-area padding and falls back to `offsetHeight`.
 
 ---
 
@@ -590,7 +590,7 @@ After any change to layout CSS, meta tags, or mobile-viewport.ts:
 
 ### GitHub issues & docs
 
-16. **[gueridon/ios-standalone-viewport.md](https://github.com/spm1001/gueridon/blob/main/docs/ios-standalone-viewport.md)** — Most comprehensive first-party investigation. Measured all viewport units on iPhone 14 Pro. Documents the "docking" recalculation behavior, `calc(100dvh + 1px)` trick, feedback loop with `calc(100dvh + env())`, and final body-scroll approach.
+16. **[gueridon/ios-standalone-viewport.md](https://github.com/spm1001/gueridon/blob/main/docs/ios-standalone-viewport.md)** — Measures all viewport units on an iPhone 14 Pro and documents the "docking" recalculation behaviour, `calc(100dvh + 1px)` workaround, feedback loop with `calc(100dvh + env())`, and final body-scroll approach.
 17. **[boolinator/ios-pwa-bottom-bar-fix.md](https://github.com/korovatron/boolinator/blob/main/ios-pwa-bottom-bar-fix.md)** — Documents the intermittent bottom bar, the `visualViewport.height + safe-area-inset-top` JS compensation pattern, and staggered retry timings (50/150/300/500/800/1200ms).
 18. **[iPhone game guide gist](https://gist.github.com/fozzedout/5e77925381991a9570151550992baf14)** — Authoritative guide to fullscreen PWA games on iPhone. Key findings: `100vh` is the ONLY unit that works from cold start; `height: 100%` breaks `viewport-fit=cover`; `100dvh` isn't initialized until viewport is "exercised". Includes DOM probe technique for reading `env()` values.
 19. **[Latitudes-Dev/shuvcode#244](https://github.com/Latitudes-Dev/shuvcode/issues/244)** — Fix iOS PWA safe area handling for Dynamic Island and bottom home indicator. Documents the same top/bottom gap symptoms.

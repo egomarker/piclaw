@@ -2,16 +2,16 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AuthStorage, ModelRegistry, SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
 import "../helpers.js";
 import { createSessionInDir } from "../../src/agent-pool/session.ts";
+import { createRealTestModelServices } from "../model-services-fixture.js";
 
 describe("bundled extension gating by channel/platform", () => {
   test("removed viewer tools stay out of bundled session bootstrap while platform-gated tools remain gated", async () => {
-    const authStorage = AuthStorage.create();
-    const modelRegistry = ModelRegistry.inMemory(authStorage);
-    const settingsManager = SettingsManager.create("/workspace", getAgentDir());
     const tempRoot = mkdtempSync(join(tmpdir(), "piclaw-session-gating-"));
+    const { modelRuntime } = await createRealTestModelServices(join(tempRoot, "agent"));
+    const settingsManager = SettingsManager.create("/workspace", getAgentDir());
     const webSessionDir = join(tempRoot, "web-session");
     const whatsappSessionDir = join(tempRoot, "wa-session");
     const workspaceDir = join(tempRoot, "workspace");
@@ -24,16 +24,14 @@ describe("bundled extension gating by channel/platform", () => {
 
     try {
       const webRuntime = await createSessionInDir(webSessionDir, {
-        authStorage,
-        modelRegistry,
+        modelRuntime,
         settingsManager,
         tools: [],
         chatJid: "web:test",
         cwd: workspaceDir,
       });
       const whatsappRuntime = await createSessionInDir(whatsappSessionDir, {
-        authStorage,
-        modelRegistry,
+        modelRuntime,
         settingsManager,
         tools: [],
         chatJid: "whatsapp:test",

@@ -400,8 +400,8 @@ function registerSessionControlHandler(agentPool: AgentPool, web: WebChannel): v
     if (request.action === "inspect") return { ok: true, ...base, before };
     if (request.action === "assess_stuck") return { ok: true, ...base, before, assessment: assessSessionSnapshot(before) };
 
-    let message = "";
-    let extra: Record<string, unknown> = {};
+    let message: string;
+    let extra: Record<string, unknown>;
     if (request.action === "compact") {
       if (before.streaming && !request.force) throw new Error("Target session is streaming; pass force=true to compact anyway.");
       const result = await agentPool.applyControlCommand(target.chatJid, {

@@ -26,13 +26,12 @@ import {
   type AgentSessionServices,
   type ExtensionFactory,
   type SessionStartEvent,
-  getAgentDir,
   SessionManager,
-  type AuthStorage,
-  type ModelRegistry,
+  type ModelRuntime,
   type SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 
+import { getPiclawAgentDir } from "../core/agent-dir.js";
 import { SESSIONS_DIR, WORKSPACE_DIR } from "../core/config.js";
 import { buildChannelSystemPromptAppendix } from "../channels/formatting.js";
 import { detectChannel } from "../router.js";
@@ -41,13 +40,12 @@ import { freezeExtensionRoutes } from "../channels/web/http/extension-routes.js"
 import { ensureExtensionNodeModulesLink } from "./session-node-modules-link.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
 import { installAddonRuntimeApi } from "../addons/runtime-contributions.js";
-import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type { CompactionStreamFn } from "../extensions/smart-compaction/stream-complete.js";
 import { normalizeLlmContext } from "./llm-context-normalizer.js";
 import { writeMergedSessionArchive } from "../session-archive.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const AGENT_DIR = getAgentDir();
+const AGENT_DIR = getPiclawAgentDir();
 const EMPTY_STRING_ARRAY: string[] = [];
 const BUNDLED_EXTENSION_PATHS_CACHE = new Map<string, string[]>();
 const SESSION_TOOL_RESULT_MAX_PERSIST_BYTES = parsePositiveInt(
@@ -632,35 +630,14 @@ export function ensureNamedSessionDir(chatJid: string, name: string): string {
  * Loads workspace resources (AGENTS.md, skills, extensions, prompt templates)
  * and resumes the most recent session tree.
  */
-export function createCompactionStreamFn(modelRegistry: ModelRegistry, settingsManager: SettingsManager): CompactionStreamFn {
-  return async (model, context, options) => {
+export function createCompactionStreamFn(modelRuntime: ModelRuntime, settingsManager: SettingsManager): CompactionStreamFn {
+  return (model, context, options) => {
     const providerRetrySettings = settingsManager.getProviderRetrySettings();
-    const hasResolvedAuth = options?.apiKey !== undefined || options?.headers !== undefined || options?.env !== undefined;
-    if (hasResolvedAuth) {
-      return streamSimple(model, normalizeLlmContext(context), {
-        ...options,
-        timeoutMs: options.timeoutMs ?? providerRetrySettings.timeoutMs,
-        maxRetries: options.maxRetries ?? providerRetrySettings.maxRetries,
-        maxRetryDelayMs: options.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
-      });
-    }
-
-    const auth = await modelRegistry.getApiKeyAndHeaders(model);
-    if (!auth.ok) {
-      throw new Error(auth.error ?? `No credentials available for ${model.provider}/${model.id}.`);
-    }
-    return streamSimple(model, normalizeLlmContext(context), {
+    return modelRuntime.streamSimple(model, normalizeLlmContext(context), {
       ...options,
-      apiKey: auth.apiKey,
       timeoutMs: options?.timeoutMs ?? providerRetrySettings.timeoutMs,
       maxRetries: options?.maxRetries ?? providerRetrySettings.maxRetries,
       maxRetryDelayMs: options?.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
-      headers: auth.headers || options?.headers
-        ? { ...auth.headers, ...options?.headers }
-        : undefined,
-      env: auth.env || options?.env
-        ? { ...auth.env, ...options?.env }
-        : undefined,
     });
   };
 }
@@ -668,8 +645,7 @@ export function createCompactionStreamFn(modelRegistry: ModelRegistry, settingsM
 export async function createSessionInDir(
   sessionDir: string,
   options: {
-    authStorage: AuthStorage;
-    modelRegistry: ModelRegistry;
+    modelRuntime: ModelRuntime;
     settingsManager: SettingsManager;
     tools: NonNullable<AgentSessionCreateOptions["tools"]>;
     customTools?: unknown[];
@@ -698,7 +674,8 @@ export async function createSessionInDir(
     sessionStartEvent?: SessionStartEvent;
   }) => {
     const builtinExtensionFactories = createBuiltinExtensionFactories({
-      compactionStreamFn: createCompactionStreamFn(options.modelRegistry, options.settingsManager),
+      compactionStreamFn: createCompactionStreamFn(options.modelRuntime, options.settingsManager),
+      modelRuntime: options.modelRuntime,
     });
     const resourceLoader = new DefaultResourceLoader({
       cwd,
@@ -716,9 +693,8 @@ export async function createSessionInDir(
     const services: AgentSessionServices = {
       cwd,
       agentDir,
-      authStorage: options.authStorage,
+      modelRuntime: options.modelRuntime,
       settingsManager: options.settingsManager,
-      modelRegistry: options.modelRegistry,
       resourceLoader,
       diagnostics: [],
     };
@@ -776,8 +752,7 @@ export async function createSessionInDir(
 export async function createDefaultSession(
   chatJid: string,
   options: {
-    authStorage: AuthStorage;
-    modelRegistry: ModelRegistry;
+    modelRuntime: ModelRuntime;
     settingsManager: SettingsManager;
     tools: NonNullable<AgentSessionCreateOptions["tools"]>;
     customTools?: unknown[];

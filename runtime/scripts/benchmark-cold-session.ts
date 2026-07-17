@@ -134,17 +134,15 @@ async function runChild(): Promise<void> {
 
     const before = process.memoryUsage().rss;
     const started = performance.now();
-    const [{ AuthStorage, ModelRegistry, SettingsManager, getAgentDir }, { createSessionInDir }] = await Promise.all([
+    const [{ ModelRuntime, SettingsManager, getAgentDir }, { createSessionInDir }] = await Promise.all([
       import("@earendil-works/pi-coding-agent"),
       import("../src/agent-pool/session.ts"),
     ]);
 
-    const authStorage = AuthStorage.create();
-    const modelRegistry = ModelRegistry.inMemory(authStorage);
+    const modelRuntime = await ModelRuntime.create({ modelsPath: null, allowModelNetwork: false });
     const settingsManager = SettingsManager.create(workspace, getAgentDir());
     const runtime = await createSessionInDir(sessionDir, {
-      authStorage,
-      modelRegistry,
+      modelRuntime,
       settingsManager,
       tools: [],
       chatJid,

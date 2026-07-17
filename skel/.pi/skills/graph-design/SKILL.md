@@ -6,9 +6,9 @@ distribution: public
 
 # Graph Design
 
-Use this skill when creating, fixing, or auditing inline SVG diagrams in Markdown, READMEs, docs pages, workitems, or other source-authored documentation.
+Use this skill to create, fix, or audit inline SVG diagrams in source-authored documentation.
 
-This skill generalizes the diagram cleanup conventions established across prior architecture and portfolio redraw work.
+It covers Markdown, READMEs, docs pages, workitems, and other files that embed architecture or flow diagrams.
 
 ## Scope
 
@@ -200,9 +200,7 @@ Avoid vague labels like:
 - `system`
 - `backend magic`
 
-## Arrow rules
-
-This is the most important section.
+## Required arrow rules
 
 ### 1. Arrows must exist when the story is a flow
 
@@ -238,7 +236,7 @@ Avoid diagonals unless they clearly improve the story.
 
 ### 4. **Orthogonal turns must have rounded corners**
 
-This is a hard rule for normal architecture/flow diagrams.
+This is a hard rule for normal architecture and flow diagrams.
 
 Do **not** use hard-corner elbow polylines as the default style.
 Do **not** leave right-angle corners visually sharp.
@@ -392,7 +390,7 @@ After editing:
 1. run the project’s build/preview command if available
 2. open the rendered output where users will actually see it
 3. inspect arrowheads, rounded turns, labels, and theme behavior
-4. confirm the source document remains the only maintained copy
+4. confirm the source document is still the only maintained copy
 
 ## Related guidance
 

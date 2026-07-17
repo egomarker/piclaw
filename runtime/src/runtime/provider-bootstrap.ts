@@ -4,11 +4,11 @@
 
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { createLogger } from "../utils/logger.js";
-import { refreshGitHubCopilotDynamicModelsAtBoot } from "../extensions/github-copilot-dynamic-models.js";
 
 export type AzureProviderBootstrapHandle = { stop: () => void; refresh: () => Promise<void> };
+type ProviderRegistration = Parameters<ModelRegistry["registerProvider"]>[1];
 export type AzureProviderBootstrapModule = {
-  startAzureProviderBootstrap: (register: (name: string, config: any) => void) => AzureProviderBootstrapHandle;
+  startAzureProviderBootstrap: (register: (name: string, config: ProviderRegistration) => void) => AzureProviderBootstrapHandle;
 };
 
 const log = createLogger("runtime.provider-bootstrap");
@@ -42,11 +42,16 @@ export async function registerOptionalProviders(agentPool: ProviderBootstrapAgen
   if (activeAzureBootstrap) return;
 
   const mod = await loadAzureBootstrapModuleImpl();
-  activeAzureBootstrap = mod.startAzureProviderBootstrap((name: string, config: any) => {
+  activeAzureBootstrap = mod.startAzureProviderBootstrap((name: string, config: ProviderRegistration) => {
     agentPool.registerModelProvider(name, config);
   });
-
-  await activeAzureBootstrap.refresh();
+  try {
+    await activeAzureBootstrap.refresh();
+  } catch (error) {
+    activeAzureBootstrap.stop();
+    activeAzureBootstrap = null;
+    throw error;
+  }
 
   log.info("Registered Azure optional providers via process bootstrap", {
     operation: "register_optional_providers.azure",
@@ -55,16 +60,9 @@ export async function registerOptionalProviders(agentPool: ProviderBootstrapAgen
   });
 }
 
-/** Eagerly refresh GitHub Copilot dynamic models at startup. */
-export async function registerGitHubCopilotDynamicModelsAtBoot(agentPool: ProviderBootstrapAgentPool): Promise<void> {
-  try {
-    await refreshGitHubCopilotDynamicModelsAtBoot(agentPool as any);
-  } catch (error) {
-    log.warn("Failed to register GitHub Copilot dynamic models at boot; will retry on first session_start.", {
-      operation: "register_optional_providers.github_copilot_boot_failed",
-      err: error,
-    });
-  }
+export function stopOptionalProviders(): void {
+  activeAzureBootstrap?.stop();
+  activeAzureBootstrap = null;
 }
 
 export function setProviderBootstrapLoaderForTests(
@@ -74,7 +72,6 @@ export function setProviderBootstrapLoaderForTests(
 }
 
 export function resetProviderBootstrapForTests(): void {
-  activeAzureBootstrap?.stop();
-  activeAzureBootstrap = null;
+  stopOptionalProviders();
   loadAzureBootstrapModuleImpl = async () => await import(AZURE_BOOTSTRAP_MODULE_URL) as AzureProviderBootstrapModule;
 }

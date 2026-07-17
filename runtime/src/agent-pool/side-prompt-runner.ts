@@ -2,15 +2,13 @@
  * agent-pool/side-prompt-runner.ts – runSidePrompt orchestration helpers.
  */
 
-import type { AgentSession, AgentSessionEvent, AgentSessionRuntime, ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { type AssistantMessageEvent, type AssistantMessageEventStream, type Model, type Api, type Usage } from "@earendil-works/pi-ai";
-import { streamSimple } from "@earendil-works/pi-ai/compat";
+import type { AgentSession, AgentSessionEvent, AgentSessionRuntime, ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { type AssistantMessageEvent, type Usage } from "@earendil-works/pi-ai";
 
 import { getAgentRuntimeConfig } from "../core/config.js";
 import { detectChannel } from "../router.js";
 import { withChatContext } from "../core/chat-context.js";
 import { recordMessageUsage } from "./usage.js";
-import { resolveModelRequestAuth } from "../utils/model-auth.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
 import { normalizeLlmContext } from "./llm-context-normalizer.js";
 import {
@@ -30,12 +28,9 @@ export interface SidePromptRunnerOptions {
   getOrCreate: (chatJid: string) => Promise<AgentSession>;
   getOrCreateSideRuntime: (chatJid: string) => Promise<AgentSessionRuntime>;
   syncSideSessionFromMain: (mainSession: AgentSession, sideRuntime: AgentSessionRuntime) => Promise<void>;
-  modelRegistry: ModelRegistry;
-  sideStreamSimple?: (
-    model: Model<Api>,
-    context: Parameters<typeof streamSimple>[1],
-    options?: Parameters<typeof streamSimple>[2],
-  ) => AssistantMessageEventStream;
+  modelRuntime: Pick<ModelRuntime, "streamSimple">;
+  /** Explicit simple-stream mode used by callers that do not need a tool-capable side session. */
+  sideStreamSimple?: ModelRuntime["streamSimple"];
   onWarn?: (message: string, details: Record<string, unknown>) => void;
 }
 
@@ -53,17 +48,6 @@ export async function runSidePrompt(
   }
 
   if (deps.sideStreamSimple) {
-    const auth = await resolveModelRequestAuth(deps.modelRegistry, model);
-    if (!auth.ok) {
-      return {
-        status: "error",
-        result: null,
-        thinking: null,
-        error: auth.error || `No credentials available for ${model.provider}/${model.id}.`,
-        model: `${model.provider}/${model.id}`,
-      };
-    }
-
     const stream = deps.sideStreamSimple(
       model,
       normalizeLlmContext({
@@ -77,10 +61,7 @@ export async function runSidePrompt(
         ],
       }),
       {
-        apiKey: auth.apiKey,
-        headers: auth.headers,
-        env: auth.env,
-        reasoning: toSideReasoning((session as AgentSession & { thinkingLevel?: unknown }).thinkingLevel) as NonNullable<Parameters<typeof streamSimple>[2]>["reasoning"],
+        reasoning: toSideReasoning((session as AgentSession & { thinkingLevel?: unknown }).thinkingLevel),
         signal: options.signal,
       },
     );

@@ -6,7 +6,7 @@ distribution: public
 
 # Adaptive Cards Authoring
 
-Use this skill when a **web-only, structured interaction** is materially better as a card than as plain markdown.
+Use this skill when a **web-only, structured interaction** is clearer as a card than as plain markdown.
 
 ## Good fits
 
@@ -42,7 +42,7 @@ Emit a normal message with a concise fallback plus one `adaptive_card` content b
 }
 ```
 
-Supported today in the PiClaw web runtime:
+PiClaw currently supports:
 
 - timeline rendering via `content_blocks`
 - actions: `Action.Submit`, `Action.OpenUrl`
@@ -81,13 +81,13 @@ Task:
 <describe the approval / choice / form interaction>
 ```
 
-If you need more determinism, ask for:
+For more deterministic output, ask for:
 
 1. a fallback message string
 2. exactly one `adaptive_card` content block JSON object
 
 ## Templates and implementation notes
 
-- Reuse `templates.md` for concrete card patterns rather than inventing new classes ad hoc.
+- Reuse `templates.md` for concrete card patterns instead of inventing ad hoc ones.
 - If you are implementing card emission in PiClaw itself, prefer `send_adaptive_card`.
 - If you need low-level posting, use message `content_blocks` or `messages` with `action: "post"`.

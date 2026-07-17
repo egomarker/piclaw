@@ -5,8 +5,8 @@
 import type { WebChannelLike } from "../core/web-channel-contracts.js";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { getVersion } from "../../../cli.js";
+import { getPiclawAgentDir } from "../../../core/agent-dir.js";
 import { THEME_PRESETS, THEME_LIST_COLOR_KEYS } from "../theming/ui-theme-data.js";
 import { TOOLSETS } from "../../../extensions/tool-activation.js";
 import { getToolCapability } from "../../../extensions/tool-capabilities.js";
@@ -387,7 +387,7 @@ const EXACT_AGENT_ROUTES: ExactAgentRoute[] = [
         return { name: p.name, label: p.label, mode: p.mode, colors };
       });
       // Read auth + custom provider state
-      const piAgentDir = process.env.PICLAW_PI_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent");
+      const piAgentDir = getPiclawAgentDir();
       let authProviders: Record<string, unknown> = {};
       try {
         const authPath = join(piAgentDir, "auth.json");

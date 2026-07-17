@@ -1,15 +1,15 @@
 # Tool Context Optimizations
 
-This document describes PiClaw's tool-result compaction path that reduces provider-request payload size while keeping full outputs searchable.
+PiClaw compacts eligible tool results before they reach provider requests. Full outputs remain searchable.
 
 ## Goals
 
 - Minimize large inline `tool_result` payloads in model context.
-- Preserve full fidelity output on disk + SQLite metadata.
-- Keep retrieval/search first-class via `search_tool_output`.
+- Preserve full-fidelity output on disk, with retrieval metadata in SQLite.
+- Keep `search_tool_output` as the standard retrieval path.
 - Prune old stored outputs automatically.
 
-## Current MVP behavior (RTK-like subset)
+## Current implementation
 
 PiClaw applies threshold-based compaction for **eligible** `tool_result` events in `runtime/extensions/integrations/context-mode.ts`.
 
@@ -31,7 +31,7 @@ When eligible output crosses configured thresholds, PiClaw:
 
 Small outputs remain inline.
 
-## Optional provider-request-time layer (legacy history)
+## Optional request-time compaction for legacy history
 
 In addition to live `tool_result` interception, `context-mode` now applies an optional request-time pass on outbound provider context:
 
@@ -40,7 +40,7 @@ In addition to live `tool_result` interception, `context-mode` now applies an op
 - stores full output via `saveToolOutput()` and replaces only outbound context payload text
 - leaves persisted session history untouched (fail-open if storage fails)
 
-This layer helps shrink provider payloads for older sessions that still contain oversized inline tool-result history.
+This layer shrinks provider payloads for older sessions that still contain oversized inline tool-result history.
 
 ## Eligibility + idempotency rules
 
@@ -125,9 +125,9 @@ Semantic summary controls:
 - `PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_TOKENS` (default `320`)
 - `PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS` (default `12000`)
 
-## Runtime gate and per-tool controls (Settings)
+## Settings controls
 
-Tool-result compaction is runtime-gated in **Settings → Compaction** and tool eligibility is controlled in **Settings → Tools**:
+Tool-result compaction is gated in **Settings → Compaction**. Tool eligibility is controlled in **Settings → Tools**:
 
 - **Enable tool-result compaction** checkbox (persisted through `/agent/settings/compaction`)
 - **Compact** column checkboxes per tool in Settings → Tools (persisted through `/agent/settings/compaction` as `toolResultCompactionTools`)
@@ -149,7 +149,7 @@ Persisted/runtime keys:
 
 When disabled, `context-mode` skips compaction and leaves tool results inline.
 
-## Optional legacy cleanup/migration utility
+## Legacy cleanup utility
 
 For historical sessions with oversized inline `toolResult` entries, run:
 

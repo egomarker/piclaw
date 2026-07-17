@@ -8,7 +8,7 @@ assignees: ''
 
 ## Summary
 
-<!-- What is this and why does it matter? One paragraph max. -->
+<!-- Describe the work and its effect. One paragraph max. -->
 
 ## Acceptance Criteria
 
@@ -17,11 +17,11 @@ assignees: ''
 
 ## Implementation Notes
 
-<!-- Key files, approach, constraints, non-goals. -->
+<!-- List key files, approach, constraints, and non-goals. -->
 
 ## Test Plan
 
-- [ ] Unit tests written for new/changed logic
+- [ ] Unit tests cover new or changed logic
 - [ ] All existing tests pass (`bun run test`)
 - [ ] Type check clean (`bun run typecheck`)
 - [ ] Edge cases and error paths covered
@@ -33,5 +33,5 @@ assignees: ''
 - [ ] Type check clean
 - [ ] Docs updated if user-facing behaviour changes
 - [ ] Operational impact assessed
-- [ ] Follow-up tickets created for deferred scope
-- [ ] Update history complete with evidence
+- [ ] Follow-up tickets exist for deferred scope
+- [ ] Update history includes evidence

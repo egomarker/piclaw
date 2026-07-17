@@ -1,55 +1,36 @@
 ---
 name: export-timeline-pdf
-description: Export a chat timeline to a PDF using the internal localhost export endpoint and wkhtmltopdf (currently unsupported in this environment).
+description: Export a chat timeline to a PDF using the internal localhost export endpoint and wkhtmltopdf.
 distribution: private
 ---
 
 # Export timeline PDF
 
-> ⚠️ This skill is currently unsupported here.
+Export chat history through piclaw's internal localhost HTML export endpoint and render it with `wkhtmltopdf`.
 
-## Fallback behaviour
+## Steps
 
-If the user asks for a timeline export right now:
+1. Export the last 50 messages:
+   ```bash
+   bun /workspace/.pi/skills/export-timeline-pdf/export-timeline-pdf.ts --chat web:default --last 50
+   ```
 
-1. Say that PDF export is currently unavailable in this environment.
-2. Offer a fallback instead:
-   - gather the requested range with the `messages` tool
-   - write a Markdown or HTML export to the workspace
-   - attach that file if the user wants a downloadable artifact
-3. Do **not** pretend the PDF path worked if the skill is unsupported.
+2. Export a date range:
+   ```bash
+   bun /workspace/.pi/skills/export-timeline-pdf/export-timeline-pdf.ts --chat web:default \
+     --from "2026-03-01T00:00:00Z" --to "2026-03-05T23:59:59Z"
+   ```
 
-## When this skill is supported
+3. Export a specific message range by row ID:
+   ```bash
+   bun /workspace/.pi/skills/export-timeline-pdf/export-timeline-pdf.ts --chat web:default \
+     --from-row 1234 --to-row 1300
+   ```
 
-Use the script below only when the local skill runtime and `wkhtmltopdf` are known to work.
-
-### Examples
-
-Export the last 50 messages:
-
-```bash
-bun /workspace/.pi/skills/export-timeline-pdf/export-timeline-pdf.ts --chat web:default --last 50
-```
-
-Export a date range:
-
-```bash
-bun /workspace/.pi/skills/export-timeline-pdf/export-timeline-pdf.ts --chat web:default \
-  --from "2026-03-01T00:00:00Z" --to "2026-03-05T23:59:59Z"
-```
-
-Export a row-id range:
-
-```bash
-bun /workspace/.pi/skills/export-timeline-pdf/export-timeline-pdf.ts --chat web:default \
-  --from-row 1234 --to-row 1300
-```
-
-Dark theme:
-
-```bash
-bun /workspace/.pi/skills/export-timeline-pdf/export-timeline-pdf.ts --chat web:default --last 20 --theme dark
-```
+4. Dark theme:
+   ```bash
+   bun /workspace/.pi/skills/export-timeline-pdf/export-timeline-pdf.ts --chat web:default --last 20 --theme dark
+   ```
 
 ## Options
 
@@ -67,7 +48,10 @@ bun /workspace/.pi/skills/export-timeline-pdf/export-timeline-pdf.ts --chat web:
 | `--auth-key` | Internal export auth key | env/config lookup |
 | `--html-only` | Save HTML sidecar without rendering PDF | off |
 
-## Auth lookup order
+## Auth
+
+The internal endpoint is only available on localhost and requires an internal auth key.
+The script resolves it in this order:
 
 1. `--auth-key`
 2. `PICLAW_EXPORT_AUTH_KEY`
@@ -77,11 +61,11 @@ bun /workspace/.pi/skills/export-timeline-pdf/export-timeline-pdf.ts --chat web:
 
 ## Prerequisites
 
-- `wkhtmltopdf` must be installed and on `PATH`
-- the piclaw web server must be running locally
+- `wkhtmltopdf` must be installed and available on `PATH`
+- piclaw web server must be running locally
 
 ## Notes
 
-- The script is read-only: it does not modify SQLite or auth/session state.
+- The script is read-only: it never opens SQLite and never writes auth/session state.
 - The HTML export endpoint is `GET /internal/export/timeline`.
 - The script writes an HTML sidecar next to the PDF for inspection.

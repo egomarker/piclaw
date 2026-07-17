@@ -32,7 +32,7 @@ In the web UI, plain `/mcp` opens the MCP management panel. In non-UI contexts i
 
 ## Config locations
 
-`pi-mcp-adapter` now follows a shared-MCP-first model.
+`pi-mcp-adapter` uses a shared-MCP-first lookup order.
 
 Preferred shared config locations:
 
@@ -70,11 +70,11 @@ In the container image, Pi home is typically bind-mounted at:
 - `windsurf`
 - `vscode`
 
-Shared MCP config is preferred first; Pi-owned config remains the place for Pi-specific imports and overrides.
+Shared MCP config comes first; Pi-owned config is for PiClaw-specific imports and overrides.
 
 ## Safe starter shell
 
-The seeded examples are intentionally minimal and safe:
+The seeded examples contain no configured servers:
 
 ```json
 {
@@ -82,7 +82,7 @@ The seeded examples are intentionally minimal and safe:
 }
 ```
 
-If you want a concrete starter server, for example filesystem access:
+For a concrete starter server, for example filesystem access:
 
 ```json
 {
@@ -100,7 +100,7 @@ If you want a concrete starter server, for example filesystem access:
 }
 ```
 
-## Typical flow
+## Setup flow
 
 1. Start with shared project config in `.mcp.json`
 2. Add one or more MCP servers, or run `/mcp setup`
@@ -149,4 +149,4 @@ The adapter also guards oversized MCP output by default and spills excess text t
 - Interactive sessions can authenticate with `/mcp-auth`; remote/headless sessions can use the proxy tool's `auth-start` and `auth-complete` actions.
 - Global `settings.toolPrefix` controls whether proxied/direct tool names are server-prefixed (`server`, `short`, or `none`).
 - Global `settings.directTools` can expose all imported MCP tools as first-class Pi tools; per-server `directTools` can enable all tools or only a named subset.
-- Keep large MCP servers behind the proxy unless you intentionally want `directTools`.
+- Keep large MCP servers behind the proxy unless you deliberately enable `directTools`.

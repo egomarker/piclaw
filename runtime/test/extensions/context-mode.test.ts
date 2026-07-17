@@ -64,6 +64,52 @@ describe("context-mode integration", () => {
     });
   }, 15_000);
 
+  test("routes semantic summarization through the runtime-owned executor without auth overrides", async () => {
+    await withTempWorkspaceEnv("piclaw-context-mode-", compactionEnv({
+      PICLAW_TOOL_OUTPUT_STORE_BYTES: "8",
+      PICLAW_TOOL_OUTPUT_STORE_LINES: "2",
+      PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED: "1",
+    }), async () => {
+      const db = await importFresh<typeof import("../src/db.js")>("../src/db.js");
+      db.initDatabase();
+      const execution = await importFresh<any>("../src/extensions/model-execution-runtime.ts");
+      const calls: any[][] = [];
+      execution.__setRuntimeModelExecutorForTests({
+        completeSimple: async (...args: any[]) => {
+          calls.push(args);
+          return {
+            stopReason: "stop",
+            content: [{ type: "text", text: "Summary:\n- Runtime-owned semantic facts\n\nKey facts:\n- exact\n\nWarnings/Errors:\n- none\n\nFollow-up cues:\n- inspect handle" }],
+          };
+        },
+      });
+
+      try {
+        const contextMode = await importFresh<any>("../extensions/integrations/context-mode.ts");
+        const fake = createFakeExtensionApi({ allTools: [] });
+        contextMode.default(fake.api);
+        const toolResult = fake.handlers.find((entry) => entry.event === "tool_result")?.handler;
+        const result = await toolResult?.({
+          toolName: "bash",
+          content: [{ type: "text", text: "alpha\nbeta\ngamma\n" }],
+          details: {},
+          input: { command: "printf" },
+          isError: false,
+          toolCallId: "tool-runtime-semantic",
+          type: "tool_result",
+        }, { model: { provider: "test", id: "model" } });
+
+        expect(result?.content?.[0]?.text).toContain("Runtime-owned semantic facts");
+        expect(calls).toHaveLength(1);
+        expect(calls[0][2].apiKey).toBeUndefined();
+        expect(calls[0][2].headers).toBeUndefined();
+        expect(calls[0][2].env).toBeUndefined();
+      } finally {
+        execution.__setRuntimeModelExecutorForTests(null);
+      }
+    });
+  });
+
   test("uses semantic summary text when semantic summarization succeeds", async () => {
     await withTempWorkspaceEnv("piclaw-context-mode-", compactionEnv({
       PICLAW_TOOL_OUTPUT_STORE_BYTES: "8",

@@ -1,11 +1,11 @@
 # Visual artifact generator
 
-Piclaw can generate polished self-contained HTML pages, architecture diagrams,
-data tables, diff reviews, and slide decks using its vendored JavaScript
-libraries and a consistent visual-design profile.
+Piclaw can generate self-contained HTML pages, architecture diagrams, data
+tables, diff reviews, and slide decks using its vendored JavaScript libraries
+and a consistent visual-design profile.
 
-This capability is delivered through the **`visual-artifact-generator` skill**
-and a set of related reference assets.
+The **`visual-artifact-generator` skill** and its reference assets provide
+this capability.
 
 ## What it generates
 
@@ -16,14 +16,14 @@ and a set of related reference assets.
 | `diff-review` | Visual before/after diff with architecture diagram, code review, decision log |
 | `plan-review` | Plan-vs-codebase comparison with requirements matrix and risk assessment |
 | `fact-check` | Document accuracy verification against actual code |
-| `generate-slides` | Magazine-quality slide deck with keyboard navigation |
+| `generate-slides` | Slide deck with keyboard navigation |
 | `project-recap` | Mental-model snapshot for context switching |
 
 ## Vendored libraries
 
-Generated artifacts use only Piclaw's vendored libraries — no external CDN
-dependencies. See [vendored-widget-libraries.md](vendored-widget-libraries.md)
-for the full reference.
+Generated artifacts use only Piclaw's vendored libraries. They do not depend
+on external CDNs. See [vendored-widget-libraries.md](vendored-widget-libraries.md)
+for the library reference.
 
 | Library | Global | Use for |
 |---|---|---|
@@ -66,17 +66,18 @@ All generated artifacts follow the saved visual-design profile:
 - **Style file:** `/workspace/.pi/skills/visual-design/SKILL.md`
 - **Preference source:** `/workspace/notes/preferences/visual-design.md`
 
-Key defaults: clean/functional style, minimal density, theme-aware neutral/gray
-palette with subtle accents, IBM Plex Sans body, JetBrains Mono NF for code,
-orthogonal diagram routing with rounded corners.
+Key defaults are a clean functional style, minimal density, a theme-aware
+neutral/grey palette with subtle accents, IBM Plex Sans for body text,
+JetBrains Mono NF for code, and orthogonal diagram routing with rounded
+corners.
 
 ## Attribution
 
 The skill is adapted from
 [nicobailon/visual-explainer](https://github.com/nicobailon/visual-explainer)
 (MIT license) by Nico Bailon. The prompt workflow, anti-slop guidance, and
-template conventions are derived from that project and thoroughly adapted for
-Piclaw's vendored library environment.
+template conventions started from that project and were adapted to Piclaw's
+vendored-library environment.
 
 ## Output location
 

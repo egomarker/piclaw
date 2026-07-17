@@ -3,6 +3,10 @@
  */
 
 import { ensureAddonRuntimeEntriesLoaded } from "../addons/runtime-contributions.js";
+import { AgentPool } from "../agent-pool.js";
+import { createRuntimeModelServices } from "../agent-pool/model-services.js";
+import { installRuntimeModelExecutor } from "../extensions/model-execution-runtime.js";
+import { registerGitHubCopilotDynamicModels } from "../extensions/github-copilot-dynamic-models.js";
 import {
   getIdentityConfig,
   getRoutingConfig,
@@ -16,7 +20,8 @@ import type { RuntimeSignalRegistrar } from "./composition.js";
 import { installAddonRuntimeInterop } from "./addon-interop.js";
 import { registerRuntimeShutdownSignals } from "./composition.js";
 import { startRuntimeLoop, type StartRuntimeLoopDeps } from "./coordinator.js";
-import { registerGitHubCopilotDynamicModelsAtBoot, registerOptionalProviders } from "./provider-bootstrap.js";
+import { ModelRefreshCoordinator, type ModelRefreshResult } from "./model-refresh.js";
+import { registerOptionalProviders, stopOptionalProviders } from "./provider-bootstrap.js";
 import { createShutdownHandler, type ShutdownDeps } from "./shutdown.js";
 import { registerShutdownHandler } from "./shutdown-registry.js";
 import {
@@ -36,54 +41,40 @@ import {
 
 const log = createLogger("runtime.bootstrap");
 
-/** Queue contract required by runtime bootstrap orchestration. */
 export type RuntimeBootstrapQueue =
   & StartRuntimeLoopDeps["queue"]
   & SchedulerDeps["queue"]
   & ShutdownDeps["queue"];
 
-/** Agent-pool contract required by runtime bootstrap orchestration. */
 export type RuntimeBootstrapAgentPool =
   & StartRuntimeLoopDeps["agentPool"]
   & SchedulerDeps["agentPool"]
   & RuntimeModelResolver
   & ShutdownDeps["agentPool"];
 
-/** Runtime state contract required by runtime bootstrap orchestration. */
 export type RuntimeBootstrapState = StartRuntimeLoopDeps["state"];
-
-/** Web channel contract required by runtime bootstrap orchestration. */
 export type RuntimeBootstrapWeb = RuntimeWebWorkerChannel & ShutdownDeps["web"];
-
-/** Legacy channel contract — retained for backward compatibility. */
-
-/** Optional pushover channel contract required by runtime bootstrap orchestration. */
 export type RuntimeBootstrapPushover = RuntimePushoverWorkerChannel & NonNullable<ShutdownDeps["pushover"]>;
 
-/** Runtime core services contract consumed by bootstrap orchestration. */
-export interface RuntimeBootstrapCoreServices {
+export interface RuntimeBootstrapBaseServices {
   queue: RuntimeBootstrapQueue;
-  agentPool: RuntimeBootstrapAgentPool;
   state: RuntimeBootstrapState;
 }
 
-/** Concrete runtime-core contract required to wire production startup modules. */
-export interface RuntimeBootstrapDefaultCoreServices extends RuntimeBootstrapCoreServices {
+export interface RuntimeBootstrapDefaultBaseServices extends RuntimeBootstrapBaseServices {
   queue: Parameters<typeof startWebChannel>[0];
-  agentPool: Parameters<typeof startWebChannel>[1];
 }
 
-/** Dependency injection contract for the runtime bootstrap sequence. */
 export interface RuntimeBootstrapDeps {
-  core: RuntimeBootstrapCoreServices;
+  base: RuntimeBootstrapBaseServices;
   assistantName: string;
   triggerPattern: RegExp;
   pollIntervalMs: number;
   signalRegistrar: RuntimeSignalRegistrar;
   initializeRuntimeEnvironment(state: RuntimeBootstrapState): void;
-  registerOptionalProviders(agentPool: RuntimeBootstrapAgentPool): void | Promise<void>;
-  registerGitHubCopilotDynamicModelsAtBoot(agentPool: RuntimeBootstrapAgentPool): void | Promise<void>;
+  createAgentPool(): Promise<RuntimeBootstrapAgentPool>;
   startWebChannel(queue: RuntimeBootstrapQueue, agentPool: RuntimeBootstrapAgentPool): Promise<RuntimeBootstrapWeb>;
+  startBackgroundModelRefresh(agentPool: RuntimeBootstrapAgentPool): void;
   startOptionalPushoverChannel(): Promise<RuntimeBootstrapPushover | null>;
   createShutdownHandler(deps: ShutdownDeps): (signal: string) => Promise<void>;
   registerRuntimeShutdownSignals(
@@ -115,22 +106,58 @@ export interface RuntimeBootstrapDeps {
   log(message: string): void;
   stopIpcWatcher(): Promise<void>;
   stopSchedulerLoop(): void;
+  stopOptionalProviders(): void;
 }
 
-/**
- * Build default runtime bootstrap dependencies from production modules.
- */
-export function createDefaultRuntimeBootstrapDeps(core: RuntimeBootstrapDefaultCoreServices): RuntimeBootstrapDeps {
+function logBackgroundRefreshResult(result: ModelRefreshResult): void {
+  const errors = [...result.errors.entries()].map(([provider, error]) => ({ provider, error: error.message }));
+  const details = {
+    operation: "model_runtime.background_refresh",
+    status: result.status,
+    providerErrors: errors,
+    error: result.error?.message,
+  };
+  if (result.status === "completed" && errors.length === 0) log.info("Background model catalogs refreshed", details);
+  else log.warn("Background model catalog refresh completed with diagnostics", details);
+}
+
+/** Build default runtime bootstrap dependencies from production modules. */
+export function createDefaultRuntimeBootstrapDeps(base: RuntimeBootstrapDefaultBaseServices): RuntimeBootstrapDeps {
+  let refreshCoordinator: ModelRefreshCoordinator | null = null;
   return {
-    core,
+    base,
     assistantName: getIdentityConfig().assistantName,
     triggerPattern: getRoutingConfig().triggerPattern,
     pollIntervalMs: getRuntimeTimingConfig().pollIntervalMs,
     signalRegistrar: process,
-    initializeRuntimeEnvironment: () => initializeRuntimeEnvironment(core.state),
-    registerOptionalProviders: () => registerOptionalProviders(core.agentPool),
-    registerGitHubCopilotDynamicModelsAtBoot: () => registerGitHubCopilotDynamicModelsAtBoot(core.agentPool),
-    startWebChannel: () => startWebChannel(core.queue, core.agentPool),
+    initializeRuntimeEnvironment: () => initializeRuntimeEnvironment(base.state),
+    createAgentPool: async () => {
+      const modelServices = await createRuntimeModelServices();
+      installRuntimeModelExecutor(modelServices.modelRuntime);
+      registerGitHubCopilotDynamicModels(modelServices.modelRuntime);
+      const agentPool = new AgentPool({
+        credentialStore: modelServices.credentialStore,
+        modelRuntime: modelServices.modelRuntime,
+        modelRegistry: modelServices.modelRegistry,
+      });
+      refreshCoordinator = new ModelRefreshCoordinator({
+        modelRuntime: modelServices.modelRuntime,
+        onComplete: logBackgroundRefreshResult,
+      });
+      return agentPool;
+    },
+    startWebChannel: (queue, agentPool) => startWebChannel(queue as Parameters<typeof startWebChannel>[0], agentPool as Parameters<typeof startWebChannel>[1]),
+    startBackgroundModelRefresh: (agentPool) => {
+      void (async () => {
+        await registerOptionalProviders(agentPool);
+        await refreshCoordinator?.queue();
+      })().catch((error) => {
+        log.warn("Background provider/model bootstrap failed", {
+          operation: "model_runtime.background_bootstrap",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    },
     startOptionalPushoverChannel: () => startOptionalPushoverChannel(),
     createShutdownHandler,
     registerRuntimeShutdownSignals,
@@ -143,22 +170,21 @@ export function createDefaultRuntimeBootstrapDeps(core: RuntimeBootstrapDefaultC
     log: (message) => log.info(message, { operation: "bootstrap.banner" }),
     stopIpcWatcher,
     stopSchedulerLoop,
+    stopOptionalProviders,
   };
 }
 
-/**
- * Bootstrap and run all runtime subsystems in production order.
- */
+/** Bootstrap and run all runtime subsystems in production order. */
 export async function bootstrapRuntime(deps: RuntimeBootstrapDeps): Promise<void> {
-  const { queue, agentPool, state } = deps.core;
+  const { queue, state } = deps.base;
 
   deps.initializeRuntimeEnvironment(state);
-  await deps.registerOptionalProviders(agentPool);
-  await deps.registerGitHubCopilotDynamicModelsAtBoot(agentPool);
+  const agentPool = await deps.createAgentPool();
   deps.log("=== Piclaw - Pi Coding Agent Assistant ===");
 
   const web = await deps.startWebChannel(queue, agentPool);
   const pushover = await deps.startOptionalPushoverChannel();
+  deps.startBackgroundModelRefresh(agentPool);
 
   const shutdown = deps.createShutdownHandler({
     queue,
@@ -167,6 +193,7 @@ export async function bootstrapRuntime(deps: RuntimeBootstrapDeps): Promise<void
     pushover,
     stopIpcWatcher: deps.stopIpcWatcher,
     stopSchedulerLoop: deps.stopSchedulerLoop,
+    stopOptionalProviders: deps.stopOptionalProviders,
   });
   registerShutdownHandler(shutdown);
   deps.registerRuntimeShutdownSignals(deps.signalRegistrar, shutdown);

@@ -1,7 +1,17 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { ModelRegistry, SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { Api, Model } from "@earendil-works/pi-ai";
 
 const NOISE_FLOOR_TOKENS = 1024;
+
+export type ModelLookup = {
+  find?(provider: string, modelId: string): Model<Api> | undefined;
+  getModel?(provider: string, modelId: string): Model<Api> | undefined;
+};
+
+function findModel(models: ModelLookup, provider: string, modelId: string): Model<Api> | undefined {
+  return models.getModel?.(provider, modelId) ?? models.find?.(provider, modelId);
+}
 
 type PreviousRequest = {
   promptTokens: number;
@@ -26,7 +36,7 @@ export interface PromptCacheWaste {
 function detectMiss(
   previous: PreviousRequest | undefined,
   message: AssistantMessage,
-  models: ModelRegistry,
+  models: ModelLookup,
 ): PromptCacheMiss | undefined {
   const usage = message.usage;
   const promptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
@@ -43,7 +53,7 @@ function detectMiss(
     : 0;
   const readPerToken = usage.cacheRead > 0
     ? usage.cost.cacheRead / usage.cacheRead
-    : (models.find(message.provider, message.model)?.cost.cacheRead ?? 0) / 1_000_000;
+    : (findModel(models, message.provider, message.model)?.cost.cacheRead ?? 0) / 1_000_000;
 
   return {
     missedTokens,
@@ -66,7 +76,7 @@ function asPreviousRequest(message: AssistantMessage, reportedCache: boolean): P
 }
 
 /** Derive cumulative prompt-cache misses from persisted session entries. */
-export function computePromptCacheWaste(entries: SessionEntry[], models: ModelRegistry): PromptCacheWaste {
+export function computePromptCacheWaste(entries: SessionEntry[], models: ModelLookup): PromptCacheWaste {
   let previous: PreviousRequest | undefined;
   const totals: PromptCacheWaste = { missedTokens: 0, missedCost: 0, missCount: 0 };
 

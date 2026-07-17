@@ -1,5 +1,4 @@
-import { completeSimple } from "@earendil-works/pi-ai/compat";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { CapturedBatch, SummarizeResult } from "./types.js";
 import { serializeBatchForSummarizer } from "./batch-capture.js";
 
@@ -23,24 +22,19 @@ function extractTextContent(message: any): string {
 export async function summarizeBatch(
   batch: CapturedBatch,
   ctx: ExtensionContext,
+  modelRuntime: Pick<ModelRuntime, "completeSimple">,
   options: { signal?: AbortSignal } = {},
 ): Promise<SummarizeResult | null> {
   if (options.signal?.aborted) return null;
 
-  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model as any);
-  if (!auth.ok) {
-    const authMessage = "error" in auth ? auth.error : "authentication failed";
-    throw new Error(`context prune summarization auth failed: ${authMessage}`);
-  }
-
   const serialized = serializeBatchForSummarizer(batch);
   const userMessage = `${SYSTEM_PROMPT}\n\n<tool-call-batch>\n${serialized}\n</tool-call-batch>`;
-  const response = await completeSimple(
+  const response = await modelRuntime.completeSimple(
     ctx.model as any,
     {
       messages: [{ role: "user", content: [{ type: "text", text: userMessage }], timestamp: Date.now() }],
     },
-    { apiKey: auth.apiKey, headers: auth.headers, env: auth.env, signal: options.signal },
+    { signal: options.signal },
   );
 
   if (options.signal?.aborted || response.stopReason === "aborted") return null;

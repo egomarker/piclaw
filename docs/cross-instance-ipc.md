@@ -1,29 +1,23 @@
 # Cross-instance IPC (experimental)
 
-> **Status:** Experimental. Implemented behind `PICLAW_REMOTE_INTEROP_ENABLED` (default off).
->
-> This feature enables one piclaw instance to interact with another instance in a
-> secure, consent-driven way.
+> **Status:** experimental. Implemented behind `PICLAW_REMOTE_INTEROP_ENABLED` and disabled by default.
+
+Cross-instance IPC lets one piclaw instance call another through signed, consent-driven HTTP endpoints.
 
 ---
 
-## 1) Design Intent
+## 1) Design
 
-Cross-instance IPC must be secure by default and operator-controlled.
+Cross-instance IPC requires explicit pairing and is disabled until an operator enables it. The current implementation targets small groups of known instances on controlled networks.
 
-> Note: We considered broader federation-style protocols, but this design is intentionally
-> scoped to small, interconnected groups of agents behind corporate firewalls with
-> pre-defined addresses.
+Default behaviour:
 
-A key design decision:
+- **Operator-mediated** mode queues inbound proposals for review.
+- The runtime notifies `web:default`; `/pair inbox`, `/pair approve`, and `/pair reject` manage the queue.
+- The proposal endpoint returns `human_required` until an operator decides.
+- **Short-circuit** execution is optional and requires a peer in `short-circuit` mode with the `full` profile, plus `PICLAW_REMOTE_SHORT_CIRCUIT_ENABLED=1`.
 
-- **Default mode is LLM-mediated** on the remote side.
-- Inbound requests go to a **dedicated remote interop channel**.
-- The remote side can **accept / deny / negotiate scope** before execution.
-- **Short-circuit (direct RPC-like execution)** is optional and must be explicitly
-  enabled by a human operator.
-
-This avoids turning pairing into unconditional remote code execution.
+Pairing does not grant unconditional remote code execution.
 
 ---
 
@@ -36,9 +30,7 @@ remote interop routes.
 Optional configuration:
 
 - `PICLAW_REMOTE_INTEROP_ALLOW_HTTP=1` – allow `http://` callback URLs (testing only).
-- `PICLAW_REMOTE_INTEROP_ALLOW_PRIVATE_NETWORK=1` – skip all SSRF protections
-  on callback URLs (private IPs, blocked hostnames, DNS re-resolution).
-  Docker/LAN development only.
+- `PICLAW_REMOTE_INTEROP_ALLOW_PRIVATE_NETWORK=1` – skip callback hostname and address checks after scheme validation. Docker/LAN development only.
 - `PICLAW_REMOTE_SHORT_CIRCUIT_ENABLED=1` – allow short-circuit execution if the peer
   is configured with `mode=short-circuit` and `profile=full`.
 - `PICLAW_REMOTE_INSTANCE_NAME` – display name in metadata.
@@ -63,7 +55,7 @@ Optional configuration:
 - Local runtime + policy engine
 - Remote runtime + policy engine
 - Network transport
-- Remote LLM decision channel (untrusted until policy-validated)
+- Remote proposal queue and agent execution path
 
 ### Security goals
 
@@ -89,7 +81,7 @@ Each instance has a stable Ed25519 identity.
 | Field | Definition |
 |---|---|
 | `public_key` | Ed25519 public key |
-| `private_key` | Local secret key (keychain/protected file) |
+| `private_key` | Ed25519 private key in the local identity file; creation applies mode `0600` where supported |
 | `instance_id` | `base64url(sha256(public_key))` |
 | `instance_name` | Display-only label |
 | `fingerprint` | Human-verifiable short form |
@@ -98,13 +90,13 @@ Each instance has a stable Ed25519 identity.
 
 - `instance_id` is key-derived (not user-chosen).
 - Display names are not security identifiers.
-- Accept/deny/revoke operations must use `instance_id` or fingerprint.
+- Pairing requests are accepted or denied by request ID. Known peers are revoked or reconfigured by immutable instance ID or fingerprint.
 
 ---
 
 ## 5) Pairing Protocol (Consent + Proof)
 
-## Step A — Request
+### Step A — Request
 
 Initiator sends `POST /api/remote/pair-request` with:
 
@@ -113,7 +105,7 @@ Initiator sends `POST /api/remote/pair-request` with:
 - protocol version (`1`)
 - nonce + expiry
 
-## Step B — Review
+### Step B — Review
 
 Receiver stores request as `pending_inbound` and prompts operator with:
 
@@ -127,7 +119,7 @@ Mode and permissions are not set during pairing — they default to
 `mediated` / `restricted` and can be changed later via `/pair mode` and
 `/pair permissions`.
 
-## Step C — URL Control Proof
+### Step C — URL Control Proof
 
 Receiver verifies initiator controls claimed URL via signed challenge callback.
 
@@ -158,63 +150,54 @@ Callback response (initiator → receiver):
 Receiver validates the signature using the initiator `public_key` from the
 pair request before accepting.
 
-## Step D — Accept / Deny / Block
+### Step D — Accept / Deny / Block
 
 - **accept**: signed confirmation, peer record created
 - **deny**: reject request (retry allowed)
 - **block**: deny + suppress future attempts under policy
 
-## Step E — Confirm
+### Step E — Confirm
 
-Initiator verifies signature + challenge binding and marks peer as paired.
+The receiver verifies the signed URL-ownership challenge in Step C. After operator acceptance, the receiver sends a signed `pair-confirm`; the initiator verifies that request against its pending outbound record and marks the peer as paired.
 
 ### Anti-spoof constraints
 
-- Never accept by display name alone.
-- Require explicit fingerprint/ID confirmation.
-- Optional short authentication string (SAS) strongly recommended.
+- The acceptance command uses the pending request ID, not a display name.
+- Pairing notices show the immutable instance ID and fingerprint for operator review.
+- No short authentication string (SAS) comparison or separate fingerprint-confirmation prompt is implemented.
 
-### Convenience routing vs identity-safe operations
+### Peer identifiers
 
-Commands like `/pair`, `/ask`, and the `remote-peer` skill accept
-display name, instance ID prefix, or fingerprint as shortcuts for peer
-lookup. This is a **convenience feature** — the underlying security
-model always resolves to the full `instance_id` and validates signatures
-against the stored `public_key`. Display-name lookups are
-non-authoritative; if multiple peers share a name, the command will
-report ambiguity rather than guessing.
+Command lookup rules differ by surface:
+
+- `/ask` accepts an exact instance ID, fingerprint, or case-insensitive display name. The database returns the first display-name match; duplicate names are not rejected, and names containing spaces cannot be addressed by the current command parser.
+- `/pair` management commands use a request ID for pending pairing requests and an exact instance ID or fingerprint for known peers.
+- The `remote-peer` CLI accepts an exact display name, exact ID, fingerprint, or instance-ID prefix. It returns the first match and does not check prefix uniqueness.
+
+After lookup, signed requests use the full `instance_id` and stored `public_key`. Display names are labels, not security identities.
 
 ---
 
-## 6) Interaction Modes
+## 6) Interaction modes
 
-## 5.1 Default: LLM-Mediated Mode (Recommended)
+### Default: operator-mediated mode
 
-Inbound prompt is treated as a **proposal**, not an immediate RPC.
+Inbound prompts enter a review queue instead of running immediately.
 
 Flow:
 
-1. Peer sends signed `proposal`.
-2. Remote runtime routes proposal to a **dedicated interop channel**.
-3. Remote LLM evaluates and returns a decision envelope:
-   - `accept_execute`
-   - `accept_defer`
-   - `deny`
-   - `negotiate`
-   - `human_required`
-4. Runtime policy engine validates decision against hard limits.
-5. If allowed, execution proceeds in bounded scope.
-6. Response returns result and optional scope proposal updates.
+1. A peer sends a signed request to `/api/remote/proposal`.
+2. The runtime verifies the peer, signature, replay nonce, hop count, size, profile, and rate limit.
+3. The runtime stores a pending proposal and notifies `web:default`.
+4. The endpoint returns `decision: "human_required"` with a `negotiation_id`.
+5. An operator reviews `/pair inbox` and runs `/pair approve <proposal_id>` or `/pair reject <proposal_id> [reason]`.
+6. Approval runs the prompt through the local agent pool. The runtime stores the result and sends a signed callback when the peer has a reachable base URL.
 
-### Important security rule
+### Policy authority
 
-The LLM is a **policy advisor**, not a policy authority.
+Deterministic checks and the local operator control execution. `PICLAW_REMOTE_INTEROP_DECISION_MODEL` currently labels response metadata; it does not select an automatic decision model.
 
-- LLM may narrow scope or deny.
-- LLM must not expand permissions beyond deterministic policy ceiling.
-- If LLM output conflicts with policy, runtime denies.
-
-## 5.2 Optional: Short-Circuit Mode (Direct RPC-like)
+### Optional: short-circuit mode
 
 Enabled explicitly per peer by human operator.
 
@@ -228,7 +211,7 @@ Use cases: low-latency trusted automation between tightly controlled peers.
 
 ## 7) Request Authentication Protocol
 
-All remote requests are signed after pairing.
+Pair confirmation and all paired-peer operation requests use signed canonical payloads. The initial pair request is unsigned; the URL-ownership callback returns a signed challenge proof in its response body.
 
 ### Required headers
 
@@ -257,14 +240,14 @@ X-Trust-Epoch
 
 ### Verification sequence
 
-1. Lookup peer by `X-Instance-Id`
-2. Require `status=paired`
-3. Validate timestamp skew bound
-4. Reject reused nonce (per-peer replay cache)
-5. Verify Ed25519 signature
-6. Validate peer `trust_epoch`
-7. Apply mode + permission + budget checks
-8. Execute request
+1. Lookup peer by `X-Instance-Id` and require `status=paired`
+2. Require the request instance ID to match the stored peer
+3. Validate signature version and timestamp skew
+4. Validate the peer `trust_epoch`
+5. Reject a reused nonce in the per-peer replay cache
+6. Rebuild the canonical payload and verify the Ed25519 signature
+7. Apply endpoint rate, mode, profile, size, hop, time, and tool checks
+8. Execute or queue the request
 
 ---
 
@@ -273,7 +256,8 @@ X-Trust-Epoch
 | Endpoint | Purpose | Auth |
 |---|---|---|
 | `POST /api/remote/pair-request` | initiate pairing | validated unauth input |
-| `POST /api/remote/pair-confirm` | complete pairing | signed |
+| `POST /api/remote/pair-confirm` | complete pairing | signed canonical request |
+| `POST /api/remote/pair-callback` | prove control of the initiator callback URL | pending outbound request + challenge; signed proof in response |
 | `GET /api/remote/ping` | health/metadata | signed |
 | `POST /api/remote/proposal` | default mediated inbound prompt | signed |
 | `POST /api/remote/execute` | optional short-circuit direct exec | signed + mode gate |
@@ -284,17 +268,15 @@ All POST endpoints require `Content-Type: application/json`.
 
 ### Proposal response envelope
 
+The current proposal endpoint always queues valid requests for operator review:
+
 ```json
 {
-  "decision": "negotiate",
-  "reason": "Need narrower tool scope",
-  "proposed_scope": {
-    "tools": ["read", "search_workspace"],
-    "max_timeout_sec": 30,
-    "max_tool_calls": 5
-  },
-  "negotiation_id": "neg_123",
-  "remote_mode": "mediated"
+  "decision": "human_required",
+  "reason": "Proposal queued for review.",
+  "negotiation_id": "proposal_123",
+  "remote_mode": "mediated",
+  "decision_model": null
 }
 ```
 
@@ -306,10 +288,10 @@ All POST endpoints require `Content-Type: application/json`.
   "result": "Disk usage: /workspace 18%",
   "usage": {
     "duration_ms": 950,
-    "tool_calls": 1
+    "tool_calls": null
   },
   "scope_applied": {
-    "profile": "restricted"
+    "profile": "full"
   }
 }
 ```
@@ -344,15 +326,15 @@ Or for a rejection:
 
 Pairing grants identity trust, not blanket execution rights.
 
-## Permission profiles
+### Permission profiles
 
 | Profile | Allowed |
 |---|---|
 | `read-only` | ping/status only — no tool execution or proposals permitted |
 | `non-mutating` | all tools classified as read-only (no side-effects) |
-| `restricted` (default) | proposal channel with constrained tools (shell, file-write, keychain, and other mutating tools denied) |
-| `full` | full remote execution rights |
-| `custom` | explicit allowlist (internal only — not yet user-facing) |
+| `restricted` (default) | proposal channel with the fixed denylist described below |
+| `full` | no remote tool-ceiling filter |
+| `custom` | deferred; currently uses the same denylist as `restricted` |
 
 **`read-only`** is the most conservative profile: the peer can only ping and
 check status. Proposals and execution are rejected at the endpoint level.
@@ -361,9 +343,9 @@ check status. Proposals and execution are rejected at the endpoint level.
 `read-only` in the tool-capabilities registry (e.g. `read`, `find`, `grep`,
 `ls`, `list_tools`). Mutating tools are blocked by the tool ceiling filter.
 
-### Restricted baseline (deny by default)
+### Restricted baseline
 
-Disallow at minimum:
+The `restricted` and deferred `custom` profiles use a fixed denylist. They block:
 
 - shell execution
 - file write/edit/delete
@@ -371,46 +353,41 @@ Disallow at minimum:
 - SQL introspection
 - model/provider switching
 - scheduler/task creation
-- privileged auth/session operations
+- process exit and tool-set self-activation
+- editor-opening tools and heavy background automation
 
-Only explicitly granted tools/capabilities are enabled.
+Other registered tools remain available unless another runtime check blocks them. The `restricted` profile is not an explicit allowlist.
 
 ---
 
 ## 10) Abuse Resistance
 
-### Mandatory controls
+### Implemented controls
 
-- per-peer request rate limit
-- per-peer concurrent run cap
-- per-peer daily token/time budget
-- request/response size caps
-- max tool calls per request
-- queue isolation (local user traffic priority)
-- circuit breaker on repeated invalid/abusive traffic
+- endpoint rate limits keyed by source, instance ID, or peer as appropriate
+- one concurrent short-circuit execute request per peer and four globally
+- request and response size caps
+- maximum tool calls and execution time per request
+- hop-count rejection
+
+Daily token/time budgets, queue priority for local traffic, and circuit breakers are not implemented.
 
 ### Loop prevention (agent-to-agent)
 
-Use chain metadata:
-
-- `X-Request-Chain-Id`
-- `X-Request-Hop`
-
-Reject if hop exceeds configured max.
+The runtime enforces `X-Request-Hop` and rejects requests above the configured limit. `/ask` also sends `X-Request-Chain-Id` for correlation, but the receiver does not currently enforce it. The `remote-peer` CLI sends only the hop header.
 
 ---
 
 ## 11) SSRF and URL Safety
 
-Pairing/callback URLs are untrusted input.
+Pairing callback URLs are untrusted input. The validator currently:
 
-Must enforce:
+- requires `https` unless `PICLAW_REMOTE_INTEROP_ALLOW_HTTP=1`
+- rejects localhost, `.local`, loopback, private, link-local, carrier-grade NAT, and benchmark ranges
+- resolves hostnames and rejects any private or loopback result
+- uses a five-second timeout for the ownership callback
 
-- `https` by default (dev-only exception explicit)
-- block localhost/link-local/metadata ranges by default
-- DNS rebinding-aware checks where feasible
-- redirect + timeout limits
-- optional domain/ACL allowlists
+`PICLAW_REMOTE_INTEROP_ALLOW_PRIVATE_NETWORK=1` bypasses hostname and address checks for development. Redirect limits, DNS re-resolution at connection time, and domain allowlists are not implemented.
 
 ---
 
@@ -418,7 +395,7 @@ Must enforce:
 
 ### Revocation
 
-`/pair revoke <instance_id>` immediately blocks new requests.
+`/pair revoke <instance_id|fingerprint>` sends a best-effort signed revocation to the peer, then marks the local peer `revoked`. Signed endpoints reject peers whose status is no longer `paired`.
 
 ### Trust epoch
 
@@ -426,7 +403,7 @@ Each peer has `trust_epoch`; requests with stale trust context are rejected.
 
 ### Key rotation
 
-Key changes require re-verification/re-pair flow; no silent key swaps.
+The protocol does not silently replace a paired public key. Key rotation requires revocation and a new pairing.
 
 ### Compromise runbook
 
@@ -440,25 +417,15 @@ Key changes require re-verification/re-pair flow; no silent key swaps.
 
 ## 13) Logging, Privacy, Retention
 
-Audit logs required, but minimize sensitive payload retention.
+The runtime appends remote audit rows with peer ID, endpoint, decision, status, error, and timestamp. It does not store raw prompts in the audit table, but proposals and results are stored in their operational tables.
 
-Recommended logged fields:
-
-- peer ID
-- endpoint + decision
-- auth result/failure code
-- mode used (mediated/short-circuit)
-- applied scope profile
-- resource usage (duration/tokens/tool calls)
-- redacted error summary
-
-Avoid logging raw secrets and full payloads by default.
+Retention cleanup and configurable redaction rules for remote audit data are not implemented.
 
 ---
 
-## 14) Minimum Viable Secure Defaults
+## 14) Minimum secure defaults
 
-These defaults are recommended for first implementation.
+These values describe the current implementation unless marked as missing.
 
 | Control | Default |
 |---|---|
@@ -467,21 +434,21 @@ These defaults are recommended for first implementation.
 | default peer profile | `restricted` |
 | timestamp skew | ±90s |
 | nonce replay TTL | 5 min |
-| nonce cache size | 10k per peer (bounded LRU) |
-| pending pair request TTL | 24h |
+| nonce cache size | 10k per peer; oldest inserted nonce is evicted at the bound |
+| pending pair request TTL | 1h from the built-in `/pair request` client; receivers accept expiries up to 24h |
 | pair-request rate | 3 / 10 min / source + ID |
 | pair-confirm rate | 6 / 10 min / source + ID |
 | proposal rate | 12 / min / peer |
 | ping rate | 60 / min / peer |
 | execute rate | 6 / min / peer |
 | revoke rate | 6 / min / peer |
-| concurrent runs | 1 / peer, 4 global remote |
+| short-circuit execute concurrency | 1 / peer, 4 global; operator-approved proposal execution does not use this counter |
 | max prompt size | 32 KB |
 | max response size | 256 KB |
 | max tool calls | 8 (restricted), 32 (full) |
 | max execution timeout | 60s (restricted), 180s (full) |
 | request hop limit | 3 |
-| audit retention | 30 days (configurable) |
+| audit retention | no cleanup policy implemented |
 
 ---
 
@@ -489,9 +456,9 @@ These defaults are recommended for first implementation.
 
 ```text
 /pair request <url>
-/pair accept <instance_id|fingerprint>
-/pair deny <instance_id|fingerprint>
-/pair block <instance_id|fingerprint>
+/pair accept <request_id>
+/pair deny <request_id>
+/pair block <request_id|instance_id|fingerprint>
 /pair revoke <instance_id|fingerprint>
 /pair list
 /pair list revoked
@@ -501,7 +468,7 @@ These defaults are recommended for first implementation.
 /pair reject <proposal_id> [reason]
 /pair permissions <instance_id> <profile>
 /pair mode <instance_id> <mediated|short-circuit>
-/ask <instance_id|fingerprint|name> <prompt>
+/ask <instance_id|fingerprint|exact-name> <prompt>
 ```
 
 | Command | Description |
@@ -521,80 +488,56 @@ These defaults are recommended for first implementation.
 | `/pair mode <id> <mode>` | Set interaction mode (`mediated`, `short-circuit`) |
 | `/ask <id> <prompt>` | Send a prompt to a paired peer (signed HTTP request) |
 
-Prompts can also be sent via the `remote-peer` skill CLI
-(`peer.ts send <fingerprint|name> <prompt>`).
+Prompts can also be sent through the `remote-peer` skill CLI:
+`peer.ts send <exact-name|instance-id|instance-id-prefix|fingerprint> <prompt>`.
+The CLI returns the first matching paired peer and does not reject ambiguous names or prefixes.
 
-UX requirements:
-
-- always show fingerprint and immutable ID
-- explicit warning on `full` or `short-circuit`
-- require confirm step for privilege escalation
+The UI lists immutable IDs or fingerprints and warns before applying `full` or `short-circuit`. These commands currently apply the change immediately without a second confirmation step.
 
 ---
 
-## 16) Implementation Plan (Security-Gated)
+## 16) Implementation status
 
-| Phase | Scope | Security gate |
-|---|---|---|
-| 1 | identity + key storage | key-derived IDs enforced |
-| 2 | pairing + peer state | challenge/URL proof complete |
-| 3 | signature middleware | canonicalization + nonce replay cache |
-| 4 | policy engine | deterministic scope enforcement |
-| 5 | mediated channel | decision envelope + negotiation flow |
-| 6 | short-circuit mode | explicit operator opt-in + tests |
-| 7 | capacity controls | quotas/queue isolation/circuit breakers |
-| 8 | revocation + rotation | trust epoch checks + runbooks |
-| 9 | observability | audit, redaction, retention, alerts |
+| Area | State |
+|---|---|
+| identity + key storage | implemented; IDs derive from Ed25519 public keys |
+| pairing + peer state | implemented with URL ownership proof and operator acceptance |
+| signature verification | implemented with versioned canonicalization and nonce replay cache |
+| tool policy | implemented; `restricted` uses a denylist and `custom` falls back to it |
+| mediated queue | implemented with operator review in `web:default` |
+| short-circuit mode | implemented behind global and per-peer gates |
+| capacity controls | endpoint rate limits, size/time/tool limits, and execute concurrency implemented; budgets, queue priority, and circuit breakers missing |
+| revocation | implemented with trust-epoch checks and best-effort peer notification; key rotation requires re-pairing |
+| observability | audit rows implemented; redaction policy, retention cleanup, and alerts missing |
 
 ---
 
-## 17) Must-Fix Checklist Before Enabling
+## 17) Security checklist
 
 - [x] canonical signature spec implemented and versioned
 - [x] nonce replay cache enforced per peer
-- [x] acceptance/revocation only by immutable ID/fingerprint
+- [x] pairing acceptance uses request ID; peer revocation uses immutable ID/fingerprint
 - [x] URL ownership challenge implemented in pairing
 - [x] pair-callback endpoint hardened (validates nonce + request_id against outbound records)
-- [ ] strict SSRF protections for callback URLs
-- [x] deterministic policy ceiling (LLM cannot escalate): tool ceiling enforced via
-  `toolCeilingFilter` on `RunAgentOptions`; `setActiveToolsByName` patched for the
-  duration of each remote run to prevent self-escalation; `custom` profile deferred
-  (falls back to `restricted`)
-- [ ] mediated mode default with dedicated channel
+- [x] baseline callback URL checks for scheme, hostname, resolved address, and private ranges
+- [x] deterministic tool ceiling: `toolCeilingFilter` constrains initial and dynamically activated tools; `restricted` uses a denylist and deferred `custom` falls back to it
+- [x] mediated mode defaults to an operator-reviewed queue with notifications in `web:default`
 - [x] short-circuit mode explicit opt-in only
-- [ ] per-peer quotas, concurrency caps, and queue isolation
+- [ ] daily budgets, local-traffic queue priority, and abuse circuit breakers; endpoint rate limits and execute concurrency caps are implemented
 - [x] loop/hop prevention implemented
 - [x] trust-epoch revocation checks in request path
-- [ ] TLS enforcement (no silent plaintext fallback)
-- [ ] audit logging with redaction and retention controls
+- [x] HTTPS required for callbacks by default; `PICLAW_REMOTE_INTEROP_ALLOW_HTTP=1` is an explicit development override
+- [ ] audit redaction and retention controls; basic audit rows are implemented
 
-### Checklist status (completed/missing)
+### Remaining work
 
-Completed:
-- Canonical signature spec + versioning (v1)
-- Nonce replay cache per peer
-- URL ownership challenge callback
-- Short-circuit explicit opt-in gate
-- Loop/hop limit checks
-- Trust-epoch checks on signed requests
-- Bidirectional peer storage (both sides store each other after pair-confirm)
-- **Explicit operator consent gate**: pairing is now two-stage — initiator sends
-  `pair-request` and waits; receiver operator must run `/pair accept` to drive
-  the URL proof and notify the initiator via a signed `pair-confirm` callback
-- **pair-callback hardened**: validates request_id, challenge nonce, and
-  receiver_instance_id against the pending outbound record before signing
-
-Missing (or partial):
-- SSRF hardening beyond baseline allow/deny rules (e.g., redirect-follow cap,
-  DNS rebinding defenses)
-- Deterministic policy ceiling + scoped tool enforcement
-- Dedicated mediated channel UI + decision workflow
-- Quotas/queue isolation beyond basic concurrency limits
-- TLS-only enforcement for interop endpoints
-- Audit redaction + retention controls
-- [x] Tool-call limit enforcement in execute handler (constants defined and
-  passed to agentPool.runAgent; cap enforced via tool_execution_end subscriber)
-- [x] pair-callback endpoint rate limiter (PAIR_CALLBACK_LIMIT: 6/10 min/source)
+- add redirect limits and DNS re-resolution at callback connection time
+- replace the `restricted` denylist with an explicit allowlist if stronger isolation is required; implement the deferred `custom` profile
+- add a dedicated mediated-channel UI or automatic decision workflow if operator review in `web:default` is insufficient
+- add daily budgets, local-traffic queue priority, and abuse circuit breakers
+- remove or separately gate the explicit HTTP development override if deployments require TLS without exception
+- add audit redaction rules, retention cleanup, and alerts
+- add a second confirmation step before applying `full` or `short-circuit`
 
 ---
 
@@ -602,5 +545,4 @@ Missing (or partial):
 
 See [`cross-instance-ipc-design.svg`](cross-instance-ipc-design.svg).
 
-The diagram should be interpreted together with this document’s security gates
-and default mode behavior.
+The diagram reflects the security gates and default mode described here.

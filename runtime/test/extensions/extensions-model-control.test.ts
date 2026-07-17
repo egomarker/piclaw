@@ -235,6 +235,47 @@ describe("model-control extension", () => {
 
   // -- list_models -----------------------------------------------------------
 
+  test("list_models awaits refresh before reading the catalog", async () => {
+    const events: string[] = [];
+    const fresh = makeModel({ provider: "fresh", id: "fresh-model" });
+    let models: Model<any>[] = [];
+    const ctx = fake.makeCtx({
+      modelRegistry: {
+        refresh: async () => {
+          events.push("refresh-start");
+          await Bun.sleep(1);
+          models = [fresh];
+          events.push("refresh-done");
+        },
+        getAvailable: () => {
+          events.push("read");
+          return models;
+        },
+        getAll: () => models,
+      } as any,
+    } as any);
+
+    const result = await callTool(fake.tools, "list_models", {}, ctx);
+    expect(events).toEqual(["refresh-start", "refresh-done", "read"]);
+    expect(result.details.models.map((entry: any) => entry.label)).toEqual(["fresh/fresh-model"]);
+  });
+
+  test("list_models serves cached models with a concise refresh error", async () => {
+    const cached = makeModel({ provider: "cached", id: "cached-model" });
+    const ctx = fake.makeCtx({
+      modelRegistry: {
+        refresh: async () => { throw new Error("catalog unavailable"); },
+        getAvailable: () => [cached],
+        getAll: () => [cached],
+      } as any,
+    } as any);
+
+    const result = await callTool(fake.tools, "list_models", {}, ctx);
+    expect(result.content[0].text).toContain("showing cached models: catalog unavailable");
+    expect(result.details.refresh_error).toBe("catalog unavailable");
+    expect(result.details.models[0].label).toBe("cached/cached-model");
+  });
+
   test("list_models shows all available", async () => {
     fake.setCurrentModel(makeModel());
     const ctx = fake.makeCtx();
@@ -320,6 +361,21 @@ describe("model-control extension", () => {
   });
 
   // -- switch_model ----------------------------------------------------------
+
+  test("switch_model awaits refresh and selects the refreshed canonical model", async () => {
+    const fresh = makeModel({ provider: "fresh", id: "fresh-model" });
+    let models: Model<any>[] = [];
+    const ctx = fake.makeCtx({
+      modelRegistry: {
+        refresh: async () => { models = [fresh]; },
+        getAvailable: () => models,
+        getAll: () => models,
+      } as any,
+    } as any);
+
+    const result = await callTool(fake.tools, "switch_model", { model: "fresh/fresh-model" }, ctx);
+    expect(result.details.current_model).toBe("fresh/fresh-model");
+  });
 
   test("switch_model with provider/id", async () => {
     fake.setCurrentModel(makeModel());

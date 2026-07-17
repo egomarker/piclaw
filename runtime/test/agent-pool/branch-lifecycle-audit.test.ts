@@ -3,6 +3,7 @@ import { join } from "path";
 import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { createTempWorkspace, importFresh, setEnv } from "../helpers.js";
+import { createAgentPoolModelOptions } from "../model-services-fixture.js";
 
 let restoreEnv: (() => void) | null = null;
 
@@ -111,6 +112,7 @@ test("agent pool audit: forks active chats from the previous stable turn boundar
   const created: Record<string, ForkableSession> = { [sourceChatJid]: sourceSession };
 
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async (chatJid: string, sessionDir: string) => {
       if (created[chatJid]) return createRuntime(created[chatJid]) as any;
       const session = new ForkableSession(ws.workspace, sessionDir, false);
@@ -167,6 +169,7 @@ test("agent pool audit: refuses to prune an active branch session", async () => 
   }
 
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => createRuntime(new ActiveBranchSession()) as any,
   });
 

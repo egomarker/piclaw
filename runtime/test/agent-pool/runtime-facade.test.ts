@@ -8,6 +8,7 @@ import { AgentRuntimeFacade } from "../../src/agent-pool/runtime-facade.js";
 import { SESSIONS_DIR } from "../../src/core/config.js";
 import { sanitiseJid } from "../../src/agent-pool/session.js";
 import { initDatabase } from "../../src/db.js";
+import "../helpers.js";
 
 function createRuntime(session: any): AgentSessionRuntime {
   return {
@@ -80,7 +81,7 @@ test("AgentRuntimeFacade reports available models and context usage", async () =
   fixture.pool.set("web:default", { runtime: createRuntime(session), lastUsed: Date.now() });
 
   const available = await fixture.facade.getAvailableModels("web:default");
-  expect(refreshCalls).toBe(1);
+  expect(refreshCalls).toBe(0);
   expect(available.current).toBe("openai/gpt-test");
   expect(available.models).toEqual(["openai/gpt-test", "anthropic/claude-test"]);
   expect(available.model_options).toEqual([
@@ -192,7 +193,7 @@ test("AgentRuntimeFacade returns registry-backed model options without hydrating
   // getOrCreateRuntime must not be called synchronously by getAvailableModels.
   // Background async work (e.g. warmProviderUsage) may trigger it after the
   // await returns — we only assert the synchronous path does not hydrate.
-  expect(refreshCalls).toBeGreaterThanOrEqual(1);
+  expect(refreshCalls).toBe(0);
   expect(available).toMatchObject({
     current: null,
     models: ["openai/gpt-fast"],
@@ -261,7 +262,7 @@ test("AgentRuntimeFacade restores persisted current model for a cold chat withou
 
     const available = await facade.getAvailableModels(chatJid);
     expect(getOrCreateCalls).toBe(0);
-    expect(refreshCalls).toBe(1);
+    expect(refreshCalls).toBe(0);
     expect(available.current).toBe("azure-openai/gpt-5.6-sol");
     expect(available.thinking_level).toBe("max");
     expect(available.thinking_level_label).toBe("max");

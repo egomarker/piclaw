@@ -1,6 +1,6 @@
 ---
 name: Question
-about: Ask a question about piclaw behaviour, configuration, or design
+about: Ask about PiClaw behaviour, configuration, or design
 title: 'Q: '
 labels: 'question'
 assignees: ''
@@ -8,13 +8,13 @@ assignees: ''
 
 ## Question
 
-<!-- What do you want to know? Be as specific as possible. -->
+<!-- State the question directly. Be specific. -->
 
 ## Context
 
 <!-- What are you trying to do? What have you already tried? -->
 
-## Environment (if relevant)
+## Environment (when relevant)
 
 - OS:
 - Piclaw version:

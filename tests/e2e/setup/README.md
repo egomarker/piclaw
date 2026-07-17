@@ -6,7 +6,7 @@
 2. The instance's internal secret (for E2E auth bootstrap)
 3. (Optional) An OpenCode API key — free-tier models work without one
 
-## Quick Start
+## Setup
 
 ### 1. Configure the test instance
 
@@ -20,7 +20,7 @@ bun run setup/configure-test-instance.ts
 OPENCODE_API_KEY=oc-your-key bun run setup/configure-test-instance.ts
 ```
 
-This will:
+The script:
 - Write provider credentials to `~/.pi/agent/auth.json` using the current Pi credential shape (`type: "api_key"`, `key`, and provider `env`)
 - Configure the active model in `~/.pi/agent/models.json` with an explicit custom-provider `models` array
 - Validate API connectivity (model list)
@@ -90,7 +90,7 @@ GITHUB_TOKEN=ghp_... bun run setup/configure-github-models.ts
 - **Preferred for CI** — reliable, no external dependency
 - Requires `permissions: { models: read }` in workflow
 
-### Recommendation
+### Recommended defaults
 
 | Environment | Use |
 |-------------|-----|

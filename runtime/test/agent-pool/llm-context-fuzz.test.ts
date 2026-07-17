@@ -181,6 +181,7 @@ describe("LLM context fuzz coverage", () => {
       } catch (error) {
         throw new Error(
           `LLM context fuzz case ${caseId} failed for seed ${FUZZ_SEED}: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify({ agentMessages, normalizedAgentMessages, llmMessages }, (_key, value) => typeof value === "bigint" ? `${value}n` : typeof value === "symbol" ? String(value) : value, 2)}`,
+          { cause: error },
         );
       }
     }

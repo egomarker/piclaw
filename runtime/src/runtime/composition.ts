@@ -1,8 +1,7 @@
 /**
- * runtime/composition.ts – runtime core composition and signal binding helpers.
+ * runtime/composition.ts – runtime base composition and signal binding helpers.
  */
 
-import { AgentPool } from "../agent-pool.js";
 import { DATA_DIR } from "../core/config.js";
 import { AgentQueue } from "../queue.js";
 import { createLogger } from "../utils/logger.js";
@@ -10,35 +9,31 @@ import { RuntimeState } from "./state.js";
 
 const log = createLogger("runtime.composition");
 
-/** Core long-lived services that runtime main wiring composes together. */
-export interface RuntimeCoreServices {
+/** Services safe to construct before persisted environment overrides are applied. */
+export interface RuntimeBaseServices {
   queue: AgentQueue;
-  agentPool: AgentPool;
   state: RuntimeState;
 }
 
-/** Optional factory overrides for runtime core service creation. */
-export interface RuntimeCoreFactoryDeps {
+/** Optional factory overrides for runtime base service creation. */
+export interface RuntimeBaseFactoryDeps {
   dataDir?: string;
   createQueue?: () => AgentQueue;
-  createAgentPool?: () => AgentPool;
   createState?: (dataDir: string) => RuntimeState;
 }
 
-/** Build fresh runtime core services for a single process run. */
-export function createRuntimeCoreServices(deps: RuntimeCoreFactoryDeps = {}): RuntimeCoreServices {
+/** Build services that do not capture model/auth/config environment. */
+export function createRuntimeBaseServices(deps: RuntimeBaseFactoryDeps = {}): RuntimeBaseServices {
   const dataDir = deps.dataDir ?? DATA_DIR;
   const createQueue = deps.createQueue ?? (() => new AgentQueue());
-  const createAgentPool = deps.createAgentPool ?? (() => new AgentPool());
   const createState = deps.createState ?? ((dir) => new RuntimeState(dir));
 
   const services = {
     queue: createQueue(),
-    agentPool: createAgentPool(),
     state: createState(dataDir),
   };
-  log.info("Created runtime core services", {
-    operation: "create_runtime_core_services",
+  log.info("Created runtime base services", {
+    operation: "create_runtime_base_services",
     dataDir,
   });
   return services;

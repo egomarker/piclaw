@@ -1,14 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-vi.mock("@earendil-works/pi-ai/compat", () => ({
-  completeSimple: vi.fn(),
-}));
-
-import { completeSimple } from "@earendil-works/pi-ai/compat";
+const completeSimple = vi.fn();
 import { captureUnindexedBatchesFromSession, groupBatchesByAgentMessage } from "../../src/extensions/context-prune/batch-capture.js";
 import { ToolCallIndexer } from "../../src/extensions/context-prune/indexer.js";
 import { CUSTOM_TYPE_INDEX, CUSTOM_TYPE_SUMMARY } from "../../src/extensions/context-prune/types.js";
-import { contextPrune } from "../../src/extensions/context-prune.js";
+import { createContextPruneExtension } from "../../src/extensions/context-prune.js";
 
 function userEntry(text: string) {
   return { type: "message", message: { role: "user", content: [{ type: "text", text }] } };
@@ -104,7 +100,7 @@ describe("contextPrune extension", () => {
 
   it("reconstructs persisted indexes, prunes context, and retrieves originals by short ref", async () => {
     const { pi, handlers, tools } = makePi();
-    contextPrune(pi as any);
+    createContextPruneExtension({ modelRuntime: { completeSimple } as any })(pi as any);
 
     const branch = [
       {
@@ -156,7 +152,7 @@ describe("contextPrune extension", () => {
     });
 
     const { pi, handlers, tools } = makePi();
-    contextPrune(pi as any);
+    createContextPruneExtension({ modelRuntime: { completeSimple } as any })(pi as any);
 
     const longOutput = "important config\n".repeat(80);
     const branch = [
@@ -202,7 +198,7 @@ describe("contextPrune extension", () => {
 
     const { pi, handlers, tools } = makePi();
     pi.sendMessage.mockImplementationOnce(() => { throw new Error("send unavailable"); });
-    contextPrune(pi as any);
+    createContextPruneExtension({ modelRuntime: { completeSimple } as any })(pi as any);
 
     const longOutput = "fallback details\n".repeat(80);
     const branch = [

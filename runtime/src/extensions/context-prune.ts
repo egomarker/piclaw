@@ -8,7 +8,7 @@
  */
 
 import { Type } from "typebox";
-import type { AgentToolResult, ExtensionAPI, ExtensionContext, ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI, ExtensionContext, ExtensionFactory, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { createLogger } from "../utils/logger.js";
 import { captureUnindexedBatchesFromSession, groupBatchesByAgentMessage } from "./context-prune/batch-capture.js";
 import { ToolCallIndexer } from "./context-prune/indexer.js";
@@ -50,7 +50,8 @@ function makeResultText(result: FlushResult): string {
   return `Context prune ${result.reason === "skipped-oversized" ? "skipped" : "completed"}. Summarized ${result.toolCallCount} tool call${result.toolCallCount === 1 ? "" : "s"} from ${result.batchCount} batch${result.batchCount === 1 ? "" : "es"}. Summary size: ${result.summaryCharCount} chars vs ${result.rawCharCount} raw chars.${skipped} Use context_tree_query with summary refs to retrieve full outputs.`;
 }
 
-export const contextPrune: ExtensionFactory = (pi: ExtensionAPI) => {
+export function createContextPruneExtension(extensionOptions: { modelRuntime?: Pick<ModelRuntime, "completeSimple"> } = {}): ExtensionFactory {
+  return function contextPrune(pi: ExtensionAPI) {
   const indexer = new ToolCallIndexer();
   let isFlushing = false;
 
@@ -115,7 +116,8 @@ export const contextPrune: ExtensionFactory = (pi: ExtensionAPI) => {
         if (options.signal?.aborted) return { ok: false, reason: "aborted" };
         sendToolProgress(options.onUpdate, `Context prune summarizing batch ${index + 1}/${batches.length} (${batch.toolCalls.length} tool call${batch.toolCalls.length === 1 ? "" : "s"})…`);
 
-        const result = await summarizeBatch(batch, ctx, { signal: options.signal });
+        if (!extensionOptions.modelRuntime) return { ok: false, reason: "summarizer-failed" };
+        const result = await summarizeBatch(batch, ctx, extensionOptions.modelRuntime, { signal: options.signal });
         if (!result) return { ok: false, reason: "summarizer-failed" };
 
         const refs = indexer.allocateSummaryRefs(batch);
@@ -198,4 +200,7 @@ export const contextPrune: ExtensionFactory = (pi: ExtensionAPI) => {
       };
     },
   });
-};
+  };
+}
+
+export const contextPrune: ExtensionFactory = createContextPruneExtension();

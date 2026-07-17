@@ -6,7 +6,7 @@
 - Create a feature branch, commit, push, and open a PR via `gh pr create`
 - Wait for the user to approve or say "merge" before merging
 - Use `gh pr merge --merge --delete-branch` to merge and clean up
-- PR descriptions should include: summary, what changed, test results
+- PR descriptions should include a summary, the change, and test results
 - One logical change per PR; don't bundle unrelated work
 
 ### Worktrees
@@ -31,7 +31,7 @@ Releases follow a two-phase tag workflow. **No release ships without passing UX 
 
 1. Build, run `make ci-fast` (unit + integration tests) locally.
 2. Push a prerelease tag: `v<version>-ux` (e.g. `v2.3.0-ux`).
-3. This triggers the **E2E Tests** workflow (Playwright UX regression suite) on CI.
+3. This tag triggers the **E2E Tests** workflow (Playwright UX regression suite) on CI.
 4. It does **not** trigger Docker builds, the integration gate, or publish workflows.
 5. Wait for the E2E workflow to complete. Review the uploaded report artifact.
 6. If UX tests fail, fix and re-push the `-ux` tag.
@@ -39,7 +39,7 @@ Releases follow a two-phase tag workflow. **No release ships without passing UX 
 ### Phase 2 — Final release
 
 1. Once the `-ux` tag is green, push the final release tag: `v<version>` (e.g. `v2.3.0`).
-2. This triggers **CI**, **Integration gate**, and **Publish Docker images** — but **not** E2E tests.
+2. This tag triggers **Integration gate** and **Publish Docker images**, but not the **CI** or **E2E Tests** workflows.
 3. The integration gate must pass before Docker images are built.
 4. Publish release notes to GitHub Releases.
 5. Download the E2E report artifact from the `-ux` workflow run and **attach it as a release asset** (PDF or HTML).
@@ -50,7 +50,7 @@ Releases follow a two-phase tag workflow. **No release ships without passing UX 
 |---|---|---|---|---|
 | Push to `main` | ✅ | — | — | — |
 | `v*-ux` / `v*-prerelease` | — | — | ✅ | — |
-| `v*` (no suffix) | ✅ | ✅ | — | ✅ |
+| `v*` (no suffix) | — | ✅ | — | ✅ |
 
 ### Quick reference
 

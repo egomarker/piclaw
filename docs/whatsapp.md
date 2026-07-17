@@ -1,8 +1,6 @@
 # WhatsApp integration
 
-The primary interface is the web UI. WhatsApp is an **opt-in secondary channel**
-for chat-style access from mobile devices. It shares the same agent pool, SQLite
-store, and session state as the web UI.
+The web UI is the primary interface. WhatsApp is an **opt-in secondary channel** for chat-style access from mobile devices. It shares the same agent pool, SQLite store, and session state as the web UI.
 
 ## Prerequisites
 
@@ -78,7 +76,7 @@ PICLAW_ASSISTANT_NAME=MyBot
 
 WhatsApp state (auth keys, session identifiers) is stored via the Baileys library
 in `/workspace/.piclaw/data/` as part of Piclaw's normal persistent data. Reconnects
-after a container restart are usually seamless without re-scanning.
+after a container restart usually work without re-scanning.
 
 If you need to reset the WhatsApp session:
 
@@ -103,7 +101,7 @@ Then restart Piclaw and pair again.
 
 Leave `PICLAW_WHATSAPP_ENABLED`/`WHATSAPP_ENABLED` unset or set it to `0`/`false`.
 The Baileys-backed channel module is lazy-loaded only after explicit enablement,
-so default web-first installs do not pay the WhatsApp startup/import cost.
+so default web-first installs skip the WhatsApp startup/import cost.
 
 ## See also
 

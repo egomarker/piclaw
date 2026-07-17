@@ -2,24 +2,28 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AuthStorage, ModelRegistry, SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
-import "../helpers.js";
+import { SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { setEnv } from "../helpers.js";
 import { createSessionInDir } from "../../src/agent-pool/session.ts";
+import { createRealTestModelServices } from "../model-services-fixture.js";
 
 describe("bundled pi-mcp-adapter integration", () => {
   test("registers the mcp proxy tool and slash commands for piclaw sessions", async () => {
-    const authStorage = AuthStorage.create();
-    const modelRegistry = ModelRegistry.inMemory(authStorage);
-    const settingsManager = SettingsManager.create("/workspace", getAgentDir());
     const tempRoot = mkdtempSync(join(tmpdir(), "piclaw-mcp-adapter-"));
+    const { modelRuntime } = await createRealTestModelServices(join(tempRoot, "agent"));
     const sessionDir = join(tempRoot, "session");
     const workspaceDir = join(tempRoot, "workspace");
+    const storeDir = join(tempRoot, "store");
+    const dataDir = join(tempRoot, "data");
     mkdirSync(workspaceDir, { recursive: true });
+    mkdirSync(storeDir, { recursive: true });
+    mkdirSync(dataDir, { recursive: true });
+    const restoreEnv = setEnv({ PICLAW_WORKSPACE: workspaceDir, PICLAW_STORE: storeDir, PICLAW_DATA: dataDir });
+    const settingsManager = SettingsManager.create(workspaceDir, getAgentDir());
 
     try {
       const runtime = await createSessionInDir(sessionDir, {
-        authStorage,
-        modelRegistry,
+        modelRuntime,
         settingsManager,
         tools: [],
         cwd: workspaceDir,
@@ -42,6 +46,7 @@ describe("bundled pi-mcp-adapter integration", () => {
 
       session.dispose?.();
     } finally {
+      restoreEnv();
       rmSync(tempRoot, { recursive: true, force: true });
     }
   }, 20_000);

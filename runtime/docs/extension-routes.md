@@ -2,8 +2,8 @@
 
 _Last updated: 2026-03-16_
 
-PiClaw extensions can register authenticated HTTP routes and serve custom web
-assets or APIs from the piclaw process.
+PiClaw extensions can register authenticated HTTP routes. They can serve
+custom web assets or APIs from the piclaw process.
 
 This is the mechanism used by:
 
@@ -75,7 +75,7 @@ That means:
 - unauthenticated users cannot
 - mutating endpoints still need normal web security discipline
 
-### Important responsibilities for extension authors
+### Extension author responsibilities
 
 Extension routes must still protect themselves correctly:
 
@@ -159,7 +159,7 @@ export default function exampleExtension() {
 
 ## Introspection
 
-PiClaw exposes the currently registered routes at:
+PiClaw exposes the registered routes at:
 
 - `GET /api/extension-routes`
 
@@ -174,11 +174,11 @@ Response shape:
 ]
 ```
 
-This is useful for:
+Use this endpoint to:
 
-- debugging route registration
-- verifying reload/install behavior
-- checking which extension currently owns a prefix
+- debug route registration
+- verify reload/install behavior
+- check which extension owns a prefix
 
 ## Current reference implementations
 

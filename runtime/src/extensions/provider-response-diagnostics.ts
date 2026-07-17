@@ -42,27 +42,21 @@ export function extractDiagnosticHeaders(headers: Record<string, string>): Recor
   return count > 0 ? result : null;
 }
 
+export function recordProviderResponseDiagnostics(status: number, headers: Record<string, string>): void {
+  if (status >= 400) {
+    const diagnostic = extractDiagnosticHeaders(headers);
+    log.warn("Provider returned error status", {
+      status,
+      ...(diagnostic ? { headers: diagnostic } : {}),
+    });
+    return;
+  }
+  const diagnostic = extractDiagnosticHeaders(headers);
+  if (diagnostic) log.debug("Provider response diagnostics", { status, headers: diagnostic });
+}
+
 export const providerResponseDiagnostics: ExtensionFactory = (pi: ExtensionAPI) => {
   pi.on("after_provider_response", async (event) => {
-    const { status, headers } = event;
-
-    // Log non-200 responses at warn level
-    if (status >= 400) {
-      const diagnostic = extractDiagnosticHeaders(headers);
-      log.warn("Provider returned error status", {
-        status,
-        ...(diagnostic ? { headers: diagnostic } : {}),
-      });
-      return;
-    }
-
-    // Log rate-limit headers at debug level for healthy responses
-    const diagnostic = extractDiagnosticHeaders(headers);
-    if (diagnostic) {
-      log.debug("Provider response diagnostics", {
-        status,
-        headers: diagnostic,
-      });
-    }
+    recordProviderResponseDiagnostics(event.status, event.headers);
   });
 };

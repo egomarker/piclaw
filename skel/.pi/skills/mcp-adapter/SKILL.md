@@ -6,7 +6,7 @@ distribution: public
 
 # MCP Adapter
 
-PiClaw ships `pi-mcp-adapter`, which exposes MCP servers to the agent through a single `mcp` tool plus `/mcp` commands.
+Use `pi-mcp-adapter` to expose MCP servers to the agent through one `mcp` tool plus `/mcp` commands.
 
 ## Config locations
 
@@ -82,8 +82,8 @@ mcp({ tool: "filesystem_read_file", args: "{\"path\":\"./README.md\"}" })
 /mcp-auth <server>
 ```
 
-## Operational notes
+## Notes
 
 - MCP servers are lazy by default and connect on first use.
 - After editing `.pi/mcp.json`, restart the session or reload Pi so the adapter re-reads config.
-- Prefer `directTools` only for small, high-value tool sets. Large MCP servers are usually better left behind the `mcp` proxy.
+- Prefer `directTools` only for small, high-value tool sets. Keep large MCP servers behind the `mcp` proxy.

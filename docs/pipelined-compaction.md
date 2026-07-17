@@ -13,7 +13,7 @@ Pipelined is a local processing method inside the existing smart-compaction life
 | Property | Pipelined behavior |
 |---|---|
 | Canonical method name | `pipelined` |
-| Default method | No; `selective` remains the default |
+| Default method | No. The default is `selective` |
 | Selection lifetime | Captured once at the start of each compaction generation |
 | Provider-native pre-pass | If enabled, a successful remote attempt completes before Pipelined; safe remote failure falls through to Pipelined |
 | Classification model calls | None |
@@ -504,11 +504,11 @@ PICLAW_SMART_COMPACTION_METHOD=pipelined
 
 The canonical values are `selective` and `pipelined`. The legacy values `traditional_pipelined`, `traditional-pipelined`, and `traditional pipelined` are accepted and normalized to `pipelined`. Unknown values fall back to the current/default method.
 
-The default remains `selective`. Environment values and manual `.piclaw/config.json` edits are startup inputs; restart the process for those external changes unless the runtime settings API is also used.
+The default is `selective`. Environment values and manual `.piclaw/config.json` edits are startup inputs; restart the process for those external changes unless the runtime settings API is also used.
 
 ### Interaction with provider-native compaction
 
-The separate `remoteCompactionEnabled` setting controls an opt-in provider-native pre-pass. It does not select or replace `smartCompactionMethod`: `pipelined` remains the captured local method and is used when the remote path is disabled or cannot complete safely. A successful remote attempt returns before local ledger construction, so it does not emit Pipelined planning telemetry. On local fallback from a compatible inherited remote state, the opaque canonical window remains provider-level input outside the ledger; Pipelined classifies the new discarded source and carries inherited file facts separately. See [Provider-native remote compaction](configuration.md#provider-native-remote-compaction) for its capability matrix, persistence, replay, and configuration contract.
+The separate `remoteCompactionEnabled` setting controls an opt-in provider-native pre-pass. It does not select or replace `smartCompactionMethod`: `pipelined` is the captured local method and is used when the remote path is disabled or cannot complete safely. A successful remote attempt returns before local ledger construction, so it does not emit Pipelined planning telemetry. On local fallback from a compatible inherited remote state, the opaque canonical window stays provider-level input outside the ledger; Pipelined classifies the new discarded source and carries inherited file facts separately. See [Provider-native remote compaction](configuration.md#provider-native-remote-compaction) for its capability matrix, persistence, replay, and configuration contract.
 
 ## 14. Observe and audit execution
 

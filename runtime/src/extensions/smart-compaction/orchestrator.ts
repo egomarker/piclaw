@@ -1,6 +1,6 @@
 /** Smart-compaction lifecycle orchestrator. Policy and provider execution live in focused modules. */
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { ExtensionAPI, ExtensionFactory, CompactionResult } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionFactory, CompactionResult, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { createLogger } from "../../utils/logger.js";
 import { applyTokenEstimateSafetyMultiplier } from "../../utils/context-window-budget.js";
 import { checkPiclawCompactionBudget, maybeYieldPiclawCompaction, resolvePiclawCompactionTrigger } from "../../agent-pool/compaction-trigger-context.js";
@@ -65,7 +65,7 @@ import {
 
 const log = createLogger("ext.smart-compaction.orchestrator");
 
-export function createSmartCompactionExtension(options: { streamFn?: CompactionStreamFn } = {}): ExtensionFactory {
+export function createSmartCompactionExtension(options: { streamFn?: CompactionStreamFn; modelRuntime?: ModelRuntime } = {}): ExtensionFactory {
   return (pi: ExtensionAPI) => {
 
   // Provider-native compacted windows are persisted in CompactionEntry.details.
@@ -272,7 +272,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
       const effectivePreparation = { ...preparation, fileOps: effectiveFileOps };
 
       if (compactionRuntimeConfig.remoteCompactionEnabled) {
-        const modelRequest = await resolveSmartCompactionModelRequest(ctx);
+        const modelRequest = await resolveSmartCompactionModelRequest(ctx, options.modelRuntime, { resolveDirectRequestAuth: true });
         if (!modelRequest.ok) {
           remoteOutcome = "unavailable";
           remoteReason = modelRequest.error;
@@ -595,7 +595,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
           );
       publishCompactionStage(statusMessage(compactionMetadata, `preparing ${methodLabel} summary prompt…`), "summarizing_prompt", promptTokens);
 
-      const modelRequest = await resolveSmartCompactionModelRequest(ctx);
+      const modelRequest = await resolveSmartCompactionModelRequest(ctx, options.modelRuntime);
       if (!modelRequest.ok) {
         log.debug("Compaction model or credentials are unavailable; cancelling instead of falling through to upstream full-pass compaction");
         return cancelCompactionWithReason(ctx, modelRequest.error);

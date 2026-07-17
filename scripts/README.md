@@ -1,7 +1,6 @@
 # scripts
 
-This directory contains repo-level maintenance, audit, migration, and operator
-entrypoints for working on the source repository itself.
+`scripts/` contains repository maintenance, audit, migration, and operator entrypoints for the source tree.
 
 Use `scripts/` for things like:
 
@@ -10,9 +9,8 @@ Use `scripts/` for things like:
 - repo-install smoke checks
 - release/build helpers tied to repository maintenance
 
-Do **not** use this directory for packaged runtime helper scripts that are meant
-to ship with piclaw. Those belong under `runtime/scripts/`.
+Do **not** place packaged runtime helpers here. Use `runtime/scripts/` for scripts that ship with Piclaw.
 
 Related:
-- `docs/repo-runtime-boundaries-2026-03-28.md`
+- `docs/archive/repo-runtime-boundaries-2026-03-28.md`
 - `runtime/scripts/README.md`

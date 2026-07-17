@@ -50,7 +50,7 @@ After scaffolding, hand-tune the JSON block so it reflects the real user-facing 
 - `summary` should be a short, literal description
 - `aliases` should match phrases a human would actually type
 - `domains`, `verbs`, and `nouns` should help intent matching
-- `keywords` should be supplemental, not a junk drawer
+- `keywords` should stay short and relevant
 - `examples` should be short task-shaped phrases
 - `role` should be `entrypoint` for runnable scripts and `module` for helper files
 - `kind` / `weight` should reflect real behavior and cost

@@ -12,6 +12,7 @@ import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { getAttachmentRegistry } from "../../src/agent-pool/attachments.js";
 import { createTempWorkspace, getTestWorkspace, importFresh, setEnv } from "../helpers.js";
+import { createAgentPoolModelOptions } from "../model-services-fixture.js";
 
 let restoreEnv: (() => void) | null = null;
 
@@ -94,6 +95,7 @@ test("agent pool aggregates streamed text and writes logs", async () => {
   }
 
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => createRuntime(new StubSession()) as any,
   });
 
@@ -153,6 +155,7 @@ test("agent pool aggregates recovery counters into memory instrumentation", asyn
   }
 
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => createRuntime(new RecoveringSession()) as any,
   });
 
@@ -174,6 +177,7 @@ test("agent pool raises provider retry defaults for shared session settings", as
 
   const { AgentPool } = await importFresh<typeof import("../src/agent-pool.js")>("../src/agent-pool.js");
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => createRuntime({ subscribe: () => () => {}, prompt: async () => {}, abort: async () => {} }) as any,
   });
 
@@ -220,6 +224,7 @@ test("agent pool honors timeout overrides", async () => {
   }
 
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => createRuntime(new StubSession()) as any,
   });
 
@@ -266,6 +271,7 @@ test("agent pool clears attachments when a run errors", async () => {
   }
 
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => createRuntime(new StubSession()) as any,
   });
 
@@ -325,6 +331,7 @@ test("agent pool stores SSH config for future sessions when no live SSH session 
   }
 
   pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => {
       createCalls += 1;
       return createRuntime(new StubSession()) as any;
@@ -368,6 +375,7 @@ test("agent pool evicts idle sessions and recreates them", async () => {
   }
 
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => {
       createCalls += 1;
       return createRuntime(new StubSession()) as any;
@@ -413,6 +421,7 @@ test("agent pool schedules lightweight warmup for the most recent inactive chats
   }
 
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async (chatJid: string) => {
       created.push(chatJid);
       return createRuntime(new StubSession()) as any;
@@ -445,6 +454,7 @@ test("agent pool recent-chat warmup skips internal maintenance chats", async () 
 
   const { AgentPool } = await importFresh<typeof import("../src/agent-pool.js")>("../src/agent-pool.js");
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => createRuntime({ subscribe: () => () => {}, prompt: async () => {}, abort: async () => {}, dispose() {} }) as any,
   });
 
@@ -471,6 +481,7 @@ test("agent pool keeps expanding recent-chat warmup past already-warm top rows",
 
   const { AgentPool } = await importFresh<typeof import("../src/agent-pool.js")>("../src/agent-pool.js");
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => createRuntime({ subscribe: () => () => {}, prompt: async () => {}, abort: async () => {}, dispose() {} }) as any,
   });
 
@@ -495,6 +506,7 @@ test("agent pool explicit warmup still materializes a live runtime", async () =>
   const { AgentPool } = await importFresh<typeof import("../src/agent-pool.js")>("../src/agent-pool.js");
   const created: string[] = [];
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async (chatJid: string) => {
       created.push(chatJid);
       return createRuntime({ subscribe: () => () => {}, prompt: async () => {}, abort: async () => {}, dispose() {} }) as any;
@@ -547,6 +559,7 @@ test("agent pool cleanup timer applies the shorter memory-pressure idle TTL", as
     }
 
     const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
       createSession: async () => createRuntime(new StubSession()) as any,
     });
 
@@ -596,6 +609,7 @@ test("agent pool applies the pressure pool cap immediately after acquiring a sec
   }
 
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => createRuntime(new StubSession()) as any,
   });
 
@@ -643,6 +657,7 @@ test("agent pool enables the default pressure trim path at the 512MB threshold",
     }
 
     const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
       createSession: async () => createRuntime(new StubSession()) as any,
     });
 
@@ -688,6 +703,7 @@ test("agent pool trims cached main sessions more aggressively when RSS crosses t
   }
 
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => createRuntime(new StubSession()) as any,
   });
 
@@ -715,6 +731,7 @@ test("agent pool rate-limits repeated recent-chat warmup for the same chat", asy
 
   const { AgentPool } = await importFresh<typeof import("../src/agent-pool.js")>("../src/agent-pool.js");
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => createRuntime({ subscribe: () => () => {}, prompt: async () => {}, abort: async () => {}, dispose() {} }) as any,
   });
 
@@ -755,6 +772,7 @@ test("agent pool can run a side prompt with the current model and thinking level
   }
 
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => createRuntime(new StubSession()) as any,
     modelRegistry: {
       getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test-key" }),
@@ -797,7 +815,7 @@ test("agent pool can run a side prompt with the current model and thinking level
   expect(seen).toEqual([{ model: "openai/gpt-test", reasoning: "high", prompt: "Side question" }]);
 });
 
-test("agent pool forwards API key auth for side prompts", async () => {
+test("agent pool leaves side-prompt auth assembly to the runtime stream boundary", async () => {
   const ws = getTestWorkspace();
   restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
 
@@ -825,6 +843,7 @@ test("agent pool forwards API key auth for side prompts", async () => {
   }
 
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => createRuntime(new StubSession()) as any,
     modelRegistry: {
       getApiKey: async () => "side-api-key",
@@ -856,7 +875,7 @@ test("agent pool forwards API key auth for side prompts", async () => {
   const result = await pool.runSidePrompt("web:default", "Side question");
   expect(result.status).toBe("success");
   expect(result.result).toBe("key answer");
-  expect(seen).toEqual([{ apiKey: "side-api-key" }]);
+  expect(seen).toEqual([{ apiKey: undefined }]);
 });
 
 test("agent pool forks active chats from the previous stable turn boundary", async () => {
@@ -956,6 +975,7 @@ test("agent pool forks active chats from the previous stable turn boundary", asy
   const created: Record<string, ForkableSession> = { [sourceChatJid]: sourceSession };
 
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async (chatJid: string, sessionDir: string) => {
       if (created[chatJid]) return createRuntime(created[chatJid]) as any;
       const session = new ForkableSession(ws.workspace, sessionDir, false);
@@ -1017,6 +1037,7 @@ test("agent pool refuses to prune an active branch session", async () => {
   }
 
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => createRuntime(new ActiveBranchSession()) as any,
   });
 
@@ -1048,6 +1069,7 @@ test("agent pool reports side prompt errors when no model is active", async () =
   }
 
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => createRuntime(new StubSession()) as any,
   });
 
@@ -1143,6 +1165,7 @@ test("agent pool can run a tool-capable side prompt through a separate side sess
   }
 
   const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
     createSession: async () => createRuntime(new MainSession()) as any,
     createSideSession: async () => createRuntime(new SideSession()) as any,
     modelRegistry: {

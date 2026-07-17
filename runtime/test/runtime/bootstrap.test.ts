@@ -8,12 +8,12 @@ import {
   type RuntimeBootstrapQueue,
   type RuntimeBootstrapState,
   type RuntimeBootstrapWeb,
-  type RuntimeBootstrapDefaultCoreServices,
+  type RuntimeBootstrapDefaultBaseServices,
 } from "../../src/runtime/bootstrap.js";
 import type { RuntimeSenders } from "../../src/runtime/wiring.js";
 
 describe("runtime bootstrap", () => {
-  test("bootstrapRuntime wires runtime services in production order", async () => {
+  test("applies environment before AgentPool creation and starts refresh after channels", async () => {
     const events: string[] = [];
 
     const queue = { shutdown: async () => {} } as RuntimeBootstrapQueue;
@@ -36,20 +36,26 @@ describe("runtime bootstrap", () => {
       sendNudge: async () => {},
     } as RuntimeSenders;
 
-    let capturedShutdownDeps: { stopIpcWatcher: () => void; stopSchedulerLoop: () => void } | null = null;
+    let capturedShutdownDeps: { stopIpcWatcher: () => void; stopSchedulerLoop: () => void; stopOptionalProviders: () => void } | null = null;
 
     const deps: RuntimeBootstrapDeps = {
-      core: { queue, agentPool, state },
+      base: { queue, state },
       assistantName: "Pi",
       triggerPattern: /@pi/i,
       pollIntervalMs: 123,
       signalRegistrar: { on: () => {} },
       initializeRuntimeEnvironment: () => events.push("init-runtime-env"),
-      registerOptionalProviders: () => events.push("register-providers"),
-      registerGitHubCopilotDynamicModelsAtBoot: () => events.push("register-copilot-dynamic"),
+      createAgentPool: async () => {
+        events.push("create-agent-pool");
+        return agentPool;
+      },
       startWebChannel: async () => {
         events.push("start-web");
         return web;
+      },
+      startBackgroundModelRefresh: (received) => {
+        expect(received).toBe(agentPool);
+        events.push("start-model-refresh");
       },
       startOptionalPushoverChannel: async () => {
         events.push("start-pushover");
@@ -60,6 +66,7 @@ describe("runtime bootstrap", () => {
         capturedShutdownDeps = {
           stopIpcWatcher: shutdownDeps.stopIpcWatcher,
           stopSchedulerLoop: shutdownDeps.stopSchedulerLoop,
+          stopOptionalProviders: shutdownDeps.stopOptionalProviders,
         };
         return async () => {};
       },
@@ -72,17 +79,17 @@ describe("runtime bootstrap", () => {
         events.push("start-workers");
         expect(runtimeSenders).toBe(senders);
       },
-      queueStartupResumePendingIpc: () => {
-        events.push("queue-startup-resume");
-      },
+      queueStartupResumePendingIpc: () => events.push("queue-startup-resume"),
       startRuntimeLoop: async (loopDeps) => {
         events.push("start-runtime-loop");
+        expect(loopDeps.agentPool).toBe(agentPool);
         expect(loopDeps.assistantName).toBe("Pi");
         expect(loopDeps.pollIntervalMs).toBe(123);
       },
       log: () => events.push("log-banner"),
-      stopIpcWatcher: () => {},
+      stopIpcWatcher: async () => {},
       stopSchedulerLoop: () => {},
+      stopOptionalProviders: () => {},
     };
 
     await bootstrapRuntime(deps);
@@ -90,11 +97,11 @@ describe("runtime bootstrap", () => {
     expect(capturedShutdownDeps).not.toBeNull();
     expect(events).toEqual([
       "init-runtime-env",
-      "register-providers",
-      "register-copilot-dynamic",
+      "create-agent-pool",
       "log-banner",
       "start-web",
       "start-pushover",
+      "start-model-refresh",
       "create-shutdown",
       "register-shutdown-signals",
       "create-senders",
@@ -103,19 +110,54 @@ describe("runtime bootstrap", () => {
     ]);
   });
 
-  test("createDefaultRuntimeBootstrapDeps preserves provided runtime core", () => {
-    const core = {
-      queue: {} as RuntimeBootstrapDefaultCoreServices["queue"],
-      agentPool: {} as RuntimeBootstrapDefaultCoreServices["agentPool"],
-      state: {} as RuntimeBootstrapDefaultCoreServices["state"],
+  test("background refresh is queued and not awaited by bootstrap", async () => {
+    const queue = { shutdown: async () => {} } as RuntimeBootstrapQueue;
+    const agentPool = { shutdown: async () => {}, resolveModelInput: () => null } as RuntimeBootstrapAgentPool;
+    const state = {} as RuntimeBootstrapState;
+    let refreshFinished = false;
+
+    const deps = {
+      base: { queue, state },
+      assistantName: "Pi",
+      triggerPattern: /@pi/i,
+      pollIntervalMs: 1,
+      signalRegistrar: { on: () => {} },
+      initializeRuntimeEnvironment: () => {},
+      createAgentPool: async () => agentPool,
+      startWebChannel: async () => ({ stop: async () => {} } as RuntimeBootstrapWeb),
+      startBackgroundModelRefresh: () => {
+        void Bun.sleep(100).then(() => { refreshFinished = true; });
+      },
+      startOptionalPushoverChannel: async () => null,
+      createShutdownHandler: () => async () => {},
+      registerRuntimeShutdownSignals: () => {},
+      createRuntimeSenders: () => ({ sendMessage: async () => {}, sendNudge: async () => {} }),
+      startRuntimeWorkers: () => {},
+      queueStartupResumePendingIpc: () => {},
+      startRuntimeLoop: async () => {},
+      log: () => {},
+      stopIpcWatcher: async () => {},
+      stopSchedulerLoop: () => {},
+      stopOptionalProviders: () => {},
+    } as RuntimeBootstrapDeps;
+
+    await bootstrapRuntime(deps);
+    expect(refreshFinished).toBe(false);
+  });
+
+  test("createDefaultRuntimeBootstrapDeps preserves provided runtime base", () => {
+    const base = {
+      queue: {} as RuntimeBootstrapDefaultBaseServices["queue"],
+      state: {} as RuntimeBootstrapDefaultBaseServices["state"],
     };
 
-    const deps = createDefaultRuntimeBootstrapDeps(core);
+    const deps = createDefaultRuntimeBootstrapDeps(base);
 
-    expect(deps.core).toBe(core);
+    expect(deps.base).toBe(base);
     expect(deps.assistantName.length).toBeGreaterThan(0);
     expect(typeof deps.pollIntervalMs).toBe("number");
     expect(deps.triggerPattern).toBeInstanceOf(RegExp);
+    expect(typeof deps.createAgentPool).toBe("function");
     expect(typeof deps.startRuntimeLoop).toBe("function");
   });
 });

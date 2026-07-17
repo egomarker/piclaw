@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   registerOptionalProviders,
   resetProviderBootstrapForTests,
+  stopOptionalProviders,
   setProviderBootstrapLoaderForTests,
   type ProviderBootstrapAgentPool,
 } from "../../src/runtime/provider-bootstrap.js";
@@ -203,6 +204,41 @@ describe("runtime provider bootstrap", () => {
     expect(registrations[0].provider).toBe("azure-foundry");
     expect(registrations[0].config.apiKey).toBe("token-for-tests");
     expect(registrations[0].config.models?.map((m) => m.id)).toEqual(["mistral-large-3", "mistral-small-3"]);
+  });
+
+  test("repeated registration has one process owner and stopOptionalProviders stops it", async () => {
+    let starts = 0;
+    let stops = 0;
+    setProviderBootstrapLoaderForTests(async () => ({
+      startAzureProviderBootstrap() {
+        starts += 1;
+        return { stop() { stops += 1; }, async refresh() {} };
+      },
+    }));
+    restoreEnvStack.push(setEnv({ AOAI_BASE_URL: "https://aoai.example" }));
+    const pool = createPool([]);
+    await registerOptionalProviders(pool);
+    await registerOptionalProviders(pool);
+    expect(starts).toBe(1);
+    stopOptionalProviders();
+    expect(stops).toBe(1);
+  });
+
+  test("failed initial refresh stops and clears the process owner so a later retry can start", async () => {
+    let starts = 0;
+    let stops = 0;
+    setProviderBootstrapLoaderForTests(async () => ({
+      startAzureProviderBootstrap() {
+        starts += 1;
+        return { stop() { stops += 1; }, async refresh() { if (starts === 1) throw new Error("token unavailable"); } };
+      },
+    }));
+    restoreEnvStack.push(setEnv({ AOAI_BASE_URL: "https://aoai.example" }));
+    const pool = createPool([]);
+    await expect(registerOptionalProviders(pool)).rejects.toThrow("token unavailable");
+    await registerOptionalProviders(pool);
+    expect(starts).toBe(2);
+    expect(stops).toBe(1);
   });
 
   test("does nothing when optional provider env vars are missing", async () => {

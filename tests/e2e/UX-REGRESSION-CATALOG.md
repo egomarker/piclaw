@@ -1,8 +1,6 @@
-# UX Bug Regression Catalog
-#
-# Extracted from 198 fix(web/editor/vnc/css/zen) commits since March 2026.
-# Each entry maps a git commit message to a testable regression scenario.
-# These will be converted to Gherkin features after the user story interview.
+# UX bug regression catalog
+
+Extracted from 198 `fix(web/editor/vnc/css/zen)` commits since March 2026. Each entry maps a commit message to a testable regression scenario. Convert these scenarios to Gherkin after the user story interview.
 
 ## Compose & Queue
 

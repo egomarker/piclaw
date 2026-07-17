@@ -20,18 +20,55 @@ export function createTestAuthStorage() {
       if (value === undefined) storage.delete(key);
       else storage.set(key, value);
     },
+    list: () => [...storage.entries()].map(([providerId, credential]) => ({ providerId, type: credential.type })),
     reload: () => {},
   };
 }
 
-export function createTestModelRegistry(models: any[] = [DEFAULT_TEST_MODEL], authStorage = createTestAuthStorage()) {
+function providerAuth(providerId: string) {
+  const hasOAuth = providerId === "anthropic" || providerId === "github-copilot" || providerId === "openai-codex" || providerId === "xai";
+  const hasApiKey = providerId !== "openai-codex";
   return {
-    refresh: () => {},
+    ...(hasApiKey ? { apiKey: { name: `${providerId} API key`, login: async (interaction: any) => ({ type: "api_key", key: await interaction.prompt({ type: "secret", message: `Enter ${providerId} API key` }) }) } } : {}),
+    ...(hasOAuth ? { oauth: { name: providerId, login: async () => ({ type: "oauth", access: "access", refresh: "refresh", expires: Date.now() + 60_000 }) } } : {}),
+  };
+}
+
+export function createTestModelRegistry(models: any[] = [DEFAULT_TEST_MODEL], authStorage = createTestAuthStorage()) {
+  const providerIds = [...new Set(models.map((model: any) => model.provider))];
+  const modelRuntime = {
+    getProviders: () => providerIds.map((id) => ({ id, name: id, auth: providerAuth(id), getModels: () => models.filter((model: any) => model.provider === id) })),
+    getProvider: (id: string) => ({ id, name: id, auth: providerAuth(id) }),
+    getModels: () => models,
+    getModel: (provider: string, modelId: string) => models.find((model: any) => model.provider === provider && model.id === modelId),
+    getAvailableSnapshot: () => models,
+    hasConfiguredAuth: () => true,
+    listCredentials: async () => authStorage.list?.() ?? [],
+    getProviderAuthStatus: (providerId: string) => ({ configured: Boolean(authStorage.get(providerId)), source: authStorage.get(providerId) ? "stored" : undefined }),
+    login: async (providerId: string, type: "api_key" | "oauth", interaction: any) => {
+      const provider = providerAuth(providerId);
+      const method = type === "oauth" ? provider.oauth : provider.apiKey;
+      if (!method?.login) throw new Error(`Unsupported ${type} login`);
+      const credential = await method.login(interaction);
+      authStorage.set(providerId, credential);
+      return credential;
+    },
+    logout: async (providerId: string) => { authStorage.set(providerId, undefined); },
+    reloadConfig: async () => {},
+    getAuth: async (providerId: string) => {
+      const credential = authStorage.get(providerId);
+      if (!credential) return undefined;
+      return { auth: { apiKey: credential.type === "oauth" ? credential.access : credential.key }, source: credential.type === "oauth" ? "OAuth" : "stored credential" };
+    },
+  };
+  return {
+    refresh: async () => {},
     getAvailable: () => models,
     getAll: () => models,
     find: (provider: string, modelId: string) => models.find((m: any) => m.provider === provider && m.id === modelId) ?? null,
     hasConfiguredAuth: () => true,
     authStorage,
+    modelRuntime,
   } as any;
 }
 
@@ -89,10 +126,12 @@ export class TestAgentControlSession {
   promptTemplates: Array<{ name: string; description: string }>;
   resourceLoader: any;
   modelRegistry: any;
+  modelRuntime: any;
   agent: { state: { messages: any[] }; replaceMessages: (messages: any[]) => void };
 
   constructor(readonly rootDir: string, modelRegistry: any = createTestModelRegistry()) {
     this.modelRegistry = modelRegistry;
+    this.modelRuntime = modelRegistry.modelRuntime;
     this.sessionFile = join(rootDir, "data", "sessions", "web_default", "state-session.jsonl");
     mkdirSync(dirname(this.sessionFile), { recursive: true });
     writeFileSync(this.sessionFile, '{"type":"session","id":"state","version":3}\n');

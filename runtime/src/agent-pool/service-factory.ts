@@ -2,7 +2,7 @@
  * agent-pool/service-factory.ts – Constructor wiring for AgentPool helper services.
  */
 
-import type { AuthStorage, ExtensionFactory, ModelRegistry, SettingsManager } from "@earendil-works/pi-coding-agent";
+import type { ExtensionFactory, ModelRegistry, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 
 import { getAttachmentRegistry } from "./attachments.js";
 import { getSshConfig } from "../db.js";
@@ -17,6 +17,7 @@ import { lightweightPrewarmSession } from "./session.js";
 import { recordMessageUsage } from "./usage.js";
 import type { AgentPoolOptions } from "./contracts.js";
 import type { AgentBashOperations } from "./tool-factory.js";
+import type { PiclawCredentialStore } from "./credential-store.js";
 
 /** Shared logger callbacks used across extracted AgentPool services. */
 export interface AgentPoolLogHooks {
@@ -30,7 +31,8 @@ export interface AgentPoolServiceFactoryOptions extends AgentPoolLogHooks {
   pool: Map<string, PoolEntry>;
   sidePool: Map<string, PoolEntry>;
   activeForkBaseLeafByChat: Map<string, string | null>;
-  authStorage: AuthStorage;
+  authStorage: PiclawCredentialStore;
+  modelRuntime: ModelRuntime;
   modelRegistry: ModelRegistry;
   settingsManager: SettingsManager;
   workspaceDir: string;
@@ -97,8 +99,9 @@ export function createAgentPoolServices(options: AgentPoolServiceFactoryOptions)
     pool: options.pool,
     getOrCreateRuntime: (chatJid) => sessionManager.getOrCreate(chatJid),
     modelRegistry: options.modelRegistry,
+    modelRuntime: options.modelRuntime,
     settingsManager: options.settingsManager,
-    authStorage: options.authStorage,
+    authPath: options.authStorage.authPath,
     clearAttachments: (chatJid) => attachments.clear(chatJid),
     refreshRuntime: (chatJid, runtime) => sessionManager.refreshRuntime(chatJid, runtime),
     onWarn: options.onWarn,
@@ -120,8 +123,7 @@ export function createAgentPoolServices(options: AgentPoolServiceFactoryOptions)
     sidePool: options.sidePool,
     ...(options.createSession ? { createSession: options.createSession } : {}),
     ...(options.createSideSession ? { createSideSession: options.createSideSession } : {}),
-    authStorage: options.authStorage,
-    modelRegistry: options.modelRegistry,
+    modelRuntime: options.modelRuntime,
     settingsManager: options.settingsManager,
     mainSessionMaxSize: options.mainSessionMaxSize,
     lightweightPrewarmSession: (chatJid) => lightweightPrewarmSession(chatJid, {

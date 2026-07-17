@@ -1,10 +1,10 @@
 # Observability
 
-PiClaw supports structured observability through a log-sink contract that any add-on can use to export traces, metrics, and exceptions to external backends without modifying the runtime.
+PiClaw emits structured JSON logs and exposes a log-sink contract that any in-process add-on can use to export traces, metrics, and exceptions to external backends without modifying the runtime.
 
-## How it works
+## Runtime log records
 
-The runtime emits structured JSON log records to stdout/stderr via `createLogger()`. Every record with an `operation` field is a telemetry-grade event:
+The runtime writes structured JSON log records to stdout and stderr via `createLogger()`. Every record with an `operation` field is a telemetry event; the operation name is its stable machine-readable key:
 
 ```typescript
 interface LogRecord {
@@ -45,13 +45,13 @@ removeLogSink(mySink);  // stop
 - The `operation` field is the stable key. Match on it. Everything else is context.
 - If no sink is registered, there is zero overhead beyond the normal JSON logging.
 
-## Why this design
+## Design properties
 
-- **The runtime never imports OTel.** It just logs structured records.
-- **Any add-on** can subscribe and interpret those records however it wants — OTel spans, Datadog, Prometheus, a local SQLite store, or nothing.
-- **No coupling.** The runtime doesn't know what's listening. The add-on doesn't need runtime code changes.
-- **Turn correlation is first-class.** `turnId` is the preferred join key; `chatJid` remains the actor key and fallback pairing key.
-- **Agent-centric identity.** For observability, the canonical actor is the chat/agent JID, not the browser user.
+- The runtime does not import OTel. It logs structured records.
+- Any add-on can subscribe and interpret those records as OTel spans, Datadog events, Prometheus metrics, a local SQLite store, or nothing.
+- The runtime does not know what is listening, and add-ons do not need runtime code changes.
+- `turnId` is the preferred join key; `chatJid` is the actor key and fallback pairing key.
+- For observability, the canonical actor is the chat or agent JID, not the browser user.
 
 ## Operation reference
 
@@ -131,7 +131,7 @@ Ready-to-import/query artifacts in this repo:
 - `docs/azure/app-insights-agent-kusto-queries.md`
 - `docs/azure/app-insights-agent-observability-workbook-template.json`
 
-### What it produces
+### Exports
 
 | Source | Output |
 |---|---|
@@ -145,7 +145,7 @@ Ready-to-import/query artifacts in this repo:
 
 ### Identity mapping
 
-The first-party add-on is intentionally **agent-centric**:
+The first-party add-on maps identity to the chat or agent JID:
 
 | Concept | Mapping |
 |---|---|
@@ -176,7 +176,7 @@ Any add-on can implement the same pattern:
 5. Treat `chatJid` as the actor key for agent analytics
 6. Use `tool.call.*` and `model.response.*` for child spans
 
-The runtime guarantees:
+Runtime guarantees:
 
 - Every `run_agent.prompt` will eventually be followed by `run_agent.complete` or `run_agent` (error) for the same turn unless the process crashes.
 - `tool.call.start` / `tool.call.end` pairs are emitted for every tool execution within a turn.

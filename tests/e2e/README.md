@@ -1,6 +1,6 @@
-# E2E / UX Regression Tests
+# E2E / UX regression tests
 
-BDD-style Playwright tests using Gherkin `.feature` files to capture UX regressions.
+BDD-style Playwright tests written in Gherkin `.feature` files to capture UX regressions.
 
 ## Structure
 
@@ -53,7 +53,7 @@ E2E tests run on CI **only** when a prerelease tag is pushed:
 | `workflow_dispatch` | **Yes** (manual) |
 | Final release tag `v*` (no suffix) | No |
 
-This keeps standard commits fast while ensuring every release candidate passes the full UX regression suite before the final tag is cut.
+This keeps standard commits fast while requiring a passing UX regression run before the final release tag.
 
 See the top-level `AGENTS.md` for the full release process.
 
@@ -64,9 +64,9 @@ See the top-level `AGENTS.md` for the full release process.
 3. Use `support/selectors.ts` for stable element references
 4. Run against the microvm-ui-test instance (not local)
 
-## Bug taxonomy (from git history)
+## Regression categories from git history
 
-The 198 UX fixes since March 2026 cluster into these regression categories:
+The 198 UX fixes since March 2026 cluster into these categories:
 
 ### Rendering / Layout
 - Double mounts, DOM multiplication, BodyPortal loops

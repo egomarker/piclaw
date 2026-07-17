@@ -3,7 +3,7 @@
 Piclaw ships with a single-user streaming web UI that combines chat, workspace,
 editor, terminal, viewers, and lightweight control surfaces in one app.
 
-This page is the compact feature tour that used to live inline in `README.md`.
+This page is a compact feature tour.
 
 ## Chat and status surfaces
 
@@ -39,8 +39,7 @@ Current behavior:
 
 ### Timeout and recovery UX
 
-When a turn stalls or times out, Piclaw now prefers salvage-first behavior in
-web chat:
+When a turn stalls or times out, Piclaw preserves partial context where possible:
 
 - preserve the last visible tool action when possible
 - preserve the last draft in the draft panel when the turn stalls
@@ -71,12 +70,13 @@ See [runtime-flows.md](runtime-flows.md) for the runtime-level details.
 
 ## Terminal
 
-- Ghostty-based web terminal
-- real shell in the browser, not a simulation
+- bundled xterm.js web terminal
+- authenticated shell session in the browser
 - dock panel or standalone tab
 - detachable into popout windows with live session transfer
 - enabled by default on Linux and macOS
 - disabled by default on Windows unless explicitly enabled
+- optional Ghostty renderer available through the `@rcarmo/piclaw-addon-ghostty-terminal` add-on
 
 Configuration details live in [configuration.md](configuration.md).
 

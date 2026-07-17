@@ -14,9 +14,11 @@ import {
   getAzureMaxEstimatedInputTokens,
   getAzureResponsesReasoningConfig,
   getAzureResponsesTextConfig,
+  applyAzureModelCaps,
   normalizeAzureOpenAIBaseUrl,
   parseAzureDeploymentNameMap,
   resolveAzureDeploymentName,
+  resolveAzureModelIdForDeployment,
   formatAzureOpenAIError,
 } from "../../extensions/integrations/azure-openai.ts";
 
@@ -170,9 +172,43 @@ describe("Azure deployment-name mapping", () => {
     ]);
   });
 
-  test("resolves mapped deployment names and falls back to the model id", () => {
+  test("resolves mapped deployment names and their logical model ids", () => {
     expect(resolveAzureDeploymentName("gpt-5", "gpt-5=dep-a")).toBe("dep-a");
     expect(resolveAzureDeploymentName("gpt-4o", "gpt-5=dep-a")).toBe("gpt-4o");
+    expect(resolveAzureModelIdForDeployment("dep-a", "gpt-5=dep-a")).toBe("gpt-5");
+    expect(resolveAzureModelIdForDeployment("dep-b", "gpt-5=dep-a")).toBe("dep-b");
+  });
+
+  test("live deployment caps and rate limits publish under the logical model id", () => {
+    const modelId = `audit-model-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const deploymentName = `deployment-${modelId}`;
+    const version = "2026-01-01";
+    expect(applyAzureModelCaps([
+      {
+        name: modelId,
+        version,
+        capabilities: {
+          maxContextToken: 222_000,
+          maxOutputToken: 22_000,
+          responses: true,
+          chatCompletion: false,
+        },
+      },
+    ], [
+      {
+        name: deploymentName,
+        properties: {
+          model: { name: modelId, version },
+          rateLimits: [
+            { key: "request", count: 12 },
+            { key: "token", count: 345_000 },
+          ],
+        },
+      },
+    ], `${modelId}=${deploymentName}`)).toBe(1);
+
+    expect(getAzureContextInputBudget(modelId)).toBe(200_000);
+    expect(getAzureMaxEstimatedInputTokens(modelId)).toBe(200_000);
   });
 });
 

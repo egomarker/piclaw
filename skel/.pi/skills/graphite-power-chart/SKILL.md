@@ -6,8 +6,8 @@ distribution: public
 
 # Graphite power chart
 
-Generate a 12-hour chart for a Zigbee device and post it to the web UI timeline.
-The script lives alongside this skill for easy adaptation to other data sources.
+Use this skill to generate a 12-hour chart for a Zigbee device and post it to the web UI timeline.
+The script lives alongside this skill so it can be adapted to other data sources.
 
 ## Usage
 

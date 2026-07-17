@@ -6,7 +6,7 @@
  * existing map-based cache structure used by callers and tests.
  */
 
-import type { AgentSession, AgentSessionRuntime, ExtensionFactory, ModelRegistry, SettingsManager, AuthStorage } from "@earendil-works/pi-coding-agent";
+import type { AgentSession, AgentSessionRuntime, ExtensionFactory, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { closeOpenAICodexWebSocketSessions } from "@earendil-works/pi-ai/api/openai-codex-responses";
 
 import {
@@ -40,8 +40,7 @@ export interface AgentSessionManagerOptions {
   sidePool: Map<string, PoolEntry>;
   createSession?: (chatJid: string, sessionDir: string) => Promise<AgentSessionRuntime>;
   createSideSession?: (chatJid: string, sessionDir: string) => Promise<AgentSessionRuntime>;
-  authStorage: AuthStorage;
-  modelRegistry: ModelRegistry;
+  modelRuntime: ModelRuntime;
   settingsManager: SettingsManager;
   mainSessionMaxSize?: number | null;
   lightweightPrewarmSession?: (chatJid: string) => Promise<void>;
@@ -155,8 +154,7 @@ export class AgentSessionManager {
       const runtime = this.options.createSession
         ? await this.options.createSession(chatJid, chatSessionDir)
         : await createDefaultSession(chatJid, {
-            authStorage: this.options.authStorage,
-            modelRegistry: this.options.modelRegistry,
+            modelRuntime: this.options.modelRuntime,
             settingsManager: this.options.settingsManager,
             tools: this.options.createDefaultTools(),
             customTools: this.options.createCustomToolOverrides?.(chatJid) ?? [],
@@ -228,8 +226,7 @@ export class AgentSessionManager {
       const runtime = this.options.createSideSession
         ? await this.options.createSideSession(chatJid, sideSessionDir)
         : await createSessionInDir(sideSessionDir, {
-            authStorage: this.options.authStorage,
-            modelRegistry: this.options.modelRegistry,
+            modelRuntime: this.options.modelRuntime,
             settingsManager: this.options.settingsManager,
             tools: this.options.createDefaultTools(),
             customTools: this.options.createCustomToolOverrides?.(chatJid) ?? [],
@@ -672,8 +669,7 @@ export class AgentSessionManager {
     const current = session.model;
     if (current && current.provider === model.provider && current.id === model.modelId) return;
 
-    const sessionRegistry = (session as AgentSession & { modelRegistry?: ModelRegistry }).modelRegistry ?? this.options.modelRegistry;
-    const resolved = sessionRegistry.find(model.provider, model.modelId);
+    const resolved = this.options.modelRuntime.getModel(model.provider, model.modelId);
     if (!resolved) return;
 
     const setModel = (session as { setModel?: (model: typeof resolved) => Promise<void> }).setModel;

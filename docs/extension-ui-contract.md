@@ -1,15 +1,13 @@
 # Extension UI contract
 
-This document defines the current **supported extension UI surfaces** in Piclaw's web app.
+This document defines the supported extension UI surfaces in Piclaw's web app.
 
-Decision for [#412](https://github.com/rcarmo/piclaw/issues/412): Piclaw already has a first-class extension UI model via pane extensions, timeline-native UI, settings panes, and the direct add-on config API. The `extension_ui_*` bridge remains supported as a lightweight compatibility/event layer, but it is not the primary long-term surface for substantial extension UI.
+Piclaw supports four extension UI surfaces:
 
-The short version:
-
-1. **Pane extensions** are the first-class host for substantial tool/file UI.
-2. **Adaptive Cards and normal timeline messages** are the preferred structured conversation UI.
-3. **Add-on settings panes** are browser-side modules that should use the direct backend add-on config API.
-4. **`extension_ui_*` events** are a low-level browser-event bridge for lightweight web-session integrations, not a full plugin UI framework.
+1. **Pane extensions** are the first-class host for substantial tool or file UI.
+2. **Adaptive Cards and normal timeline messages** are preferred for structured conversation UI that belongs in chat history.
+3. **Add-on settings panes** use the direct backend add-on config API.
+4. **`extension_ui_*` events** remain a low-level compatibility bridge for lightweight browser-session integrations; they are not a full plugin UI framework.
 
 ## The supported surfaces
 

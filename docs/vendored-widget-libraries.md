@@ -39,9 +39,9 @@ SceneLoader (STL, glTF), physics, particles, and post-processing.
 **Global:** `echarts`
 **License:** Apache-2.0
 
-Rich charting library: bar, line, pie, scatter, radar, heatmap, treemap,
+Charting library with bar, line, pie, scatter, radar, heatmap, treemap,
 sunburst, sankey, graph, geographic maps, candlestick, boxplot, and more.
-Dark theme built in.
+Includes a built-in dark theme.
 
 ![ECharts treemap widget — source code visualization](echarts-treemap-widget.png)
 
@@ -186,9 +186,8 @@ window.addEventListener('piclaw:widget-message', function (e) {
 **Global:** `window.beautifulMermaid`
 **License:** MIT
 
-Mermaid diagram renderer with enhanced theming. Exposes
-`window.beautifulMermaid` — **not** `window.mermaid`. Do not use
-`mermaid.initialize()` patterns here.
+Mermaid renderer with Piclaw theming. Exposes `window.beautifulMermaid`,
+not `window.mermaid`. Do not use `mermaid.initialize()` patterns here.
 
 ```html
 <script src="/static/common/js/vendor/beautiful-mermaid.js"></script>
@@ -249,8 +248,8 @@ artifacts and widgets:
 **Weights:** Regular (400), Medium (500)
 **License:** OFL 1.1
 
-Nerd Font patched variant — includes ~9,000 Powerline, Devicons, and
-file-type glyphs. Also serves as the terminal font.
+This Nerd Font variant includes about 9,000 Powerline, Devicons, and
+file-type glyphs. Piclaw also uses it as the terminal font.
 
 ```css
 @font-face {

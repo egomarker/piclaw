@@ -1,16 +1,16 @@
 # Dream and AutoDream
 
-PiClaw has two related memory-maintenance features:
+PiClaw has two memory-maintenance features:
 
 - `Dream` — manual `/dream [days]`
 - `AutoDream` — the built-in nightly maintenance cycle
 
-Both now run as **out-of-band agent turns** on a dedicated temporary `dream:` channel.
-That channel is cleaned up after the run, so Dream work does not remain as a normal persisted chat/session.
+Both run as **out-of-band agent turns** on a dedicated temporary `dream:` channel.
+That channel is cleaned up after the run, so Dream work does not remain as a normal persisted chat or session.
 
 ## Core behavior
 
-Dream is now **model-driven**.
+Dream is **model-driven**.
 
 The model follows the original 4-phase Dream flow:
 
@@ -19,8 +19,8 @@ The model follows the original 4-phase Dream flow:
 3. **Consolidate** — merge, normalize dates, and correct contradictions at the source
 4. **Prune and Index** — prune stale pointers, add references to newly important memories, and keep the compact memory index clean
 
-The model is responsible for deciding what is relevant.
-Do not treat Dream as a fixed rule-based length filter.
+The model decides what is relevant.
+Dream is not a fixed rule-based length filter.
 
 ## Narrow search criteria
 
@@ -87,28 +87,29 @@ Behavior:
 
 AutoDream is bounded to avoid no-op nightly runs, but it no longer waits for a full 24-hour gap.
 
-It now behaves like this:
+AutoDream behaves as follows:
 
 - if there is no prior consolidation, AutoDream runs
-- if there have been **no sessions** since the last consolidation, AutoDream skips
+- if daily-note consolidation is still outstanding, AutoDream runs even when there have been no new sessions
+- if there is no outstanding consolidation and there have been **no sessions** since the last consolidation, AutoDream skips
 - otherwise the nightly run proceeds, even if the previous consolidation happened late the night before
 
-This keeps the nightly cadence stable while still avoiding empty runs.
+This preserves a nightly cadence, retries unresolved daily-note work, and skips empty runs.
 
 ## First-boot bootstrap
 
 Fresh workspaces may start with only seeded scaffolding files and placeholder daily-note summaries.
-To keep container behavior consistent, runtime now queues a silent Dream bootstrap on startup whenever the core memory files are missing:
+When the core memory files are missing, runtime queues a silent Dream bootstrap on startup:
 
 - `notes/memory/MEMORY.md`
 - `notes/memory/current-state.md`
 - `notes/memory/recent-context.md`
 
-That bootstrap runs as an out-of-band Dream turn on the temporary `dream:` channel and uses the broader manual-style window so the first container boot can populate both the memory layer and proper daily summaries.
+That bootstrap runs as an out-of-band Dream turn on the temporary `dream:` channel and uses the 2-day AutoDream window to populate the memory layer and recent daily summaries.
 
 ## Memory lifecycle and content model
 
-Dream now treats memory as layered outputs rather than a mirrored `notes/daily/` → `notes/memory/days/` copy.
+Dream treats memory as layered outputs. It does not mirror `notes/daily/` into `notes/memory/days/`.
 
 ### Lifecycle
 
@@ -117,7 +118,7 @@ Dream now treats memory as layered outputs rather than a mirrored `notes/daily/`
 3. the model runs Orient → Signal → Consolidate → Prune and Index
 4. runtime refreshes workspace FTS and cleans up the temporary `dream:` session
 
-### Which file should contain what?
+### Memory files
 
 | Surface | Role | Content approach |
 |---|---|---|
@@ -133,7 +134,7 @@ Dream now treats memory as layered outputs rather than a mirrored `notes/daily/`
 
 ### Sparse day-memory rule
 
-`notes/memory/days/*.md` is intentionally model-owned and sparse:
+`notes/memory/days/*.md` is model-owned and sparse:
 
 - create/update it only when a day carries durable agent-facing memory beyond the daily note
 - do not generate it as a required mirror of every complete daily note
@@ -141,7 +142,9 @@ Dream now treats memory as layered outputs rather than a mirrored `notes/daily/`
 
 ### Incomplete daily-note recovery cues
 
-When runtime seeds or refreshes an unfinished daily note, it also writes a hidden `DREAM_CUES` comment. Those cues are compact transcript hints derived from the message slice described by front matter (`scope_anchor`, `first_message`, `last_message`, `messages_total`, `session_trees`, `session_chats`). Dream should use them before searching broadly. For bounded-full-slice days (`bounded_full_slice: yes`), it may inspect the full bounded day slice before declaring consolidation unsafe. Larger or multi-session days now include a compact per-session-tree index plus per-tree snippets (all messages for small trees, otherwise first/last windows per tree), with thresholds and snippet budget configurable via Dream cue env vars. If `cue_global_budget_breached: yes`, the final Dream summary should mention that date's budget breach. If a pass still leaves unresolved notes, the run result and logs report the unresolved dates.
+When runtime seeds or refreshes an unfinished daily note, it also writes a hidden `DREAM_CUES` comment. Those cues are compact transcript hints derived from the message slice described by front matter (`scope_anchor`, `first_message`, `last_message`, `messages_total`, `session_trees`, `session_chats`). Dream should use them before searching broadly.
+
+For bounded-full-slice days (`bounded_full_slice: yes`), Dream may inspect the full bounded day slice before declaring consolidation unsafe. Larger or multi-session days include a compact per-session-tree index plus per-tree snippets: all messages for small trees, otherwise first and last windows per tree. Thresholds and snippet budget are configurable through Dream cue env vars. If `cue_global_budget_breached: yes`, the final Dream summary should mention that date's budget breach. If a pass leaves unresolved notes, the run result and logs report the unresolved dates.
 
 ## Files touched
 
@@ -170,7 +173,7 @@ Dream/AutoDream should complete work in this order:
 
 `notes/memory/MEMORY.md` should point to `notes/memory/days/*.md` only when a sparse episodic day-memory file actually exists. Otherwise it should point back to the corresponding `notes/daily/*.md` note.
 
-Runtime/sidecar refresh no longer materializes `notes/memory/days/*.md` automatically from daily notes; that subtree is model-owned and intentionally sparse.
+Runtime and sidecar refresh do not materialize `notes/memory/days/*.md` automatically from daily notes. That subtree is model-owned and sparse.
 
 ## Startup memory contract
 

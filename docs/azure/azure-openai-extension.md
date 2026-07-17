@@ -2,11 +2,11 @@
 
 > **Status:** experimental
 >
-> This bundled extension adds Azure OpenAI and Azure AI Foundry support to piclaw. Its configuration and internal APIs may still change between releases.
+> The bundled `runtime/extensions/integrations/azure-openai.ts` extension adds Azure OpenAI and Azure AI Foundry support to piclaw. Its configuration and internal APIs may still change between releases.
 
-This document focuses on the Azure OpenAI features the extension implements, how it registers providers safely, and the Azure-specific safeguards it applies at runtime.
+The extension ships Azure OpenAI features, provider registration rules, and Azure-specific runtime safeguards.
 
-## What this extension provides
+## Capabilities
 
 ### Azure OpenAI provider
 
@@ -55,11 +55,11 @@ Features:
 
 The extension uses **custom API names** instead of overriding the global OpenAI handlers.
 
-Why this matters:
+Custom API names:
 
-- prevents collisions with other providers
-- avoids breaking providers such as GitHub Copilot
-- keeps Azure routing explicit per model
+- prevent collisions with other providers
+- avoid breaking providers such as GitHub Copilot
+- keep Azure routing explicit per model
 
 Rules:
 
@@ -159,7 +159,7 @@ Budget selection is source-aware:
 - when live deployment TPM data is available, the default replay ceiling is 65% of that TPM allowance, bounded by the model's usable context
 - when live TPM data is unavailable or only a baked-in fallback exists, the extension uses the registered model context instead of collapsing a long-context model to a stale 65K-style replay limit
 - the context-aware fallback defaults to 900,000 input tokens and reserves up to 65,536 tokens for output
-- `AOAI_ABSOLUTE_INPUT_TOKEN_CAP` remains the conservative fallback for models without a known context window
+- `AOAI_ABSOLUTE_INPUT_TOKEN_CAP` is the conservative fallback for models without a known context window
 
 Why this exists:
 
@@ -277,7 +277,7 @@ The extension:
 | `AOAI_CONTEXT_OUTPUT_RESERVE` | `65536` | Output headroom reserved when deriving the context-aware input budget; minimum 16,000 |
 | `AOAI_DEPLOYMENT_NAME_MAP` | empty | Optional comma-separated `model=deployment` mappings, for example `gpt-5.6=prod-gpt56,gpt-5.4=prod-gpt54` |
 
-`AZURE_OPENAI_DEPLOYMENT_NAME_MAP` remains accepted as a compatibility alias for `AOAI_DEPLOYMENT_NAME_MAP`.
+`AZURE_OPENAI_DEPLOYMENT_NAME_MAP` is still accepted as a compatibility alias for `AOAI_DEPLOYMENT_NAME_MAP`.
 
 ### Foundry settings
 
@@ -360,17 +360,17 @@ Mitigation:
 
 ### Harness surfaces
 
-Development validation currently uses:
+Development validation uses:
 
 - `runtime/scripts/azure-openai-harness.ts`
 - `runtime/extensions/experimental/azure-openai.harness.ts`
 - `runtime/src/extensions/azure-openai-api.ts`
 
-The harness now bundles under:
+The harness bundles to:
 
 - `/workspace/piclaw/.tmp/azure-openai.harness.bundle.mjs`
 
-That avoids Bun resolving dependencies from `/workspace/node_modules` instead of this repo's `node_modules` tree.
+This keeps Bun from resolving dependencies from `/workspace/node_modules` instead of this repo's `node_modules` tree.
 
 ### Request/session correlation status
 
@@ -398,7 +398,7 @@ The harness now checks these invariants automatically and fails if:
 - `session_id` / `x-client-request-id` drift from the active session id
 - replayed request payloads still contain leaked `partialJson` scratch buffers
 
-Optional Azure-native request-id mirroring remains available in the harness via:
+Optional Azure-native request-id mirroring is still available in the harness via:
 
 - `AOAI_EXPERIMENT_AZURE_CLIENT_REQUEST_ID=1`
 
@@ -406,17 +406,17 @@ and also passed focused `json` / `tool` / `history` validation on `gpt-5-3-codex
 
 - `/workspace/tmp/azure-openai-harness-0672-gpt53-xms.json`
 
-### Earendil `0.80.6` compatibility
+### Earendil `0.80.10` compatibility
 
-The runtime now uses the `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, and `@earendil-works/pi-coding-agent` packages at `0.80.6`. Piclaw keeps its Azure transport wrapper because Azure still needs stricter replay sanitation, context-aware output clamping, request/session correlation, and clearer retry handling than the generic Responses path supplies.
+The runtime uses the `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, and `@earendil-works/pi-coding-agent` packages at `0.80.10`. Piclaw keeps its Azure transport wrapper because Azure needs stricter replay sanitation, context-aware output clamping, request/session correlation, and retry handling than the generic Responses path supplies.
 
-Current state:
+The runtime currently behaves as follows:
 
-- the shared Responses parser continues to strip `partialJson` scratch buffers when finalizing tool calls and on error paths
+- the shared Responses parser strips `partialJson` scratch buffers when finalizing tool calls and on error paths
 - Piclaw adapts Azure `reasoning_text` and commentary-phase events into normal thinking updates, including reasoning-token usage
-- deterministic coverage verifies output-token clamping, session correlation, GPT-5.6 metadata, retryable status classification, `Retry-After` parsing, deployment-name mapping, and final error text
+- deterministic coverage verifies output-token clamping, session correlation, retryable status classification, `Retry-After` parsing, deployment-name mapping, and final error text
 - focused coverage lives in `runtime/test/extensions/azure-openai-api.test.ts`, `azure-openai-retry-after.test.ts`, and `azure-openai-routing.test.ts`
-- the older `0672` report paths above are retained as historical live-provider evidence; they are not claims that those exact report files were regenerated for `0.80.6`
+- the `0672` paths record historical live-provider runs; those files are not shipped with the repository and were not regenerated for `0.80.10`
 
 ## Troubleshooting checklist
 
@@ -443,9 +443,9 @@ journalctl --user -u piclaw.service --no-pager | rg "azure-openai\] Stream"
 
 ---
 
-## Summary
+## Separate integration layer
 
-This extension is more than a thin Azure transport adapter. It adds the Azure-specific behavior piclaw needs to make Azure OpenAI usable in long-running tool-heavy sessions:
+Piclaw keeps this as a separate integration layer because Azure needs extra behaviour beyond the generic OpenAI path:
 
 - safe provider registration
 - managed-identity auth
@@ -457,5 +457,3 @@ This extension is more than a thin Azure transport adapter. It adds the Azure-sp
 - token-budget-aware request shaping
 - throttle-aware retries
 - workspace-friendly image output
-
-Those safeguards are the main reason this extension exists as a separate integration layer instead of relying on the generic OpenAI path.

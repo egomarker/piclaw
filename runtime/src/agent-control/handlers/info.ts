@@ -162,7 +162,7 @@ export async function handleStats(session: AgentSession, _command: StatsCommand)
   ];
 
   try {
-    const cacheWaste = computePromptCacheWaste(session.sessionManager.getEntries(), session.modelRegistry);
+    const cacheWaste = computePromptCacheWaste(session.sessionManager.getEntries(), session.modelRuntime);
     if (cacheWaste.missedTokens > 0) {
       const missLabel = cacheWaste.missCount === 1 ? "1 miss" : `${cacheWaste.missCount} misses`;
       const cost = cacheWaste.missedCost >= 0.0001 ? `${formatCurrency(cacheWaste.missedCost)}, ` : "";

@@ -25,7 +25,6 @@
  *   - providerRequestSanitizer: defensive provider payload cleanup before HTTP requests.
  *   - llmContextNormalizer: defensive LLM message-shape cleanup before provider conversion.
  *   - mcpTimeoutPatch: Piclaw-compatible outer timeout/abort guard for MCP tools.
- *   - githubCopilotDynamicModels: Piclaw-private GitHub Copilot live /models catalog merge.
  *   - localLitePromptProfile: compact prompt/tool profile for local OpenAI-compatible models.
  *
  * Note: bun_run, keychain, ssh, proxmox, and portainer now live as packaged
@@ -35,7 +34,7 @@
  * Consumers:
  *   - agent-pool/session.ts passes builtinExtensionFactories to the resource loader.
  */
-import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type { ExtensionFactory, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AttachmentRegistry } from "../agent-pool/attachments.js";
 import { createFileAttachmentsExtension } from "./file-attachments.js";
 import { messagesCrud } from "./messages-crud.js";
@@ -63,15 +62,15 @@ import { providerResponseDiagnostics } from "./provider-response-diagnostics.js"
 import { providerRequestSanitizer } from "./provider-request-sanitizer.js";
 import { llmContextNormalizer } from "./llm-context-normalizer.js";
 import { postCompactionPrune } from "./post-compaction-prune.js";
-import { contextPrune } from "./context-prune.js";
+import { createContextPruneExtension } from "./context-prune.js";
 import { mcpTimeoutPatch } from "./mcp-timeout-patch.js";
-import { githubCopilotDynamicModels } from "./github-copilot-dynamic-models.js";
 import { localLitePromptProfile } from "./local-lite-prompt-profile.js";
 
 /** Build the built-in extension factory list used for session creation. */
 export function createBuiltinExtensionFactories(options?: {
   attachmentRegistry?: AttachmentRegistry;
   compactionStreamFn?: CompactionStreamFn;
+  modelRuntime?: ModelRuntime;
 }): ExtensionFactory[] {
   return [
     createFileAttachmentsExtension(options?.attachmentRegistry),
@@ -86,7 +85,7 @@ export function createBuiltinExtensionFactories(options?: {
     workspaceMemoryBootstrap,
     dreamMaintenance,
     uiThemeExtension,
-    createSmartCompactionExtension({ streamFn: options?.compactionStreamFn }),
+    createSmartCompactionExtension({ streamFn: options?.compactionStreamFn, modelRuntime: options?.modelRuntime }),
     sendAdaptiveCard,
     sendDashboardWidget,
     chatTool,
@@ -100,10 +99,9 @@ export function createBuiltinExtensionFactories(options?: {
     providerRequestSanitizer,
     providerResponseDiagnostics,
     postCompactionPrune,
-    contextPrune,
+    createContextPruneExtension({ modelRuntime: options?.modelRuntime }),
     llmContextNormalizer,
     mcpTimeoutPatch,
-    githubCopilotDynamicModels,
     localLitePromptProfile,
   ];
 }

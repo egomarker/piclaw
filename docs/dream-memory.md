@@ -1,7 +1,6 @@
 # Dream and AutoDream
 
-Piclaw has two related memory-maintenance features that keep the workspace memory
-layer coherent across sessions:
+Dream and AutoDream keep the workspace memory layer coherent across sessions:
 
 - **`Dream`** — triggered manually via `/dream [days]`
 - **`AutoDream`** — the built-in nightly maintenance cycle (default cron `0 1 * * *`, i.e. 01:00 in the runtime timezone)
@@ -9,7 +8,7 @@ layer coherent across sessions:
 Both run as **out-of-band agent turns** on a dedicated temporary `dream:` channel
 that is cleaned up after the run, so Dream work does not appear in normal chat history.
 
-## What it does
+## Flow
 
 Dream follows a four-phase model-driven flow:
 
@@ -51,9 +50,7 @@ Unfinished daily notes are seeded with hidden `DREAM_CUES` based on their
 front-matter transcript slice. Small bounded days may expose the full slice;
 larger or multi-session days use a per-session-tree cue index plus per-tree
 snippets, and cue thresholds/snippet budgets are Dream env-configurable.
-Unresolved backlog dates are reported after the run if consolidation remains
-incomplete. Default window: last 7 days. Daily-note day boundaries follow the
-runtime timezone (`TZ` / runtime timing config), not UTC.
+If consolidation is incomplete, the run reports unresolved backlog dates. Default window: last 7 days. Daily-note day boundaries follow the runtime timezone (`TZ` / runtime timing config), not UTC.
 
 ### AutoDream
 
@@ -74,7 +71,7 @@ layer and initial daily summaries.
 Dream ends with a runtime-owned workspace FTS index refresh, so updated memory
 files are immediately searchable via `search_workspace` without a manual refresh.
 
-## Detailed reference
+## Reference
 
 For the full specification — including memory lifecycle, content model, file
 ownership rules, and the out-of-band channel contract — see:

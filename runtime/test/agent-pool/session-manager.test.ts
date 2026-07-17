@@ -49,8 +49,6 @@ function createManager(overrides: Record<string, unknown> = {}) {
   const manager = new AgentSessionManager({
     pool,
     sidePool,
-    authStorage: {} as any,
-    modelRegistry: { find: () => undefined } as any,
     settingsManager: {
       getDefaultProvider: () => null,
       getDefaultModel: () => null,

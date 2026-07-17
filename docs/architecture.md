@@ -1,6 +1,6 @@
 # Architecture
 
-This document outlines the main components, how they fit together, and where the code lives.
+This page maps Piclaw's main components, their relationships, and the code layout.
 
 ## Component overview
 
@@ -20,7 +20,7 @@ flowchart TB
 
   subgraph Core[Runtime core]
     ROUTER[Router / request dispatch]
-    QUEUE[AgentQueue\nchat:{jid} lanes\ndream:{jid} lanes]
+    QUEUE["AgentQueue<br/>chat:{jid} lanes<br/>dream:{jid} lanes"]
     POOL[AgentPool]
     SDK[Pi SDK AgentSession]
   end
@@ -69,8 +69,8 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-  USER[Interactive user turn] --> CHATLANE[chat:{jid} lane]
-  DREAMTURN[Dream / AutoDream] --> DREAMLANE[dream:{jid} lane]
+  USER[Interactive user turn] --> CHATLANE["chat:{jid} lane"]
+  DREAMTURN[Dream / AutoDream] --> DREAMLANE["dream:{jid} lane"]
 
   CHATLANE --> MAIN[AgentPool + warm chat session]
   DREAMLANE --> TEMP[AgentPool + temporary dream: session]
@@ -174,7 +174,7 @@ Each factory receives an `ExtensionAPI` and registers tools or commands via `pi.
 
 ### Bundled runtime extensions
 
-In addition to the inline factories, piclaw ships **packaged runtime extensions** under `extensions/` in the package tree. These are loaded via jiti at session start; some are always enabled and others are gated on environment variables:
+Piclaw also ships **packaged runtime extensions** under `extensions/` in the package tree. These are loaded via jiti at session start; some are always enabled and others are gated on environment variables:
 
 | Extension | Gate | Purpose |
 |-----------|------|---------|
@@ -189,16 +189,16 @@ In addition to the inline factories, piclaw ships **packaged runtime extensions*
 | `@rcarmo/piclaw-addon-win-ui` | Installable add-on | Windows desktop automation via bun:ffi + IAccessible (`win_*` tools) |
 | `viewers/office-viewer/` | Always loaded | Lightweight JS Office document viewer with extension route |
 
-WhatsApp is now an opt-in runtime channel rather than an assumed core subsystem. The default web-first runtime uses a no-op WhatsApp boundary; the Baileys-backed channel module is lazy-loaded only when `PICLAW_WHATSAPP_ENABLED=1`/`WHATSAPP_ENABLED=1` (or `whatsapp.enabled: true` in config) and a phone number are configured.
+WhatsApp is an opt-in runtime channel. The default web-first runtime uses a no-op WhatsApp boundary; the Baileys-backed channel module is lazy-loaded only when `PICLAW_WHATSAPP_ENABLED=1`/`WHATSAPP_ENABLED=1` (or `whatsapp.enabled: true` in config) and a phone number are configured.
 
 These packaged runtime extensions use relative imports into `runtime/src/...` where needed. Piclaw also loads selected bundled Pi-package extensions from `node_modules/` (currently `pi-mcp-adapter`). A `node_modules` symlink next to the `extensions/` directory is created automatically at startup so jiti can resolve deep package imports for both the local packaged extension tree and bundled npm/Pi-package extensions. `runtime/src/extensions/` remains a separate built-in factory surface and should not be confused with the filesystem-backed packaged extension tree.
 
-Dream-backed startup memory now follows a compact-index pattern inside the workspace:
+Dream-backed startup memory follows a compact-index pattern inside the workspace:
 - `notes/memory/MEMORY.md` is the startup index and is kept under the session budget (line-capped and under ~25KB)
 - typed memory files (`user.md`, `feedback.md`, `project.md`, `reference.md`) hold the richer agent-facing detail
 - optional sparse files under `notes/memory/days/` preserve durable transcript-derived signals only when a day needs an extra agent-facing memory beyond the human-readable `notes/daily/*.md` overview
 - runtime no longer auto-generates a mirrored `notes/memory/days/*.md` for every complete daily note; the model owns that sparse subtree, while `MEMORY.md` falls back to linking the daily note when no sparse day-memory file exists
-- the built-in nightly AutoDream task and the manual `/dream` command now execute as out-of-band model turns on a temporary `dream:` channel
+- the built-in nightly AutoDream task and the manual `/dream` command execute as out-of-band model turns on a temporary `dream:` channel
 - Dream work is queued on a dedicated `dream:<chatJid>` lane so long consolidations do not block the interactive `chat:<chatJid>` lane
 - runtime creates a pre-Dream `.zip` backup, prunes older Dream backups (default keep: 10), and seeds in-window daily notes from the database before the model turn starts
 - Dream ends with a runtime-owned workspace FTS refresh so newly written memory files are searchable immediately
@@ -212,7 +212,7 @@ Dream/AutoDream use the original model-driven 4-phase flow:
 
 In the Prune and Index phase, Dream should both remove stale pointers and add concise references to newly important memories; overly verbose index lines should be shortened with detail moved into the target file.
 
-Search collection is intentionally narrow:
+Dream keeps search collection intentionally narrow:
 - inspect existing daily/memory files first
 - inspect drifted memories
 - only then run narrow transcript/message searches for known suspicions
@@ -228,9 +228,9 @@ For infrastructure integrations, the intended uniform contract is:
 - raw transport surface: `request`
 - reusable higher-level orchestration: `workflow`
 
-`ssh` follows that model directly, and infrastructure integrations like `proxmox` and `portainer` (now maintained in the [piclaw-addons](https://github.com/rcarmo/piclaw-addons) repository) mirror the same contract.
+`ssh` follows that model directly, and infrastructure integrations like `proxmox` and `portainer` (maintained in the [piclaw-addons](https://github.com/rcarmo/piclaw-addons) repository) mirror the same contract.
 
-This contract is also a context-conservation strategy: compact family summaries come first, recommendations stay short, workflow examples are opt-in, and raw `request` is reserved for the cases where curated workflows are not enough.
+The contract also conserves prompt space: compact family summaries come first, recommendations stay short, workflow examples are opt-in, and raw `request` is reserved for cases where curated workflows are not enough.
 
 ### Web pane extensions
 
@@ -248,7 +248,7 @@ The web UI uses a separate **pane extension** system for content-area components
 | `terminal-tab` | tabs | `runtime/web/src/panes/terminal-pane.ts` |
 | `vnc-viewer` | tabs | `runtime/web/src/panes/vnc-pane.ts` |
 
-The editor extension is lazy-loaded as a separate bundle (`editor.bundle.js`, ~1.57 MB) on first file open. Specialized viewers (office, CSV, PDF, image) use route-backed iframes served through the extension route system, and their workspace-preview affordances now normalize around explicit “Edit/Open in Tab” promotion actions. See [web-pane-extensions.md](web-pane-extensions.md) for the pane contract and [extension-ui-contract.md](extension-ui-contract.md) for how pane extensions fit alongside timeline-native UI and the lower-level `extension_ui_*` bridge.
+The editor extension is lazy-loaded as a separate bundle (`editor.bundle.js`, ~1.57 MB) on first file open. Specialized viewers (office, CSV, PDF, image) use route-backed iframes served through the extension route system, and their workspace-preview affordances use explicit “Edit/Open in Tab” promotion actions. See [web-pane-extensions.md](web-pane-extensions.md) for the pane contract and [extension-ui-contract.md](extension-ui-contract.md) for how pane extensions fit alongside timeline-native UI and the lower-level `extension_ui_*` bridge.
 
 ## Web UI loading sequence
 
@@ -299,7 +299,7 @@ Page load
 
 ## Per-chat turn lifecycle and failure model
 
-PiClaw now uses a deliberately simple per-chat turn model:
+PiClaw uses a simple per-chat turn model:
 
 1. **Start a run**
    - `beginChatRun()` advances the chat cursor to the current user message timestamp
@@ -319,7 +319,7 @@ PiClaw now uses a deliberately simple per-chat turn model:
    - **Retry** = rewind to `prevTs`, clear the failed marker, replay the user turn
    - **Skip** = advance to `failedTs`, clear the failed marker, move on
 
-This keeps the semantics stable:
+The model preserves these semantics:
 - transient failures remain automatic
 - persistent failures do not silently consume user messages
 - the runtime never treats a blank terminal completion as a successful committed turn
@@ -353,7 +353,7 @@ There is no longer a supported path where an empty terminal turn both:
 - Core utilities (config/env/chat context) live in `runtime/src/core`; shared helpers live in `runtime/src/utils`.
 - Chat context (chat JID + channel) is tracked in AsyncLocalStorage; tools/extensions read from the scoped context (defaults to `web:default` / `web`) rather than env variables.
 - SSH-backed core-tool state is session-scoped and persisted in SQLite (`ssh_configs`). `AgentPool` injects a per-session `ssh-core` extension and can hot-swap the live SSH backend for an existing warm session.
-- Proxmox and Portainer API profiles were previously persisted in dedicated SQLite tables (`proxmox_configs`, `portainer_configs`). These tools have been moved to the [piclaw-addons](https://github.com/rcarmo/piclaw-addons) repository and now use the `extension_kv` table for session-scoped config persistence. The legacy tables remain in the schema for backward compatibility.
+- Proxmox and Portainer API profiles were previously persisted in dedicated SQLite tables (`proxmox_configs`, `portainer_configs`). These tools have been moved to the [piclaw-addons](https://github.com/rcarmo/piclaw-addons) repository and use the `extension_kv` table for session-scoped config persistence. The legacy tables remain in the schema for backward compatibility.
 - **Extension KV store**: the `extension_kv` table provides a scoped key-value store for addon extensions. Each extension is isolated by `extension_id` (runtime-assigned). Supports `chat`-scoped entries (keyed by chat JID) and `global` entries. Values are JSON-serialized and queryable via `json_extract()`. The store is registered as a global singleton during runtime init (`extension-kv-registry.ts`) and accessed by addons through the compat layer.
 - Workspace tree responses are cached briefly (1s) and rate-limited to prevent bursty UI reloads (HTTP 429 when exceeded).
 - The **workspace explorer** is a responsive sidebar (visible on desktop/tablet ≥1024px landscape) that shows a file tree of `/workspace`, supports file previews, drag-and-drop upload with progress reporting, a client-side 256 MB upload guard, inline file creation, inline rename, drag-and-drop move, file reference pills for prompts, and a live workspace-index status chip with one-click reindex.
@@ -361,19 +361,19 @@ There is no longer a supported path where an empty terminal turn both:
 - **Adaptive Cards** are rendered in the web timeline from `content_blocks` using the vendored Microsoft `adaptivecards` SDK. Action handling routes through `POST /agent/card-action`; submissions are also persisted as `adaptive_card_submission` blocks so the timeline can render compact receipts instead of raw text fallbacks. Finished cards are re-rendered with their submitted values populated, inputs locked read-only, and a concise state banner. Agent-owned cards should be posted through the internal `send_adaptive_card` tool (or equivalent agent-response message path) rather than a local slash command.
 - The **tab strip** provides multi-file editing with dirty indicators, pin support, MRU-based tab switching, context menus (Close / Close Others / Close All / Pin / Preview), and keyboard shortcuts (Ctrl+Tab, Ctrl+W).
 - Operational remote surfaces:
-  - `piclaw://terminal` opens the terminal tab (`TERMINAL_TAB_PATH`) via `GET /terminal/session` and `GET /terminal/ws`/`WebSocket` upgrades. The backend is enabled by default on Linux/macOS and remains explicitly controllable via `PICLAW_WEB_TERMINAL_ENABLED` / `web.terminalEnabled`.
+  - `piclaw://terminal` opens the terminal tab (`TERMINAL_TAB_PATH`) via `GET /terminal/session` and `GET /terminal/ws`/`WebSocket` upgrades. The backend is enabled by default on Linux/macOS and can be controlled via `PICLAW_WEB_TERMINAL_ENABLED` / `web.terminalEnabled`.
   - `piclaw://vnc[/<target>]` opens the VNC pane via `GET /vnc/session` and `GET /vnc/ws`/`WebSocket` upgrades, then brokers raw TCP to the target (`WebSocketTcpBridge` + `VncSessionService`). Direct-connect is enabled by default on Linux/macOS/Windows and is explicitly controllable via `PICLAW_WEB_VNC_ALLOW_DIRECT` / `web.vncAllowDirect`. When direct-connect mode is disabled and no saved targets exist, the pane shows an explicit allowlist-only empty state instead of nudging the user toward a blocked path.
 - **Markdown preview** is available for `.md` / `.mdx` / `.markdown` files via the tab context menu → Preview. Shows a live split-view with a resizable splitter.
-- **Timeline attachment previews** now syntax-highlight common text/code/config formats (for example YAML, JSON, JS/TS, Python, Go, shell, SQL, TOML, Dockerfile, PowerShell, and common dotfiles/config files) while Markdown keeps its rendered preview path.
+- **Timeline attachment previews** syntax-highlight common text/code/config formats (for example YAML, JSON, JS/TS, Python, Go, shell, SQL, TOML, Dockerfile, PowerShell, and common dotfiles/config files) while Markdown keeps its rendered preview path.
 - **Message permalinks**: clicking a timeline timestamp inserts a `message:{id}` pill in the compose box; Ctrl+Click copies a shareable URL; clicking a reference scrolls to and highlights the target.
 - **Multi-turn threading**: when the agent produces multiple turns in a single response, subsequent turns are stored with a `thread_id` pointing to the first turn's message. The UI renders threaded replies indented with a left border.
 - **Context usage / compaction affordance**: the compose footer reads `/agent/context` for current context-window usage. The web app refreshes on initial connect, SSE reconnect, focus, `pageshow`, visible-again transitions, and immediately after successful manual `/compact`. Post-compaction usage prefers a rebuilt-session estimate and falls back to the safety-adjusted report estimate; null-token events are not persisted or broadcast. After session eviction or lookup failure, `/agent/context` falls back to validated persisted channel usage, so the indicator does not need a new agent turn to update.
 - **Recovery chip**: when the agent recovers from a transient mid-turn failure, a subtle recovery chip appears in the compose area so the user can see that retries happened without flooding the timeline.
 - **Blank turn detection**: empty or whitespace-only model completions are treated as failures rather than success. If automatic recovery still cannot produce a terminal persisted reply, the cursor is rewound and the failed run is held for explicit retry/skip resolution.
-- **Compaction stall guard**: compaction waits are now bounded — `PICLAW_SESSION_IDLE_COMPACTION_MAX_WAIT_MS` (default 5 min) prevents indefinite stalls during heavy summarisation. Progress state is preserved across the wait so the UI stays coherent.
-- **Held failed runs**: `processChat()` now stops on unresolved failed runs instead of repeatedly re-consuming the same user message. Model-change retries, explicit recovery-card actions, and manual skip/retry flows are expected to resolve that hold.
-- **Model switch retry behavior**: successful model-switch commands now retry a held failed run by rewinding to `prevTs` and resuming the chat. Recovery-card actions (`Continue`, `Retry cleanly`) first skip the held failed turn so the follow-up prompt is not blocked behind the unresolved failure marker.
-- **Crash recovery split**: startup/runtime inflight recovery is still automatic for interrupted no-output turns, but exhausted no-terminal-output turns now live in the simpler held-failure path (`failed_*`) until explicitly retried or skipped.
+- **Compaction stall guard**: compaction waits are bounded — `PICLAW_SESSION_IDLE_COMPACTION_MAX_WAIT_MS` (default 5 min) prevents indefinite stalls during heavy summarisation. Progress state is preserved across the wait so the UI stays coherent.
+- **Held failed runs**: `processChat()` stops on unresolved failed runs instead of repeatedly re-consuming the same user message. Model-change retries, explicit recovery-card actions, and manual skip/retry flows can resolve that hold.
+- **Model switch retry behavior**: successful model-switch commands retry a held failed run by rewinding to `prevTs` and resuming the chat. Recovery-card actions (`Continue`, `Retry cleanly`) first skip the held failed turn so the follow-up prompt is not blocked behind the unresolved failure marker.
+- **Crash recovery split**: startup/runtime inflight recovery is automatic for interrupted no-output turns, but exhausted no-terminal-output turns use the simpler held-failure path (`failed_*`) until explicitly retried or skipped.
 - **OOBE auto-complete**: on established installs with existing conversation history, the provider-ready OOBE panel auto-completes without requiring manual dismissal.
 - **Extension progress UI**: long-running operations in SSH, azure-openai, and the azure harness emit working-indicator state via `ctx.ui.setWorkingIndicator` / `setWorkingMessage` so the compose area shows spinner feedback during multi-step tool chains. Addon extensions (proxmox, portainer) in piclaw-addons also use this API.
 - **Debug / introspection endpoint**: `GET /agent/debug[?chat_jid=...]` returns a full provenance snapshot of the active session — loaded extensions (with command/tool/handler counts), tools, commands, prompt templates, and skills. Each resource includes its `SourceInfo` (`path`, `source`, `scope`, `origin`, optional `baseDir`) from pi-coding-agent ≥0.62.0.
