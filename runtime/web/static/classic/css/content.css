@@ -129,12 +129,12 @@
  * skip layout/paint for historical rows far outside the timeline viewport.
  * Unsupported engines ignore both declarations and keep the existing layout.
  */
-@supports (content-visibility: auto) {
+/*@supports (content-visibility: auto) {
     .timeline-content > .post {
         content-visibility: auto;
         contain-intrinsic-size: auto 120px;
     }
-}
+}*/
 
 .post.removing {
     opacity: 0;
