@@ -8,7 +8,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentSession, AgentSessionRuntime, ModelRegistry, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
-import type { Provider } from "@earendil-works/pi-ai";
+import type { Model, Provider } from "@earendil-works/pi-ai";
 
 import { applyControlCommand, type AgentControlCommand, type AgentControlResult } from "../agent-control/index.js";
 import { getLatestTokenUsageModel } from "../db.js";
@@ -484,6 +484,8 @@ export interface AvailableModelOption {
   name: string | null;
   context_window: number | null;
   reasoning: boolean;
+  thinking_levels: string[];
+  thinking_level_labels: string[];
 }
 
 /** Shape returned by available-model inspection. */
@@ -554,16 +556,21 @@ export class AgentRuntimeFacade {
       (session as (AgentSession & { settingsManager?: SettingsManager }) | null)?.settingsManager ?? this.options.settingsManager,
     );
     const available = scopedModels.models;
-    const modelOptions = available.map((model) => ({
-      label: `${model.provider}/${model.id}`,
-      provider: model.provider,
-      id: model.id,
-      name: typeof model.name === "string" && model.name.trim() ? model.name.trim() : null,
-      context_window: typeof model.contextWindow === "number" && Number.isFinite(model.contextWindow) && model.contextWindow > 0
-        ? model.contextWindow
-        : null,
-      reasoning: Boolean(model.reasoning),
-    }));
+    const modelOptions = available.map((model) => {
+      const thinkingLevels = getAvailableThinkingLevelsForModel(model as Model<any>);
+      return {
+        label: `${model.provider}/${model.id}`,
+        provider: model.provider,
+        id: model.id,
+        name: typeof model.name === "string" && model.name.trim() ? model.name.trim() : null,
+        context_window: typeof model.contextWindow === "number" && Number.isFinite(model.contextWindow) && model.contextWindow > 0
+          ? model.contextWindow
+          : null,
+        reasoning: Boolean(model.reasoning),
+        thinking_levels: thinkingLevels,
+        thinking_level_labels: thinkingLevels.map((level) => formatThinkingLevelForDisplay(level, model as Model<any>)),
+      };
+    });
     const models = modelOptions.map((model) => model.label);
     const currentModel = session?.model ? `${session.model.provider}/${session.model.id}` : persistedState.current;
     const currentModelOption = currentModel ? modelOptions.find((model) => model.label === currentModel) ?? null : null;

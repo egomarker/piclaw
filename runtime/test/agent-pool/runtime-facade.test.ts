@@ -92,6 +92,8 @@ test("AgentRuntimeFacade reports available models and context usage", async () =
       name: "GPT Test",
       context_window: 128000,
       reasoning: true,
+      thinking_levels: ["off", "minimal", "low", "medium", "high"],
+      thinking_level_labels: ["off", "minimal", "low", "medium", "high"],
     },
     {
       label: "anthropic/claude-test",
@@ -100,6 +102,8 @@ test("AgentRuntimeFacade reports available models and context usage", async () =
       name: "Claude Test",
       context_window: 200000,
       reasoning: true,
+      thinking_levels: ["off", "minimal", "low", "medium", "high"],
+      thinking_level_labels: ["off", "minimal", "low", "medium", "high"],
     },
   ]);
   expect(available.thinking_level).toBe("high");
@@ -137,6 +141,8 @@ test("AgentRuntimeFacade reports display labels for legacy max thinking metadata
   expect(available.thinking_level_label).toBe("max");
   expect(available.available_thinking_levels).toEqual(["off", "low", "medium", "high", "xhigh"]);
   expect(available.available_thinking_level_labels).toEqual(["off", "low", "medium", "high", "max"]);
+  expect(available.model_options[0]?.thinking_levels).toEqual(["off", "minimal", "low", "medium", "high", "xhigh"]);
+  expect(available.model_options[0]?.thinking_level_labels).toEqual(["off", "minimal", "low", "medium", "high", "max"]);
 });
 
 test("AgentRuntimeFacade filters web model options with scopedModelsOnly enabledModels", async () => {
@@ -164,6 +170,10 @@ test("AgentRuntimeFacade filters web model options with scopedModelsOnly enabled
     expect(available.enabled_model_patterns).toEqual(["anthropic/*", "gemini-test"]);
     expect(available.models).toEqual(["anthropic/claude-test", "google/gemini-test"]);
     expect(available.model_options.map((m) => m.label)).toEqual(["anthropic/claude-test", "google/gemini-test"]);
+    expect(available.model_options.map((m) => m.thinking_levels)).toEqual([
+      ["off", "minimal", "low", "medium", "high"],
+      ["off"],
+    ]);
   } finally {
     if (previous === undefined) delete process.env.PICLAW_SCOPED_MODELS_ONLY;
     else process.env.PICLAW_SCOPED_MODELS_ONLY = previous;
@@ -205,6 +215,8 @@ test("AgentRuntimeFacade returns registry-backed model options without hydrating
         name: "GPT Fast",
         context_window: 128000,
         reasoning: true,
+        thinking_levels: ["off", "minimal", "low", "medium", "high"],
+        thinking_level_labels: ["off", "minimal", "low", "medium", "high"],
       },
     ],
     thinking_level: null,
@@ -268,6 +280,8 @@ test("AgentRuntimeFacade restores persisted current model for a cold chat withou
     expect(available.thinking_level_label).toBe("max");
     expect(available.supports_thinking).toBe(true);
     expect(available.available_thinking_levels).toContain("max");
+    expect(available.model_options[0]?.thinking_levels).toEqual(["minimal", "low", "medium", "high", "xhigh", "max"]);
+    expect(available.model_options[0]?.thinking_level_labels).toEqual(["minimal", "low", "medium", "high", "xhigh", "max"]);
   } finally {
     rmSync(sessionDir, { recursive: true, force: true });
   }
