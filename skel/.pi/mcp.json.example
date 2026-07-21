@@ -1,3 +1,12 @@
 {
-  "mcpServers": {}
+  "mcpServers": {
+    "example-keychain-bearer": {
+      "url": "https://mcp.example.test/mcp",
+      "auth": "bearer",
+      "bearerTokenKeychain": "mcp/example",
+      "bearerTokenEnv": "PICLAW_MCP_EXAMPLE_TOKEN",
+      "lifecycle": "lazy",
+      "directTools": false
+    }
+  }
 }

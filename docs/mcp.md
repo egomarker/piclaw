@@ -72,6 +72,27 @@ In the container image, Pi home is typically bind-mounted at:
 
 Shared MCP config comes first; Pi-owned config is for PiClaw-specific imports and overrides.
 
+## Keychain-backed bearer tokens
+
+PiClaw can resolve an HTTP MCP bearer token from its encrypted keychain before the adapter starts:
+
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "url": "https://mcp.example.test/mcp",
+      "auth": "bearer",
+      "bearerTokenKeychain": "mcp/memory",
+      "bearerTokenEnv": "PICLAW_MCP_MEMORY_TOKEN"
+    }
+  }
+}
+```
+
+Store the token with `piclaw keychain set mcp/memory --type token --secret-file <path>`. `bearerTokenKeychain` and `bearerTokenEnv` must appear together. PiClaw puts the decrypted value into the named environment variable in memory before loading `pi-mcp-adapter`, and removes it during graceful shutdown. The token is not written into the MCP config or metadata cache.
+
+Do not combine `bearerTokenKeychain` with a literal `bearerToken`, and choose a dedicated environment variable name that is not already set.
+
 ## Safe starter shell
 
 The seeded examples contain no configured servers:
