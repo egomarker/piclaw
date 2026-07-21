@@ -8,7 +8,7 @@ import { type AssistantMessageEvent, type Usage } from "@earendil-works/pi-ai";
 import { getAgentRuntimeConfig } from "../core/config.js";
 import { detectChannel } from "../router.js";
 import { withChatContext } from "../core/chat-context.js";
-import { recordMessageUsage } from "./usage.js";
+import { installSessionUsageRecorder, recordMessageUsage } from "./usage.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
 import { normalizeLlmContext } from "./llm-context-normalizer.js";
 import {
@@ -130,6 +130,7 @@ export async function runSidePrompt(
   const sideRuntime = await deps.getOrCreateSideRuntime(chatJid);
   await deps.syncSideSessionFromMain(session, sideRuntime);
   const sideSession = sideRuntime.session;
+  installSessionUsageRecorder(sideSession, chatJid, deps.onWarn);
 
   let text = "";
   let thinking = "";
@@ -166,15 +167,6 @@ export async function runSidePrompt(
       const message = event.message as { role?: string; stopReason?: string; errorMessage?: string; usage?: Usage; content?: unknown[] } | undefined;
       if (message?.role === "assistant") {
         finalMessage = message as SideAssistantMessage;
-        try {
-          recordMessageUsage(chatJid, message);
-        } catch (err) {
-          deps.onWarn?.("Failed to persist side-prompt usage", {
-            operation: "run_side_prompt.persist_usage_session",
-            chatJid,
-            err,
-          });
-        }
       }
     }
   });

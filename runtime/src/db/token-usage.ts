@@ -25,6 +25,9 @@ export interface TokenUsageTotalsSummary {
   runs: number;
 }
 
+/** Source category for a persisted usage record. */
+export type TokenUsageSource = "assistant" | "tool" | "compaction" | "branch_summary" | "unknown";
+
 /** Latest token/cost record for a chat, including cache-hit telemetry. */
 export interface LatestTokenUsageSummary extends TokenUsageTotalsSummary {
   output_tokens: number;
@@ -36,6 +39,7 @@ export interface LatestTokenUsageSummary extends TokenUsageTotalsSummary {
   response_model: string | null;
   provider: string | null;
   api: string | null;
+  usage_source: string | null;
   turns: number | null;
   run_at: string | null;
 }
@@ -48,6 +52,11 @@ export interface TokenUsageByProviderSummary extends TokenUsageTotalsSummary {
 /** Aggregated token/cost totals grouped by model for a chat. */
 export interface TokenUsageByModelSummary extends TokenUsageTotalsSummary {
   model: string | null;
+}
+
+/** Aggregated token/cost totals grouped by usage source for a chat. */
+export interface TokenUsageBySourceSummary extends TokenUsageTotalsSummary {
+  usage_source: string | null;
 }
 
 /** Latest model metadata recorded for a chat's token-usage stream. */
@@ -97,6 +106,8 @@ export interface TokenUsageRecord {
   provider?: string | null;
   /** API variant used (e.g. "messages", "chat"). */
   api?: string | null;
+  /** Usage source category, such as assistant turn, tool execution, or compaction summary. */
+  usage_source?: TokenUsageSource | string | null;
   /** Number of conversational turns in the run. */
   turns?: number | null;
 }
@@ -123,8 +134,9 @@ export function storeTokenUsage(record: TokenUsageRecord): void {
       response_model,
       provider,
       api,
+      usage_source,
       turns
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     record.chat_jid,
     record.run_at,
@@ -143,6 +155,7 @@ export function storeTokenUsage(record: TokenUsageRecord): void {
     record.response_model ?? null,
     record.provider ?? null,
     record.api ?? null,
+    record.usage_source ?? "assistant",
     record.turns ?? null
   );
 }
@@ -200,6 +213,7 @@ export function getLatestTokenUsage(chatJid: string): LatestTokenUsageSummary | 
       response_model,
       provider,
       api,
+      usage_source,
       turns,
       run_at,
       1 AS runs
@@ -254,6 +268,28 @@ export function getTokenUsageByModel(chatJid: string, limit = 5): TokenUsageByMo
      ORDER BY total_tokens DESC
      LIMIT ?`
   ).all(chatJid, normalizeLimit(limit)) as TokenUsageByModelSummary[];
+}
+
+/** Return per-source token and cost totals for a chat, sorted by total tokens. */
+export function getTokenUsageBySource(chatJid: string, limit = 5): TokenUsageBySourceSummary[] {
+  const db = getDb();
+  return db.prepare(
+    `SELECT
+      usage_source,
+      COALESCE(SUM(input_tokens), 0) AS input_tokens,
+      COALESCE(SUM(output_tokens), 0) AS output_tokens,
+      COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+      COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+      COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
+      COALESCE(SUM(total_tokens), 0) AS total_tokens,
+      COALESCE(SUM(cost_total), 0) AS cost_total,
+      COUNT(*) AS runs
+     FROM token_usage
+     WHERE chat_jid = ?
+     GROUP BY usage_source
+     ORDER BY total_tokens DESC
+     LIMIT ?`
+  ).all(chatJid, normalizeLimit(limit)) as TokenUsageBySourceSummary[];
 }
 
 /** Return the most recent token-usage model metadata for a chat, if any. */

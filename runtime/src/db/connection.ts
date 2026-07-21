@@ -529,6 +529,7 @@ function createSchema(database: Database): void {
       response_model TEXT,
       provider TEXT,
       api TEXT,
+      usage_source TEXT DEFAULT 'assistant',
       turns INTEGER DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_token_usage_chat_jid ON token_usage(chat_jid);
@@ -697,6 +698,7 @@ function ensureTokenUsageColumns(database: Database): void {
 
   ensureColumn("response_model", "TEXT");
   ensureColumn("reasoning_tokens", "INTEGER DEFAULT 0");
+  ensureColumn("usage_source", "TEXT DEFAULT 'assistant'");
 }
 
 function ensureScheduledTaskColumns(database: Database): void {

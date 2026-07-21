@@ -197,10 +197,9 @@ test("AgentTurnCoordinator flushes completed commentary before a later final ans
   expect(tracker.getFinalText()).toBe("done");
 });
 
-test("AgentTurnCoordinator subscribes, records usage, and downgrades handler failures to warnings", () => {
+test("AgentTurnCoordinator subscribes and downgrades handler failures to warnings", () => {
   let listener: ((event: unknown) => void) | null = null;
   let touched = 0;
-  const usage: Array<{ chatJid: string; message: unknown }> = [];
   const warns: string[] = [];
 
   const session = {
@@ -217,9 +216,6 @@ test("AgentTurnCoordinator subscribes, records usage, and downgrades handler fai
     touchSession: () => {
       touched += 1;
     },
-    recordMessageUsage: (chatJid, message) => {
-      usage.push({ chatJid, message });
-    },
     onWarn: (message) => warns.push(message),
   });
 
@@ -234,8 +230,6 @@ test("AgentTurnCoordinator subscribes, records usage, and downgrades handler fai
   });
 
   expect(touched).toBe(1);
-  expect(usage).toHaveLength(1);
-  expect(usage[0]?.chatJid).toBe("web:default");
   expect(warns).toContain("Event handler error");
 
   unsub();

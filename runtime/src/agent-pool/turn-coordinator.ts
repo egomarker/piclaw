@@ -66,7 +66,8 @@ export interface PromptTimeoutState {
 export interface AgentTurnCoordinatorOptions {
   takeAttachments: (chatJid: string) => AttachmentInfo[];
   touchSession: (chatJid: string) => void;
-  recordMessageUsage: (chatJid: string, message: unknown) => void;
+  /** @deprecated Usage is now recorded once per bound session; retained for test/extension option compatibility. */
+  recordMessageUsage?: (chatJid: string, message: unknown) => void;
   onInfo?: (message: string, details: Record<string, unknown>) => void;
   onWarn?: (message: string, details: Record<string, unknown>) => void;
   onError?: (message: string, details: Record<string, unknown>) => void;
@@ -323,17 +324,6 @@ export class AgentTurnCoordinator {
 
       tracker.handleMessageUpdate(event);
 
-      if (event.type === "message_end") {
-        try {
-          this.options.recordMessageUsage(chatJid, (event as { message?: unknown }).message);
-        } catch (err) {
-          this.options.onWarn?.("Failed to persist message usage", {
-            operation: "subscribe_to_session.record_usage",
-            chatJid,
-            err,
-          });
-        }
-      }
     });
   }
 

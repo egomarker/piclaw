@@ -21,7 +21,7 @@ import { getSessionFileLineCount } from "../../session-rotation.js";
 import { getAutoCompactionTokenStatusForSession } from "../../agent-pool/compaction.js";
 import { computePromptCacheWaste } from "../../agent-pool/cache-stats.js";
 import { peekProviderUsage, type ProviderUsageWindow } from "../../agent-pool/provider-usage.js";
-import { getTokenUsageByModel, getTokenUsageByProvider, getTokenUsageTotals } from "../../db.js";
+import { getTokenUsageByModel, getTokenUsageByProvider, getTokenUsageBySource, getTokenUsageTotals } from "../../db.js";
 import { createLogger, debugSuppressedError } from "../../utils/logger.js";
 import { searchWorkspace } from "../../workspace-search.js";
 
@@ -181,6 +181,7 @@ export async function handleStats(session: AgentSession, _command: StatsCommand)
     if (totals.runs > 0) {
       const providerRows = getTokenUsageByProvider(chatJid, 5);
       const modelRows = getTokenUsageByModel(chatJid, 5);
+      const sourceRows = getTokenUsageBySource(chatJid, 5);
 
       lines.push(
         "",
@@ -192,6 +193,19 @@ export async function handleStats(session: AgentSession, _command: StatsCommand)
         `| Cost | ${formatCurrency(totals.cost_total)} |`,
         `| Runs | ${formatCompactNumber(totals.runs)} |`,
       );
+
+      if (sourceRows.length > 0) {
+        lines.push(
+          "",
+          "**Per source**",
+          "",
+          "| Source | Tokens | Reasoning | Cost | Runs |",
+          "|---|---|---|---|---|",
+        );
+        for (const row of sourceRows) {
+          lines.push(`| ${row.usage_source || "unknown"} | ${formatCompactNumber(row.total_tokens)} | ${formatCompactNumber(row.reasoning_tokens ?? 0)} | ${formatCurrency(row.cost_total)} | ${formatCompactNumber(row.runs)} |`);
+        }
+      }
 
       if (providerRows.length > 0) {
         lines.push(

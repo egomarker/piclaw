@@ -130,6 +130,8 @@ test("agent control info and mode commands", async () => {
   );
   expect(stats.message).toContain("**Session stats**");
   expect(stats.message).toContain("**Tracked usage (persisted)**");
+  expect(stats.message).toContain("**Per source**");
+  expect(stats.message).toContain("| assistant | 150 | 0 | $0.15 | 1 |");
   expect(stats.message).toContain("**Per provider**");
   expect(stats.message).toContain("**Per model**");
 
