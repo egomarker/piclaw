@@ -2,6 +2,8 @@
 
 Piclaw can use a local `llama.cpp` OpenAI-compatible server or router through the **llama.cpp router** provider preset in `/login`.
 
+Piclaw currently configures llama.cpp routers through `/login`. It does not implement upstream Pi's `/llama` Hugging Face search, download, load, or unload workflow.
+
 ## Requirements
 
 Run `llama-server` or a compatible router with the OpenAI-compatible API enabled. The default Piclaw preset expects:

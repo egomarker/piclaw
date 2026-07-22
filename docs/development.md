@@ -52,27 +52,32 @@ cd runtime && bun test --max-concurrency=1
 
 ## Focused integration notes
 
-### Earendil 0.81.0 runtime
+### Earendil 0.81.1 runtime
 
-Piclaw's Pi runtime packages are sourced from `@earendil-works/*` and are pinned together at `0.81.0`. The runtime uses upstream model/auth services, catalogs, pricing, native `max` thinking, compaction estimation, Anthropic signature handling, and configurable `shellPath` behavior while keeping a small set of Piclaw-owned compatibility layers.
+Piclaw's Pi runtime packages are sourced from `@earendil-works/*` and are pinned together at `0.81.1`. The runtime uses upstream model/auth services, provider composition, model catalogs, pricing, native `max` thinking, compaction estimation, summarization retries, Anthropic signature handling, and configurable `shellPath` behaviour.
 
-| Compatibility layer | Why Piclaw still owns it | Focused coverage |
+| Piclaw layer | Why Piclaw still owns it | Focused coverage |
 |---|---|---|
-| `runtime/src/extensions/azure-openai-api.ts` and `runtime/extensions/integrations/azure-openai.ts` | Azure transport, deployment mapping, session correlation, replay sanitation, context budgeting, and throttle feedback | `runtime/test/extensions/azure-openai-*.test.ts` |
-| `runtime/src/extensions/github-copilot-dynamic-models.ts` | Merge authenticated live Copilot models into Earendil's static registry without collapsing native `max` into `xhigh` | `runtime/test/extensions/github-copilot-dynamic-models.test.ts` |
-| `runtime/src/agent-control/` and `runtime/web/src/components/settings/models.ts` | Preserve native `xhigh`/`max` as separate levels while retaining compatibility with old custom `{ xhigh: "max" }` metadata | `runtime/test/agent-control/*.test.ts` |
-| `runtime/src/tools/tracked-bash.ts` | Keep Piclaw's process tracking and keychain injection while honoring Pi's configured `shellPath` | `runtime/test/tools/tracked-bash.test.ts` |
-| `runtime/src/extensions/mcp-timeout-patch.ts` | Preserve Piclaw's outer `PICLAW_MCP_TOOL_TIMEOUT_MS` timeout/abort guard around tools registered by the packaged adapter | `runtime/test/extensions/mcp-timeout-patch.test.ts` |
-| `runtime/src/agent-pool/cache-stats.ts` | Add diagnostic cache re-billing to the shared session statistics | `runtime/test/agent-pool/cache-stats.test.ts` |
-| `runtime/vendor-manifests/` plus generated `*.meta.json` | Keep browser dependencies reproducible and auditable | `runtime/test/scripts/runtime-vendors.test.ts` |
+| `runtime/src/extensions/github-copilot-dynamic-models.ts` | Adds authenticated live Copilot catalog data through native provider registration while preserving Piclaw model labels and OAuth behaviour | `runtime/test/extensions/github-copilot-dynamic-models.test.ts`, `runtime/test/agent-pool/earendil-0810-provider-regressions.test.ts` |
+| `runtime/src/extensions/azure-openai-api.ts` and `runtime/extensions/integrations/azure-openai.ts` | Handles Azure deployment routing, managed identity, secondary Foundry endpoints, replay sanitation, context budgeting, and throttle feedback | `runtime/test/extensions/azure-openai-*.test.ts`, `runtime/test/runtime/provider-bootstrap.test.ts` |
+| `runtime/src/agent-pool/usage.ts` and `runtime/src/db/token-usage.ts` | Persists assistant, tool, compaction, and branch-summary usage in Piclaw's SQLite `token_usage` table | `runtime/test/agent-pool/usage.test.ts`, `runtime/test/db/token-usage.test.ts` |
+| `runtime/src/agent-pool/runtime-facade.ts` | Adds Piclaw web payload fields for per-model thinking levels and non-secret provider diagnostics | `runtime/test/agent-pool/runtime-facade.test.ts` |
+| `runtime/src/agent-control/provider-defs.ts` | Supplies static fallback names, hints, and setup notes for Piclaw's `/login` picker when runtime provider enrichment is unavailable | `runtime/test/agent-control/provider-defs.test.ts` |
+| `runtime/src/channels/web/sse/agent-events.ts` | Converts upstream summarization retry lifecycle events into web `agent_status` payloads | `runtime/test/channels/web/sse/agent-events.test.ts` |
+| `scripts/audit-model-catalog-delta.ts` | Compares two local `pi-ai` provider catalog snapshots before and after dependency upgrades | `runtime/test/scripts/model-catalog-delta-audit.test.ts` |
+| `runtime/src/tools/tracked-bash.ts` | Keeps Piclaw's process tracking and keychain injection while honoring Pi's configured `shellPath` | `runtime/test/tools/tracked-bash.test.ts` |
+| `runtime/src/extensions/mcp-timeout-patch.ts` | Preserves Piclaw's outer `PICLAW_MCP_TOOL_TIMEOUT_MS` timeout/abort guard around tools registered by the packaged adapter | `runtime/test/extensions/mcp-timeout-patch.test.ts` |
+| `runtime/vendor-manifests/` plus generated `*.meta.json` | Keeps browser dependencies reproducible and auditable | `runtime/test/scripts/runtime-vendors.test.ts` |
 
-The compatibility layers fail conservatively: dynamic model discovery falls back to the static catalog, the MCP wrapper leaves unrelated tools untouched and can be disabled independently, and statistics omit cache re-billing when provider usage data is insufficient.
+The compatibility layers fail conservatively: dynamic model discovery falls back to the static catalog, the MCP wrapper leaves unrelated tools untouched and can be disabled independently, and statistics omit optional diagnostics when provider data is unavailable.
 
 Useful focused validation from the repository root:
 
 ```bash
 bun test \
-  runtime/test/agent-pool/cache-stats.test.ts \
+  runtime/test/agent-pool/runtime-facade.test.ts \
+  runtime/test/agent-pool/usage.test.ts \
+  runtime/test/channels/web/sse/agent-events.test.ts \
   runtime/test/extensions/mcp-timeout-patch.test.ts \
   runtime/test/extensions/github-copilot-dynamic-models.test.ts \
   runtime/test/extensions/azure-openai-api.test.ts \

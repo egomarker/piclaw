@@ -196,7 +196,7 @@ These packaged runtime extensions use relative imports into `runtime/src/...` wh
 Dream-backed startup memory follows a compact-index pattern inside the workspace:
 - `notes/memory/MEMORY.md` is the startup index and is kept under the session budget (line-capped and under ~25KB)
 - typed memory files (`user.md`, `feedback.md`, `project.md`, `reference.md`) hold the richer agent-facing detail
-- optional sparse files under `notes/memory/days/` preserve durable transcript-derived signals only when a day needs an extra agent-facing memory beyond the human-readable `notes/daily/*.md` overview
+- optional sparse files under `notes/memory/days/` preserve durable transcript-derived signals only when a day needs extra agent-facing memory beyond the human-readable `notes/daily/*.md` note
 - runtime no longer auto-generates a mirrored `notes/memory/days/*.md` for every complete daily note; the model owns that sparse subtree, while `MEMORY.md` falls back to linking the daily note when no sparse day-memory file exists
 - the built-in nightly AutoDream task and the manual `/dream` command execute as out-of-band model turns on a temporary `dream:` channel
 - Dream work is queued on a dedicated `dream:<chatJid>` lane so long consolidations do not block the interactive `chat:<chatJid>` lane

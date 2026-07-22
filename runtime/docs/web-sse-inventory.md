@@ -1,8 +1,8 @@
 # Web SSE event inventory
 
-_Last updated: 2026-03-16_
+_Last updated: 2026-07-22_
 
-This document inventories the current Server-Sent Events used by the PiClaw web client, based on the current TypeScript server sources and the web client listener registrations.
+This document inventories the Server-Sent Events used by the PiClaw web client, based on the TypeScript server sources and the web client listener registrations.
 
 ## Conventions observed
 
@@ -16,7 +16,7 @@ Current SSE naming is mostly flat but domain-prefixed:
 - UI/theme singleton — `ui_theme`
 - transport/system — `connected`
 
-This is reasonably consistent already: underscore_case, mostly domain-prefixed, with timeline events using short noun phrases.
+The event names use underscore_case. Most are domain-prefixed; timeline events use short noun phrases.
 
 ### Delivery scope
 The transport currently distinguishes between:
@@ -107,7 +107,8 @@ substantially by subtype.
 |---|---|---|---|
 | `tool_call` | `title` | `agent-events.ts` | A tool call started or was recognised from a tool-related session event. |
 | `tool_status` | `title`, `status` | `agent-events.ts` | Tool execution progress/completion (`Working...`, `Done`, `Failed`). |
-| `intent` | `title`, `detail?`, `intent_key?`, `started_at?` | `agent-events.ts`, web handlers | User-facing turn state such as retrying, compacting, auto-compaction cancellation, queued steering, etc. |
+| `intent` | `title`, `detail?`, `intent_key?`, `started_at?` | `agent-events.ts`, web handlers | User-facing turn state such as retrying, compacting, summarization retry, auto-compaction cancellation, queued steering, etc. |
+| `intent` with `intent_key: "summarization_retry"` | `title`, `detail?`, `source?`, `reason?`, `attempt?`, `maxAttempts?`, `delayMs?` | `agent-events.ts` | Web status for upstream `summarization_retry_scheduled`, `summarization_retry_attempt_start`, and `summarization_retry_finished` events. |
 | `error` | `title` | `agent-events.ts`, web handlers | User-visible terminal or near-terminal error state. |
 
 Common base fields remain:
@@ -118,7 +119,7 @@ Common base fields remain:
 - `turn_id`
 - profile decoration such as `agent_name`, `agent_avatar`, `user_name`, `user_avatar`, `user_avatar_background`
 
-## Audit findings so far
+## Contract notes
 
 ### 1) Stale listener cleanup identified and resolved
 The audit initially found stale client listeners for:
@@ -152,23 +153,22 @@ The timeline-facing event family is currently fairly clean:
 
 These names are short, readable, and map well onto actual timeline semantics.
 
-### 4) Domain prefixing is mostly working
-The current event space is not namespaced hierarchically, but it is still understandable because of consistent prefixes:
+### 4) Domain prefixes are consistent
+
+The current event space is flat. The prefixes keep related events grouped:
 
 - `agent_*`
 - `workspace_*`
 - `extension_ui_*`
 
-That means this audit probably does **not** need a disruptive event renaming pass unless stronger evidence of confusion appears.
-
-### 5) `extension_ui_*` is now subscribed client-side, but still only lightly surfaced in the main app shell
+### 5) `extension_ui_*` is subscribed client-side and lightly surfaced in the main app shell
 The server emits a complete `extension_ui_*` SSE family from `src/channels/web/ui-bridge.ts`, and the browser SSE client now subscribes to those events as well.
 
 The current main app shell exposes them as browser events (`piclaw-extension-ui` and subtype events such as `piclaw-extension-ui:notify`) and surfaces `extension_ui_notify` / `extension_ui_error` as intent toasts.
 
-That closes the earlier transport dead-end, but it does **not** yet amount to a full first-class extension-UI product surface in the main web app.
+That closes the earlier transport gap. The main web app still exposes extension UI through browser events and intent toasts rather than a dedicated extension UI pane.
 
-## Suggested next checks
+## Suggested checks
 
 1. Decide whether the current lightweight browser-event bridge for `extension_ui_*` should grow into a richer first-class extension-UI surface.
    - ticket: `workitems/00-inbox/extension-ui-sse-client-contract-gap.md`

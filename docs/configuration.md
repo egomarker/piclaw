@@ -1,18 +1,5 @@
 # Configuration
 
-## Provider setup notes
-
-Piclaw's `/login` provider picker is backed by Earendil's runtime provider catalog plus Piclaw's static fallback metadata. Recent built-in provider families exposed directly in the picker include:
-
-- Qwen Token Plan (`qwen-token-plan`, `qwen-token-plan-cn`) — API key providers using `QWEN_TOKEN_PLAN_API_KEY` or `QWEN_TOKEN_PLAN_CN_API_KEY`.
-- Z.AI China coding plan (`zai-coding-cn`) — API key provider using `ZAI_CODING_CN_API_KEY`.
-- Radius (`radius`) — supports OAuth subscription login and API-key gateways.
-- NVIDIA (`nvidia`) and Together (`together`) — API-key providers.
-- Ant Ling (`ant-ling`) — API-key provider.
-
-Provider composition details are available in the `/agent/models` payload under `provider_diagnostics`; the payload intentionally includes only non-secret auth source/label and composition flags.
-
-
 This page lists Piclaw's environment variables, config files, secrets, authentication settings, and notification settings.
 
 **Jump to:**
@@ -240,6 +227,16 @@ As a result:
 - provider credentials and configured models live in Pi-managed auth/config storage rather than a separate piclaw-only env-var matrix
 
 Most users should prefer `/login` over setting raw provider env vars by hand unless they are deliberately using one of the packaged integration-specific paths.
+
+Piclaw's `/login` provider picker uses Earendil's runtime provider catalog plus Piclaw's static fallback metadata. Recent built-in provider families exposed directly in the picker include:
+
+- Qwen Token Plan (`qwen-token-plan`, `qwen-token-plan-cn`) — API key providers using `QWEN_TOKEN_PLAN_API_KEY` or `QWEN_TOKEN_PLAN_CN_API_KEY`.
+- Z.AI China coding plan (`zai-coding-cn`) — API key provider using `ZAI_CODING_CN_API_KEY`.
+- Radius (`radius`) — supports OAuth subscription login and API-key gateways.
+- NVIDIA (`nvidia`) and Together (`together`) — API-key providers.
+- Ant Ling (`ant-ling`) — API-key provider.
+
+Use `/login <provider-id>` to configure one of these providers directly. Provider composition details are available in the `/agent/models` payload under `provider_diagnostics`; the payload includes non-secret auth source/label and composition flags.
 
 ### GitHub Copilot live model discovery
 
