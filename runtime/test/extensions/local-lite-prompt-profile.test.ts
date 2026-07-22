@@ -6,6 +6,7 @@ describe("local-lite prompt profile", () => {
   test("detects local and private OpenAI-compatible models", async () => {
     const { isLocalLitePromptModel } = await import("../../src/extensions/local-lite-prompt-profile.js");
 
+    expect(isLocalLitePromptModel({ provider: "llama-cpp", baseUrl: "https://example.com" })).toBe(true);
     expect(isLocalLitePromptModel({ provider: "ollama", baseUrl: "https://example.com" })).toBe(true);
     expect(isLocalLitePromptModel({ provider: "openai-compatible", baseUrl: "http://sandbox.local:8090/v1" })).toBe(true);
     expect(isLocalLitePromptModel({ provider: "milkv-local", baseUrl: "http://milkv.local:8090/v1" })).toBe(true);
