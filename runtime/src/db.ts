@@ -150,6 +150,7 @@ export {
   getTokenUsageTotals,
   getTokenUsageByProvider,
   getTokenUsageByModel,
+  getTokenUsageBySource,
   getLatestTokenUsage,
   getLatestTokenUsageModel,
   pruneOldTokenUsage,

@@ -30,6 +30,7 @@ import {
   type ModelRuntime,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import type { Provider } from "@earendil-works/pi-ai";
 
 import { type AgentControlCommand, type AgentControlResult } from "./agent-control/index.js";
 import { getPiclawAgentDir } from "./core/agent-dir.js";
@@ -556,6 +557,10 @@ export class AgentPool {
     config: Parameters<ModelRegistry["registerProvider"]>[1]
   ): void {
     this.runtimeFacade.registerModelProvider(providerName, config);
+  }
+
+  registerNativeModelProvider(provider: Provider): void {
+    this.runtimeFacade.registerNativeModelProvider(provider);
   }
 
   getModelRegistry(): ModelRegistry {

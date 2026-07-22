@@ -130,6 +130,8 @@ test("agent control info and mode commands", async () => {
   );
   expect(stats.message).toContain("**Session stats**");
   expect(stats.message).toContain("**Tracked usage (persisted)**");
+  expect(stats.message).toContain("**Per source**");
+  expect(stats.message).toContain("| assistant | 150 | 0 | $0.15 | 1 |");
   expect(stats.message).toContain("**Per provider**");
   expect(stats.message).toContain("**Per model**");
 
@@ -249,6 +251,7 @@ test("agent control session and tree commands", async () => {
   expect(existsSync(join(ws.data, "sessions", "web_default", "active-session.jsonl"))).toBe(false);
   expect(existsSync(join(ws.data, "sessions", "web_default", "archive", "active-session.jsonl"))).toBe(true);
   expect(session.seededEntries.at(-1)?.some((entry) => entry[0] === "compaction")).toBe(true);
+  expect(session.seededEntries.at(-1)?.some((entry) => entry[0] === "thinking_level_change" && entry[1] === "low")).toBe(true);
 
   const fork = await applyControlCommand(runtime as any, registry, { type: "fork", entryId: "entry-1", raw: "/fork entry-1" });
   expect(fork.message).toContain("Selected");
@@ -568,6 +571,30 @@ test("login config writes stay inside the overridden pi-agent dir", async () => 
   const modelsJson = JSON.parse(readFileSync(modelsPath, "utf-8"));
   expect(modelsJson.providers?.ollama?.baseUrl).toBe("http://127.0.0.1:11434/v1");
   expect(modelsJson.providers?.ollama?.models?.map((entry: { id: string }) => entry.id)).toEqual(["llama3:latest", "qwen3:latest"]);
+
+  const llamaCppResult = await applyControlCommand(runtime as any, loginRegistry, {
+    type: "login",
+    provider: `__step2 ${JSON.stringify({ provider: "llama-cpp", method: "configure", baseUrl: "http://127.0.0.1:8080/v1", modelId: "local-model", contextWindow: "32768" })}`,
+    raw: "/login __step2",
+  });
+  expect(llamaCppResult.status).toBe("success");
+  expect(reloadConfigCalls).toBe(2);
+
+  const updatedModelsJson = JSON.parse(readFileSync(modelsPath, "utf-8"));
+  expect(updatedModelsJson.providers?.["llama-cpp"]?.baseUrl).toBe("http://127.0.0.1:8080/v1");
+  expect(updatedModelsJson.providers?.["llama-cpp"]?.api).toBe("openai-completions");
+  expect(updatedModelsJson.providers?.["llama-cpp"]?.models?.[0]).toMatchObject({
+    id: "local-model",
+    contextWindow: 32768,
+    compat: {
+      supportsStore: false,
+      supportsStrictMode: false,
+      supportsDeveloperRole: false,
+      supportsReasoningEffort: false,
+      supportsLongCacheRetention: false,
+      maxTokensField: "max_tokens",
+    },
+  });
 });
 
 test("provider-owned API-key login supports multiple prompts without direct credential writes", async () => {

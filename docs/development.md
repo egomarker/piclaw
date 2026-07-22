@@ -52,9 +52,9 @@ cd runtime && bun test --max-concurrency=1
 
 ## Focused integration notes
 
-### Earendil 0.80.10 runtime
+### Earendil 0.81.0 runtime
 
-Piclaw's Pi runtime packages are sourced from `@earendil-works/*` and are pinned together at `0.80.10`. The runtime uses upstream model/auth services, catalogs, pricing, native `max` thinking, compaction estimation, Anthropic signature handling, and configurable `shellPath` behavior while keeping a small set of Piclaw-owned compatibility layers.
+Piclaw's Pi runtime packages are sourced from `@earendil-works/*` and are pinned together at `0.81.0`. The runtime uses upstream model/auth services, catalogs, pricing, native `max` thinking, compaction estimation, Anthropic signature handling, and configurable `shellPath` behavior while keeping a small set of Piclaw-owned compatibility layers.
 
 | Compatibility layer | Why Piclaw still owns it | Focused coverage |
 |---|---|---|
@@ -157,7 +157,7 @@ Notes:
 - the live Azure extension aligns `prompt_cache_key`, `session_id`, and `x-client-request-id` from the active session id on the Azure Responses path
 - the harness checks those correlation fields automatically and fails if they drift
 - the harness also fails if replayed request payloads still contain leaked `partialJson` scratch buffers
-- historical `0.67.2` live-provider evidence for `gpt-5-3-codex` and `gpt-5-4` is recorded in [azure-openai-extension.md](azure/azure-openai-extension.md); deterministic `0.80.10` behavior is covered by the focused tests in the Earendil section above
+- historical `0.67.2` live-provider evidence for `gpt-5-3-codex` and `gpt-5-4` is recorded in [azure-openai-extension.md](azure/azure-openai-extension.md); deterministic `0.81.0` behavior is covered by the focused tests in the Earendil section above
 - `AOAI_EXPERIMENT_AZURE_CLIENT_REQUEST_ID=1` remains available for the optional `x-ms-client-request-id` experiment
 
 ### Workspace search / reindex UI

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createAssistantMessageEventStream, type AssistantMessage, type Model } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, type AssistantMessage, type Context, type Model, type Provider, type SimpleStreamOptions, type StreamOptions } from "@earendil-works/pi-ai";
 import {
   createAgentSession,
   ModelRuntime,
@@ -42,18 +42,35 @@ function assistant(text: string): AssistantMessage {
   };
 }
 
-describe("Earendil 0.80.10 ambient auth", () => {
-  test("branch summarization can use a provider that supplies auth outside Pi", async () => {
+describe("Earendil 0.81.0 ambient auth", () => {
+  test("branch summarization can use a native provider that supplies auth outside Pi", async () => {
     const root = mkdtempSync(join(tmpdir(), "piclaw-ambient-auth-"));
     try {
       const credentials = new FileCredentialStore(join(root, "auth.json"));
       const modelRuntime = await ModelRuntime.create({ credentials, modelsPath: null, allowModelNetwork: false });
-      modelRuntime.registerProvider(model.provider, {
+      let streamCalls = 0;
+      const streamWithAmbientAuth = (_selectedModel: Model<any>, _context: Context, options?: StreamOptions | SimpleStreamOptions) => {
+        streamCalls += 1;
+        expect(options?.apiKey).toBe("ambient-native-key");
+        const stream = createAssistantMessageEventStream();
+        stream.push({ type: "done", reason: "stop", message: assistant("branch summary text") });
+        return stream;
+      };
+      const provider: Provider<"openai-responses"> = {
+        id: model.provider,
+        name: "Ambient Auth Test",
         baseUrl: model.baseUrl,
-        api: model.api,
-        apiKey: "ambient-placeholder",
-        models: [model],
-      });
+        auth: {
+          apiKey: {
+            name: "Ambient test auth",
+            resolve: async () => ({ auth: { apiKey: "ambient-native-key" }, source: "ambient-test" }),
+          },
+        },
+        getModels: () => [model],
+        stream: streamWithAmbientAuth,
+        streamSimple: streamWithAmbientAuth,
+      };
+      modelRuntime.registerNativeProvider(provider);
       await modelRuntime.refresh({ allowNetwork: false });
 
       const settingsManager = SettingsManager.inMemory({
@@ -69,15 +86,6 @@ describe("Earendil 0.80.10 ambient auth", () => {
         model,
         tools: [],
       });
-
-      let streamCalls = 0;
-      session.agent.streamFn = (_selectedModel, _context, options) => {
-        streamCalls += 1;
-        expect(options?.apiKey).toBe("ambient-placeholder");
-        const stream = createAssistantMessageEventStream();
-        stream.push({ type: "done", reason: "stop", message: assistant("branch summary text") });
-        return stream;
-      };
 
       const targetId = sessionManager.appendMessage({ role: "user", content: "first branch", timestamp: Date.now() });
       sessionManager.appendMessage(assistant("first reply"));

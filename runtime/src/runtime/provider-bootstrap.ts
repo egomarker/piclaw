@@ -3,12 +3,12 @@
  */
 
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { Provider } from "@earendil-works/pi-ai";
 import { createLogger } from "../utils/logger.js";
 
 export type AzureProviderBootstrapHandle = { stop: () => void; refresh: () => Promise<void> };
-type ProviderRegistration = Parameters<ModelRegistry["registerProvider"]>[1];
 export type AzureProviderBootstrapModule = {
-  startAzureProviderBootstrap: (register: (name: string, config: ProviderRegistration) => void) => AzureProviderBootstrapHandle;
+  startAzureProviderBootstrap: (register: (provider: Provider) => void) => AzureProviderBootstrapHandle;
 };
 
 const log = createLogger("runtime.provider-bootstrap");
@@ -20,6 +20,7 @@ export interface ProviderBootstrapAgentPool {
     providerName: string,
     config: Parameters<ModelRegistry["registerProvider"]>[1]
   ): void;
+  registerNativeModelProvider(provider: Provider): void;
   getModelRegistry(): ModelRegistry;
 }
 
@@ -42,8 +43,8 @@ export async function registerOptionalProviders(agentPool: ProviderBootstrapAgen
   if (activeAzureBootstrap) return;
 
   const mod = await loadAzureBootstrapModuleImpl();
-  activeAzureBootstrap = mod.startAzureProviderBootstrap((name: string, config: ProviderRegistration) => {
-    agentPool.registerModelProvider(name, config);
+  activeAzureBootstrap = mod.startAzureProviderBootstrap((provider) => {
+    agentPool.registerNativeModelProvider(provider);
   });
   try {
     await activeAzureBootstrap.refresh();

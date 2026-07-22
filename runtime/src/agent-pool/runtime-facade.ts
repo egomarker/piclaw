@@ -8,6 +8,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentSession, AgentSessionRuntime, ModelRegistry, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
+import type { Api, Model, Provider } from "@earendil-works/pi-ai";
 
 import { applyControlCommand, type AgentControlCommand, type AgentControlResult } from "../agent-control/index.js";
 import { getLatestTokenUsageModel } from "../db.js";
@@ -96,6 +97,83 @@ function formatLatestRequestedModel(provider: string | null | undefined, model: 
   if (modelLabel.includes("/")) return modelLabel;
   const providerLabel = normalizeTokenUsageModelLabel(provider);
   return providerLabel ? `${providerLabel}/${modelLabel}` : modelLabel;
+}
+
+type ProviderCompositionRuntime = Pick<ModelRuntime, "getProviders" | "getProviderAuthStatus" | "getRegisteredProviderConfig" | "getRegisteredNativeProvider" | "getRegisteredProviderIds" | "getCompatibilityRequestConfig" | "getError">;
+
+/** Non-secret provider composition diagnostics returned to model/debug surfaces. */
+export interface ProviderCompositionDiagnostic {
+  provider: string;
+  name: string | null;
+  composed: boolean;
+  registered_extension: boolean;
+  registered_native: boolean;
+  model_count: number;
+  available_model_count: number;
+  auth_configured: boolean;
+  auth_source: string | null;
+  auth_label: string | null;
+  compatibility_auth_header: boolean | null;
+  compatibility_has_headers: boolean;
+}
+
+export interface ProviderCompositionDiagnostics {
+  providers: ProviderCompositionDiagnostic[];
+  registered_provider_ids: string[];
+  composition_error: string | null;
+}
+
+function safeCall<T>(run: () => T, fallback: T): T {
+  try {
+    return run();
+  } catch {
+    return fallback;
+  }
+}
+
+function buildProviderCompositionDiagnostics(
+  modelRuntime: Partial<ProviderCompositionRuntime> | null | undefined,
+  availableModels: readonly Model<Api>[],
+): ProviderCompositionDiagnostics {
+  const runtime = modelRuntime ?? {};
+  const providers = safeCall(() => [...(runtime.getProviders?.() ?? [])], [] as Provider[]);
+  const registeredProviderIds = safeCall(() => [...(runtime.getRegisteredProviderIds?.() ?? [])], [] as string[]).sort((a, b) => a.localeCompare(b));
+  const providerIds = new Set<string>();
+  for (const provider of providers) providerIds.add(provider.id);
+  for (const providerId of registeredProviderIds) providerIds.add(providerId);
+  for (const model of availableModels) providerIds.add(model.provider);
+
+  const rows = [...providerIds].sort((a, b) => a.localeCompare(b)).map((providerId) => {
+    const provider = providers.find((candidate) => candidate.id === providerId);
+    const providerModels = provider?.getModels?.() ?? [];
+    const firstAvailableModel = availableModels.find((model) => model.provider === providerId) ?? null;
+    const compatibility = firstAvailableModel && typeof runtime.getCompatibilityRequestConfig === "function"
+      ? safeCall(() => runtime.getCompatibilityRequestConfig!(firstAvailableModel), null)
+      : null;
+    const auth = typeof runtime.getProviderAuthStatus === "function"
+      ? safeCall(() => runtime.getProviderAuthStatus!(providerId), null)
+      : null;
+    return {
+      provider: providerId,
+      name: typeof provider?.name === "string" && provider.name.trim() ? provider.name.trim() : null,
+      composed: Boolean(provider),
+      registered_extension: Boolean(runtime.getRegisteredProviderConfig?.(providerId)),
+      registered_native: Boolean(runtime.getRegisteredNativeProvider?.(providerId)),
+      model_count: providerModels.length,
+      available_model_count: availableModels.filter((model) => model.provider === providerId).length,
+      auth_configured: Boolean(auth?.configured),
+      auth_source: typeof auth?.source === "string" ? auth.source : null,
+      auth_label: typeof auth?.label === "string" ? auth.label : null,
+      compatibility_auth_header: compatibility ? Boolean(compatibility.authHeader) : null,
+      compatibility_has_headers: Boolean(compatibility?.headers && Object.keys(compatibility.headers).length > 0),
+    } satisfies ProviderCompositionDiagnostic;
+  });
+
+  return {
+    providers: rows,
+    registered_provider_ids: registeredProviderIds,
+    composition_error: typeof runtime.getError === "function" ? (runtime.getError() ?? null) : null,
+  };
 }
 
 function getLatestTokenUsageModelForStatus(chatJid: string): ReturnType<typeof getLatestTokenUsageModel> {
@@ -483,6 +561,8 @@ export interface AvailableModelOption {
   name: string | null;
   context_window: number | null;
   reasoning: boolean;
+  thinking_levels: string[];
+  thinking_level_labels: string[];
 }
 
 /** Shape returned by available-model inspection. */
@@ -500,6 +580,7 @@ export interface AvailableModelsResult {
   latest_response_model: string | null;
   scoped_models_only: boolean;
   enabled_model_patterns: string[];
+  provider_diagnostics: ProviderCompositionDiagnostics;
 }
 
 /** Dependencies required by AgentRuntimeFacade. */
@@ -553,16 +634,21 @@ export class AgentRuntimeFacade {
       (session as (AgentSession & { settingsManager?: SettingsManager }) | null)?.settingsManager ?? this.options.settingsManager,
     );
     const available = scopedModels.models;
-    const modelOptions = available.map((model) => ({
-      label: `${model.provider}/${model.id}`,
-      provider: model.provider,
-      id: model.id,
-      name: typeof model.name === "string" && model.name.trim() ? model.name.trim() : null,
-      context_window: typeof model.contextWindow === "number" && Number.isFinite(model.contextWindow) && model.contextWindow > 0
-        ? model.contextWindow
-        : null,
-      reasoning: Boolean(model.reasoning),
-    }));
+    const modelOptions = available.map((model) => {
+      const thinkingLevels = getAvailableThinkingLevelsForModel(model as Model<any>);
+      return {
+        label: `${model.provider}/${model.id}`,
+        provider: model.provider,
+        id: model.id,
+        name: typeof model.name === "string" && model.name.trim() ? model.name.trim() : null,
+        context_window: typeof model.contextWindow === "number" && Number.isFinite(model.contextWindow) && model.contextWindow > 0
+          ? model.contextWindow
+          : null,
+        reasoning: Boolean(model.reasoning),
+        thinking_levels: thinkingLevels,
+        thinking_level_labels: thinkingLevels.map((level) => formatThinkingLevelForDisplay(level, model as Model<any>)),
+      };
+    });
     const models = modelOptions.map((model) => model.label);
     const currentModel = session?.model ? `${session.model.provider}/${session.model.id}` : persistedState.current;
     const currentModelOption = currentModel ? modelOptions.find((model) => model.label === currentModel) ?? null : null;
@@ -612,6 +698,7 @@ export class AgentRuntimeFacade {
       latest_response_model: latestResponseModel,
       scoped_models_only: scopedModels.scoped,
       enabled_model_patterns: scopedModels.patterns,
+      provider_diagnostics: buildProviderCompositionDiagnostics(this.options.modelRuntime, available),
     };
   }
 
@@ -682,6 +769,10 @@ export class AgentRuntimeFacade {
 
   registerModelProvider(providerName: string, config: Parameters<ModelRegistry["registerProvider"]>[1]): void {
     this.options.modelRegistry.registerProvider(providerName, config);
+  }
+
+  registerNativeModelProvider(provider: Provider): void {
+    this.options.modelRegistry.registerProvider(provider);
   }
 
   resolveModelInput(input: string): { model?: string; error?: string } {

@@ -51,6 +51,11 @@ function createFacade(overrides: Partial<ConstructorParameters<typeof AgentRunti
       getAvailable: () => [],
       registerProvider: () => {},
     } as any,
+    modelRuntime: {
+      getProviders: () => [],
+      getRegisteredProviderIds: () => [],
+      getError: () => undefined,
+    } as any,
     authStorage: { get: () => null } as any,
     clearAttachments: (chatJid) => cleared.push(chatJid),
     refreshRuntime: async () => {},
@@ -92,6 +97,8 @@ test("AgentRuntimeFacade reports available models and context usage", async () =
       name: "GPT Test",
       context_window: 128000,
       reasoning: true,
+      thinking_levels: ["off", "minimal", "low", "medium", "high"],
+      thinking_level_labels: ["off", "minimal", "low", "medium", "high"],
     },
     {
       label: "anthropic/claude-test",
@@ -100,6 +107,8 @@ test("AgentRuntimeFacade reports available models and context usage", async () =
       name: "Claude Test",
       context_window: 200000,
       reasoning: true,
+      thinking_levels: ["off", "minimal", "low", "medium", "high"],
+      thinking_level_labels: ["off", "minimal", "low", "medium", "high"],
     },
   ]);
   expect(available.thinking_level).toBe("high");
@@ -137,6 +146,82 @@ test("AgentRuntimeFacade reports display labels for legacy max thinking metadata
   expect(available.thinking_level_label).toBe("max");
   expect(available.available_thinking_levels).toEqual(["off", "low", "medium", "high", "xhigh"]);
   expect(available.available_thinking_level_labels).toEqual(["off", "low", "medium", "high", "max"]);
+  expect(available.model_options[0]?.thinking_levels).toEqual(["off", "minimal", "low", "medium", "high", "xhigh"]);
+  expect(available.model_options[0]?.thinking_level_labels).toEqual(["off", "minimal", "low", "medium", "high", "max"]);
+});
+
+test("AgentRuntimeFacade exposes non-secret provider composition diagnostics", async () => {
+  const extensionProvider = {
+    id: "custom-ai",
+    name: "Custom AI",
+    getModels: () => [
+      { provider: "custom-ai", id: "configured", reasoning: true },
+      { provider: "custom-ai", id: "hidden", reasoning: false },
+    ],
+  };
+  const nativeProvider = {
+    id: "native-ai",
+    name: "Native AI",
+    getModels: () => [{ provider: "native-ai", id: "native", reasoning: false }],
+  };
+  const fixture = createFacade({
+    modelRegistry: {
+      refresh: () => {},
+      getAvailable: () => [
+        { provider: "custom-ai", id: "configured", name: "Configured", contextWindow: 128000, reasoning: true },
+        { provider: "native-ai", id: "native", name: "Native", contextWindow: 64000, reasoning: false },
+      ],
+      getAll: () => [],
+      registerProvider: () => {},
+    } as any,
+    modelRuntime: {
+      getProviders: () => [extensionProvider, nativeProvider],
+      getRegisteredProviderIds: () => ["custom-ai", "native-ai"],
+      getRegisteredProviderConfig: (providerId: string) => providerId === "custom-ai" ? { name: "Custom AI", apiKey: "$CUSTOM_AI_KEY" } : undefined,
+      getRegisteredNativeProvider: (providerId: string) => providerId === "native-ai" ? nativeProvider : undefined,
+      getProviderAuthStatus: (providerId: string) => providerId === "custom-ai"
+        ? { configured: true, source: "environment", label: "CUSTOM_AI_KEY" }
+        : { configured: false },
+      getCompatibilityRequestConfig: (model: any) => model.provider === "custom-ai"
+        ? { authHeader: false, headers: { "X-Diagnostic": "present" } }
+        : { authHeader: true },
+      getError: () => "composition warning",
+    } as any,
+  });
+
+  const available = await fixture.facade.getAvailableModels("web:diagnostics");
+  expect(available.provider_diagnostics.composition_error).toBe("composition warning");
+  expect(available.provider_diagnostics.registered_provider_ids).toEqual(["custom-ai", "native-ai"]);
+  expect(available.provider_diagnostics.providers).toEqual([
+    {
+      provider: "custom-ai",
+      name: "Custom AI",
+      composed: true,
+      registered_extension: true,
+      registered_native: false,
+      model_count: 2,
+      available_model_count: 1,
+      auth_configured: true,
+      auth_source: "environment",
+      auth_label: "CUSTOM_AI_KEY",
+      compatibility_auth_header: false,
+      compatibility_has_headers: true,
+    },
+    {
+      provider: "native-ai",
+      name: "Native AI",
+      composed: true,
+      registered_extension: false,
+      registered_native: true,
+      model_count: 1,
+      available_model_count: 1,
+      auth_configured: false,
+      auth_source: null,
+      auth_label: null,
+      compatibility_auth_header: true,
+      compatibility_has_headers: false,
+    },
+  ]);
 });
 
 test("AgentRuntimeFacade filters web model options with scopedModelsOnly enabledModels", async () => {
@@ -164,6 +249,10 @@ test("AgentRuntimeFacade filters web model options with scopedModelsOnly enabled
     expect(available.enabled_model_patterns).toEqual(["anthropic/*", "gemini-test"]);
     expect(available.models).toEqual(["anthropic/claude-test", "google/gemini-test"]);
     expect(available.model_options.map((m) => m.label)).toEqual(["anthropic/claude-test", "google/gemini-test"]);
+    expect(available.model_options.map((m) => m.thinking_levels)).toEqual([
+      ["off", "minimal", "low", "medium", "high"],
+      ["off"],
+    ]);
   } finally {
     if (previous === undefined) delete process.env.PICLAW_SCOPED_MODELS_ONLY;
     else process.env.PICLAW_SCOPED_MODELS_ONLY = previous;
@@ -205,6 +294,8 @@ test("AgentRuntimeFacade returns registry-backed model options without hydrating
         name: "GPT Fast",
         context_window: 128000,
         reasoning: true,
+        thinking_levels: ["off", "minimal", "low", "medium", "high"],
+        thinking_level_labels: ["off", "minimal", "low", "medium", "high"],
       },
     ],
     thinking_level: null,
@@ -268,6 +359,8 @@ test("AgentRuntimeFacade restores persisted current model for a cold chat withou
     expect(available.thinking_level_label).toBe("max");
     expect(available.supports_thinking).toBe(true);
     expect(available.available_thinking_levels).toContain("max");
+    expect(available.model_options[0]?.thinking_levels).toEqual(["minimal", "low", "medium", "high", "xhigh", "max"]);
+    expect(available.model_options[0]?.thinking_level_labels).toEqual(["minimal", "low", "medium", "high", "xhigh", "max"]);
   } finally {
     rmSync(sessionDir, { recursive: true, force: true });
   }

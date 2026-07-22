@@ -321,6 +321,7 @@ export class TestAgentControlSession {
       await options.setup({
         appendSessionInfo: (name: string) => recorded.push(["session_info", name]),
         appendModelChange: (provider: string, modelId: string) => recorded.push(["model_change", provider, modelId]),
+        appendThinkingLevelChange: (thinkingLevel: string) => recorded.push(["thinking_level_change", thinkingLevel]),
         appendCompaction: (summary: string, firstKeptEntryId: string, tokensBefore: number) => recorded.push(["compaction", summary, firstKeptEntryId, tokensBefore]),
         appendCustomMessageEntry: (customType: string, content: unknown, display: boolean, details: unknown) => recorded.push(["custom_message", customType, content, display, details]),
         appendMessage: (message: unknown) => recorded.push(["message", message]),

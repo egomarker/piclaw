@@ -45,6 +45,11 @@ describe("runtime bootstrap", () => {
       pollIntervalMs: 123,
       signalRegistrar: { on: () => {} },
       initializeRuntimeEnvironment: () => events.push("init-runtime-env"),
+      hydrateMcpCredentials: async () => {
+        events.push("hydrate-mcp-credentials");
+        return [];
+      },
+      clearMcpCredentials: () => events.push("clear-mcp-credentials"),
       createAgentPool: async () => {
         events.push("create-agent-pool");
         return agentPool;
@@ -97,6 +102,7 @@ describe("runtime bootstrap", () => {
     expect(capturedShutdownDeps).not.toBeNull();
     expect(events).toEqual([
       "init-runtime-env",
+      "hydrate-mcp-credentials",
       "create-agent-pool",
       "log-banner",
       "start-web",
@@ -123,6 +129,8 @@ describe("runtime bootstrap", () => {
       pollIntervalMs: 1,
       signalRegistrar: { on: () => {} },
       initializeRuntimeEnvironment: () => {},
+      hydrateMcpCredentials: async () => [],
+      clearMcpCredentials: () => {},
       createAgentPool: async () => agentPool,
       startWebChannel: async () => ({ stop: async () => {} } as RuntimeBootstrapWeb),
       startBackgroundModelRefresh: () => {
@@ -157,6 +165,8 @@ describe("runtime bootstrap", () => {
     expect(deps.assistantName.length).toBeGreaterThan(0);
     expect(typeof deps.pollIntervalMs).toBe("number");
     expect(deps.triggerPattern).toBeInstanceOf(RegExp);
+    expect(typeof deps.hydrateMcpCredentials).toBe("function");
+    expect(typeof deps.clearMcpCredentials).toBe("function");
     expect(typeof deps.createAgentPool).toBe("function");
     expect(typeof deps.startRuntimeLoop).toBe("function");
   });

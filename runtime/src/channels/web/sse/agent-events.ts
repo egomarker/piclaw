@@ -686,6 +686,46 @@ export function createStreamingEventHandler(options: StreamingEventHandlerOption
       }
     }
 
+    if (event.type === "summarization_retry_scheduled") {
+      const e = event as { source?: string; reason?: string; attempt?: number; maxAttempts?: number; delayMs?: number; errorMessage?: string };
+      const source = e.source === "branchSummary" ? "branch" : "compaction";
+      const delaySec = e.delayMs ? Math.round(e.delayMs / 1000) : "?";
+      options.emitter.status({
+        ...base,
+        type: "intent",
+        title: `Retrying ${source} summary (attempt ${e.attempt ?? "?"}/${e.maxAttempts ?? "?"}, ${delaySec}s delay)`,
+        detail: sanitizeProviderErrorDetail(e.errorMessage || undefined) || undefined,
+        intent_key: "summarization_retry",
+        source: e.source ?? null,
+        reason: e.reason ?? null,
+        attempt: e.attempt ?? null,
+        maxAttempts: e.maxAttempts ?? null,
+        delayMs: e.delayMs ?? null,
+      });
+    }
+
+    if (event.type === "summarization_retry_attempt_start") {
+      const e = event as { source?: string; reason?: string };
+      const source = e.source === "branchSummary" ? "branch" : "compaction";
+      options.emitter.status({
+        ...base,
+        type: "intent",
+        title: `Retrying ${source} summary now`,
+        intent_key: "summarization_retry",
+        source: e.source ?? null,
+        reason: e.reason ?? null,
+      });
+    }
+
+    if (event.type === "summarization_retry_finished") {
+      options.emitter.status({
+        ...base,
+        type: "intent",
+        title: "Summary retry finished",
+        intent_key: "summarization_retry",
+      });
+    }
+
     if (event.type === "compaction_start") {
       const e = event as Record<string, unknown>;
       const reason = typeof e.reason === "string" ? e.reason : undefined;

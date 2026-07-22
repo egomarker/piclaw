@@ -14,7 +14,7 @@ import { AgentSessionManager, type PoolEntry } from "./session-manager.js";
 import { AgentToolFactory } from "./tool-factory.js";
 import { AgentTurnCoordinator } from "./turn-coordinator.js";
 import { lightweightPrewarmSession } from "./session.js";
-import { recordMessageUsage } from "./usage.js";
+import { installSessionUsageRecorder } from "./usage.js";
 import type { AgentPoolOptions } from "./contracts.js";
 import type { AgentBashOperations } from "./tool-factory.js";
 import type { PiclawCredentialStore } from "./credential-store.js";
@@ -88,7 +88,6 @@ export function createAgentPoolServices(options: AgentPoolServiceFactoryOptions)
       const entry = options.pool.get(chatJid);
       if (entry) entry.lastUsed = Date.now();
     },
-    recordMessageUsage,
     onInfo: options.onInfo,
     onWarn: options.onWarn,
     onError: options.onError,
@@ -132,7 +131,10 @@ export function createAgentPoolServices(options: AgentPoolServiceFactoryOptions)
     createDefaultTools: () => toolFactory.createDefaultTools(),
     createCustomToolOverrides: (chatJid) => toolFactory.createCustomToolOverrides(chatJid),
     getSessionExtensionFactories: (chatJid) => resolveSessionExtensionFactories(chatJid),
-    bindSession: (runtime, chatJid) => sessionBinder.bindSession(runtime, chatJid),
+    bindSession: async (runtime, chatJid) => {
+      installSessionUsageRecorder(runtime.session, chatJid, options.onWarn);
+      await sessionBinder.bindSession(runtime, chatJid);
+    },
     ensureBranchRegistration: (chatJid, session) => {
       branchManager.ensureBranchRegistration(chatJid, session);
     },

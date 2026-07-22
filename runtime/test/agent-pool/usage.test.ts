@@ -11,7 +11,7 @@ import "../helpers.js";
 
 import { initDatabase } from "../../src/db.js";
 import { getDb } from "../../src/db/connection.js";
-import { recordMessageUsage } from "../../src/agent-pool/usage.js";
+import { recordMessageUsage, recordSessionEventUsage } from "../../src/agent-pool/usage.js";
 
 describe("recordMessageUsage", () => {
   test("stores usage from a well-formed message", () => {
@@ -47,6 +47,7 @@ describe("recordMessageUsage", () => {
     expect(row.output_tokens).toBe(50);
     expect(row.reasoning_tokens).toBe(11);
     expect(row.total_tokens).toBe(165);
+    expect(row.usage_source).toBe("assistant");
     expect(row.model).toBe("gpt-4o");
     expect(row.run_at).toBe("2025-06-01T12:00:00.000Z");
   });
@@ -122,5 +123,74 @@ describe("recordMessageUsage", () => {
     const row = db.prepare("SELECT * FROM token_usage WHERE chat_jid = ?").get("test:usage-nots") as any;
     expect(row).toBeDefined();
     expect(row.run_at >= before).toBe(true);
+  });
+
+  test("stores tool-result usage from session events", () => {
+    initDatabase();
+    const db = getDb();
+
+    recordSessionEventUsage("test:usage-tool", {
+      type: "message_end",
+      message: {
+        role: "toolResult",
+        toolName: "delegate",
+        timestamp: 1_750_000_000_000,
+        usage: {
+          input: 12,
+          output: 7,
+          cacheRead: 3,
+          cacheWrite: 2,
+          totalTokens: 24,
+          cost: { input: 0.001, output: 0.002, cacheRead: 0.0001, cacheWrite: 0.0002, total: 0.0033 },
+        },
+      },
+    });
+
+    const row = db.prepare("SELECT * FROM token_usage WHERE chat_jid = ?").get("test:usage-tool") as any;
+    expect(row).toBeDefined();
+    expect(row.usage_source).toBe("tool");
+    expect(row.total_tokens).toBe(24);
+    expect(row.turns).toBe(0);
+    expect(row.model).toBeNull();
+  });
+
+  test("stores compaction and branch-summary usage from session events", () => {
+    initDatabase();
+    const db = getDb();
+
+    recordSessionEventUsage("test:usage-summaries", {
+      type: "session_compact",
+      compactionEntry: {
+        type: "compaction",
+        timestamp: "2026-01-02T03:04:05Z",
+        usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 120, cost: { total: 0.01 } },
+      },
+    });
+    recordSessionEventUsage("test:usage-summaries", {
+      type: "session_tree",
+      summaryEntry: {
+        type: "branch_summary",
+        timestamp: "2026-01-02T03:05:05Z",
+        usage: { input: 30, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 40, cost: { total: 0.003 } },
+      },
+    });
+
+    const rows = db.prepare("SELECT usage_source, total_tokens, cost_total FROM token_usage WHERE chat_jid = ? ORDER BY run_at ASC").all("test:usage-summaries") as any[];
+    expect(rows.map((row) => row.usage_source)).toEqual(["compaction", "branch_summary"]);
+    expect(rows.map((row) => row.total_tokens)).toEqual([120, 40]);
+    expect(rows.map((row) => row.cost_total)).toEqual([0.01, 0.003]);
+  });
+
+  test("ignores zero-value usage payloads", () => {
+    initDatabase();
+    const db = getDb();
+
+    recordSessionEventUsage("test:usage-zero", {
+      type: "message_end",
+      message: { role: "toolResult", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } } },
+    });
+
+    const row = db.prepare("SELECT COUNT(*) AS count FROM token_usage WHERE chat_jid = ?").get("test:usage-zero") as any;
+    expect(row.count).toBe(0);
   });
 });

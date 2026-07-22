@@ -5,7 +5,7 @@
  * control command (`/session-rotate`) and automatic rotation in AgentPool.
  */
 
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AgentSession, AgentSessionRuntime, SessionContext, SessionManager } from "@earendil-works/pi-coding-agent";
 import { closeOpenAICodexWebSocketSessions } from "@earendil-works/pi-ai/api/openai-codex-responses";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
@@ -159,6 +159,7 @@ export function seedRotatedSession(
   options: {
     sessionName?: string;
     model?: RotationModel | null;
+    thinkingLevel?: ThinkingLevel | null;
   }
 ): void {
   if (options.sessionName?.trim()) {
@@ -167,6 +168,9 @@ export function seedRotatedSession(
 
   if (options.model) {
     sessionManager.appendModelChange(options.model.provider, options.model.modelId);
+  }
+  if (options.thinkingLevel) {
+    sessionManager.appendThinkingLevelChange(options.thinkingLevel);
   }
 
   const carried = collectCarriedSummary(context.messages);
@@ -265,6 +269,7 @@ export function seedEmergencyRotatedSession(
   options: {
     sessionName?: string;
     model?: RotationModel | null;
+    thinkingLevel?: ThinkingLevel | null;
     reason?: string | null;
     previousSessionFile?: string | null;
     archivePath?: string | null;
@@ -276,6 +281,9 @@ export function seedEmergencyRotatedSession(
 
   if (options.model) {
     sessionManager.appendModelChange(options.model.provider, options.model.modelId);
+  }
+  if (options.thinkingLevel) {
+    sessionManager.appendThinkingLevelChange(options.thinkingLevel);
   }
 
   const emergency = buildEmergencyRotationSummary(context, options);
@@ -390,6 +398,26 @@ export function syncRotatedSessionModel(session: AgentSession, model: RotationMo
   return true;
 }
 
+/** Keep a successor session on the user's active thinking level after rotation. */
+export function syncRotatedSessionThinkingLevel(session: AgentSession, thinkingLevel: ThinkingLevel | null): boolean {
+  if (!thinkingLevel) return false;
+  const sessionLike = session as AgentSession & {
+    agent?: { state?: { thinkingLevel?: string } };
+  };
+  if (!sessionLike.agent?.state) return false;
+
+  const previous = session.thinkingLevel ?? null;
+  sessionLike.agent.state.thinkingLevel = thinkingLevel;
+  if (previous !== thinkingLevel) {
+    log.info("Synced rotated session thinking level to carried preference", {
+      operation: "session_rotation.sync_thinking_level",
+      previous,
+      next: thinkingLevel,
+    });
+  }
+  return true;
+}
+
 /** Rotate a persisted session into a newly-seeded successor session file. */
 export async function rotateSession(
   session: AgentSession,
@@ -470,6 +498,7 @@ export async function rotateSession(
   const currentModel = session.model
     ? { provider: session.model.provider, modelId: session.model.id }
     : context.model;
+  const currentThinkingLevel = session.thinkingLevel ?? context.thinkingLevel ?? null;
   const currentSessionName = session.sessionName?.trim() || undefined;
 
   let archived = false;
@@ -490,6 +519,7 @@ export async function rotateSession(
           seedEmergencyRotatedSession(sessionManager, context, {
             sessionName: currentSessionName,
             model: currentModel,
+            thinkingLevel: currentThinkingLevel,
             reason: emergencyReason,
             previousSessionFile,
             archivePath,
@@ -499,6 +529,7 @@ export async function rotateSession(
         seedRotatedSession(sessionManager, context, {
           sessionName: currentSessionName,
           model: currentModel,
+          thinkingLevel: currentThinkingLevel,
         });
       },
     });
@@ -519,6 +550,7 @@ export async function rotateSession(
     const activeSession = runtime.session;
     replacementSessionFile = activeSession.sessionFile?.trim() || replacementSessionFile;
     syncRotatedSessionModel(activeSession, currentModel);
+    syncRotatedSessionThinkingLevel(activeSession, currentThinkingLevel);
     forcePersistSessionFile(activeSession);
     closeOpenAICodexWebSocketSessions(previousSessionId);
     rmSync(previousSessionFile, { force: true });

@@ -72,7 +72,7 @@ async function* terminalEncryptedReasoningEvents(): AsyncIterable<any> {
   };
 }
 
-describe("Earendil 0.80.10 provider regressions", () => {
+describe("Earendil 0.81.x provider regressions", () => {
   test("built-in catalogs expose Fable 5 max, Copilot MAI Responses, corrected OpenRouter context, and OpenCode affinity", () => {
     const anthropicFable = getBuiltinModels("anthropic").find((model) => model.id === "claude-fable-5");
     expect(anthropicFable?.thinkingLevelMap).toMatchObject({ xhigh: "xhigh", max: "max" });
@@ -85,6 +85,25 @@ describe("Earendil 0.80.10 provider regressions", () => {
 
     const openCodeResponses = getBuiltinModels("opencode").find((model) => model.api === "openai-responses");
     expect(openCodeResponses?.compat).toMatchObject({ sessionAffinityFormat: "openai-nosession" });
+  });
+
+  test("Moonshot Kimi K3 metadata uses OpenAI thinking format with reasoning effort support", () => {
+    for (const provider of ["moonshotai", "moonshotai-cn"] as const) {
+      const kimiK3 = getBuiltinModels(provider).find((model) => model.id === "kimi-k3");
+      expect(kimiK3, provider).toBeDefined();
+      expect(kimiK3?.api).toBe("openai-completions");
+      expect(kimiK3?.reasoning).toBe(true);
+      expect(kimiK3?.thinkingLevelMap).toMatchObject({ low: "low", high: "high", max: "max" });
+      expect(kimiK3?.thinkingLevelMap?.minimal).toBeNull();
+      expect(kimiK3?.thinkingLevelMap?.medium).toBeNull();
+      expect(kimiK3?.compat).toMatchObject({
+        thinkingFormat: "openai",
+        supportsReasoningEffort: true,
+        supportsDeveloperRole: false,
+        requiresReasoningContentOnAssistantMessages: true,
+        deferredToolsMode: "kimi",
+      });
+    }
   });
 
   test("OpenRouter Responses uses its native session header and omits OpenAI session_id", async () => {

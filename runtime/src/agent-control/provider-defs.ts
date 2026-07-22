@@ -14,6 +14,7 @@ export interface ProviderDef {
   isCustom?: boolean;
   customApi?: string;
   customFields?: ProviderCustomField[];
+  customCompat?: Record<string, unknown>;
   hasExternalAuth?: boolean;
   authNote?: string;
 }
@@ -43,6 +44,7 @@ const REMOVED_PROVIDER_IDS = new Set([
 ]);
 
 const API_KEY_HINTS: Record<string, string> = {
+  "ant-ling": "...",
   anthropic: "sk-ant-...",
   "azure-openai-responses": "...",
   cerebras: "csk-...",
@@ -59,10 +61,15 @@ const API_KEY_HINTS: Record<string, string> = {
   mistral: "...",
   moonshotai: "sk-...",
   "moonshotai-cn": "sk-...",
+  nvidia: "nvapi-...",
   openai: "sk-proj-...",
   opencode: "oc-...",
   "opencode-go": "oc-...",
   openrouter: "sk-or-...",
+  "qwen-token-plan": "sk-sp-...",
+  "qwen-token-plan-cn": "sk-sp-...",
+  radius: "...",
+  together: "...",
   "vercel-ai-gateway": "...",
   xai: "xai-...",
   xiaomi: "XIAOMI_API_KEY",
@@ -70,10 +77,12 @@ const API_KEY_HINTS: Record<string, string> = {
   "xiaomi-token-plan-ams": "XIAOMI_TOKEN_PLAN_AMS_API_KEY",
   "xiaomi-token-plan-sgp": "XIAOMI_TOKEN_PLAN_SGP_API_KEY",
   zai: "ZAI_API_KEY",
+  "zai-coding-cn": "ZAI_CODING_CN_API_KEY",
 };
 
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   "amazon-bedrock": "Amazon Bedrock",
+  "ant-ling": "Ant Ling",
   anthropic: "Anthropic",
   "azure-openai-responses": "Azure OpenAI Responses",
   cerebras: "Cerebras",
@@ -92,11 +101,16 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   "minimax-cn": "MiniMax (China)",
   moonshotai: "Moonshot AI",
   "moonshotai-cn": "Moonshot AI (China)",
+  nvidia: "NVIDIA",
   opencode: "OpenCode Zen",
   "opencode-go": "OpenCode Go",
   "openai-codex": "OpenAI Codex",
   openai: "OpenAI",
   openrouter: "OpenRouter",
+  "qwen-token-plan": "Qwen Token Plan",
+  "qwen-token-plan-cn": "Qwen Token Plan CN",
+  radius: "Radius",
+  together: "Together",
   "vercel-ai-gateway": "Vercel AI Gateway",
   xai: "xAI",
   xiaomi: "Xiaomi MiMo (API billing)",
@@ -104,15 +118,20 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   "xiaomi-token-plan-ams": "Xiaomi MiMo Token Plan (AMS)",
   "xiaomi-token-plan-sgp": "Xiaomi MiMo Token Plan (SGP)",
   zai: "ZAI",
+  "zai-coding-cn": "Z.AI Coding CN",
 };
 
 const EXTERNAL_AUTH_NOTES: Record<string, string> = {
   "amazon-bedrock": "Configure AWS credentials (AWS_PROFILE, IAM environment variables, bearer token, or instance/task role) and region outside this login flow.",
   "google-vertex": "Configure Google Application Default Credentials plus GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION outside this login flow.",
+  "qwen-token-plan": "Qwen subscription token-plan provider. Use QWEN_TOKEN_PLAN_API_KEY or save the token-plan key here.",
+  "qwen-token-plan-cn": "Qwen China token-plan provider. Use QWEN_TOKEN_PLAN_CN_API_KEY or save the China token-plan key here.",
+  radius: "Radius supports OAuth subscription login and API-key gateways.",
   xiaomi: "Uses API billing credentials. Set XIAOMI_API_KEY or save an API key here; token-plan credentials use the regional xiaomi-token-plan-* providers.",
   "xiaomi-token-plan-cn": "Regional token-plan provider. Use XIAOMI_TOKEN_PLAN_CN_API_KEY or save the regional token-plan key here.",
   "xiaomi-token-plan-ams": "Regional token-plan provider. Use XIAOMI_TOKEN_PLAN_AMS_API_KEY or save the regional token-plan key here.",
   "xiaomi-token-plan-sgp": "Regional token-plan provider. Use XIAOMI_TOKEN_PLAN_SGP_API_KEY or save the regional token-plan key here.",
+  "zai-coding-cn": "Z.AI China coding-plan provider. Use ZAI_CODING_CN_API_KEY or save the API key here.",
 };
 
 function customProvider(
@@ -120,11 +139,13 @@ function customProvider(
   name: string,
   customApi: string,
   customFields: ProviderCustomField[],
+  customCompat?: Record<string, unknown>,
 ): ProviderDef {
-  return { id, name, hasOAuth: false, hasApiKey: false, isCustom: true, customApi, customFields };
+  return { id, name, hasOAuth: false, hasApiKey: false, isCustom: true, customApi, customFields, ...(customCompat ? { customCompat } : {}) };
 }
 
 export const PROVIDER_DEFS: ProviderDef[] = [
+  { id: "ant-ling", name: "Ant Ling", hasOAuth: false, hasApiKey: true, apiKeyHint: API_KEY_HINTS["ant-ling"] },
   { id: "anthropic", name: "Anthropic", hasOAuth: true, hasApiKey: true, apiKeyHint: API_KEY_HINTS.anthropic },
   { id: "github-copilot", name: "GitHub Copilot", hasOAuth: true, hasApiKey: false },
   { id: "openai-codex", name: "OpenAI Codex", hasOAuth: true, hasApiKey: false },
@@ -133,6 +154,7 @@ export const PROVIDER_DEFS: ProviderDef[] = [
   { id: "google", name: "Google Gemini", hasOAuth: false, hasApiKey: true, apiKeyHint: API_KEY_HINTS.google },
   { id: "deepseek", name: "DeepSeek", hasOAuth: false, hasApiKey: true, apiKeyHint: API_KEY_HINTS.deepseek },
   { id: "mistral", name: "Mistral", hasOAuth: false, hasApiKey: true, apiKeyHint: API_KEY_HINTS.mistral },
+  { id: "nvidia", name: "NVIDIA", hasOAuth: false, hasApiKey: true, apiKeyHint: API_KEY_HINTS.nvidia },
   { id: "groq", name: "Groq", hasOAuth: false, hasApiKey: true, apiKeyHint: API_KEY_HINTS.groq },
   { id: "cerebras", name: "Cerebras", hasOAuth: false, hasApiKey: true, apiKeyHint: API_KEY_HINTS.cerebras },
   {
@@ -158,7 +180,12 @@ export const PROVIDER_DEFS: ProviderDef[] = [
   { id: "xiaomi-token-plan-sgp", name: "Xiaomi MiMo Token Plan (SGP)", hasOAuth: false, hasApiKey: true, apiKeyHint: API_KEY_HINTS["xiaomi-token-plan-sgp"], authNote: EXTERNAL_AUTH_NOTES["xiaomi-token-plan-sgp"] },
   { id: "openrouter", name: "OpenRouter", hasOAuth: false, hasApiKey: true, apiKeyHint: API_KEY_HINTS.openrouter },
   { id: "vercel-ai-gateway", name: "Vercel AI Gateway", hasOAuth: false, hasApiKey: true, apiKeyHint: API_KEY_HINTS["vercel-ai-gateway"] },
+  { id: "qwen-token-plan", name: "Qwen Token Plan", hasOAuth: false, hasApiKey: true, apiKeyHint: API_KEY_HINTS["qwen-token-plan"], authNote: EXTERNAL_AUTH_NOTES["qwen-token-plan"] },
+  { id: "qwen-token-plan-cn", name: "Qwen Token Plan CN", hasOAuth: false, hasApiKey: true, apiKeyHint: API_KEY_HINTS["qwen-token-plan-cn"], authNote: EXTERNAL_AUTH_NOTES["qwen-token-plan-cn"] },
+  { id: "radius", name: "Radius", hasOAuth: true, hasApiKey: true, apiKeyHint: API_KEY_HINTS.radius, authNote: EXTERNAL_AUTH_NOTES.radius },
+  { id: "together", name: "Together", hasOAuth: false, hasApiKey: true, apiKeyHint: API_KEY_HINTS.together },
   { id: "zai", name: "ZAI", hasOAuth: false, hasApiKey: true, apiKeyHint: API_KEY_HINTS.zai },
+  { id: "zai-coding-cn", name: "Z.AI Coding CN", hasOAuth: false, hasApiKey: true, apiKeyHint: API_KEY_HINTS["zai-coding-cn"], authNote: EXTERNAL_AUTH_NOTES["zai-coding-cn"] },
   { id: "opencode", name: "OpenCode Zen", hasOAuth: false, hasApiKey: true, apiKeyHint: API_KEY_HINTS.opencode },
   { id: "opencode-go", name: "OpenCode Go", hasOAuth: false, hasApiKey: true, apiKeyHint: API_KEY_HINTS["opencode-go"] },
   { id: "kimi-coding", name: "Kimi For Coding", hasOAuth: false, hasApiKey: true, apiKeyHint: API_KEY_HINTS["kimi-coding"] },
@@ -202,6 +229,19 @@ export const PROVIDER_DEFS: ProviderDef[] = [
     { key: "modelIds", label: "Additional model IDs (comma-separated)", placeholder: "qwen3:latest", required: false },
     { key: "contextWindow", label: "Context window", placeholder: "128000", required: false },
   ]),
+  customProvider("llama-cpp", "llama.cpp router", "openai-completions", [
+    { key: "baseUrl", label: "Base URL", placeholder: "http://127.0.0.1:8080/v1", required: true },
+    { key: "modelId", label: "Model ID", placeholder: "local-model", required: true },
+    { key: "modelIds", label: "Additional model IDs (comma-separated)", placeholder: "qwen3-8b,gemma-3-12b", required: false },
+    { key: "contextWindow", label: "Context window", placeholder: "32768", required: false },
+  ], {
+    supportsStore: false,
+    supportsStrictMode: false,
+    supportsDeveloperRole: false,
+    supportsReasoningEffort: false,
+    supportsLongCacheRetention: false,
+    maxTokensField: "max_tokens",
+  }),
   customProvider("openai-compatible", "OpenAI-compatible", "openai-completions", [
     { key: "baseUrl", label: "Base URL", placeholder: "https://api.example.com/v1", required: true },
     { key: "apiKey", label: "API Key", placeholder: "sk-...", required: true },

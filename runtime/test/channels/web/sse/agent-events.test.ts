@@ -83,6 +83,50 @@ describe("web SSE provider retry events", () => {
   });
 });
 
+describe("web SSE summarization retry events", () => {
+  it("surfaces compaction and branch-summary retry lifecycle", () => {
+    const { handler, statuses } = makeHandler();
+
+    handler({
+      type: "summarization_retry_scheduled",
+      source: "compaction",
+      reason: "overflow",
+      attempt: 2,
+      maxAttempts: 3,
+      delayMs: 1500,
+      errorMessage: "socket connection was closed",
+    } as any);
+    handler({
+      type: "summarization_retry_attempt_start",
+      source: "branchSummary",
+    } as any);
+    handler({ type: "summarization_retry_finished" } as any);
+
+    expect(statuses[0]).toMatchObject({
+      type: "intent",
+      title: "Retrying compaction summary (attempt 2/3, 2s delay)",
+      detail: "socket connection was closed",
+      intent_key: "summarization_retry",
+      source: "compaction",
+      reason: "overflow",
+      attempt: 2,
+      maxAttempts: 3,
+      delayMs: 1500,
+    });
+    expect(statuses[1]).toMatchObject({
+      type: "intent",
+      title: "Retrying branch summary now",
+      intent_key: "summarization_retry",
+      source: "branchSummary",
+    });
+    expect(statuses[2]).toMatchObject({
+      type: "intent",
+      title: "Summary retry finished",
+      intent_key: "summarization_retry",
+    });
+  });
+});
+
 describe("web SSE agent compaction events", () => {
   it("includes structured Piclaw trigger fields on compaction start and end", () => {
     const { handler, statuses } = makeHandler();

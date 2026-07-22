@@ -17,15 +17,16 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { Api, Model, Provider } from "@earendil-works/pi-ai";
 
 type AzureProviderConfig = Parameters<ExtensionAPI["registerProvider"]>[1];
-type AzureProviderRegistrar = (name: string, config: AzureProviderConfig) => void;
+type AzureProviderConfigRegistrar = (name: string, config: AzureProviderConfig) => void;
+type AzureNativeProviderRegistrar = (provider: Provider) => void;
 import OpenAI from "openai";
 import {
   AssistantMessageEventStream,
   getSupportedThinkingLevels,
   type AssistantMessage,
-  type Model,
   type ToolCall,
   type ToolResultMessage,
 } from "@earendil-works/pi-ai";
@@ -1637,7 +1638,7 @@ function streamSimpleFoundryOpenAICompletions(model: any, context: any, options:
  * wrappers, while this function is responsible for publishing the provider and
  * model metadata that the rest of piclaw sees.
  */
-export function registerAzureProviders(register: AzureProviderRegistrar, token: string): void {
+export function registerAzureProviders(register: AzureProviderConfigRegistrar, token: string): void {
   const openaiModels = MODEL_IDS.flatMap((id, idx) => {
     const spec = MODEL_SPECS[id] || DEFAULT_AZURE_SPEC;
     const caps = MODEL_CAPABILITIES[id];
@@ -1741,6 +1742,40 @@ export function registerAzureProviders(register: AzureProviderRegistrar, token: 
   }
 }
 
+function toAzureNativeProvider(providerId: string, config: AzureProviderConfig, token: string): Provider {
+  const streamSimple = config.streamSimple;
+  if (typeof streamSimple !== "function") throw new Error(`Azure provider ${providerId} has no streamSimple implementation`);
+  const models = (config.models ?? []).map((model) => ({
+    ...model,
+    provider: providerId,
+    baseUrl: model.baseUrl ?? config.baseUrl,
+    api: model.api ?? config.api,
+    headers: { ...(config.headers ?? {}), ...(model.headers ?? {}) },
+  })) as Model<Api>[];
+  const apiKey = config.apiKey ?? token;
+  return {
+    id: providerId,
+    name: config.name ?? providerId,
+    baseUrl: config.baseUrl,
+    headers: config.headers,
+    auth: {
+      apiKey: {
+        name: `${config.name ?? providerId} token`,
+        resolve: async () => ({ auth: { apiKey }, source: STATIC_API_KEY ? "static api key" : "azure token bootstrap" }),
+      },
+    },
+    getModels: () => models,
+    stream: (model, context, options) => streamSimple(model, context, options),
+    streamSimple,
+  };
+}
+
+export function registerAzureNativeProviders(register: AzureNativeProviderRegistrar, token: string): void {
+  const registrations: Array<{ name: string; config: AzureProviderConfig }> = [];
+  registerAzureProviders((name, config) => registrations.push({ name, config }), token);
+  for (const { name, config } of registrations) register(toAzureNativeProvider(name, config, token));
+}
+
 export async function repairAzureContext(event: { messages: any[] }, ctx: { model?: any }): Promise<{ messages: any[] } | void> {
   const currentModel = ctx.model;
   if (!currentModel) return;
@@ -1822,7 +1857,7 @@ function isAzureBootstrapTimerApi(value: unknown): value is AzureBootstrapTimerA
 }
 
 export function startAzureProviderBootstrap(
-  register: AzureProviderRegistrar,
+  register: AzureNativeProviderRegistrar,
   options: AzureBootstrapTimerApi | AzureProviderBootstrapOptions = {},
 ): { stop: () => void; refresh: () => Promise<void> } {
   const timerApi = isAzureBootstrapTimerApi(options) ? options : options.timerApi ?? globalThis;
@@ -1851,7 +1886,7 @@ export function startAzureProviderBootstrap(
     if (stopped) return;
     logExtensionLoaded();
     if (staticApiKey) {
-      registerAzureProviders(register, staticApiKey);
+      registerAzureNativeProviders(register, staticApiKey);
       return;
     }
     const cache = await tokenProvider();
@@ -1861,7 +1896,7 @@ export function startAzureProviderBootstrap(
       } catch (error) {
         console.error("[azure-openai] Model capability refresh failed; retaining last-good/static model metadata:", error);
       }
-      if (!stopped) registerAzureProviders(register, cache.accessToken);
+      if (!stopped) registerAzureNativeProviders(register, cache.accessToken);
     }
     if (!stopped) scheduleNext(cache.expiresOnEpoch);
   };

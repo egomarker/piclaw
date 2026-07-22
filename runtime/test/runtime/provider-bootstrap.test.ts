@@ -22,6 +22,23 @@ function splitCsv(value: string | undefined): string[] {
   return (value ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
 }
 
+function makeProvider(id: string, baseUrl: string, apiKey: string, modelIds: string[]) {
+  return {
+    id,
+    name: id,
+    baseUrl,
+    auth: {
+      apiKey: {
+        name: `${id} token`,
+        resolve: async () => ({ auth: { apiKey }, source: "test" }),
+      },
+    },
+    getModels: () => modelIds.map((modelId) => ({ id: modelId, provider: id, baseUrl, api: "test-api", input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } })),
+    stream: () => { throw new Error("unused"); },
+    streamSimple: () => { throw new Error("unused"); },
+  } as any;
+}
+
 function installFakeAzureBootstrapLoader(): void {
   setProviderBootstrapLoaderForTests(async () => ({
     startAzureProviderBootstrap(register) {
@@ -36,11 +53,7 @@ function installFakeAzureBootstrapLoader(): void {
               const payload = await response.json() as { access_token?: string };
               token = payload.access_token || "";
             }
-            register("azure-openai", {
-              baseUrl: aoaiBaseUrl,
-              apiKey: token || undefined,
-              models: splitCsv(process.env.AOAI_MODEL_IDS).map((id) => ({ id })),
-            });
+            register(makeProvider("azure-openai", aoaiBaseUrl, token, splitCsv(process.env.AOAI_MODEL_IDS)));
           }
 
           const foundryBaseUrl = process.env.FOUNDRY_BASE_URL;
@@ -51,11 +64,7 @@ function installFakeAzureBootstrapLoader(): void {
               const payload = await response.json() as { access_token?: string };
               token = payload.access_token || "";
             }
-            register("azure-foundry", {
-              baseUrl: foundryBaseUrl,
-              apiKey: token || undefined,
-              models: splitCsv(process.env.FOUNDRY_MODEL_IDS).map((id) => ({ id })),
-            });
+            register(makeProvider("azure-foundry", foundryBaseUrl, token, splitCsv(process.env.FOUNDRY_MODEL_IDS)));
           }
         },
       };
@@ -63,16 +72,22 @@ function installFakeAzureBootstrapLoader(): void {
   }));
 }
 
-function createPool(registrations: Array<{
-  provider: string;
-  config: Parameters<ProviderBootstrapAgentPool["registerModelProvider"]>[1];
-}>): ProviderBootstrapAgentPool {
+function createPool(registrations: any[]): ProviderBootstrapAgentPool {
   return {
     hasProviderModels: () => false,
     registerModelProvider: (provider, config) => {
       registrations.push({ provider, config });
     },
+    registerNativeModelProvider: (provider) => {
+      registrations.push({ provider: provider.id, native: provider });
+    },
   };
+}
+
+async function expectNativeRegistration(registration: any, providerId: string, apiKey: string, modelIds: string[]): Promise<void> {
+  expect(registration.provider).toBe(providerId);
+  expect(await registration.native.auth.apiKey.resolve()).toMatchObject({ auth: { apiKey } });
+  expect(registration.native.getModels().map((model: any) => model.id)).toEqual(modelIds);
 }
 
 describe("runtime provider bootstrap", () => {
@@ -89,17 +104,12 @@ describe("runtime provider bootstrap", () => {
       FOUNDRY_MODEL_NAMES: undefined,
     }));
 
-    const registrations: Array<{
-      provider: string;
-      config: Parameters<ProviderBootstrapAgentPool["registerModelProvider"]>[1];
-    }> = [];
+    const registrations: any[] = [];
 
     await registerOptionalProviders(createPool(registrations));
 
     expect(registrations).toHaveLength(1);
-    expect(registrations[0].provider).toBe("azure-openai");
-    expect(registrations[0].config.apiKey).toBe("token");
-    expect(registrations[0].config.models?.map((m) => m.id)).toEqual(["gpt-5", "gpt-5-mini"]);
+    await expectNativeRegistration(registrations[0], "azure-openai", "token", ["gpt-5", "gpt-5-mini"]);
   });
 
   test("registers azure-openai provider models immediately in managed-identity mode", async () => {
@@ -124,10 +134,7 @@ describe("runtime provider bootstrap", () => {
       headers: { "Content-Type": "application/json" },
     })) as typeof fetch;
 
-    const registrations: Array<{
-      provider: string;
-      config: Parameters<ProviderBootstrapAgentPool["registerModelProvider"]>[1];
-    }> = [];
+    const registrations: any[] = [];
 
     try {
       await registerOptionalProviders(createPool(registrations));
@@ -136,9 +143,7 @@ describe("runtime provider bootstrap", () => {
     }
 
     expect(registrations).toHaveLength(1);
-    expect(registrations[0].provider).toBe("azure-openai");
-    expect(registrations[0].config.apiKey).toBe("token-for-tests");
-    expect(registrations[0].config.models?.map((m) => m.id)).toEqual(["gpt-5", "gpt-5-mini"]);
+    await expectNativeRegistration(registrations[0], "azure-openai", "token-for-tests", ["gpt-5", "gpt-5-mini"]);
   });
 
   test("registers azure-foundry provider models when Foundry env is configured", async () => {
@@ -154,17 +159,12 @@ describe("runtime provider bootstrap", () => {
       FOUNDRY_MODEL_NAMES: "Mistral Large 3,Mistral Small 3",
     }));
 
-    const registrations: Array<{
-      provider: string;
-      config: Parameters<ProviderBootstrapAgentPool["registerModelProvider"]>[1];
-    }> = [];
+    const registrations: any[] = [];
 
     await registerOptionalProviders(createPool(registrations));
 
     expect(registrations).toHaveLength(1);
-    expect(registrations[0].provider).toBe("azure-foundry");
-    expect(registrations[0].config.apiKey).toBe("foundry-token");
-    expect(registrations[0].config.models?.map((m) => m.id)).toEqual(["mistral-large-3", "mistral-small-3"]);
+    await expectNativeRegistration(registrations[0], "azure-foundry", "foundry-token", ["mistral-large-3", "mistral-small-3"]);
   });
 
   test("registers azure-foundry provider models immediately in managed-identity mode", async () => {
@@ -189,10 +189,7 @@ describe("runtime provider bootstrap", () => {
       headers: { "Content-Type": "application/json" },
     })) as typeof fetch;
 
-    const registrations: Array<{
-      provider: string;
-      config: Parameters<ProviderBootstrapAgentPool["registerModelProvider"]>[1];
-    }> = [];
+    const registrations: any[] = [];
 
     try {
       await registerOptionalProviders(createPool(registrations));
@@ -201,9 +198,7 @@ describe("runtime provider bootstrap", () => {
     }
 
     expect(registrations).toHaveLength(1);
-    expect(registrations[0].provider).toBe("azure-foundry");
-    expect(registrations[0].config.apiKey).toBe("token-for-tests");
-    expect(registrations[0].config.models?.map((m) => m.id)).toEqual(["mistral-large-3", "mistral-small-3"]);
+    await expectNativeRegistration(registrations[0], "azure-foundry", "token-for-tests", ["mistral-large-3", "mistral-small-3"]);
   });
 
   test("repeated registration has one process owner and stopOptionalProviders stops it", async () => {

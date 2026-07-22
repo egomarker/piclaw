@@ -637,7 +637,12 @@ async function handleStep2(
 
     const allIds = modelIds ? modelIds.split(",").map((s) => s.trim()).filter(Boolean) : [modelId];
     if (modelId && !allIds.includes(modelId)) allIds.unshift(modelId);
-    const models = allIds.map((id) => ({ id, name: id, ...(contextWindow ? { contextWindow } : {}) }));
+    const models = allIds.map((id) => ({
+      id,
+      name: id,
+      ...(contextWindow ? { contextWindow } : {}),
+      ...(def.customCompat ? { compat: def.customCompat } : {}),
+    }));
 
     backupFile(getModelsJsonPath());
     const modelsJson = readJsonFile(getModelsJsonPath()) as { providers?: Record<string, unknown> };
