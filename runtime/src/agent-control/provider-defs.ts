@@ -14,6 +14,7 @@ export interface ProviderDef {
   isCustom?: boolean;
   customApi?: string;
   customFields?: ProviderCustomField[];
+  customCompat?: Record<string, unknown>;
   hasExternalAuth?: boolean;
   authNote?: string;
 }
@@ -120,8 +121,9 @@ function customProvider(
   name: string,
   customApi: string,
   customFields: ProviderCustomField[],
+  customCompat?: Record<string, unknown>,
 ): ProviderDef {
-  return { id, name, hasOAuth: false, hasApiKey: false, isCustom: true, customApi, customFields };
+  return { id, name, hasOAuth: false, hasApiKey: false, isCustom: true, customApi, customFields, ...(customCompat ? { customCompat } : {}) };
 }
 
 export const PROVIDER_DEFS: ProviderDef[] = [
@@ -202,6 +204,19 @@ export const PROVIDER_DEFS: ProviderDef[] = [
     { key: "modelIds", label: "Additional model IDs (comma-separated)", placeholder: "qwen3:latest", required: false },
     { key: "contextWindow", label: "Context window", placeholder: "128000", required: false },
   ]),
+  customProvider("llama-cpp", "llama.cpp router", "openai-completions", [
+    { key: "baseUrl", label: "Base URL", placeholder: "http://127.0.0.1:8080/v1", required: true },
+    { key: "modelId", label: "Model ID", placeholder: "local-model", required: true },
+    { key: "modelIds", label: "Additional model IDs (comma-separated)", placeholder: "qwen3-8b,gemma-3-12b", required: false },
+    { key: "contextWindow", label: "Context window", placeholder: "32768", required: false },
+  ], {
+    supportsStore: false,
+    supportsStrictMode: false,
+    supportsDeveloperRole: false,
+    supportsReasoningEffort: false,
+    supportsLongCacheRetention: false,
+    maxTokensField: "max_tokens",
+  }),
   customProvider("openai-compatible", "OpenAI-compatible", "openai-completions", [
     { key: "baseUrl", label: "Base URL", placeholder: "https://api.example.com/v1", required: true },
     { key: "apiKey", label: "API Key", placeholder: "sk-...", required: true },

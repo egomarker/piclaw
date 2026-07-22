@@ -15,6 +15,25 @@ describe("provider defs", () => {
     expect(provider?.customFields?.map((field) => field.key)).toEqual(["baseUrl", "apiKey", "modelId", "modelIds"]);
   });
 
+  test("llama.cpp router is exposed as a local OpenAI-compatible custom provider", () => {
+    const provider = PROVIDER_DEFS.find((entry) => entry.id === "llama-cpp");
+    expect(provider).toMatchObject({
+      name: "llama.cpp router",
+      isCustom: true,
+      hasApiKey: false,
+      customApi: "openai-completions",
+      customCompat: {
+        supportsStore: false,
+        supportsStrictMode: false,
+        supportsDeveloperRole: false,
+        supportsReasoningEffort: false,
+        supportsLongCacheRetention: false,
+        maxTokensField: "max_tokens",
+      },
+    });
+    expect(provider?.customFields?.map((field) => field.key)).toEqual(["baseUrl", "modelId", "modelIds", "contextWindow"]);
+  });
+
   test("tracks current built-in providers and drops removed Google subscription providers", () => {
     const ids = getProviderDefs().map((entry) => entry.id);
     expect(ids).toContain("cloudflare-ai-gateway");

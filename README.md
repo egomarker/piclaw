@@ -38,7 +38,7 @@ docker run -d \
   ghcr.io/rcarmo/piclaw:latest
 ```
 
-Open `http://localhost:8080` and type `/login` to configure your LLM provider, including custom OpenAI-compatible endpoints. The web UI ships with English, Simplified Chinese, and Japanese strings; switch languages in Settings.
+Open `http://localhost:8080` and type `/login` to configure your LLM provider, including custom OpenAI-compatible endpoints and local [llama.cpp routers](docs/llama-cpp.md). The web UI ships with English, Simplified Chinese, and Japanese strings; switch languages in Settings.
 
 > [!TIP]
 > Keep `--init` enabled for `docker run` / `podman run` so the runtime inserts a tiny init process for signal forwarding and zombie reaping. The bundled `docker-compose.yml` now sets the equivalent `init: true` flag.
