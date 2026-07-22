@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { Credential } from "@earendil-works/pi-ai";
-import { FileCredentialStore } from "../../src/agent-pool/credential-store.js";
+import { FileCredentialStore, isTransientOAuthRefreshError } from "../../src/agent-pool/credential-store.js";
 
 const roots: string[] = [];
 async function createStore(initial: Record<string, Credential> = {}) {
@@ -78,6 +78,120 @@ describe("FileCredentialStore", () => {
       return undefined;
     });
     expect(post).toMatchObject({ type: "oauth", access: "new" });
+  });
+
+  test("retries transient OAuth refresh failures under the same serialized mutation", async () => {
+    const delays: number[] = [];
+    const { authPath } = await createStore({ oauth: { type: "oauth", access: "old", refresh: "refresh", expires: 1 } });
+    const store = new FileCredentialStore(authPath, {
+      maxRetries: 2,
+      baseDelayMs: 100,
+      maxDelayMs: 1_000,
+      random: () => 0.5,
+      sleep: async (delayMs) => { delays.push(delayMs); },
+    });
+    let calls = 0;
+
+    const refreshed = await store.modify("oauth", async (current) => {
+      calls += 1;
+      expect(current).toMatchObject({ type: "oauth", access: "old", refresh: "refresh" });
+      if (calls < 3) throw new Error(calls === 1 ? "fetch failed" : "503 Service Unavailable");
+      return { type: "oauth", access: "new", refresh: "rotated", expires: Date.now() + 60_000 };
+    });
+
+    expect(calls).toBe(3);
+    expect(delays).toEqual([100, 200]);
+    expect(refreshed).toMatchObject({ type: "oauth", access: "new", refresh: "rotated" });
+    expect(await store.read("oauth")).toMatchObject({ type: "oauth", access: "new", refresh: "rotated" });
+  });
+
+  test("serializes concurrent refresh contenders around one retry sequence", async () => {
+    const { authPath } = await createStore({ oauth: { type: "oauth", access: "old", refresh: "refresh", expires: 1 } });
+    const delays: number[] = [];
+    const owner = new FileCredentialStore(authPath, {
+      maxRetries: 1,
+      baseDelayMs: 10,
+      random: () => 0.5,
+      sleep: async (delayMs) => { delays.push(delayMs); await Bun.sleep(5); },
+    });
+    const waiter = new FileCredentialStore(authPath, {
+      maxRetries: 1,
+      sleep: async () => { throw new Error("waiter should not retry"); },
+    });
+    let ownerCalls = 0;
+    let waiterCalls = 0;
+    let ownerEntered!: () => void;
+    const ownerHasLock = new Promise<void>((resolve) => { ownerEntered = resolve; });
+
+    const ownerResultPromise = owner.modify("oauth", async () => {
+      ownerCalls += 1;
+      ownerEntered();
+      if (ownerCalls === 1) throw new Error("503 Service Unavailable");
+      return { type: "oauth", access: "new", refresh: "rotated", expires: Date.now() + 60_000 };
+    });
+    await ownerHasLock;
+    const waiterResultPromise = waiter.modify("oauth", async (current) => {
+      waiterCalls += 1;
+      expect(current).toMatchObject({ type: "oauth", access: "new", refresh: "rotated" });
+      return undefined;
+    });
+
+    const [ownerResult, waiterResult] = await Promise.all([ownerResultPromise, waiterResultPromise]);
+    expect(ownerCalls).toBe(2);
+    expect(waiterCalls).toBe(1);
+    expect(delays).toEqual([10]);
+    expect(ownerResult).toMatchObject({ type: "oauth", access: "new" });
+    expect(waiterResult).toMatchObject({ type: "oauth", access: "new" });
+  });
+
+  test("does not retry permanent OAuth refresh failures", async () => {
+    const { authPath } = await createStore({ oauth: { type: "oauth", access: "old", refresh: "refresh", expires: 1 } });
+    const store = new FileCredentialStore(authPath, {
+      maxRetries: 3,
+      sleep: async () => { throw new Error("sleep should not run"); },
+    });
+    for (const message of [
+      "400 Bad Request: invalid_grant",
+      "401 Unauthorized",
+      "refresh token revoked",
+    ]) {
+      let calls = 0;
+      await expect(store.modify("oauth", async () => {
+        calls += 1;
+        throw new Error(message);
+      })).rejects.toThrow(message);
+      expect(calls).toBe(1);
+    }
+    expect(await store.read("oauth")).toMatchObject({ type: "oauth", access: "old", refresh: "refresh" });
+  });
+
+  test("does not retry a valid OAuth credential mutation", async () => {
+    const { authPath } = await createStore({ oauth: { type: "oauth", access: "valid", refresh: "refresh", expires: Date.now() + 60_000 } });
+    const store = new FileCredentialStore(authPath, { maxRetries: 2, sleep: async () => undefined });
+    let calls = 0;
+    await expect(store.modify("oauth", async () => {
+      calls += 1;
+      throw new Error("503 Service Unavailable");
+    })).rejects.toThrow("503 Service Unavailable");
+    expect(calls).toBe(1);
+  });
+
+  test("does not retry non-OAuth credential mutations", async () => {
+    const { authPath } = await createStore({ api: { type: "api_key", key: "old" } });
+    const store = new FileCredentialStore(authPath, { maxRetries: 2, sleep: async () => undefined });
+    let calls = 0;
+    await expect(store.modify("api", async () => {
+      calls += 1;
+      throw new Error("503 Service Unavailable");
+    })).rejects.toThrow("503 Service Unavailable");
+    expect(calls).toBe(1);
+  });
+
+  test("classifies nested transient and permanent OAuth errors", () => {
+    expect(isTransientOAuthRefreshError(new Error("OAuth refresh failed", { cause: new Error("429 Too Many Requests") }))).toBe(true);
+    expect(isTransientOAuthRefreshError({ code: "ETIMEDOUT" })).toBe(true);
+    expect(isTransientOAuthRefreshError(new Error("OAuth refresh failed", { cause: new Error("400 invalid_grant") }))).toBe(false);
+    expect(isTransientOAuthRefreshError(new Error("401 Unauthorized"))).toBe(false);
   });
 
   test("delete does not overwrite unrelated providers", async () => {
