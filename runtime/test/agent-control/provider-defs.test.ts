@@ -36,26 +36,45 @@ describe("provider defs", () => {
 
   test("tracks current built-in providers and drops removed Google subscription providers", () => {
     const ids = getProviderDefs().map((entry) => entry.id);
+    expect(ids).toContain("ant-ling");
     expect(ids).toContain("cloudflare-ai-gateway");
     expect(ids).toContain("cloudflare-workers-ai");
     expect(ids).toContain("moonshotai");
     expect(ids).toContain("moonshotai-cn");
+    expect(ids).toContain("nvidia");
+    expect(ids).toContain("qwen-token-plan");
+    expect(ids).toContain("qwen-token-plan-cn");
+    expect(ids).toContain("radius");
+    expect(ids).toContain("together");
     expect(ids).toContain("xiaomi");
     expect(ids).toContain("xiaomi-token-plan-cn");
     expect(ids).toContain("xiaomi-token-plan-ams");
     expect(ids).toContain("xiaomi-token-plan-sgp");
+    expect(ids).toContain("zai-coding-cn");
     expect(ids).not.toContain("google-gemini-cli");
     expect(ids).not.toContain("google-antigravity");
     expect(ids).not.toContain("antigravity");
   });
 
-  test("documents Xiaomi MiMo API billing and regional token-plan provider split", () => {
+  test("documents upstream token-plan and regional provider splits", () => {
     const defs = getProviderDefs();
+    expect(defs.find((entry) => entry.id === "qwen-token-plan")).toMatchObject({
+      name: "Qwen Token Plan", hasApiKey: true, apiKeyHint: "sk-sp-...",
+    });
+    expect(defs.find((entry) => entry.id === "qwen-token-plan-cn")).toMatchObject({
+      name: "Qwen Token Plan CN", hasApiKey: true, apiKeyHint: "sk-sp-...",
+    });
+    expect(defs.find((entry) => entry.id === "radius")).toMatchObject({
+      name: "Radius", hasOAuth: true, hasApiKey: true,
+    });
     expect(defs.find((entry) => entry.id === "xiaomi")).toMatchObject({
       name: "Xiaomi MiMo (API billing)", hasApiKey: true, apiKeyHint: "XIAOMI_API_KEY",
     });
     expect(defs.find((entry) => entry.id === "xiaomi-token-plan-ams")).toMatchObject({
       name: "Xiaomi MiMo Token Plan (AMS)", hasApiKey: true, apiKeyHint: "XIAOMI_TOKEN_PLAN_AMS_API_KEY",
+    });
+    expect(defs.find((entry) => entry.id === "zai-coding-cn")).toMatchObject({
+      name: "Z.AI Coding CN", hasApiKey: true, apiKeyHint: "ZAI_CODING_CN_API_KEY",
     });
   });
 
