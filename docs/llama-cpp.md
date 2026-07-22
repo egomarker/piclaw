@@ -2,6 +2,8 @@
 
 Piclaw can use a local `llama.cpp` OpenAI-compatible server or router through the **llama.cpp router** provider preset in `/login`.
 
+Piclaw currently configures llama.cpp routers through `/login`. It does not implement upstream Pi's `/llama` Hugging Face search, download, load, or unload workflow.
+
 ## Requirements
 
 Run `llama-server` or a compatible router with the OpenAI-compatible API enabled. The default Piclaw preset expects:
@@ -64,4 +66,4 @@ The preset stores model metadata in `~/.pi/agent/models.json` and reloads the ru
 - The preset uses `openai-completions`, matching llama.cpp’s OpenAI-compatible chat/completions API.
 - No API key is required by default. If your router requires one, use the generic **OpenAI-compatible** provider instead.
 - The compatibility flags avoid hosted-provider assumptions that local routers often do not implement.
-- Local models are also treated as local-lite prompt targets by Piclaw’s prompt-profile extension.
+- The `llama-cpp` provider preset is treated as a local-lite prompt target by Piclaw’s prompt-profile extension, even when the router URL is not local. This keeps startup context and active tools small for local GGUF models.

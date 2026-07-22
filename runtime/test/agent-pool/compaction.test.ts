@@ -307,6 +307,107 @@ test("estimateContextTokensFromSession does not let stale native usage undercoun
   expect(estimateContextTokensFromSession(session)).toBeGreaterThan(4_000);
 });
 
+test("estimateContextTokensFromSession clamps cached estimates to fresh provider usage", () => {
+  let usageTokens = 100_000;
+  const session = {
+    getContextUsage: () => ({ tokens: usageTokens }),
+    sessionManager: {
+      getLeafId: () => "leaf-provider-cache",
+      getEntries: () => ["same-entry-count"],
+      buildSessionContext: () => ({ messages: [{ role: "user", content: [{ type: "text", text: "small" }] }] }),
+    },
+  } as any;
+
+  expect(estimateContextTokensFromSession(session)).toBe(100_000);
+  usageTokens = 321_100;
+  expect(estimateContextTokensFromSession(session)).toBe(321_100);
+});
+
+test("estimateContextTokensFromSession keeps compacted contexts below stale provider usage", () => {
+  let providerTokens = 150_000;
+  const session = {
+    getContextUsage: () => ({ tokens: providerTokens }),
+    sessionManager: {
+      getLeafId: () => "leaf-compacted-cache",
+      getEntries: () => ["same-entry-count"],
+      buildSessionContext: () => ({
+        messages: [
+          { role: "compactionSummary", summary: "small summary", tokensBefore: 150_000 },
+          { role: "assistant", content: [{ type: "text", text: "kept" }] },
+        ],
+      }),
+    },
+  } as any;
+
+  expect(estimateContextTokensFromSession(session)).toBeLessThan(150_000);
+  providerTokens = 200_000;
+  expect(estimateContextTokensFromSession(session)).toBeLessThan(150_000);
+});
+
+test("getAutoCompactionTokenStatusForSession uses fresh provider usage above threshold despite cached lower estimate", () => {
+  let usageTokens = 213_300;
+  const chatJid = "web:fresh-provider-threshold";
+  const session = {
+    getContextUsage: () => ({ tokens: usageTokens }),
+    model: { provider: "openai-codex", id: "gpt-5.5", contextWindow: 372_000 },
+    sessionManager: {
+      getLeafId: () => "leaf-threshold",
+      getEntries: () => ["same-entry-count"],
+      buildSessionContext: () => ({ messages: [{ role: "user", content: [{ type: "text", text: "small" }] }] }),
+    },
+  } as any;
+
+  const before = getAutoCompactionTokenStatusForSession(session, chatJid)!;
+  expect(before.rawContextTokens).toBe(213_300);
+  expect(before.tokenStatus.tokenLimitReached).toBe(false);
+
+  usageTokens = 321_100;
+  const after = getAutoCompactionTokenStatusForSession(session, chatJid)!;
+  expect(after.rawContextTokens).toBe(321_100);
+  expect(after.tokenStatus.tokenLimitReached).toBe(true);
+});
+
+test("maybeAutoCompactSessionBeforePrompt triggers from fresh provider usage even after a cached lower estimate", async () => {
+  const previousScope = process.env.PICLAW_AUTO_COMPACTION_SCOPE;
+  const previousThreshold = process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT;
+  process.env.PICLAW_AUTO_COMPACTION_SCOPE = "total";
+  process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT = "75";
+  try {
+    let usageTokens = 213_300;
+    let compactCalls = 0;
+    const chatJid = "web:fresh-provider-auto-compact";
+    const session = {
+      getContextUsage: () => ({ tokens: usageTokens }),
+      model: { provider: "openai-codex", id: "gpt-5.5", contextWindow: 372_000 },
+      settingsManager: { getCompactionSettings: () => ({ enabled: true, reserveTokens: 96_000 }) },
+      isStreaming: false,
+      isCompacting: false,
+      isRetrying: false,
+      sessionManager: {
+        getLeafId: () => "leaf-auto-threshold",
+        getEntries: () => ["same-entry-count"],
+        buildSessionContext: () => ({ messages: [{ role: "user", content: [{ type: "text", text: "small" }] }] }),
+      },
+      async compact() {
+        compactCalls += 1;
+        usageTokens = 50_000;
+      },
+    } as any;
+
+    await maybeAutoCompactSessionBeforePrompt(session, chatJid, { onInfo: () => undefined, onWarn: () => undefined }, () => undefined);
+    expect(compactCalls).toBe(0);
+
+    usageTokens = 321_100;
+    await maybeAutoCompactSessionBeforePrompt(session, chatJid, { onInfo: () => undefined, onWarn: () => undefined }, () => undefined);
+    expect(compactCalls).toBe(1);
+  } finally {
+    if (previousScope === undefined) delete process.env.PICLAW_AUTO_COMPACTION_SCOPE;
+    else process.env.PICLAW_AUTO_COMPACTION_SCOPE = previousScope;
+    if (previousThreshold === undefined) delete process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT;
+    else process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT = previousThreshold;
+  }
+});
+
 test("runCompactionWithTimeout preserves extension-recorded cancellation reasons", async () => {
   const previousTimeout = process.env.PICLAW_COMPACTION_TIMEOUT_MS;
   process.env.PICLAW_COMPACTION_TIMEOUT_MS = "5000";

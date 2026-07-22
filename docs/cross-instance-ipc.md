@@ -417,7 +417,7 @@ The protocol does not silently replace a paired public key. Key rotation require
 
 ## 13) Logging, Privacy, Retention
 
-The runtime appends remote audit rows with peer ID, endpoint, decision, status, error, and timestamp. It does not store raw prompts in the audit table, but proposals and results are stored in their operational tables.
+The runtime appends remote audit rows with peer ID, endpoint, decision, status, error, and timestamp. The audit table excludes raw prompts. Proposals and results are stored in their operational tables.
 
 Retention cleanup and configurable redaction rules for remote audit data are not implemented.
 

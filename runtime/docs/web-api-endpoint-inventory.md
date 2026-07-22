@@ -1,10 +1,8 @@
 # Web API endpoint inventory
 
-_Last updated: 2026-04-21_
+_Last updated: 2026-07-22_
 
-This document inventories the current PiClaw web-channel HTTP surface, including
-route families, auth/CSRF/rate-limit posture, and the main naming/response-shape
-observations from the API audit.
+This document inventories the PiClaw web-channel HTTP surface, including route families, auth, CSRF checks, rate limits, and response shapes.
 
 ## Guard model
 
@@ -90,7 +88,7 @@ or `/workspace/*` route family.
 | GET | `/agent/queue-state` | `dispatch-agent.ts` | authenticated | n/a | none | JSON queue state |
 | POST | `/agent/queue-remove` | `dispatch-agent.ts` | authenticated | yes | `data/agent_queue` | status JSON |
 | POST | `/agent/queue-steer` | `dispatch-agent.ts` | authenticated | yes | `data/agent_queue` | status JSON |
-| GET | `/agent/models` | `dispatch-agent.ts` | authenticated | n/a | none | JSON model list/state |
+| GET | `/agent/models` | `dispatch-agent.ts` | authenticated | n/a | none | JSON model list/state, per-model thinking levels, provider usage, and non-secret `provider_diagnostics` |
 | GET | `/agent/active-chats` | `dispatch-agent.ts` | authenticated | n/a | none | JSON list |
 | GET | `/agent/branches` | `dispatch-agent.ts` | authenticated | n/a | none | JSON list |
 | POST | `/agent/branch-fork` | `dispatch-agent.ts` | authenticated | yes | `data/agent_branch` | branch metadata JSON |
@@ -224,12 +222,12 @@ web endpoint helpers (`ui-endpoints.ts`, `handlers/workspace.ts`).
 6. **binary/streaming**
    - raw file/media/SSE/WebSocket
 
-### Inconsistencies worth noting
+### Response-shape differences
 
-These are not urgent breakages, but they are visible:
+The active response families differ in these visible places:
 
-- `/workspace/file` multiplexes create/read/update/delete by method, while posts use separate resource/action paths
-- some mutations return `{ status: "ok" }`, some return `{ status: "ok", ok: true, ... }` for compatibility, and others return full resource payloads; that split is now documented but is still not fully unified
+- `/workspace/file` multiplexes create/read/update/delete by method, while posts use separate resource/action paths.
+- Some mutations return `{ status: "ok" }`, some return `{ status: "ok", ok: true, ... }` for compatibility, and others return full resource payloads.
 
 ### Working policy emerging from the audit
 
@@ -261,11 +259,11 @@ The response-shape direction is now:
 - **resource-creating mutations**
   - keep richer created-resource payloads rather than forcing a generic status envelope
 
-## Security posture observations
+## Security observations
 
-### Good news
+### Main router controls
 
-The dominant main-router posture is solid:
+The main router uses these controls:
 
 - auth-gated app/API surface by default
 - CSRF Origin checks on mutating browser requests
@@ -273,11 +271,9 @@ The dominant main-router posture is solid:
 - SSE chat scoping enforced at the broadcast layer
 - terminal websocket upgrade separately auth/origin-checked
 
-### Important caveat
+### Remote interop caveat
 
-`/api/remote/*` should always be reviewed as a **separate security domain**.
-It is not missing guards by accident; it deliberately uses protocol-specific
-validation instead of cookie-auth + CSRF.
+`/api/remote/*` is a separate security domain. It uses protocol-specific validation instead of cookie authentication and CSRF checks.
 
 ## Follow-up candidates
 

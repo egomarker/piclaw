@@ -19,7 +19,7 @@ import { createLogger, debugSuppressedError } from "../utils/logger.js";
 
 const log = createLogger("local-lite-prompt-profile");
 const LOCAL_LITE_ACTIVE_TOOLS = ["list_tools", "activate_tools", "read"] as const;
-const ALWAYS_LOCAL_PROVIDER_IDS = new Set(["ollama"]);
+const ALWAYS_LOCAL_PROVIDER_IDS = new Set(["llama-cpp", "ollama"]);
 const LOCALHOST_NAMES = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
 const PRIVATE_172_SECOND_OCTET_MIN = 16;
 const PRIVATE_172_SECOND_OCTET_MAX = 31;

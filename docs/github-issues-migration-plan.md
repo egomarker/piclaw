@@ -1,6 +1,6 @@
 # GitHub Issues Migration Plan
 
-## Overview
+## Migration target
 
 Migrate the file-based workitem kanban
 (`workitems/{00-inbox,10-next,20-doing,30-done,40-review,50-done}/`) to GitHub

@@ -180,6 +180,18 @@ The first web UI consumer is the thin `/btw <question>` flow:
 
 Core provides the reusable side-prompt and side-session substrate. The current `/btw` panel is an early consumer, not the final side-conversation system.
 
+## Summarization retry status
+
+Earendil `0.81.1` emits summarization retry lifecycle events when compaction or branch-summary generation hits a retryable provider failure. Piclaw forwards those events as `agent_status` payloads so the web UI shows the retry instead of appearing idle.
+
+| Upstream event | Web status title |
+|---|---|
+| `summarization_retry_scheduled` | `Retrying compaction summary (...)` or `Retrying branch summary (...)` |
+| `summarization_retry_attempt_start` | `Retrying compaction summary now` or `Retrying branch summary now` |
+| `summarization_retry_finished` | `Summary retry finished` |
+
+The status payload includes `intent_key: "summarization_retry"`, `source`, `reason`, `attempt`, `maxAttempts`, and `delayMs` when the upstream event supplies those fields.
+
 ## Context usage / compaction affordance restore
 
 The compose footer exposes current context-window usage through the `ContextPie` indicator, backed by `GET /agent/context`.

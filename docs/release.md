@@ -7,15 +7,21 @@ Pushing a version tag triggers `.github/workflows/publish.yml` and publishes mul
 - `ghcr.io/rcarmo/piclaw:<tag>`
 - `ghcr.io/rcarmo/piclaw:latest`
 
-The same workflow also builds portable YOLO upgrade artifacts and attaches them to the GitHub release:
+The same workflow also builds deterministic source archives and portable YOLO upgrade artifacts and attaches them to the GitHub release:
 
+- `piclaw-<version>-source.tar.gz`
+- `piclaw-<version>-source.zip`
+- `piclaw-<version>-source.SHA256SUMS`
+- `piclaw-<version>-source.manifest.json`
 - `piclaw-<version>-linux-x64.run`
 - `piclaw-<version>-linux-x64-baseline.run` — non-AVX x64 Linux Bun runtime for older CPUs
 - `piclaw-<version>-linux-arm64.run`
 - `piclaw-<version>-macos-arm64.tar.gz`
 - `piclaw-<version>-windows-x64.zip`
 
-These portable artifacts bundle Bun, Piclaw, built web assets, `skel/`, vendored runtime assets, and production `node_modules` for the target OS/architecture. The `linux-x64-baseline` artifact uses Bun’s non-AVX baseline build.
+The source archives contain tracked repository files at the release tag. They exclude dependencies, generated artifacts, `.git`, and local runtime state. `SHA256SUMS` records checksums for the source archives.
+
+The portable artifacts bundle Bun, Piclaw, built web assets, `skel/`, vendored runtime assets, and production `node_modules` for the target OS/architecture. The `linux-x64-baseline` artifact uses Bun’s non-AVX baseline build.
 
 The workflow also publishes the experimental Electrobun desktop shell for each release runner with a `piclaw-desktop` prefix:
 
@@ -58,6 +64,13 @@ git push origin main vX.Y.Z
 ```
 
 Then monitor CI and publish the GitHub release via the API (see skill for details).
+
+Build a local source archive when you need to verify the release source payload:
+
+```bash
+bun run release:build-source-archive
+cat artifacts/release/piclaw-$(jq -r .version package.json)-source.SHA256SUMS
+```
 
 Build a local portable artifact for the current architecture when you need a manual YOLO bundle smoke test:
 
