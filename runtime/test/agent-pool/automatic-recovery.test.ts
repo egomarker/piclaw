@@ -186,6 +186,27 @@ test("classifies invalid-request and aborted failures as non-recoverable", () =>
   expect(decision.strategy).toBeNull();
 });
 
+test("preserves a mixed terminal-side-effect and failed-tool outcome", () => {
+  const decision = decideAutomaticRecovery({
+    config: DEFAULT_AUTOMATIC_RECOVERY_CONFIG,
+    errorText: "Prompt completed without emitting an assistant reply before finalization (tool activity seen).",
+    recoveryAttemptsUsed: 0,
+    elapsedMs: 1000,
+    snapshot: {
+      hadToolActivity: true,
+      hadPartialOutput: false,
+      hadTerminalTurnOutput: false,
+      canDisableToolsForRecovery: true,
+      hadToolFailure: true,
+      sawTerminalSideEffectToolActivity: true,
+    },
+  });
+
+  expect(decision.recover).toBe(false);
+  expect(decision.classifier).toBe("tool_activity");
+  expect(decision.strategy).toBeNull();
+});
+
 test("uses a continuation retry after non-terminal tool activity times out", () => {
   const decision = decideAutomaticRecovery({
     config: DEFAULT_AUTOMATIC_RECOVERY_CONFIG,

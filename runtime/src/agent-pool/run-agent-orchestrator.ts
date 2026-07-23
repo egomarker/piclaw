@@ -496,6 +496,7 @@ interface PromptAttemptResult {
   output: AgentOutput;
   snapshot: RecoveryAttemptSnapshot;
   promptWasPersisted: boolean;
+  timedOut: boolean;
 }
 
 function buildRecoveryDiagnosticEntry(
@@ -880,6 +881,7 @@ async function runPromptAttempt(
     "exit_process",
   ].includes(toolName);
   let sawTerminalSideEffectToolActivity = false;
+  let hadToolFailure = false;
 
   const readContextUsageSnapshot = (projectedAdditionalRawTokens = 0): {
     tokens: number;
@@ -1210,6 +1212,7 @@ async function runPromptAttempt(
       }
       // Track failed tool executions so recovery can make smarter decisions.
       if (event.type === "tool_execution_end" && (event as { isError?: unknown }).isError) {
+        hadToolFailure = true;
         if (toolUseSoftStopApplied) {
           hadToolFailureAfterSoftStop = true;
         } else {
@@ -1483,10 +1486,13 @@ async function runPromptAttempt(
         // missing closing assistant text is informational, not a failed turn.
         // This must remain true even if the assistant streamed a short lead-in
         // before the tool call; otherwise the UI side effect can be hidden by
-        // recovery/error handling.
+        // recovery/error handling. A failed tool in the same attempt still
+        // requires an error or continuation; a later terminal side effect must
+        // not mask it.
         // Read-only tool-only stops remain recoverable so we can retry and ask
         // the provider for the final prose reply.
         const isTerminalSideEffectCompletion = hadToolActivity
+          && !hadToolFailure
           && !isBlankTurnSessionDelta(blankTurnDelta)
           && sawTerminalSideEffectToolActivity;
         const isDraftBackedSoftStopCompletion = hadToolActivity
@@ -1531,6 +1537,7 @@ async function runPromptAttempt(
   return {
     output,
     promptWasPersisted: didPromptAdvanceSession(session, baselineLeafId),
+    timedOut,
     snapshot: {
       hadToolActivity,
       hadPartialOutput,
@@ -1543,6 +1550,8 @@ async function runPromptAttempt(
       onlyReadOnlyToolActivity,
       canDisableToolsForRecovery: typeof (session as unknown as { getActiveToolNames?: unknown }).getActiveToolNames === "function"
         && typeof (session as unknown as { setActiveToolsByName?: unknown }).setActiveToolsByName === "function",
+      hadToolFailure,
+      sawTerminalSideEffectToolActivity,
       toolUseBudgetExceeded,
       assistantToolUseMessageCount,
       toolExecutionCount,
@@ -1716,15 +1725,23 @@ export async function runAgentPrompt(
       : baseRecoveryConfig;
     let recoveryAttemptsUsed = 0;
     let lastClassifier: RecoveryClassifier | null = null;
+    let lastRecoveryErrorText: string | null = null;
     const strategyHistory: RecoveryStrategy[] = [];
     const recoveryDiagnostics: AgentRecoveryDiagnosticEntry[] = [];
     let recoveryBudgetStartedAt: number | null = null;
-    const useWholeRunAsRecoveryBudget = timeoutMs > 0 && timeoutMs < baseRecoveryConfig.totalBudgetMs;
+    let allowPostTimeoutRecoveryWindow = false;
     const getRecoveryBudgetElapsedMs = () => {
-      const anchor = recoveryBudgetStartedAt == null
-        ? (useWholeRunAsRecoveryBudget ? startTime : Date.now())
-        : recoveryBudgetStartedAt;
-      return Math.max(0, Date.now() - anchor);
+      if (recoveryBudgetStartedAt != null) {
+        return Math.max(0, Date.now() - recoveryBudgetStartedAt);
+      }
+      // A timed-out tool-bearing attempt needs a fresh bounded continuation
+      // window because the original prompt has already consumed its timeout.
+      // Generic configured timeouts keep the historical whole-run budget
+      // semantics; runs without a configured timeout start their recovery
+      // budget after the first failed attempt.
+      return timeoutMs <= 0 || allowPostTimeoutRecoveryWindow
+        ? 0
+        : Math.max(0, Date.now() - startTime);
     };
 
     const runResult: AgentOutput = await withChatContext(chatJid, channel, async () => {
@@ -1736,9 +1753,34 @@ export async function runAgentPrompt(
         // path never reaches an await that actually suspends.
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
+        if (recoveryAttemptsUsed > 0 && getRecoveryBudgetElapsedMs() >= recoveryConfig.totalBudgetMs) {
+          const duration = Date.now() - startTime;
+          const error = lastRecoveryErrorText || "Automatic recovery budget exhausted before the next attempt could start.";
+          lastClassifier = "budget_exhausted";
+          const recovery = buildRecoveryMetadata(
+            recoveryAttemptsUsed,
+            duration,
+            false,
+            true,
+            lastClassifier,
+            strategyHistory,
+            recoveryDiagnostics,
+          );
+          writeAgentLog(options.logsDir, chatJid, duration, false, null, error, recovery);
+          emitAgentSessionEvent(runOptions.onEvent, {
+            type: "recovery_end",
+            outcome: "exhausted",
+            attemptsUsed: recoveryAttemptsUsed,
+            classifier: lastClassifier,
+            errorMessage: error,
+          });
+          return { status: "error" as const, result: null, error, recovery };
+        }
+
         // The configured turn timeout bounds the initial attempt. Once that
-        // attempt fails, automatic recovery gets its own smaller total budget;
-        // otherwise a timeout failure can never start its continuation.
+        // attempt fails after tool activity, automatic recovery gets its own
+        // smaller total budget; otherwise a timeout failure can never start
+        // its safe tools-disabled continuation.
         if (timeoutMs > 0 && recoveryAttemptsUsed === 0) {
           const loopElapsedMs = Date.now() - startTime;
           if (loopElapsedMs > timeoutMs) {
@@ -1753,9 +1795,7 @@ export async function runAgentPrompt(
           }
         }
 
-        const remainingRecoveryBudgetMs = recoveryBudgetStartedAt == null
-          ? recoveryConfig.totalBudgetMs
-          : Math.max(1, recoveryConfig.totalBudgetMs - getRecoveryBudgetElapsedMs());
+        const remainingRecoveryBudgetMs = Math.max(1, recoveryConfig.totalBudgetMs - getRecoveryBudgetElapsedMs());
         const attemptTimeoutMs = recoveryAttemptsUsed > 0
           ? (timeoutMs > 0 ? Math.min(timeoutMs, remainingRecoveryBudgetMs) : remainingRecoveryBudgetMs)
           : timeoutMs;
@@ -1859,6 +1899,10 @@ export async function runAgentPrompt(
         }
 
         const errorText = attempt.output.error || "Agent error";
+        lastRecoveryErrorText = errorText;
+        allowPostTimeoutRecoveryWindow = recoveryAttemptsUsed === 0
+          && attempt.snapshot.hadToolActivity
+          && attempt.timedOut;
         const decision = decideAutomaticRecovery({
           config: recoveryConfig,
           errorText,
@@ -1945,7 +1989,7 @@ export async function runAgentPrompt(
           return attempt.output;
         }
 
-        if (recoveryBudgetStartedAt == null) {
+        if (recoveryBudgetStartedAt == null && (timeoutMs <= 0 || allowPostTimeoutRecoveryWindow)) {
           recoveryBudgetStartedAt = Date.now();
         }
 

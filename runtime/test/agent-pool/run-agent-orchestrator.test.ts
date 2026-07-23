@@ -3557,7 +3557,7 @@ test("runAgentPrompt treats terminal UI tool completion without final prose as i
   }
 });
 
-test("runAgentPrompt treats terminal side-effect tool completion as informational even after earlier tool failures", async () => {
+test("runAgentPrompt does not let a terminal side-effect tool mask an earlier tool failure", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
@@ -3566,11 +3566,14 @@ test("runAgentPrompt treats terminal side-effect tool completion as informationa
 
   class StubSession {
     private listeners: Array<(event: any) => void> = [];
+    private activeTools = ["bash", "exit_process"];
     sessionManager = { getLeafId: () => "leaf-terminal-side-effect" };
     isStreaming = false;
     isCompacting = false;
     isRetrying = false;
     promptCalls = 0;
+    getActiveToolNames() { return [...this.activeTools]; }
+    setActiveToolsByName(names: string[]) { this.activeTools = [...names]; }
     subscribe(listener: (event: any) => void) {
       this.listeners.push(listener);
       return () => {
@@ -3623,8 +3626,8 @@ test("runAgentPrompt treats terminal side-effect tool completion as informationa
       clearActiveForkBaseLeaf: () => {},
     });
 
-    expect(result.status).toBe("tool_complete");
-    expect(result.error).toBeUndefined();
+    expect(result.status).toBe("error");
+    expect(result.error).toContain("without emitting an assistant reply before finalization");
     expect(session.promptCalls).toBe(1);
     expect(recoveryEvents).toEqual([]);
   } finally {
@@ -3856,6 +3859,175 @@ test("runAgentPrompt uses a tools-disabled continuation after timeout with non-t
     expect(session.promptTexts).toEqual(["inspect logs", RECOVERY_CONTINUATION_PROMPT]);
     expect(session.toolSets).toContainEqual([]);
     expect(session.toolSets.at(-1)).toEqual(["bash", "read"]);
+  } finally {
+    restoreEnv();
+  }
+});
+
+test("runAgentPrompt does not start a generic retry after backoff exhausts the configured timeout", async () => {
+  const restoreEnv = setEnv({
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
+    PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
+  });
+
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    private activeTools = ["bash", "read"];
+    sessionManager = { getLeafId: () => "leaf-generic-short-timeout-budget" };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    promptCalls = 0;
+    getActiveToolNames() { return [...this.activeTools]; }
+    setActiveToolsByName(names: string[]) { this.activeTools = [...names]; }
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => { this.listeners = this.listeners.filter((entry) => entry !== listener); };
+    }
+    async prompt() {
+      this.promptCalls += 1;
+      if (this.promptCalls === 1) {
+        for (const listener of this.listeners) {
+          listener({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              stopReason: "toolUse",
+              content: [{ type: "toolCall", id: "tool-synthetic-timeout", name: "bash", arguments: { command: "false" } }],
+            },
+          });
+          listener({ type: "tool_execution_start", toolCallId: "tool-synthetic-timeout", toolName: "bash", args: { command: "false" } });
+          listener({ type: "tool_execution_end", toolCallId: "tool-synthetic-timeout", toolName: "bash", isError: true });
+        }
+        await Bun.sleep(70);
+        throw new Error("Response timed out before finalization");
+      }
+      throw new Error("recovery attempt must not start after its budget is exhausted");
+    }
+    async abort() {}
+  }
+
+  try {
+    const session = new StubSession();
+    const turnCoordinator = new AgentTurnCoordinator({
+      takeAttachments: () => [],
+      touchSession: () => {},
+      recordMessageUsage: () => {},
+    });
+    const attemptTimeouts: number[] = [];
+    const originalStartPromptTimeout = turnCoordinator.startPromptTimeout.bind(turnCoordinator);
+    turnCoordinator.startPromptTimeout = ((promptSession: any, chatJid: string, timeoutMs: number) => {
+      attemptTimeouts.push(timeoutMs);
+      return originalStartPromptTimeout(promptSession, chatJid, timeoutMs);
+    }) as any;
+
+    const result = await runAgentPrompt("retry within remaining budget", "web:generic-short-timeout-budget", { timeoutMs: 100 }, {
+      getOrCreateRuntime: async () => createRuntime(session, { maxRetries: 2, baseDelayMs: 50, maxDelayMs: 50 }) as any,
+      turnCoordinator,
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.error).toContain("Response timed out before finalization");
+    expect(result.recovery).toEqual(expect.objectContaining({
+      attemptsUsed: 1,
+      exhausted: true,
+      lastClassifier: "budget_exhausted",
+    }));
+    expect(session.promptCalls).toBe(1);
+    expect(attemptTimeouts).toEqual([100]);
+  } finally {
+    restoreEnv();
+  }
+});
+
+test("runAgentPrompt clamps a recovery attempt to the remaining short timeout budget", async () => {
+  const restoreEnv = setEnv({
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
+    PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
+  });
+
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    private activeTools = ["bash", "read"];
+    sessionManager = { getLeafId: () => "leaf-short-timeout-budget" };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    promptCalls = 0;
+    getActiveToolNames() { return [...this.activeTools]; }
+    setActiveToolsByName(names: string[]) { this.activeTools = [...names]; }
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => { this.listeners = this.listeners.filter((entry) => entry !== listener); };
+    }
+    private resolveTimedOutPrompt: (() => void) | null = null;
+    async prompt() {
+      this.promptCalls += 1;
+      if (this.promptCalls === 1) {
+        for (const listener of this.listeners) {
+          listener({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              stopReason: "toolUse",
+              content: [{ type: "toolCall", id: "tool-timeout", name: "bash", arguments: { command: "false" } }],
+            },
+          });
+          listener({ type: "tool_execution_start", toolCallId: "tool-timeout", toolName: "bash", args: { command: "false" } });
+          listener({ type: "tool_execution_end", toolCallId: "tool-timeout", toolName: "bash", isError: true });
+        }
+        await new Promise<void>((resolve) => { this.resolveTimedOutPrompt = resolve; });
+        return;
+      }
+      expect(this.activeTools).toEqual([]);
+      for (const listener of this.listeners) {
+        listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Recovered within the short budget." } });
+        listener({ type: "message_end", message: createAssistantMessage("Recovered within the short budget.") });
+      }
+    }
+    async abort() {
+      this.resolveTimedOutPrompt?.();
+      this.resolveTimedOutPrompt = null;
+    }
+  }
+
+  try {
+    const session = new StubSession();
+    const turnCoordinator = new AgentTurnCoordinator({
+      takeAttachments: () => [],
+      touchSession: () => {},
+      recordMessageUsage: () => {},
+    });
+    const attemptTimeouts: number[] = [];
+    const originalStartPromptTimeout = turnCoordinator.startPromptTimeout.bind(turnCoordinator);
+    turnCoordinator.startPromptTimeout = ((promptSession: any, chatJid: string, timeoutMs: number) => {
+      attemptTimeouts.push(timeoutMs);
+      return originalStartPromptTimeout(promptSession, chatJid, timeoutMs);
+    }) as any;
+
+    const result = await runAgentPrompt("retry briefly", "web:short-timeout-budget", { timeoutMs: 100 }, {
+      getOrCreateRuntime: async () => createRuntime(session, { maxRetries: 2, baseDelayMs: 1, maxDelayMs: 1 }) as any,
+      turnCoordinator,
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.result).toBe("Recovered within the short budget.");
+    expect(attemptTimeouts).toHaveLength(2);
+    expect(attemptTimeouts[0]).toBe(100);
+    expect(attemptTimeouts[1]).toBeGreaterThan(0);
+    expect(attemptTimeouts[1]).toBeLessThan(100);
   } finally {
     restoreEnv();
   }

@@ -48,6 +48,8 @@ export interface RecoveryAttemptSnapshot {
   sawThinkingOnlyStop?: boolean;
   onlyReadOnlyToolActivity?: boolean;
   canDisableToolsForRecovery?: boolean;
+  hadToolFailure?: boolean;
+  sawTerminalSideEffectToolActivity?: boolean;
   toolUseBudgetExceeded?: boolean;
   assistantToolUseMessageCount?: number;
   toolExecutionCount?: number;
@@ -265,6 +267,14 @@ export function decideAutomaticRecovery(input: RecoveryDecisionInput): RecoveryD
         classifier: "completed_turn_output",
         strategy: null,
         reason: "Automatic recovery skipped because a terminal assistant reply already completed during the failed run.",
+      };
+    }
+    if (input.snapshot.hadToolFailure && input.snapshot.sawTerminalSideEffectToolActivity) {
+      return {
+        recover: false,
+        classifier: "tool_activity",
+        strategy: null,
+        reason: "A terminal side-effect tool completed after another tool failed; preserve the mixed outcome instead of converting it to recovery success.",
       };
     }
     if (isContextPressureFailure(errorText) || input.snapshot.sawCompactionIntent) {
