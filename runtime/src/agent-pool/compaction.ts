@@ -132,7 +132,6 @@ type ContextEstimateCacheEntry = {
   entryCount: number;
   tokens: number;
   at: number;
-  allowProviderClamp: boolean;
 };
 
 function readProviderContextTokens(session: AgentSession): number | null {
@@ -172,7 +171,7 @@ export function estimateContextTokensFromSession(session: AgentSession): number 
     // entry count. Clamp cached estimates upward so fresh provider usage can
     // still trigger compaction and the web context meter does not drop during
     // tool execution before rebounding on the next assistant message.
-    const tokens = cached.allowProviderClamp && providerTokens != null ? Math.max(cached.tokens, providerTokens) : cached.tokens;
+    const tokens = providerTokens != null ? Math.max(cached.tokens, providerTokens) : cached.tokens;
     if (tokens !== cached.tokens) ctxEstimateCache.set(mgr as object, { ...cached, tokens, at: now });
     return tokens;
   }
@@ -182,28 +181,14 @@ export function estimateContextTokensFromSession(session: AgentSession): number 
   }
 
   const context = mgr.buildSessionContext();
-  const hasCompactionSummary = context.messages.some((message: any) => message?.role === "compactionSummary");
   const estimatedTokens = context.messages.reduce((total: number, message: any) => total + estimateMessageTokens(message), 0);
 
-  // Assistant usage metadata is scoped to the prompt that produced that
-  // assistant message. After a compaction, kept assistant messages can still
-  // carry pre-compaction usage totals, so trusting getContextUsage()/last usage
-  // makes the freshly compacted context look huge and triggers repeated idle
-  // compactions. Once a compacted summary is present, estimate the resolved
-  // compacted context directly from the messages instead.
-  if (!hasCompactionSummary) {
-    if (providerTokens !== null) {
-      // Native usage is often the most accurate count for the prompt that just
-      // ran, but it can lag behind newly appended tool results/messages. Never
-      // let stale native usage hide current context growth from auto-compaction.
-      const tokens = Math.max(providerTokens, estimatedTokens);
-      ctxEstimateCache.set(mgr as object, { leafId, entryCount, tokens, at: now, allowProviderClamp: true });
-      return tokens;
-    }
-  }
-
-  ctxEstimateCache.set(mgr as object, { leafId, entryCount, tokens: estimatedTokens, at: now, allowProviderClamp: !hasCompactionSummary });
-  return estimatedTokens;
+  // Native usage is the most accurate count for the prompt that just ran, but
+  // it can lag behind newly appended tool results/messages. Use the larger
+  // value so neither source can hide current context growth.
+  const tokens = providerTokens === null ? estimatedTokens : Math.max(providerTokens, estimatedTokens);
+  ctxEstimateCache.set(mgr as object, { leafId, entryCount, tokens, at: now });
+  return tokens;
 }
 
 export interface CompactionContextReport {

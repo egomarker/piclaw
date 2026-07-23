@@ -865,7 +865,7 @@ async function runPromptAttempt(
       })
     : undefined;
 
-  const tracker = options.turnCoordinator.createTracker(chatJid, onTurnComplete);
+  const tracker = options.turnCoordinator.createTracker(chatJid, onTurnComplete, runOptions.onTurnDiscard);
   const toolExecutionWatchdogHeartbeat = createToolExecutionWatchdogHeartbeatController(chatJid);
   const isRetrySafeToolName = (toolName: unknown): boolean => typeof toolName === "string" && [
     "read",

@@ -28,6 +28,11 @@ export interface AgentTurnOutput {
   followedByToolUse?: boolean;
 }
 
+/** A completed assistant text stream intentionally kept out of durable output. */
+export interface AgentTurnDiscard {
+  reason: "tool_use_commentary";
+}
+
 /** Error state captured from an assistant message with stopReason "error". */
 export interface AgentTurnError {
   stopReason: "error";
@@ -82,6 +87,7 @@ export class AgentTurnCoordinator {
   createTracker(
     chatJid: string,
     onTurnComplete?: (turn: AgentTurnOutput) => void,
+    onTurnDiscard?: (discard: AgentTurnDiscard) => void,
   ): AgentTurnTracker {
     let currentTurnText = "";
     let currentTurnPhase: AssistantTextPhase = null;
@@ -134,9 +140,6 @@ export class AgentTurnCoordinator {
         .map((block) => resolveTextPhaseFromBlock(block))
         .find((candidate) => candidate !== null) ?? null;
 
-      // Commentary is user-visible streamed text. Hidden model reasoning uses
-      // distinct thinking blocks, so dropping commentary here loses prose the
-      // web UI already showed as a draft when the model proceeds to a tool.
       return { text, phase };
     };
 
@@ -273,12 +276,15 @@ export class AgentTurnCoordinator {
 
           messageHasDelta = false;
           messageComplete = true;
-          // A tool-call message is already authoritative and immutable at
-          // message_end. Persist its visible lead-in before dispatching tools
-          // instead of leaving stable prose in the transient Draft panel until
-          // another assistant text stream happens to begin.
           if (message.stopReason === "toolUse" && hadToolCallContent) {
-            if (onTurnComplete) {
+            // Signed commentary is transient provider narration. GPT-5.5 can
+            // use it for terse internal-looking tool planning, so do not turn
+            // it into a durable assistant post. Explicit final-answer text and
+            // legacy unphased lead-ins retain the existing checkpoint behavior.
+            if (currentTurnPhase === "commentary") {
+              onTurnDiscard?.({ reason: "tool_use_commentary" });
+              resetCurrentTurn();
+            } else if (onTurnComplete) {
               flushTurn({ followedByToolUse: true });
             } else {
               resetCurrentTurn();

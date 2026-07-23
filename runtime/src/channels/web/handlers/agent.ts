@@ -2422,6 +2422,9 @@ export async function processChat(
     skipPrePromptCompaction: true,
     scheduleIdleAutoCompaction: true,
     onEvent: trackedStreamingHandler,
+    onTurnDiscard: () => {
+      clearCommittedDraft();
+    },
     onTurnComplete: (turn: { text: string; attachments: unknown[]; usage?: unknown; followedByToolUse?: boolean }) => {
       // Turn boundary: the first turn (index 0) is the original prompt's
       // response — skip placeholder consumption so it doesn't steal a

@@ -323,8 +323,8 @@ test("estimateContextTokensFromSession clamps cached estimates to fresh provider
   expect(estimateContextTokensFromSession(session)).toBe(321_100);
 });
 
-test("estimateContextTokensFromSession keeps compacted contexts below stale provider usage", () => {
-  let providerTokens = 150_000;
+test("estimateContextTokensFromSession uses provider usage once it is fresh after compaction", () => {
+  let providerTokens: number | null = null;
   const session = {
     getContextUsage: () => ({ tokens: providerTokens }),
     sessionManager: {
@@ -341,7 +341,7 @@ test("estimateContextTokensFromSession keeps compacted contexts below stale prov
 
   expect(estimateContextTokensFromSession(session)).toBeLessThan(150_000);
   providerTokens = 200_000;
-  expect(estimateContextTokensFromSession(session)).toBeLessThan(150_000);
+  expect(estimateContextTokensFromSession(session)).toBe(200_000);
 });
 
 test("getAutoCompactionTokenStatusForSession uses fresh provider usage above threshold despite cached lower estimate", () => {
@@ -1018,7 +1018,7 @@ test("estimateContextTokensFromSession ignores stale assistant usage after compa
       role: "toolResult",
       content: [{ type: "text", text: "small result" }],
     },
-  ], 230_000);
+  ]);
 
   const estimated = estimateContextTokensFromSession(session);
 
