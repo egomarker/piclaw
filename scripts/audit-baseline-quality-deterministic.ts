@@ -490,6 +490,7 @@ const groupDefinitions: GroupDefinition[] = [
           "addons-handler.test.ts",
           "addon-web-extensions.test.ts",
           "general-settings-handler.test.ts",
+          "general-settings-ui.test.ts",
           "settings-pane-registry.test.ts",
           "settings-widget-fixture.test.ts",
           "settings-z-index.test.ts",

@@ -6,15 +6,29 @@ import type { Credential, CredentialInfo, CredentialStore } from "@earendil-work
 import lockfile from "proper-lockfile";
 
 import { getPiclawAgentDir } from "../core/agent-dir.js";
+import { createLogger } from "../utils/logger.js";
+
+const log = createLogger("agent-pool.credential-store");
 
 const AUTH_FILE_MODE = 0o600;
 const AUTH_DIRECTORY_MODE = 0o700;
+const DEFAULT_OAUTH_REFRESH_MAX_RETRIES = 2;
+const DEFAULT_OAUTH_REFRESH_RETRY_BASE_DELAY_MS = 250;
+const DEFAULT_OAUTH_REFRESH_RETRY_MAX_DELAY_MS = 2_000;
 const LOCK_OPTIONS = {
   retries: { retries: 10, factor: 2, minTimeout: 100, maxTimeout: 10_000, randomize: true },
   stale: 30_000,
 } as const;
 
 type CredentialData = Record<string, Credential>;
+
+type OAuthRefreshRetryOptions = {
+  maxRetries: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  random: () => number;
+  sleep: (delayMs: number) => Promise<void>;
+};
 
 export interface PiclawCredentialStore extends CredentialStore {
   readonly authPath: string;
@@ -79,6 +93,41 @@ function resolveConfigValue(config: string, env?: Record<string, string>): strin
   return resolved;
 }
 
+function errorChainText(error: unknown): string {
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  let current = error;
+  while (current !== undefined && current !== null && !seen.has(current) && parts.length < 8) {
+    seen.add(current);
+    if (current instanceof Error) {
+      parts.push(`${current.name}: ${current.message}`);
+      current = current.cause;
+      continue;
+    }
+    if (typeof current === "object") {
+      const record = current as Record<string, unknown>;
+      for (const key of ["status", "statusCode", "code", "error", "error_description"]) {
+        if (record[key] !== undefined) parts.push(String(record[key]));
+      }
+      current = record.cause;
+      continue;
+    }
+    parts.push(String(current));
+    break;
+  }
+  return parts.join(" | ");
+}
+
+/** Retry only failures that can plausibly succeed without replacing the refresh token. */
+export function isTransientOAuthRefreshError(error: unknown): boolean {
+  const detail = errorChainText(error);
+  if (!detail) return false;
+  if (/invalid[_ -]?grant|invalid[_ -]?client|unauthorized[_ -]?client|access[_ -]?denied|refresh token[^|]*(?:expired|revoked|invalid)|\b(?:400|401|403)\b/i.test(detail)) {
+    return false;
+  }
+  return /\b(?:408|425|429|500|502|503|504)\b|fetch failed|network(?: error)?|socket hang up|econnreset|econnrefused|etimedout|enotfound|timed? out|timeout|temporar(?:y|ily)|rate limit|too many requests|overloaded|service unavailable|bad gateway|gateway timeout/i.test(detail);
+}
+
 function cloneCredential<T extends Credential | undefined>(credential: T): T {
   return credential === undefined ? credential : structuredClone(credential);
 }
@@ -99,8 +148,20 @@ function parseCredentialData(content: string | undefined): CredentialData {
 export class FileCredentialStore implements PiclawCredentialStore {
   private data: CredentialData = {};
   private errors: Error[] = [];
+  private readonly oauthRefreshRetry: OAuthRefreshRetryOptions;
 
-  constructor(readonly authPath: string = join(getPiclawAgentDir(), "auth.json")) {}
+  constructor(
+    readonly authPath: string = join(getPiclawAgentDir(), "auth.json"),
+    oauthRefreshRetry: Partial<OAuthRefreshRetryOptions> = {},
+  ) {
+    this.oauthRefreshRetry = {
+      maxRetries: oauthRefreshRetry.maxRetries ?? DEFAULT_OAUTH_REFRESH_MAX_RETRIES,
+      baseDelayMs: oauthRefreshRetry.baseDelayMs ?? DEFAULT_OAUTH_REFRESH_RETRY_BASE_DELAY_MS,
+      maxDelayMs: oauthRefreshRetry.maxDelayMs ?? DEFAULT_OAUTH_REFRESH_RETRY_MAX_DELAY_MS,
+      random: oauthRefreshRetry.random ?? Math.random,
+      sleep: oauthRefreshRetry.sleep ?? (async (delayMs) => { await Bun.sleep(delayMs); }),
+    };
+  }
 
   private recordError(error: unknown): Error {
     const normalized = error instanceof Error ? error : new Error(String(error));
@@ -161,7 +222,36 @@ export class FileCredentialStore implements PiclawCredentialStore {
 
   async modify(providerId: string, fn: (current: Credential | undefined) => Promise<Credential | undefined>): Promise<Credential | undefined> {
     return this.withLock(async (current, assertLock) => {
-      const nextCredential = await fn(cloneCredential(current[providerId]));
+      const storedCredential = current[providerId];
+      let nextCredential: Credential | undefined;
+      let retryAttempt = 0;
+      while (true) {
+        try {
+          nextCredential = await fn(cloneCredential(storedCredential));
+          break;
+        } catch (error) {
+          const isExpiredOAuthRefresh = storedCredential?.type === "oauth" && Date.now() >= storedCredential.expires;
+          if (!isExpiredOAuthRefresh || retryAttempt >= this.oauthRefreshRetry.maxRetries || !isTransientOAuthRefreshError(error)) {
+            throw error;
+          }
+          retryAttempt += 1;
+          assertLock();
+          const exponentialDelay = Math.min(
+            this.oauthRefreshRetry.maxDelayMs,
+            this.oauthRefreshRetry.baseDelayMs * (2 ** (retryAttempt - 1)),
+          );
+          const jitteredDelay = Math.max(0, Math.round(exponentialDelay * (0.75 + this.oauthRefreshRetry.random() * 0.5)));
+          log.warn("Transient OAuth refresh failed; retrying under the credential lock", {
+            operation: "credential_store.oauth_refresh_retry",
+            providerId,
+            retryAttempt,
+            maxRetries: this.oauthRefreshRetry.maxRetries,
+            delayMs: jitteredDelay,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          await this.oauthRefreshRetry.sleep(jitteredDelay);
+        }
+      }
       assertLock();
       if (nextCredential === undefined) {
         this.data = current;
