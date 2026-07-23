@@ -519,6 +519,7 @@ function buildRecoveryDiagnosticEntry(
     hadToolActivity: Boolean(snapshot.hadToolActivity),
     hadPartialOutput: Boolean(snapshot.hadPartialOutput),
     hadCompletedTurnOutput: Boolean(snapshot.hadCompletedTurnOutput),
+    hadTerminalTurnOutput: Boolean(snapshot.hadTerminalTurnOutput),
     sawCompactionIntent: Boolean(snapshot.sawCompactionIntent),
     compactionErrorMessage: snapshot.compactionErrorMessage ?? null,
     toolUseBudgetExceeded: Boolean(snapshot.toolUseBudgetExceeded),
@@ -764,8 +765,6 @@ async function runPromptAttempt(
   let sawCompactionIntent = false;
   let sawAssistantToolCallMessage = false;
   let onlyReadOnlyToolActivity = true;
-  let hadToolFailure = false;
-  let failedToolName: string | null = null;
   let assistantToolUseMessageCount = 0;
   let toolExecutionCount = 0;
   let midTurnToolResultChars = 0;
@@ -1211,14 +1210,10 @@ async function runPromptAttempt(
       }
       // Track failed tool executions so recovery can make smarter decisions.
       if (event.type === "tool_execution_end" && (event as { isError?: unknown }).isError) {
-        hadToolFailure = true;
         if (toolUseSoftStopApplied) {
           hadToolFailureAfterSoftStop = true;
         } else {
           hadToolFailureBeforeSoftStop = true;
-        }
-        if (!failedToolName && typeof toolName === "string") {
-          failedToolName = toolName;
         }
       }
       if (event.type === "tool_execution_end" && !(event as { isError?: unknown }).isError && isTerminalSideEffectToolName(toolName)) {
@@ -1494,18 +1489,14 @@ async function runPromptAttempt(
         const isTerminalSideEffectCompletion = hadToolActivity
           && !isBlankTurnSessionDelta(blankTurnDelta)
           && sawTerminalSideEffectToolActivity;
-        const isSideEffectingToolOnlyCompletion = hadToolActivity
-          && !hadPartialOutput
-          && !hadToolFailure
-          && !isBlankTurnSessionDelta(blankTurnDelta)
-          && !onlyReadOnlyToolActivity
-          && detail.includes("provider stopped after tool use");
-        const isDraftBackedToolCompletion = hadToolActivity
+        const isDraftBackedSoftStopCompletion = hadToolActivity
           && hadPartialOutput
-          && (!hadToolFailure || (!hadToolFailureBeforeSoftStop && hadToolFailureAfterSoftStop && toolUseSoftStopApplied))
+          && !hadToolFailureBeforeSoftStop
+          && hadToolFailureAfterSoftStop
+          && toolUseSoftStopApplied
           && !isBlankTurnSessionDelta(blankTurnDelta)
           && detail.includes("provider stopped after tool use");
-        const isToolOnlyCompletion = isTerminalSideEffectCompletion || isSideEffectingToolOnlyCompletion || isDraftBackedToolCompletion;
+        const isToolOnlyCompletion = isTerminalSideEffectCompletion || isDraftBackedSoftStopCompletion;
         output = isToolOnlyCompletion
           ? {
             status: "tool_complete" as const,
@@ -1544,11 +1535,14 @@ async function runPromptAttempt(
       hadToolActivity,
       hadPartialOutput,
       hadCompletedTurnOutput,
+      hadTerminalTurnOutput,
       compactionErrorMessage,
       sawCompactionIntent,
       sawAssistantToolCall: sawAssistantToolCallMessage,
       sawThinkingOnlyStop,
       onlyReadOnlyToolActivity,
+      canDisableToolsForRecovery: typeof (session as unknown as { getActiveToolNames?: unknown }).getActiveToolNames === "function"
+        && typeof (session as unknown as { setActiveToolsByName?: unknown }).setActiveToolsByName === "function",
       toolUseBudgetExceeded,
       assistantToolUseMessageCount,
       toolExecutionCount,
@@ -1735,20 +1729,22 @@ export async function runAgentPrompt(
 
     const runResult: AgentOutput = await withChatContext(chatJid, channel, async () => {
       let attemptPrompt = prompt;
+      let recoveryContinuationWithoutTools = false;
       while (true) {
         // Yield to the event loop on every iteration. Prevents synchronous-
         // throw + catch + retry from starving the event loop when the error
         // path never reaches an await that actually suspends.
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-        // Hard wall-clock escape hatch: if the entire run (including all
-        // recovery attempts) has exceeded the timeout, bail out.
-        if (timeoutMs > 0) {
+        // The configured turn timeout bounds the initial attempt. Once that
+        // attempt fails, automatic recovery gets its own smaller total budget;
+        // otherwise a timeout failure can never start its continuation.
+        if (timeoutMs > 0 && recoveryAttemptsUsed === 0) {
           const loopElapsedMs = Date.now() - startTime;
           if (loopElapsedMs > timeoutMs) {
             const duration = Date.now() - startTime;
             writeAgentLog(options.logsDir, chatJid, duration, false, null,
-              `Recovery loop exceeded timeout (${loopElapsedMs}ms > ${timeoutMs}ms)`);
+              `Agent run exceeded timeout before recovery (${loopElapsedMs}ms > ${timeoutMs}ms)`);
             return {
               status: "error" as const,
               result: null,
@@ -1757,16 +1753,34 @@ export async function runAgentPrompt(
           }
         }
 
-        const attempt = await runPromptAttempt(
-          attemptPrompt,
-          chatJid,
-          session,
-          timeoutMs,
-          runOptions,
-          options,
-          startTime,
-          modelLabel,
-        );
+        const remainingRecoveryBudgetMs = recoveryBudgetStartedAt == null
+          ? recoveryConfig.totalBudgetMs
+          : Math.max(1, recoveryConfig.totalBudgetMs - getRecoveryBudgetElapsedMs());
+        const attemptTimeoutMs = recoveryAttemptsUsed > 0
+          ? (timeoutMs > 0 ? Math.min(timeoutMs, remainingRecoveryBudgetMs) : remainingRecoveryBudgetMs)
+          : timeoutMs;
+        let recoverySavedToolNames: string[] | null = null;
+        if (recoveryContinuationWithoutTools && sessionCtrl && typeof sessionCtrl.getActiveToolNames === "function" && typeof sessionCtrl.setActiveToolsByName === "function") {
+          recoverySavedToolNames = sessionCtrl.getActiveToolNames();
+          sessionCtrl.setActiveToolsByName([]);
+        }
+        let attempt: PromptAttemptResult;
+        try {
+          attempt = await runPromptAttempt(
+            attemptPrompt,
+            chatJid,
+            session,
+            attemptTimeoutMs,
+            runOptions,
+            options,
+            startTime,
+            modelLabel,
+          );
+        } finally {
+          if (recoverySavedToolNames && sessionCtrl && typeof sessionCtrl.setActiveToolsByName === "function") {
+            sessionCtrl.setActiveToolsByName(recoverySavedToolNames);
+          }
+        }
 
         // If the tool-call cap was hit, abort immediately without recovery.
         if (toolCallCapRef.exceeded) {
@@ -1971,7 +1985,10 @@ export async function runAgentPrompt(
         // instruction and can repeat side-effecting tools. Resume persisted
         // turns with a neutral continuation; only replay when no branch state
         // was appended (for example, a synchronous pre-prompt throw).
-        if (attempt.promptWasPersisted) attemptPrompt = RECOVERY_CONTINUATION_PROMPT;
+        if (attempt.promptWasPersisted || attempt.snapshot.hadToolActivity) {
+          attemptPrompt = RECOVERY_CONTINUATION_PROMPT;
+        }
+        recoveryContinuationWithoutTools = recoveryContinuationWithoutTools || attempt.snapshot.hadToolActivity;
 
         if (effectiveDecision.strategy === "compact_then_retry") {
           const compactionResult = await runRecoveryCompaction(session, chatJid, runOptions, options);
@@ -1989,6 +2006,7 @@ export async function runAgentPrompt(
                 hadToolActivity: false,
                 hadPartialOutput: attempt.snapshot.hadPartialOutput,
                 hadCompletedTurnOutput: attempt.snapshot.hadCompletedTurnOutput,
+                hadTerminalTurnOutput: attempt.snapshot.hadTerminalTurnOutput,
                 compactionErrorMessage: compactionResult.errorMessage,
                 sawCompactionIntent: true,
                 toolUseBudgetExceeded: attempt.snapshot.toolUseBudgetExceeded,
@@ -2010,6 +2028,7 @@ export async function runAgentPrompt(
                   hadToolActivity: false,
                   hadPartialOutput: attempt.snapshot.hadPartialOutput,
                   hadCompletedTurnOutput: attempt.snapshot.hadCompletedTurnOutput,
+                  hadTerminalTurnOutput: attempt.snapshot.hadTerminalTurnOutput,
                   compactionErrorMessage: compactionResult.errorMessage,
                   sawCompactionIntent: true,
                   toolUseBudgetExceeded: attempt.snapshot.toolUseBudgetExceeded,

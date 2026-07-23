@@ -186,7 +186,7 @@ test("classifies invalid-request and aborted failures as non-recoverable", () =>
   expect(decision.strategy).toBeNull();
 });
 
-test("skips automatic recovery when tool activity already happened", () => {
+test("uses a continuation retry after non-terminal tool activity times out", () => {
   const decision = decideAutomaticRecovery({
     config: DEFAULT_AUTOMATIC_RECOVERY_CONFIG,
     errorText: "Timed out after 30s",
@@ -195,12 +195,72 @@ test("skips automatic recovery when tool activity already happened", () => {
     snapshot: {
       hadToolActivity: true,
       hadPartialOutput: true,
+      hadCompletedTurnOutput: true,
+      hadTerminalTurnOutput: false,
+      sawAssistantToolCall: true,
+      canDisableToolsForRecovery: true,
     },
   });
 
   expect(isTransientFailure("Timed out after 30s")).toBe(true);
+  expect(decision.recover).toBe(true);
+  expect(decision.classifier).toBe("transient");
+  expect(decision.strategy).toBe("retry");
+});
+
+test("keeps legacy completed-turn snapshots terminal when terminal detail is absent", () => {
+  const decision = decideAutomaticRecovery({
+    config: DEFAULT_AUTOMATIC_RECOVERY_CONFIG,
+    errorText: "Timed out after 30s",
+    recoveryAttemptsUsed: 0,
+    elapsedMs: 1000,
+    snapshot: {
+      hadToolActivity: true,
+      hadPartialOutput: true,
+      hadCompletedTurnOutput: true,
+    },
+  });
+
   expect(decision.recover).toBe(false);
-  expect(decision.classifier).toBe("tool_activity");
+  expect(decision.classifier).toBe("completed_turn_output");
+});
+
+test("skips recovery when a terminal assistant reply already completed", () => {
+  const decision = decideAutomaticRecovery({
+    config: DEFAULT_AUTOMATIC_RECOVERY_CONFIG,
+    errorText: "Timed out after 30s",
+    recoveryAttemptsUsed: 0,
+    elapsedMs: 1000,
+    snapshot: {
+      hadToolActivity: true,
+      hadPartialOutput: true,
+      hadCompletedTurnOutput: true,
+      hadTerminalTurnOutput: true,
+    },
+  });
+
+  expect(decision.recover).toBe(false);
+  expect(decision.classifier).toBe("completed_turn_output");
+});
+
+test("does not continue non-recoverable tool failures", () => {
+  const decision = decideAutomaticRecovery({
+    config: DEFAULT_AUTOMATIC_RECOVERY_CONFIG,
+    errorText: "permission denied by policy",
+    recoveryAttemptsUsed: 0,
+    elapsedMs: 1000,
+    snapshot: {
+      hadToolActivity: true,
+      hadPartialOutput: true,
+      hadCompletedTurnOutput: true,
+      hadTerminalTurnOutput: false,
+      sawAssistantToolCall: true,
+      canDisableToolsForRecovery: true,
+    },
+  });
+
+  expect(decision.recover).toBe(false);
+  expect(decision.classifier).toBe("non_recoverable");
 });
 
 test("allows compaction recovery despite tool activity when compaction was in progress", () => {

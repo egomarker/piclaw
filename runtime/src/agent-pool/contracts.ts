@@ -22,6 +22,7 @@ export interface AgentRecoveryDiagnosticEntry {
   hadToolActivity: boolean;
   hadPartialOutput: boolean;
   hadCompletedTurnOutput: boolean;
+  hadTerminalTurnOutput: boolean;
   sawCompactionIntent: boolean;
   compactionErrorMessage: string | null;
   toolUseBudgetExceeded?: boolean;
