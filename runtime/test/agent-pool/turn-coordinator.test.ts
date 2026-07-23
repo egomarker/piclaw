@@ -364,14 +364,19 @@ test("AgentTurnCoordinator commits assistant text as soon as its tool-use messag
   }));
 });
 
-test("AgentTurnCoordinator commits streamed text at tool-use message_end when the finalized message omits it", () => {
+test("AgentTurnCoordinator discards signed commentary at a tool-use boundary", () => {
   const completed: Array<{ text: string; attachments: AttachmentInfo[]; followedByToolUse?: boolean }> = [];
+  const discarded: Array<{ reason: string }> = [];
   const coordinator = new AgentTurnCoordinator({
     takeAttachments: () => [],
     touchSession: () => {},
     recordMessageUsage: () => {},
   });
-  const tracker = coordinator.createTracker("web:default", (turn) => completed.push(turn));
+  const tracker = coordinator.createTracker(
+    "web:default",
+    (turn) => completed.push(turn),
+    (discard) => discarded.push(discard),
+  );
 
   tracker.handleMessageUpdate({
     type: "message_update",
@@ -395,14 +400,14 @@ test("AgentTurnCoordinator commits streamed text at tool-use message_end when th
     message: {
       role: "assistant",
       stopReason: "toolUse",
-      content: [{ type: "toolCall", id: "tool-1", name: "edit", arguments: {} }],
+      content: [
+        { type: "text", text: "Need inspect logs then retry.", textSignature: JSON.stringify({ phase: "commentary" }) },
+        { type: "toolCall", id: "tool-1", name: "edit", arguments: {} },
+      ],
     },
   } as any);
-  expect(completed).toEqual([{
-    text: "The review is complete; I will now apply the patch.",
-    attachments: [],
-    followedByToolUse: true,
-  }]);
+  expect(completed).toEqual([]);
+  expect(discarded).toEqual([{ reason: "tool_use_commentary" }]);
   expect(tracker.getFinalText()).toBe("");
 
   tracker.handleMessageUpdate({
@@ -410,8 +415,47 @@ test("AgentTurnCoordinator commits streamed text at tool-use message_end when th
     assistantMessageEvent: { type: "text_start", contentIndex: 0, partial: { content: [{ type: "text" }] } },
   } as any);
 
-  expect(completed).toHaveLength(1);
-  expect(tracker.getTurnCount()).toBe(1);
+  expect(completed).toHaveLength(0);
+  expect(tracker.getTurnCount()).toBe(0);
+});
+
+test("AgentTurnCoordinator commits explicit final-answer text at a tool-use boundary", () => {
+  const completed: Array<{ text: string; attachments: AttachmentInfo[]; followedByToolUse?: boolean }> = [];
+  const coordinator = new AgentTurnCoordinator({
+    takeAttachments: () => [],
+    touchSession: () => {},
+    recordMessageUsage: () => {},
+  });
+  const tracker = coordinator.createTracker("web:default", (turn) => completed.push(turn));
+  const signature = JSON.stringify({ phase: "final_answer" });
+
+  tracker.handleMessageUpdate({
+    type: "message_update",
+    assistantMessageEvent: {
+      type: "text_delta",
+      delta: "I have finished the requested action.",
+      contentIndex: 0,
+      partial: { content: [{ type: "text", textSignature: signature }] },
+    },
+  } as any);
+  tracker.handleMessageUpdate({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      stopReason: "toolUse",
+      content: [
+        { type: "text", text: "I have finished the requested action.", textSignature: signature },
+        { type: "toolCall", id: "tool-1", name: "send_message", arguments: {} },
+      ],
+    },
+  } as any);
+
+  expect(completed).toEqual([{
+    text: "I have finished the requested action.",
+    attachments: [],
+    followedByToolUse: true,
+  }]);
+  expect(tracker.getFinalText()).toBe("");
 });
 
 test("AgentTurnCoordinator clears a completed tool-use lead-in even without a turn callback", () => {
