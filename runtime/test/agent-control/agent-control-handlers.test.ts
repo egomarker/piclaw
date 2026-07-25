@@ -813,7 +813,17 @@ test("agent control compacts undersized model switches and skips them while cycl
 
   let currentIndex = 0;
   session.model = models[currentIndex];
-  session.getContextUsage = () => ({ tokens: 150000, contextWindow: 200000, percent: 75 }) as any;
+  session.getContextUsage = () => {
+    const awaitingPostCompactionUsage = session.sessionContext.messages.some(
+      (message: any) => message.role === "compactionSummary",
+    );
+    return {
+      tokens: awaitingPostCompactionUsage ? null : 150000,
+      contextWindow: 200000,
+      percent: awaitingPostCompactionUsage ? null : 75,
+    } as any;
+  };
+
   session.setModel = async (model: any) => {
     session.model = model;
     const nextIndex = models.findIndex((entry) => entry.provider === model.provider && entry.id === model.id);
