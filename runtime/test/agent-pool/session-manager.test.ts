@@ -60,7 +60,6 @@ function createManager(overrides: Record<string, unknown> = {}) {
     ensureBranchRegistration: (chatJid) => {
       state.registered.push(chatJid);
     },
-    isInFlightRun: () => false,
     onInfo: (message) => state.infos.push(message),
     onWarn: (message) => state.warns.push(message),
     onError: (message) => state.errors.push(message),
@@ -242,6 +241,46 @@ test("AgentSessionManager disposes a cached side runtime when reseeding it is ca
   expect(setThinkingCalls).toBe(0);
   expect(setToolsCalls).toBe(0);
   expect(fixture.state.warns).toContain("Failed to reseed side session from main context");
+});
+
+test("AgentSessionManager protects pending and in-flight chats from TTL and pool-limit eviction", async () => {
+  let disposed = 0;
+  const protectedSession = {
+    isStreaming: false,
+    isBashRunning: false,
+    isCompacting: false,
+    dispose() { disposed += 1; },
+  };
+  const otherSession = {
+    isStreaming: false,
+    isBashRunning: false,
+    isCompacting: false,
+    dispose() { disposed += 1; },
+  };
+  const fixture = createManager({ mainSessionMaxSize: 1 });
+  fixture.pool.set("web:protected", { runtime: createRuntime(protectedSession), lastUsed: Date.now() - 10_000 });
+  fixture.pool.set("web:other", { runtime: createRuntime(otherSession), lastUsed: Date.now() - 10_000 });
+
+  const releaseFirst = fixture.manager.acquireEvictionProtection("web:protected");
+  const releaseSecond = fixture.manager.acquireEvictionProtection("web:protected");
+  expect(fixture.manager.getInstrumentationSnapshot().evictionProtectedChats).toBe(1);
+
+  // Keep both entries within the TTL window so the max-size path—not TTL—must
+  // choose the unprotected candidate.
+  fixture.manager.evictIdle({ mainIdleTtlMs: 60_000, sideIdleTtlMs: 60_000, mainSessionMaxSizeOverride: 1 });
+  expect(fixture.pool.has("web:protected")).toBe(true);
+  expect(fixture.pool.has("web:other")).toBe(false);
+
+  releaseFirst();
+  fixture.manager.evictIdle({ mainIdleTtlMs: 1, sideIdleTtlMs: 1, mainSessionMaxSizeOverride: 1 });
+  expect(fixture.pool.has("web:protected")).toBe(true);
+
+  releaseSecond();
+  expect(fixture.manager.getInstrumentationSnapshot().evictionProtectedChats).toBe(0);
+  fixture.pool.get("web:protected")!.lastUsed = Date.now() - 10_000;
+  fixture.manager.evictIdle({ mainIdleTtlMs: 1, sideIdleTtlMs: 1, mainSessionMaxSizeOverride: 1 });
+  expect(fixture.pool.has("web:protected")).toBe(false);
+  expect(disposed).toBe(2);
 });
 
 test("AgentSessionManager evicts idle sessions and shuts down remaining sessions", async () => {
@@ -630,225 +669,41 @@ test("restoreClaimedDeferredBranchSeed preserves a newer primary seed written af
   expect(readDeferredBranchSeed(chatJid)?.sessionName).toBe("Newer");
 });
 
-test("AgentSessionManager in-flight guard protects a session even when SDK isStreaming is false (pool limit eviction)", async () => {
+test("AgentSessionManager eviction protection also preserves the matching idle side session", async () => {
   let disposed = 0;
-  const inFlight = new Set<string>();
-  const fixture = createManager({
-    mainSessionMaxSize: 1,
-    isInFlightRun: (jid: string) => inFlight.has(jid),
-    createSession: async (chatJid: string) => {
-      const session = {
-        chatJid,
-        isStreaming: false,
-        isBashRunning: false,
-        isCompacting: false,
-        dispose() {
-          disposed += 1;
-        },
-      };
-      return createRuntime(session) as any;
-    },
-  });
-
-  // Create two sessions. Both have isStreaming=false (simulating the race window).
-  await fixture.manager.getOrCreate("web:alpha");
-  await fixture.manager.getOrCreate("web:beta");
-
-  expect(fixture.pool.size).toBe(1); // max=1, so only alpha survived
-  expect(disposed).toBe(1);
-
-  // Now create alpha again, this time with in-flight set but isStreaming still false.
-  // We need a fresh pool to control the test precisely.
-  const pool2 = new Map<string, { runtime: any; lastUsed: number }>();
-  const sidePool2 = new Map<string, { runtime: any; lastUsed: number }>();
-  const fixture2 = createManager({
-    pool: pool2,
-    sidePool: sidePool2,
-    mainSessionMaxSize: 1,
-    isInFlightRun: (jid: string) => inFlight.has(jid),
-    createSession: async (chatJid: string) => {
-      const session = {
-        chatJid,
-        isStreaming: false,
-        isBashRunning: false,
-        isCompacting: false,
-        dispose() {
-          disposed += 1;
-        },
-      };
-      return createRuntime(session) as any;
-    },
-  });
-
-  await fixture2.manager.getOrCreate("web:alpha");
-  await fixture2.manager.getOrCreate("web:beta"); // evicts alpha
-  expect(pool2.has("web:beta")).toBe(true);
-
-  // Now create alpha as in-flight, then attempt to create gamma.
-  // enforceMainSessionPoolLimit should NOT evict alpha because it's in-flight.
-  const pool3 = new Map<string, { runtime: any; lastUsed: number }>();
-  const sidePool3 = new Map<string, { runtime: any; lastUsed: number }>();
-  const fixture3 = createManager({
-    pool: pool3,
-    sidePool: sidePool3,
-    mainSessionMaxSize: 1,
-    isInFlightRun: (jid: string) => inFlight.has(jid),
-    createSession: async (chatJid: string) => {
-      const session = {
-        chatJid,
-        isStreaming: false,
-        isBashRunning: false,
-        isCompacting: false,
-        dispose() {
-          disposed += 1;
-        },
-      };
-      return createRuntime(session) as any;
-    },
-  });
-
-  const disposedBeforeThird = disposed;
-  await fixture3.manager.getOrCreate("web:alpha");
-  inFlight.add("web:alpha");
-  await fixture3.manager.getOrCreate("web:gamma");
-
-  // With max=1 and alpha protected (in-flight), gamma is also protected
-  // because getOrCreate passes protectedChatJids: ["web:gamma"].
-  // The pool may temporarily exceed max while sessions are active.
-  expect(pool3.has("web:alpha")).toBe(true);
-  expect(pool3.has("web:gamma")).toBe(true);
-  // Both survive because neither is a viable eviction candidate.
-  expect(disposed).toBe(disposedBeforeThird);
-
-  // After clearing in-flight flag, alpha becomes evictable.
-  inFlight.clear();
-  // Trigger enforcement manually (simulates the next evictIdle tick)
-  (fixture3.manager as any).enforceMainSessionPoolLimit({});
-  // Now alpha (older, unprotected) should be evicted
-  expect(pool3.has("web:alpha")).toBe(false);
-  expect(pool3.has("web:gamma")).toBe(true);
-  expect(pool3.size).toBe(1);
-  expect(disposed).toBe(disposedBeforeThird + 1);
-  await fixture3.manager.shutdown();
-});
-
-test("AgentSessionManager in-flight session becomes evictable after the run marker clears", async () => {
-  let disposed = 0;
-  const inFlight = new Set<string>();
-  const pool = new Map<string, { runtime: any; lastUsed: number }>();
-  const sidePool = new Map<string, { runtime: any; lastUsed: number }>();
-  const fixture = createManager({
-    pool,
-    sidePool,
-    mainSessionMaxSize: 1,
-    isInFlightRun: (jid: string) => inFlight.has(jid),
-    createSession: async (chatJid: string) => {
-      const session = {
-        chatJid,
-        isStreaming: false,
-        isBashRunning: false,
-        isCompacting: false,
-        dispose() {
-          disposed += 1;
-        },
-      };
-      return createRuntime(session) as any;
-    },
-  });
-
-  // Session A created while in-flight
-  await fixture.manager.getOrCreate("web:a");
-  inFlight.add("web:a");
-  await fixture.manager.getOrCreate("web:b");
-  expect(pool.has("web:a")).toBe(true); // protected by in-flight
-  expect(disposed).toBe(0);
-  expect(pool.size).toBe(2); // temporarily exceeds max
-
-  // Clear the in-flight marker and call enforceMainSessionPoolLimit
-  inFlight.delete("web:a");
-  (fixture.manager as any).enforceMainSessionPoolLimit({});
-
-  // Now 'a' should be evicted (older, unprotected, isStreaming still false)
-  expect(pool.has("web:a")).toBe(false);
-  expect(pool.has("web:b")).toBe(true);
-  expect(pool.size).toBe(1);
-  expect(disposed).toBe(1);
-
-  await fixture.manager.shutdown();
-});
-
-test("AgentSessionManager ordinary eviction still works when in-flight guard is not engaged", async () => {
-  let disposed = 0;
-  const inFlight = new Set<string>();
-  const pool = new Map<string, { runtime: any; lastUsed: number }>();
-  const sidePool = new Map<string, { runtime: any; lastUsed: number }>();
-  const fixture = createManager({
-    pool,
-    sidePool,
-    mainSessionMaxSize: 2,
-    isInFlightRun: (jid: string) => inFlight.has(jid),
-    createSession: async (chatJid: string) => {
-      const session = {
-        chatJid,
-        isStreaming: false,
-        isBashRunning: false,
-        isCompacting: false,
-        dispose() {
-          disposed += 1;
-        },
-      };
-      return createRuntime(session) as any;
-    },
-  });
-
-  // Create three sessions, none in-flight, max=2
-  await fixture.manager.getOrCreate("web:x");
-  await Bun.sleep(2);
-  await fixture.manager.getOrCreate("web:y");
-  await Bun.sleep(2);
-  await fixture.manager.getOrCreate("web:z");
-
-  // Oldest (x) should be evicted; y and z survive
-  expect(pool.has("web:x")).toBe(false);
-  expect(pool.has("web:y")).toBe(true);
-  expect(pool.has("web:z")).toBe(true);
-  expect(pool.size).toBe(2);
-  expect(disposed).toBe(1);
-
-  // evictIdle should also work normally
-  const activeSession = {
-    isStreaming: true,
-    isBashRunning: false,
-    isCompacting: false,
-    dispose() {
-      disposed += 1;
-    },
-  };
-  const idleSession = {
+  const fixture = createManager();
+  const session = {
     isStreaming: false,
     isBashRunning: false,
     isCompacting: false,
-    dispose() {
-      disposed += 1;
-    },
+    dispose() { disposed += 1; },
   };
-  const pool4 = new Map<string, { runtime: any; lastUsed: number }>();
-  const sidePool4 = new Map<string, { runtime: any; lastUsed: number }>();
-  const fixture4 = createManager({
-    pool: pool4,
-    sidePool: sidePool4,
-    isInFlightRun: () => false,
+  fixture.sidePool.set("web:protected", {
+    runtime: createRuntime(session),
+    lastUsed: Date.now() - 10_000,
   });
-  pool4.set("web:active", { runtime: createRuntime(activeSession), lastUsed: Date.now() - 10_000 });
-  pool4.set("web:idle", { runtime: createRuntime(idleSession), lastUsed: Date.now() - 10_000 });
 
-  const idleDisposed = disposed;
-  fixture4.manager.evictIdle({ mainIdleTtlMs: 1_000, sideIdleTtlMs: 1_000 });
+  const release = fixture.manager.acquireEvictionProtection("web:protected");
+  fixture.manager.evictIdle({ mainIdleTtlMs: 1, sideIdleTtlMs: 1 });
+  expect(fixture.sidePool.has("web:protected")).toBe(true);
+  expect(disposed).toBe(0);
 
-  expect(pool4.has("web:idle")).toBe(false);
-  expect(pool4.has("web:active")).toBe(true);
-  expect(disposed).toBe(idleDisposed + 1);
+  release();
+  fixture.manager.evictIdle({ mainIdleTtlMs: 1, sideIdleTtlMs: 1 });
+  expect(fixture.sidePool.has("web:protected")).toBe(false);
+  await waitFor(() => disposed === 1);
+});
+
+test("AgentSessionManager shutdown clears active eviction protection safely", async () => {
+  const fixture = createManager();
+  const release = fixture.manager.acquireEvictionProtection("web:protected");
+  expect(fixture.manager.getInstrumentationSnapshot().evictionProtectedChats).toBe(1);
 
   await fixture.manager.shutdown();
-  await fixture4.manager.shutdown();
+  expect(fixture.manager.getInstrumentationSnapshot().evictionProtectedChats).toBe(0);
+
+  // A release that races with or follows shutdown remains harmless and idempotent.
+  release();
+  release();
+  expect(fixture.manager.getInstrumentationSnapshot().evictionProtectedChats).toBe(0);
 });

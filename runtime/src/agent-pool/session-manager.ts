@@ -50,14 +50,6 @@ export interface AgentSessionManagerOptions {
   bindSession: (runtime: AgentSessionRuntime, chatJid: string) => Promise<void>;
   ensureBranchRegistration: (chatJid: string, session?: AgentSession | null) => void;
 
-  /**
-   * Optional callback to check whether a chat JID has an active/pending
-   * runAgent call in flight. When true, the session must not be evicted by
-   * idle cleanup or pool-limit enforcement even if session.isStreaming has
-   * not yet been set by the SDK's _runAgentPrompt.
-   */
-  isInFlightRun?: (chatJid: string) => boolean;
-
   onInfo?: (message: string, details: Record<string, unknown>) => void;
   onWarn?: (message: string, details: Record<string, unknown>) => void;
   onError?: (message: string, details: Record<string, unknown>) => void;
@@ -69,6 +61,7 @@ export interface AgentSessionManagerOptions {
 export interface AgentSessionManagerInstrumentationSnapshot {
   branchSeedRealizationsInFlight: number;
   createInFlight: number;
+  evictionProtectedChats: number;
   invalidDeferredSeedErrors: number;
   prewarmInFlight: number;
   queuedPrewarms: number;
@@ -88,10 +81,33 @@ export class AgentSessionManager {
   private readonly queuedPrewarms = new Set<string>();
   private readonly prewarmQueue: Array<{ chatJid: string; mode: "full" | "lightweight" }> = [];
   private readonly prewarmCooldownByChat = new Map<string, number>();
+  private readonly evictionProtectionCounts = new Map<string, number>();
   private prewarmLoopActive = false;
   private isShuttingDown = false;
 
   constructor(private readonly options: AgentSessionManagerOptions) {}
+
+  /**
+   * Protect a chat from every idle/pool-limit eviction path while work is
+   * pending or in flight. Protection is reference-counted for overlapping runs.
+   */
+  acquireEvictionProtection(chatJid: string): () => void {
+    const normalized = String(chatJid || "").trim();
+    if (!normalized) return () => {};
+    this.evictionProtectionCounts.set(normalized, (this.evictionProtectionCounts.get(normalized) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const next = (this.evictionProtectionCounts.get(normalized) ?? 1) - 1;
+      if (next > 0) this.evictionProtectionCounts.set(normalized, next);
+      else this.evictionProtectionCounts.delete(normalized);
+    };
+  }
+
+  private getEvictionProtectedChatJids(explicit: string[] = []): string[] {
+    return [...new Set([...explicit, ...this.evictionProtectionCounts.keys()])];
+  }
 
   private getBlockingInvalidSeedError(chatJid: string): Error | null {
     const knownInvalidSeedState = this.invalidDeferredBranchSeedErrors.get(chatJid);
@@ -363,6 +379,7 @@ export class AgentSessionManager {
     return {
       branchSeedRealizationsInFlight: this.branchSeedRealizationInFlight.size,
       createInFlight: this.createInFlight.size,
+      evictionProtectedChats: this.evictionProtectionCounts.size,
       invalidDeferredSeedErrors: this.invalidDeferredBranchSeedErrors.size,
       prewarmInFlight: this.prewarmInFlight.size,
       queuedPrewarms: this.queuedPrewarms.size,
@@ -376,6 +393,7 @@ export class AgentSessionManager {
     this.queuedPrewarms.clear();
     this.prewarmQueue.length = 0;
     this.prewarmCooldownByChat.clear();
+    this.evictionProtectionCounts.clear();
 
     for (const jid of [...this.options.pool.keys()]) {
       await this.disposeEntry(this.options.pool, jid, "shutdown.dispose_main_session");
@@ -417,11 +435,11 @@ export class AgentSessionManager {
   evictIdle(options: { mainIdleTtlMs: number; sideIdleTtlMs: number; mainSessionMaxSizeOverride?: number | null; protectedChatJids?: string[] }): void {
     const now = Date.now();
     const { mainIdleTtlMs, sideIdleTtlMs, mainSessionMaxSizeOverride } = options;
-    const explicitProtectedChatJids = new Set(
+    const explicitProtectedChatJids = new Set(this.getEvictionProtectedChatJids(
       Array.isArray(options.protectedChatJids)
         ? options.protectedChatJids.map((chatJid) => String(chatJid || "").trim()).filter(Boolean)
         : [],
-    );
+    ));
     let protectedRecentMainChatJid: string | null = null;
     let protectedRecentMainLastUsed = -Infinity;
     for (const [jid, entry] of this.options.pool) {
@@ -439,7 +457,7 @@ export class AgentSessionManager {
       if (explicitProtectedChatJids.has(jid) || jid === protectedRecentMainChatJid) {
         continue;
       }
-      if (this.shouldKeepSessionCached(entry.runtime.session, now, entry, jid)) {
+      if (this.shouldKeepSessionCached(entry.runtime.session, now, entry)) {
         continue;
       }
       if (now - entry.lastUsed > mainIdleTtlMs) {
@@ -453,7 +471,12 @@ export class AgentSessionManager {
     });
 
     for (const [jid, entry] of this.options.sidePool) {
-      if (this.shouldKeepSessionCached(entry.runtime.session, now, entry, jid)) {
+      // Preserve the fork's broader protection semantics: an in-flight chat
+      // protects both its main and side runtime from timer-based eviction.
+      if (explicitProtectedChatJids.has(jid)) {
+        continue;
+      }
+      if (this.shouldKeepSessionCached(entry.runtime.session, now, entry)) {
         continue;
       }
       if (now - entry.lastUsed > sideIdleTtlMs) {
@@ -470,17 +493,8 @@ export class AgentSessionManager {
     session: { isStreaming?: boolean; isBashRunning?: boolean; isCompacting?: boolean },
     now: number,
     entry: PoolEntry,
-    chatJid?: string,
   ): boolean {
     if (session.isStreaming || session.isBashRunning || session.isCompacting) {
-      entry.lastUsed = now;
-      return true;
-    }
-    // Protect sessions that have an active/pending runAgent call even if
-    // the SDK's _isAgentRunActive (session.isStreaming) hasn't been set yet.
-    // This closes the race between evictIdle / enforceMainSessionPoolLimit
-    // and the runAgentPrompt → _runAgentPrompt setup window.
-    if (chatJid && this.options.isInFlightRun?.(chatJid)) {
       entry.lastUsed = now;
       return true;
     }
@@ -492,13 +506,13 @@ export class AgentSessionManager {
     const maxSize = Number.isFinite(resolvedMaxSize) ? resolvedMaxSize : 0;
     if (maxSize <= 0 || this.options.pool.size <= maxSize) return;
 
-    const protectedChatJids = new Set(
+    const protectedChatJids = new Set(this.getEvictionProtectedChatJids(
       Array.isArray(options.protectedChatJids)
         ? options.protectedChatJids.map((chatJid) => String(chatJid || "").trim()).filter(Boolean)
         : [],
-    );
+    ));
     const candidates = [...this.options.pool.entries()]
-      .filter(([chatJid, entry]) => !protectedChatJids.has(chatJid) && !this.shouldKeepSessionCached(entry.runtime.session, Date.now(), entry, chatJid))
+      .filter(([chatJid, entry]) => !protectedChatJids.has(chatJid) && !this.shouldKeepSessionCached(entry.runtime.session, Date.now(), entry))
       .sort((left, right) => left[1].lastUsed - right[1].lastUsed);
 
     while (this.options.pool.size > maxSize && candidates.length > 0) {

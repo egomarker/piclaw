@@ -583,6 +583,91 @@ test("agent pool cleanup timer applies the shorter memory-pressure idle TTL", as
   }
 });
 
+test("agent pool protects a run before the session flips isStreaming", async () => {
+  const ws = getTestWorkspace();
+  restoreEnv = setEnv({
+    PICLAW_WORKSPACE: ws.workspace,
+    PICLAW_STORE: ws.store,
+    PICLAW_DATA: ws.data,
+    PICLAW_MAIN_SESSION_IDLE_TTL_MS: "1",
+    PICLAW_MAIN_SESSION_POOL_MAX_SIZE: "1",
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "0",
+  });
+
+  const { AgentPool } = await importFresh<typeof import("../src/agent-pool.js")>("../src/agent-pool.js");
+  let promptStarted!: () => void;
+  const promptStartedPromise = new Promise<void>((resolve) => { promptStarted = resolve; });
+  let finishPrompt!: () => void;
+  const promptBlocked = new Promise<void>((resolve) => { finishPrompt = resolve; });
+  let disposed = 0;
+
+  class PendingSession {
+    isStreaming = false;
+    isBashRunning = false;
+    isCompacting = false;
+    subscribe(_listener: (event: any) => void) { return () => {}; }
+    async prompt(_prompt: string) {
+      promptStarted();
+      await promptBlocked;
+    }
+    async abort() {}
+    dispose() { disposed += 1; }
+  }
+
+  const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
+    createSession: async () => createRuntime(new PendingSession()) as any,
+  });
+
+  const run = pool.runAgent("race", "web:protected", { timeoutMs: 0 });
+  await promptStartedPromise;
+  const entry = (pool as any).pool.get("web:protected");
+  entry.lastUsed = Date.now() - 10_000;
+
+  // Simulate the periodic cleanup firing after runAgent acquired the runtime but
+  // before the SDK marks the session as streaming.
+  (pool as any).evictIdle();
+  expect((pool as any).pool.has("web:protected")).toBe(true);
+  expect(disposed).toBe(0);
+  expect(pool.getMemoryInstrumentationSnapshot().sessionManager.evictionProtectedChats).toBe(1);
+
+  finishPrompt();
+  await run;
+  expect(pool.getMemoryInstrumentationSnapshot().sessionManager.evictionProtectedChats).toBe(0);
+
+  entry.lastUsed = Date.now() - 10_000;
+  (pool as any).evictIdle();
+  expect((pool as any).pool.has("web:protected")).toBe(false);
+  expect(disposed).toBe(1);
+
+  await pool.shutdown();
+});
+
+test("agent pool releases eviction protection when runtime creation fails", async () => {
+  const ws = getTestWorkspace();
+  restoreEnv = setEnv({
+    PICLAW_WORKSPACE: ws.workspace,
+    PICLAW_STORE: ws.store,
+    PICLAW_DATA: ws.data,
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "0",
+  });
+
+  const { AgentPool } = await importFresh<typeof import("../src/agent-pool.js")>("../src/agent-pool.js");
+  const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
+    createSession: async () => {
+      throw new Error("synthetic runtime creation failure");
+    },
+  });
+
+  const output = await pool.runAgent("race", "web:protected-error", { timeoutMs: 0 });
+  expect(output.status).toBe("error");
+  expect(output.error).toContain("synthetic runtime creation failure");
+  expect(pool.getMemoryInstrumentationSnapshot().sessionManager.evictionProtectedChats).toBe(0);
+
+  await pool.shutdown();
+});
+
 test("agent pool applies the pressure pool cap immediately after acquiring a second session", async () => {
   const ws = getTestWorkspace();
   restoreEnv = setEnv({
