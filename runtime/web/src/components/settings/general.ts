@@ -3,26 +3,22 @@ import { METERS_EVENT_NAME, applyMetersEnabled, readStoredMetersEnabled } from '
 import { NumberStepper } from './number-stepper.js';
 import { useTranslation } from '../../utils/i18n.js';
 
-function resolveAvatarPreview(value) {
+export function resolveAvatarPreview(value, kind) {
     const raw = String(value || '').trim();
     if (!raw) return '';
-    if (raw.startsWith('http://') || raw.startsWith('https://') || raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
-    if (raw.startsWith('/workspace/')) {
-        return `/workspace/file?path=${encodeURIComponent(raw.slice('/workspace/'.length))}`;
-    }
-    if (raw.startsWith('/')) return '';
-    if (/^[a-zA-Z]:[\\/]/.test(raw)) return '';
-    if (raw.startsWith('\\\\')) return '';
-    if (raw.includes('\\')) return '';
-    return `/workspace/file?path=${encodeURIComponent(raw.replace(/^\.\//, ''))}`;
+    // Newly selected files have not reached the avatar cache yet, so preview
+    // their browser-local URL directly. Persisted sources must use the avatar
+    // endpoint: /workspace/file is a JSON metadata API, not image content.
+    if (raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
+    return kind === 'agent' || kind === 'user' ? `/avatar/${kind}` : '';
 }
 
-function AvatarField({ value, onChange }) {
+function AvatarField({ value, kind, onChange }) {
     const { t } = useTranslation();
     const inputRef = useRef(null);
-    const [preview, setPreview] = useState(resolveAvatarPreview(value));
+    const [preview, setPreview] = useState(resolveAvatarPreview(value, kind));
 
-    useEffect(() => { setPreview(resolveAvatarPreview(value)); }, [value]);
+    useEffect(() => { setPreview(resolveAvatarPreview(value, kind)); }, [kind, value]);
 
     const handleFileSelect = useCallback((e) => {
         const file = e.target.files?.[0];
@@ -229,12 +225,12 @@ export function GeneralSection({ settingsData, setStatus, mergeSettingsData }) {
             <h3>${t('settings.general.identity')}</h3>
             <div class="settings-row">
                 <label>${t('settings.general.userLabel')}</label>
-                <${AvatarField} value=${userAvatar} onChange=${setUserAvatar} />
+                <${AvatarField} kind="user" value=${userAvatar} onChange=${setUserAvatar} />
                 <input type="text" value=${userName} onInput=${e => setUserName(e.target.value)} placeholder=${t('settings.general.yourName')} />
             </div>
             <div class="settings-row">
                 <label>${t('settings.general.agentLabel')}</label>
-                <${AvatarField} value=${assistantAvatar} onChange=${setAssistantAvatar} />
+                <${AvatarField} kind="agent" value=${assistantAvatar} onChange=${setAssistantAvatar} />
                 <input type="text" value=${assistantName} onInput=${e => setAssistantName(e.target.value)} placeholder=${t('settings.general.agentName')} />
             </div>
 

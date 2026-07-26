@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
-import { writeSettingsClipboardText } from "../../web/src/components/settings/general.js";
+import { resolveAvatarPreview, writeSettingsClipboardText } from "../../web/src/components/settings/general.js";
+
+const runtimeRoot = join(import.meta.dir, "../..");
 
 test("general settings falls back to execCommand when the Clipboard API rejects", async () => {
   const calls: string[] = [];
@@ -40,4 +44,27 @@ test("general settings falls back to execCommand when the Clipboard API rejects"
   } finally {
     console.debug = originalDebug;
   }
+});
+
+test("general settings previews persisted avatars through the image-serving avatar endpoints", () => {
+  expect(resolveAvatarPreview("/workspace/avatars/agent.png", "agent")).toBe("/avatar/agent");
+  expect(resolveAvatarPreview("avatars/user.png", "user")).toBe("/avatar/user");
+  expect(resolveAvatarPreview("https://example.test/agent.png", "agent")).toBe("/avatar/agent");
+  expect(resolveAvatarPreview("/media/42", "user")).toBe("/avatar/user");
+});
+
+test("general settings keeps unsaved browser-local avatar previews direct", () => {
+  const dataUrl = "data:image/png;base64,iVBORw0KGgo=";
+  const blobUrl = "blob:https://example.test/avatar";
+  expect(resolveAvatarPreview(dataUrl, "agent")).toBe(dataUrl);
+  expect(resolveAvatarPreview(blobUrl, "user")).toBe(blobUrl);
+  expect(resolveAvatarPreview("", "agent")).toBe("");
+  expect(resolveAvatarPreview("avatar.png", "unknown")).toBe("");
+});
+
+test("general settings passes explicit avatar kinds to both identity fields", () => {
+  const source = readFileSync(join(runtimeRoot, "web/src/components/settings/general.ts"), "utf8");
+  expect(source).toContain('<${AvatarField} kind="user" value=${userAvatar}');
+  expect(source).toContain('<${AvatarField} kind="agent" value=${assistantAvatar}');
+  expect(source).not.toContain("/workspace/file?path=");
 });
