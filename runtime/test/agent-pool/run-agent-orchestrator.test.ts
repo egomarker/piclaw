@@ -2327,6 +2327,7 @@ test("runAgentPrompt recovers a timeout-before-finalization when compaction was 
 });
 
 test("runAgentPrompt starts the recovery budget after the first failed attempt", async () => {
+  initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
@@ -2416,6 +2417,148 @@ test("runAgentPrompt starts the recovery budget after the first failed attempt",
     restoreEnv();
   }
 });
+
+test("runAgentPrompt gives compact_then_retry a full continuation budget after a long initial attempt and compaction", async () => {
+  initDatabase();
+  const restoreEnv = setEnv({
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
+    PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
+  });
+  const originalDateNow = Date.now;
+  let now = 1_000_000;
+  Date.now = () => now;
+
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    sessionManager = { getLeafId: () => "leaf-long-initial" };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    promptCalls = 0;
+    compactCalls = 0;
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => { this.listeners = this.listeners.filter((entry) => entry !== listener); };
+    }
+    async compact() {
+      this.compactCalls += 1;
+      now += 60_000;
+    }
+    async prompt() {
+      this.promptCalls += 1;
+      if (this.promptCalls === 1) {
+        now += 120_000;
+        throw new Error("maximum context length exceeded after a long initial request");
+      }
+      for (const listener of this.listeners) {
+        listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "continued after bounded recovery" } });
+        listener({ type: "message_end", message: createAssistantMessage("continued after bounded recovery") });
+      }
+    }
+    async abort() {}
+  }
+
+  try {
+    const session = new StubSession();
+    const turnCoordinator = new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} });
+    const attemptTimeouts: number[] = [];
+    const originalStartPromptTimeout = turnCoordinator.startPromptTimeout.bind(turnCoordinator);
+    turnCoordinator.startPromptTimeout = ((promptSession: any, chatJid: string, timeoutMs: number) => {
+      attemptTimeouts.push(timeoutMs);
+      return originalStartPromptTimeout(promptSession, chatJid, timeoutMs);
+    }) as any;
+
+    const result = await runAgentPrompt("large turn", "web:long-initial-recovery", { timeoutMs: 180_000 }, {
+      getOrCreateRuntime: async () => createRuntime(session, { maxRetries: 2, baseDelayMs: 1, maxDelayMs: 1 }) as any,
+      turnCoordinator,
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.result).toBe("continued after bounded recovery");
+    expect(result.recovery).toEqual(expect.objectContaining({ attemptsUsed: 1, recovered: true, lastClassifier: "context_pressure" }));
+    expect(session.promptCalls).toBe(2);
+    expect(session.compactCalls).toBe(1);
+    expect(attemptTimeouts).toEqual([180_000, 30_000]);
+  } finally {
+    Date.now = originalDateNow;
+    restoreEnv();
+  }
+});
+
+test("runAgentPrompt bounds the compact_then_retry continuation attempt timeout", async () => {
+  initDatabase();
+  const restoreEnv = setEnv({
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
+    PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30",
+  });
+
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    sessionManager = { getLeafId: () => "leaf-bounded-continuation" };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    promptCalls = 0;
+    compactCalls = 0;
+    abortCalls = 0;
+    private releasePrompt: (() => void) | null = null;
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => { this.listeners = this.listeners.filter((entry) => entry !== listener); };
+    }
+    async compact() { this.compactCalls += 1; }
+    async prompt() {
+      this.promptCalls += 1;
+      if (this.promptCalls === 1) throw new Error("maximum context length exceeded before retry");
+      await new Promise<void>((resolve) => { this.releasePrompt = resolve; });
+    }
+    async abort() {
+      this.abortCalls += 1;
+      this.releasePrompt?.();
+      this.releasePrompt = null;
+    }
+  }
+
+  try {
+    const session = new StubSession();
+    const turnCoordinator = new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} });
+    const attemptTimeouts: number[] = [];
+    const originalStartPromptTimeout = turnCoordinator.startPromptTimeout.bind(turnCoordinator);
+    turnCoordinator.startPromptTimeout = ((promptSession: any, chatJid: string, timeoutMs: number) => {
+      attemptTimeouts.push(timeoutMs);
+      return originalStartPromptTimeout(promptSession, chatJid, timeoutMs);
+    }) as any;
+
+    const result = await runAgentPrompt("large turn", "web:bounded-continuation", { timeoutMs: 30 }, {
+      getOrCreateRuntime: async () => createRuntime(session, { maxRetries: 2, baseDelayMs: 1, maxDelayMs: 1 }) as any,
+      turnCoordinator,
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.error).toContain("Timed out after");
+    expect(result.recovery).toEqual(expect.objectContaining({ attemptsUsed: 1, exhausted: true, lastClassifier: "budget_exhausted" }));
+    expect(session.promptCalls).toBe(2);
+    expect(session.compactCalls).toBe(1);
+    expect(session.abortCalls).toBe(1);
+    expect(attemptTimeouts[0]).toBe(30);
+    expect(attemptTimeouts[1]).toBeGreaterThan(0);
+    expect(attemptTimeouts[1]).toBeLessThanOrEqual(30);
+  } finally {
+    restoreEnv();
+  }
+}, 5_000);
 
 test("runAgentPrompt writes recovery diagnostics into the agent log", async () => {
   const restoreEnv = setEnv({
@@ -3764,6 +3907,7 @@ test("runAgentPrompt continues after a committed tool-use lead-in when closing p
 });
 
 test("runAgentPrompt uses a tools-disabled continuation after timeout with non-terminal tool output", async () => {
+  initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
@@ -3947,6 +4091,7 @@ test("runAgentPrompt does not start a generic retry after backoff exhausts the c
 });
 
 test("runAgentPrompt clamps a recovery attempt to the remaining short timeout budget", async () => {
+  initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
@@ -4034,6 +4179,7 @@ test("runAgentPrompt clamps a recovery attempt to the remaining short timeout bu
 });
 
 test("runAgentPrompt keeps tools disabled across repeated continuation attempts", async () => {
+  initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "3",

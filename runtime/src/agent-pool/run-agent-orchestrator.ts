@@ -18,6 +18,7 @@ import {
   decideAutomaticRecovery,
   getAutomaticRecoveryConfig,
   getAutomaticRecoveryDelayMs,
+  isContextPressureFailure,
   isLengthStopFailure,
   type RecoveryAttemptSnapshot,
   type RecoveryClassifier,
@@ -1734,14 +1735,21 @@ export async function runAgentPrompt(
       if (recoveryBudgetStartedAt != null) {
         return Math.max(0, Date.now() - recoveryBudgetStartedAt);
       }
-      // A timed-out tool-bearing attempt needs a fresh bounded continuation
-      // window because the original prompt has already consumed its timeout.
-      // Generic configured timeouts keep the historical whole-run budget
-      // semantics; runs without a configured timeout start their recovery
-      // budget after the first failed attempt.
       return timeoutMs <= 0 || allowPostTimeoutRecoveryWindow
         ? 0
         : Math.max(0, Date.now() - startTime);
+    };
+    const getRecoveryDecisionElapsedMs = (errorText: string, snapshot: RecoveryAttemptSnapshot) => {
+      // #778: context-pressure compact_then_retry has two bounded phases:
+      // recovery compaction is bounded by the compaction timeout; the
+      // continuation prompt receives a fresh recovery budget after compaction.
+      // Therefore the initial prompt duration must not exhaust the recovery
+      // decision before compaction can run.
+      if (recoveryAttemptsUsed === 0 && (isContextPressureFailure(errorText) || snapshot.sawCompactionIntent)) return 0;
+      return getRecoveryBudgetElapsedMs();
+    };
+    const startRecoveryBudgetAfterCompaction = () => {
+      recoveryBudgetStartedAt = Date.now();
     };
 
     const runResult: AgentOutput = await withChatContext(chatJid, channel, async () => {
@@ -1907,7 +1915,7 @@ export async function runAgentPrompt(
           config: recoveryConfig,
           errorText,
           recoveryAttemptsUsed,
-          elapsedMs: getRecoveryBudgetElapsedMs(),
+          elapsedMs: getRecoveryDecisionElapsedMs(errorText, attempt.snapshot),
           snapshot: attempt.snapshot,
         });
 
@@ -1989,10 +1997,6 @@ export async function runAgentPrompt(
           return attempt.output;
         }
 
-        if (recoveryBudgetStartedAt == null && (timeoutMs <= 0 || allowPostTimeoutRecoveryWindow)) {
-          recoveryBudgetStartedAt = Date.now();
-        }
-
         recoveryAttemptsUsed += 1;
         strategyHistory.push(effectiveDecision.strategy);
         const retryDelayMs = effectiveDecision.strategy === "retry"
@@ -2015,6 +2019,10 @@ export async function runAgentPrompt(
             : effectiveDecision.reason,
           errorMessage: errorText,
         });
+
+        if (recoveryBudgetStartedAt == null && (timeoutMs <= 0 || allowPostTimeoutRecoveryWindow)) {
+          recoveryBudgetStartedAt = Date.now();
+        }
 
         if (retryDelayMs > 0) {
           heartbeatTrackedPhase(chatJid, "recovery", {
@@ -2114,6 +2122,7 @@ export async function runAgentPrompt(
               };
             }
           }
+          startRecoveryBudgetAfterCompaction();
         }
 
         heartbeatTrackedPhase(chatJid, "prompt", {
