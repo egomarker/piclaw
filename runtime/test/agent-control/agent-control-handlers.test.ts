@@ -249,6 +249,7 @@ test("agent control session and tree commands", async () => {
   expect(existsSync(join(ws.data, "sessions", "web_default", "active-session.jsonl"))).toBe(false);
   expect(existsSync(join(ws.data, "sessions", "web_default", "archive", "active-session.jsonl"))).toBe(true);
   expect(session.seededEntries.at(-1)?.some((entry) => entry[0] === "compaction")).toBe(true);
+  expect(session.seededEntries.at(-1)?.some((entry) => entry[0] === "thinking_level_change" && entry[1] === "low")).toBe(true);
 
   const fork = await applyControlCommand(runtime as any, registry, { type: "fork", entryId: "entry-1", raw: "/fork entry-1" });
   expect(fork.message).toContain("Selected");

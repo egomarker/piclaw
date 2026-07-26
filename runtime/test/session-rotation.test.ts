@@ -264,7 +264,7 @@ test("rotateSession emergency fallback archives bloated context when compaction 
   expect(appendedContent).toContain("Turn after emergency rotation");
 });
 
-test("rotateSession syncs active in-memory model to carried model after emergency successor creation", async () => {
+test("rotateSession syncs active model and thinking level after emergency successor creation", async () => {
   const workspace = createTempWorkspace("piclaw-rotate-session-model-sync-");
   cleanupWorkspace = workspace.cleanup;
   restoreEnv = setEnv({
@@ -295,13 +295,19 @@ test("rotateSession syncs active in-memory model to carried model after emergenc
       return provider === carriedModel.provider;
     },
   };
-  const makeSession = (manager: SessionManager, file: string | undefined, activeModel: typeof carriedModel | typeof staleDefaultModel) => ({
+  const makeSession = (
+    manager: SessionManager,
+    file: string | undefined,
+    activeModel: typeof carriedModel | typeof staleDefaultModel,
+    thinkingLevel: string,
+  ) => ({
     sessionManager: manager,
     sessionFile: file,
     sessionName: "Model sync session",
-    agent: { state: { model: activeModel } },
+    agent: { state: { model: activeModel, thinkingLevel } },
     modelRuntime,
     get model() { return this.agent.state.model; },
+    get thinkingLevel() { return this.agent.state.thinkingLevel; },
     isStreaming: false,
     isCompacting: false,
     isRetrying: false,
@@ -311,7 +317,7 @@ test("rotateSession syncs active in-memory model to carried model after emergenc
     },
   });
 
-  const originalSession = makeSession(sessionManager, sessionFile, carriedModel);
+  const originalSession = makeSession(sessionManager, sessionFile, carriedModel, "high");
   const runtime = {
     session: originalSession,
     cwd: workspace.workspace,
@@ -325,7 +331,7 @@ test("rotateSession syncs active in-memory model to carried model after emergenc
       // starts on its default model before Piclaw seeds the carried model entry.
       nextManager.appendModelChange(staleDefaultModel.provider, staleDefaultModel.id);
       await options?.setup?.(nextManager);
-      runtime.session = makeSession(nextManager, nextManager.getSessionFile(), staleDefaultModel) as any;
+      runtime.session = makeSession(nextManager, nextManager.getSessionFile(), staleDefaultModel, "medium") as any;
       return { cancelled: false };
     },
     switchSession: async () => ({ cancelled: false }),
@@ -339,6 +345,7 @@ test("rotateSession syncs active in-memory model to carried model after emergenc
   expect(result.status).toBe("success");
   expect(runtime.session.model.provider).toBe("github-copilot");
   expect(runtime.session.model.id).toBe("gpt-5.5");
+  expect(runtime.session.thinkingLevel).toBe("high");
   const nextEntries = readFileSync(runtime.session.sessionFile!, "utf8")
     .trim()
     .split("\n")
@@ -348,6 +355,7 @@ test("rotateSession syncs active in-memory model to carried model after emergenc
     "openai-codex/gpt-5.5",
     "github-copilot/gpt-5.5",
   ]);
+  expect(nextEntries.filter((entry) => entry.type === "thinking_level_change").map((entry) => entry.thinkingLevel)).toEqual(["high"]);
 });
 
 test("rotateSession restores the previous session when a cancelled newSession already replaced runtime.session", async () => {
