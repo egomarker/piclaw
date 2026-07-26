@@ -68,8 +68,8 @@ export async function writeSettingsClipboardText(value, runtime: any = {}) {
         try {
             await nav.clipboard.writeText(text);
             return true;
-        } catch (_error) {
-            // Fall through to execCommand for HTTP/tunneled/non-secure contexts.
+        } catch (error) {
+            console.debug('[settings/general] Clipboard API write failed; falling back to execCommand.', error);
         }
     }
 
