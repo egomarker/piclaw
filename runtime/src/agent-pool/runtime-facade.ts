@@ -8,6 +8,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentSession, AgentSessionRuntime, ModelRegistry, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
+import type { Provider } from "@earendil-works/pi-ai";
 
 import { applyControlCommand, type AgentControlCommand, type AgentControlResult } from "../agent-control/index.js";
 import { getLatestTokenUsageModel } from "../db.js";
@@ -682,6 +683,10 @@ export class AgentRuntimeFacade {
 
   registerModelProvider(providerName: string, config: Parameters<ModelRegistry["registerProvider"]>[1]): void {
     this.options.modelRegistry.registerProvider(providerName, config);
+  }
+
+  registerNativeModelProvider(provider: Provider): void {
+    this.options.modelRegistry.registerProvider(provider);
   }
 
   resolveModelInput(input: string): { model?: string; error?: string } {

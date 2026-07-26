@@ -7,7 +7,7 @@
  * scoped to github-copilot only and imports chat-capable live model IDs while filtering known
  * non-chat model IDs such as embeddings and trajectory compaction helpers.
  */
-import type { Api, Model, OAuthCredential, RefreshModelsContext } from "@earendil-works/pi-ai";
+import type { Api, Model, OAuthCredential, Provider, RefreshModelsContext } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 import { createLogger } from "../utils/logger.js";
@@ -30,6 +30,7 @@ const log = createLogger("extensions.github-copilot-dynamic-models");
 
 type ProviderConfig = Parameters<ExtensionAPI["registerProvider"]>[1];
 type ProviderModelConfig = NonNullable<ProviderConfig["models"]>[number];
+type CopilotDynamicModelRuntime = Pick<ModelRuntime, "getModels" | "getProvider" | "registerNativeProvider">;
 type FetchLike = typeof fetch;
 
 type CopilotLiveModel = {
@@ -391,23 +392,39 @@ function toStoredModel(model: ProviderModelConfig): Model<Api> {
   } as Model<Api>;
 }
 
-export function createGitHubCopilotDynamicModelsOverlay(
-  modelRuntime: Pick<ModelRuntime, "getModels" | "registerProvider">,
-): ProviderConfig {
-  let lastGood: ProviderModelConfig[] = mergeGitHubCopilotDynamicModels([...modelRuntime.getModels(PROVIDER)], []);
-  let networkInFlight: Promise<ProviderModelConfig[]> | null = null;
+export function createGitHubCopilotDynamicModelsProvider(
+  modelRuntime: Pick<ModelRuntime, "getModels" | "getProvider">,
+): Provider | null {
+  const base = modelRuntime.getProvider(PROVIDER);
+  if (!base) return null;
+  let lastGood: ProviderModelConfig[] = mergeGitHubCopilotDynamicModels([...base.getModels()], []);
+  let networkInFlight: Promise<void> | null = null;
+
+  const publishLastGood = (models: ProviderModelConfig[]): void => {
+    lastGood = models;
+  };
+
+  const readStoredAndMerge = async (context: RefreshModelsContext): Promise<Model<Api>[]> => {
+    const cached = await storedProviderModels(context);
+    const merged = mergeGitHubCopilotDynamicModels([...base.getModels(), ...cached], []);
+    if (merged.length > 0) publishLastGood(merged);
+    return cached;
+  };
+
   return {
-    // Pi core composes extension-supplied model lists by replacing the built-in
-    // model objects. Keep Copilot's required IDE identity headers at the
-    // provider-auth layer so they survive that composition path for every
-    // static, cached, and live-discovered model.
-    headers: { ...COPILOT_HEADERS },
+    ...base,
+    // Register as a native provider so Copilot's built-in OAuth, endpoint
+    // derivation, filterModels, and stream implementations remain provider-owned.
+    // Piclaw only augments the synchronous model list with account-discovered
+    // chat-capable model IDs and required Copilot IDE headers.
+    headers: { ...(base.headers ?? {}), ...COPILOT_HEADERS },
+    getModels: () => lastGood.map(toStoredModel),
     refreshModels: async (context) => {
-      const cached = await storedProviderModels(context);
-      if (cached.length > 0) lastGood = mergeGitHubCopilotDynamicModels([...modelRuntime.getModels(PROVIDER), ...cached], []);
-      if (!context.allowNetwork || context.signal?.aborted) return lastGood;
+      await base.refreshModels?.(context);
+      const cached = await readStoredAndMerge(context);
+      if (!context.allowNetwork || context.signal?.aborted) return;
       const credential = copilotCredential(context.credential);
-      if (!credential) return lastGood;
+      if (!credential) return;
       networkInFlight ??= (async () => {
         try {
           const live = await fetchGitHubCopilotLiveModels({
@@ -415,15 +432,16 @@ export function createGitHubCopilotDynamicModelsOverlay(
             apiKey: credential.access,
             signal: context.signal,
           });
-          if (context.signal?.aborted) return lastGood;
-          lastGood = mergeGitHubCopilotDynamicModels([...modelRuntime.getModels(PROVIDER), ...cached], live);
+          if (context.signal?.aborted) return;
+          const merged = mergeGitHubCopilotDynamicModels([...base.getModels(), ...cached], live);
+          publishLastGood(merged);
           await context.store.write({ models: lastGood.map(toStoredModel), checkedAt: Date.now() });
-          log.info("Refreshed GitHub Copilot dynamic model overlay", {
+          log.info("Refreshed GitHub Copilot dynamic native provider", {
             operation: "github_copilot_dynamic_models.refresh",
             liveCount: live.length,
             registeredCount: lastGood.length,
           });
-          return lastGood;
+          return;
         } catch (error) {
           if (!context.signal?.aborted) {
             log.warn("GitHub Copilot dynamic model refresh failed; keeping last-good catalog", {
@@ -431,19 +449,26 @@ export function createGitHubCopilotDynamicModelsOverlay(
               error: error instanceof Error ? error.message : String(error),
             });
           }
-          return lastGood;
+          return;
         } finally {
           networkInFlight = null;
         }
       })();
-      return networkInFlight;
+      await networkInFlight;
     },
   };
 }
 
 export function registerGitHubCopilotDynamicModels(
-  modelRuntime: Pick<ModelRuntime, "getModels" | "registerProvider">,
+  modelRuntime: CopilotDynamicModelRuntime,
 ): void {
   if (DISABLED) return;
-  modelRuntime.registerProvider(PROVIDER, createGitHubCopilotDynamicModelsOverlay(modelRuntime));
+  const provider = createGitHubCopilotDynamicModelsProvider(modelRuntime);
+  if (!provider) {
+    log.warn("GitHub Copilot provider not found; dynamic native provider overlay skipped", {
+      operation: "github_copilot_dynamic_models.provider_missing",
+    });
+    return;
+  }
+  modelRuntime.registerNativeProvider(provider);
 }
