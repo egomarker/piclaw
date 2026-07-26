@@ -40,6 +40,14 @@ export interface AgentPoolServiceFactoryOptions extends AgentPoolLogHooks {
   bashOperations?: AgentBashOperations;
   createSession?: AgentPoolOptions["createSession"];
   createSideSession?: AgentPoolOptions["createSideSession"];
+
+  /**
+   * Optional callback to check whether a chat JID has an active/pending
+   * runAgent call in flight. When true, the session must not be evicted by
+   * idle cleanup or pool-limit enforcement even if session.isStreaming has
+   * not yet been set by the SDK's _runAgentPrompt.
+   */
+  isInFlightRun?: (chatJid: string) => boolean;
 }
 
 /** Concrete helper instances composed into AgentPool. */
@@ -136,6 +144,7 @@ export function createAgentPoolServices(options: AgentPoolServiceFactoryOptions)
     ensureBranchRegistration: (chatJid, session) => {
       branchManager.ensureBranchRegistration(chatJid, session);
     },
+    isInFlightRun: options.isInFlightRun,
     onInfo: options.onInfo,
     onWarn: options.onWarn,
     onError: options.onError,

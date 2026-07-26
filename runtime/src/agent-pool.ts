@@ -220,6 +220,14 @@ export class AgentPool {
   private sidePool = new Map<string, PoolEntry>();
   private activeForkBaseLeafByChat = new Map<string, string | null>();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * Ref-counted guard: chat JIDs with an active runAgent call.
+   * Incremented before runAgentPrompt, decremented in finally.
+   * Used by AgentSessionManager.shouldKeepSessionCached to protect
+   * sessions whose SDK _isAgentRunActive flag hasn't been set yet.
+   */
+  private readonly inFlightRunCount = new Map<string, number>();
   private shuttingDown = false;
   private memoryPressureActive = false;
   private recoveryStats: AgentPoolRecoveryInstrumentationSnapshot = {
@@ -281,6 +289,7 @@ export class AgentPool {
       bashOperations: this.bashOperations,
       createSession: this.createSession,
       createSideSession: this.createSideSession,
+      isInFlightRun: (chatJid) => (this.inFlightRunCount.get(chatJid) ?? 0) > 0,
       onInfo: (message, details) => log.info(message, details),
       onWarn: (message, details) => log.warn(message, details),
       onError: (message, details) => log.error(message, details),
@@ -357,29 +366,36 @@ export class AgentPool {
 
   /** Run a prompt against the persistent session for `chatJid`. */
   async runAgent(prompt: string, chatJid: string, options: RunAgentOptions = {}): Promise<AgentOutput> {
-    const output = await runAgentPrompt(prompt, chatJid, options, {
-      getOrCreateRuntime: (nextChatJid) => this.getOrCreateRuntime(nextChatJid),
-      turnCoordinator: this.turnCoordinator,
-      clearAttachments: (nextChatJid) => this.attachments.clear(nextChatJid),
-      takeAttachments: (nextChatJid) => this.attachments.take(nextChatJid),
-      logsDir: this.logsDir,
-      setActiveForkBaseLeaf: (nextChatJid, leafId) => this.activeForkBaseLeafByChat.set(nextChatJid, leafId),
-      clearActiveForkBaseLeaf: (nextChatJid) => {
-        this.activeForkBaseLeafByChat.delete(nextChatJid);
-      },
-      onInfo: (message, details) => log.info(message, details),
-      onWarn: (message, details) => log.warn(message, details),
-      onError: (message, details) => log.error(message, details),
-    });
+    // Mark in-flight before runAgentPrompt so evictIdle / enforceMainSessionPoolLimit
+    // protect this session even before SDK's _isAgentRunActive is set.
+    this.markInFlightRun(chatJid);
+    try {
+      const output = await runAgentPrompt(prompt, chatJid, options, {
+        getOrCreateRuntime: (nextChatJid) => this.getOrCreateRuntime(nextChatJid),
+        turnCoordinator: this.turnCoordinator,
+        clearAttachments: (nextChatJid) => this.attachments.clear(nextChatJid),
+        takeAttachments: (nextChatJid) => this.attachments.take(nextChatJid),
+        logsDir: this.logsDir,
+        setActiveForkBaseLeaf: (nextChatJid, leafId) => this.activeForkBaseLeafByChat.set(nextChatJid, leafId),
+        clearActiveForkBaseLeaf: (nextChatJid) => {
+          this.activeForkBaseLeafByChat.delete(nextChatJid);
+        },
+        onInfo: (message, details) => log.info(message, details),
+        onWarn: (message, details) => log.warn(message, details),
+        onError: (message, details) => log.error(message, details),
+      });
 
-    const recovery = output.recovery;
-    if (recovery) {
-      this.recoveryStats.attemptsTotal += Math.max(0, recovery.attemptsUsed || 0);
-      if (recovery.recovered) this.recoveryStats.recoveredRuns += 1;
-      if (recovery.exhausted) this.recoveryStats.exhaustedRuns += 1;
+      const recovery = output.recovery;
+      if (recovery) {
+        this.recoveryStats.attemptsTotal += Math.max(0, recovery.attemptsUsed || 0);
+        if (recovery.recovered) this.recoveryStats.recoveredRuns += 1;
+        if (recovery.exhausted) this.recoveryStats.exhaustedRuns += 1;
+      }
+
+      return output;
+    } finally {
+      this.clearInFlightRun(chatJid);
     }
-
-    return output;
   }
 
   async applyControlCommand(chatJid: string, command: AgentControlCommand): Promise<AgentControlResult> {
@@ -763,6 +779,21 @@ export class AgentPool {
       mainIdleTtlMs: active ? Math.min(this.config.mainIdleTtlMs, this.config.memoryPressureMainIdleTtlMs) : this.config.mainIdleTtlMs,
       mainSessionMaxSizeOverride: active ? this.config.memoryPressureMainSessionPoolMaxSize : undefined,
     };
+  }
+
+  /** Mark a chat JID as having an active runAgent call (ref-counted). */
+  markInFlightRun(chatJid: string): void {
+    this.inFlightRunCount.set(chatJid, (this.inFlightRunCount.get(chatJid) ?? 0) + 1);
+  }
+
+  /** Unmark a chat JID that no longer has an active runAgent call (ref-counted). */
+  clearInFlightRun(chatJid: string): void {
+    const count = (this.inFlightRunCount.get(chatJid) ?? 1) - 1;
+    if (count <= 0) {
+      this.inFlightRunCount.delete(chatJid);
+    } else {
+      this.inFlightRunCount.set(chatJid, count);
+    }
   }
 
   private evictIdle(): void {

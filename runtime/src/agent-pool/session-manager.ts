@@ -49,6 +49,15 @@ export interface AgentSessionManagerOptions {
   getSessionExtensionFactories?: (chatJid: string) => Promise<ExtensionFactory[]>;
   bindSession: (runtime: AgentSessionRuntime, chatJid: string) => Promise<void>;
   ensureBranchRegistration: (chatJid: string, session?: AgentSession | null) => void;
+
+  /**
+   * Optional callback to check whether a chat JID has an active/pending
+   * runAgent call in flight. When true, the session must not be evicted by
+   * idle cleanup or pool-limit enforcement even if session.isStreaming has
+   * not yet been set by the SDK's _runAgentPrompt.
+   */
+  isInFlightRun?: (chatJid: string) => boolean;
+
   onInfo?: (message: string, details: Record<string, unknown>) => void;
   onWarn?: (message: string, details: Record<string, unknown>) => void;
   onError?: (message: string, details: Record<string, unknown>) => void;
@@ -430,7 +439,7 @@ export class AgentSessionManager {
       if (explicitProtectedChatJids.has(jid) || jid === protectedRecentMainChatJid) {
         continue;
       }
-      if (this.shouldKeepSessionCached(entry.runtime.session, now, entry)) {
+      if (this.shouldKeepSessionCached(entry.runtime.session, now, entry, jid)) {
         continue;
       }
       if (now - entry.lastUsed > mainIdleTtlMs) {
@@ -444,7 +453,7 @@ export class AgentSessionManager {
     });
 
     for (const [jid, entry] of this.options.sidePool) {
-      if (this.shouldKeepSessionCached(entry.runtime.session, now, entry)) {
+      if (this.shouldKeepSessionCached(entry.runtime.session, now, entry, jid)) {
         continue;
       }
       if (now - entry.lastUsed > sideIdleTtlMs) {
@@ -461,8 +470,17 @@ export class AgentSessionManager {
     session: { isStreaming?: boolean; isBashRunning?: boolean; isCompacting?: boolean },
     now: number,
     entry: PoolEntry,
+    chatJid?: string,
   ): boolean {
     if (session.isStreaming || session.isBashRunning || session.isCompacting) {
+      entry.lastUsed = now;
+      return true;
+    }
+    // Protect sessions that have an active/pending runAgent call even if
+    // the SDK's _isAgentRunActive (session.isStreaming) hasn't been set yet.
+    // This closes the race between evictIdle / enforceMainSessionPoolLimit
+    // and the runAgentPrompt → _runAgentPrompt setup window.
+    if (chatJid && this.options.isInFlightRun?.(chatJid)) {
       entry.lastUsed = now;
       return true;
     }
@@ -480,7 +498,7 @@ export class AgentSessionManager {
         : [],
     );
     const candidates = [...this.options.pool.entries()]
-      .filter(([chatJid, entry]) => !protectedChatJids.has(chatJid) && !this.shouldKeepSessionCached(entry.runtime.session, Date.now(), entry))
+      .filter(([chatJid, entry]) => !protectedChatJids.has(chatJid) && !this.shouldKeepSessionCached(entry.runtime.session, Date.now(), entry, chatJid))
       .sort((left, right) => left[1].lastUsed - right[1].lastUsed);
 
     while (this.options.pool.size > maxSize && candidates.length > 0) {
