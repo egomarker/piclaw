@@ -72,7 +72,7 @@ async function* terminalEncryptedReasoningEvents(): AsyncIterable<any> {
   };
 }
 
-describe("Earendil 0.80.10 provider regressions", () => {
+describe("Earendil 0.81.0 provider regressions", () => {
   test("built-in catalogs expose Fable 5 max, Copilot MAI Responses, corrected OpenRouter context, and OpenCode affinity", () => {
     const anthropicFable = getBuiltinModels("anthropic").find((model) => model.id === "claude-fable-5");
     expect(anthropicFable?.thinkingLevelMap).toMatchObject({ xhigh: "xhigh", max: "max" });
