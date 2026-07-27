@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { convertResponsesTools } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import "../helpers.ts";
 import { setMessagesPostFn } from "../../src/extensions/messages-crud.js";
 import { sendDashboardWidget } from "../../src/extensions/send-dashboard-widget.js";
@@ -21,6 +22,8 @@ describe("send_dashboard_widget tool", () => {
       } as any);
 
       const tool = tools.get("send_dashboard_widget");
+      expect(tool.constrainedSampling).toBeUndefined();
+      expect((convertResponsesTools([tool], { strict: null, supportsStrictMode: true })[0] as any).strict).toBeNull();
       const result = await withChatContext("web:test", "web", () =>
         tool.execute("tool-1", {
           html: "<h1>Hello</h1><button onclick=\"piclawWidget.submit({text:'clicked'})\">Go</button>",

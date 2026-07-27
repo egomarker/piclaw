@@ -198,6 +198,8 @@ export const envTools: ExtensionFactory = (pi: ExtensionAPI) => {
     label: "env",
     description: `Get, set, or clear persistent workspace-scoped environment variables. Writes a managed block into ${getWorkspaceRoot()}/.env.sh, persists state under ${getWorkspaceRoot()}/.piclaw/env-tool.json, updates process.env immediately for later tool calls, and supports copying existing vars via $NAME on set. Prefer keychain for secrets.`,
     promptSnippet: `env: get/set/clear persistent workspace-scoped environment variables in ${getWorkspaceRoot()}/.env.sh (use $NAME to copy an existing env var; prefer keychain for secrets).`,
+    // The action-dependent optional fields are a permissive schema. Advertising
+    // strict sampling makes Codex reject it before dispatching any request.
     parameters: ENV_TOOL_SCHEMA,
     async execute(_toolCallId, params: EnvToolParams): Promise<AgentToolResult<EnvToolDetails>> {
       const current = loadManagedEnv();

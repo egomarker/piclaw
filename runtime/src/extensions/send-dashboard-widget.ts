@@ -113,6 +113,8 @@ export const sendDashboardWidget: ExtensionFactory = (pi: ExtensionAPI) => {
     label: "send_dashboard_widget",
     description: "Post an interactive widget with agent-authored HTML to the web timeline.",
     promptSnippet: "send_dashboard_widget: post an interactive widget (HTML/CSS/JS) to the floating pane. Use piclawWidget.submit({text}) to return output.",
+    // Keep the schema permissive: optional widget metadata does not satisfy
+    // Codex's closed-object requirements for strict function schemas.
     parameters: SendDashboardWidgetSchema,
     async execute(_toolCallId, params: Params) {
       const html = typeof params.html === "string" ? params.html.trim() : "";

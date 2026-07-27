@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "fs";
+import { convertResponsesTools } from "@earendil-works/pi-ai/api/openai-responses-shared";
 
 import { createTempWorkspace, importFresh, setEnv } from "../helpers.js";
 import { createFakeExtensionApi } from "./fake-extension-api.js";
@@ -34,6 +35,12 @@ describe("env-tools extension", () => {
     envTools(fake.api);
     return fake.tools.get("env");
   }
+
+  test("does not advertise an invalid strict schema to Codex", async () => {
+    const tool = await getTool();
+    expect(tool.constrainedSampling).toBeUndefined();
+    expect((convertResponsesTools([tool], { strict: null, supportsStrictMode: true })[0] as any).strict).toBeNull();
+  });
 
   test("get without a name lists managed variable names only", async () => {
     const tool = await getTool();

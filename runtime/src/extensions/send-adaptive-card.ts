@@ -71,6 +71,8 @@ export const sendAdaptiveCard: ExtensionFactory = (pi: ExtensionAPI) => {
     label: "send_adaptive_card",
     description: "Post a PiClaw web Adaptive Card as an agent message.",
     promptSnippet: "send_adaptive_card: post an agent-owned adaptive_card content block to web timeline.",
+    // Adaptive Card payloads are intentionally open-ended. Marking this tool
+    // strict makes Codex reject the function schema before the turn starts.
     parameters: SendAdaptiveCardSchema,
     async execute(_toolCallId, params: SendAdaptiveCardParams) {
       const content = params.content?.trim();

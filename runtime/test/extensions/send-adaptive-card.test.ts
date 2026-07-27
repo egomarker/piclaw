@@ -3,6 +3,7 @@
  */
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { convertResponsesTools } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import { createTempWorkspace, importFresh, setEnv } from "../helpers.js";
 import { withChatContext } from "../../src/core/chat-context.js";
 
@@ -81,6 +82,8 @@ describe("send_adaptive_card extension", () => {
     const { tool } = await getTool();
     expect(tool).toBeDefined();
     expect(tool.name).toBe("send_adaptive_card");
+    expect(tool.constrainedSampling).toBeUndefined();
+    expect((convertResponsesTools([tool], { strict: null, supportsStrictMode: true })[0] as any).strict).toBeNull();
   });
 
   test("posts agent-owned adaptive card via registered messages post function", async () => {
