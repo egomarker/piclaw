@@ -7,7 +7,7 @@ Telegram Bot API transport for Piclaw.
 - allowlisted 1:1 chats only
 - no groups
 - no forum topics
-- inbound: text, photo, document, location
+- inbound: text, photo, document, video, location
 - outbound: text, image, file
 - location shares are normalized to plain text with all received location fields
 

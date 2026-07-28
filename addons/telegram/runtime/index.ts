@@ -91,7 +91,6 @@ function buildChatName(message: TelegramMessage): string {
 function getUnsupportedKind(message: TelegramMessage): string | null {
   if (message.sticker) return "sticker";
   if (message.voice) return "voice";
-  if (message.video) return "video";
   if (message.audio) return "audio";
   if (message.animation) return "animation";
   return null;
@@ -232,9 +231,10 @@ export async function buildInboundPayload(
     }
   }
 
-  if (message.document?.file_id) {
+  const fileAttachment = message.document ?? message.video;
+  if (fileAttachment?.file_id) {
     try {
-      const imported = await importDocumentAttachment(api, message, message.document);
+      const imported = await importDocumentAttachment(api, message, fileAttachment);
       if (imported) {
         mediaIds.push(imported.mediaId);
         contentBlocks.push(imported.contentBlock);
@@ -242,7 +242,7 @@ export async function buildInboundPayload(
       }
     } catch (error) {
       summaries.push("[File attachment unavailable]");
-      log("warn", "Failed to import Telegram document attachment", { err: error, messageId: message.message_id });
+      log("warn", "Failed to import Telegram file attachment", { err: error, messageId: message.message_id });
     }
   }
 

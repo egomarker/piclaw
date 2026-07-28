@@ -621,6 +621,92 @@ test("telegram pollLoop routes update handler failures through the reconnect pat
   expect(disconnects[0]).toContain("update handler failed");
 });
 
+test("telegram runtime imports native video messages as file attachments", async () => {
+  restoreEnv = setEnv({
+    PICLAW_TELEGRAM_ENABLED: "false",
+    PICLAW_TELEGRAM_BOT_TOKEN: undefined,
+  });
+
+  const runtimeGlobal = globalThis as Record<string, unknown>;
+  const previousRuntimeApi = runtimeGlobal.__piclaw_runtime;
+  const createdMedia: Array<{
+    filename: string;
+    contentType: string;
+    data: Uint8Array;
+    metadata: Record<string, unknown> | null;
+  }> = [];
+  runtimeGlobal.__piclaw_runtime = {
+    createMedia: (
+      filename: string,
+      contentType: string,
+      data: Uint8Array,
+      _thumbnail: Uint8Array | null,
+      metadata: Record<string, unknown> | null,
+    ) => {
+      createdMedia.push({ filename, contentType, data, metadata });
+      return 42;
+    },
+  };
+
+  try {
+    const runtime = await importFresh<typeof import("../../../addons/telegram/runtime/index.ts")>("../../../addons/telegram/runtime/index.ts", import.meta.url);
+    const api = {
+      getFile: async (fileId: string) => {
+        expect(fileId).toBe("video-file-id");
+        return { file_id: fileId, file_path: "videos/clip.mp4" };
+      },
+      downloadFile: async (filePath: string) => {
+        expect(filePath).toBe("videos/clip.mp4");
+        return new Uint8Array([1, 2, 3]);
+      },
+    } as unknown as TelegramBotApi;
+
+    const payload = await runtime.buildInboundPayload(api, {
+      message_id: 5,
+      date: 0,
+      caption: "Inspect this clip",
+      chat: { id: 123456, type: "private" },
+      video: {
+        file_id: "video-file-id",
+        file_name: "clip.mp4",
+        mime_type: "video/mp4",
+        file_size: 3,
+      },
+    });
+
+    expect(payload).toEqual({
+      content: "Inspect this clip\n\n[File attachment: clip.mp4]",
+      mediaIds: [42],
+      contentBlocks: [{
+        type: "file",
+        media_id: 42,
+        name: "clip.mp4",
+        filename: "clip.mp4",
+        mime_type: "video/mp4",
+        size: 3,
+      }],
+    });
+    expect(createdMedia).toHaveLength(1);
+    expect(createdMedia[0]).toMatchObject({
+      filename: "clip.mp4",
+      contentType: "video/mp4",
+      data: new Uint8Array([1, 2, 3]),
+      metadata: {
+        source: "telegram",
+        chat_id: "123456",
+        message_id: 5,
+        file_id: "video-file-id",
+      },
+    });
+  } finally {
+    if (previousRuntimeApi === undefined) {
+      delete runtimeGlobal.__piclaw_runtime;
+    } else {
+      runtimeGlobal.__piclaw_runtime = previousRuntimeApi;
+    }
+  }
+});
+
 test("telegram runtime converts location-only messages into plain text", async () => {
   restoreEnv = setEnv({
     PICLAW_TELEGRAM_ENABLED: "false",

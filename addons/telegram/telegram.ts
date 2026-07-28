@@ -57,7 +57,7 @@ export interface TelegramMessage {
   location?: TelegramLocation;
   sticker?: unknown;
   voice?: unknown;
-  video?: unknown;
+  video?: TelegramDocument;
   audio?: unknown;
   animation?: unknown;
 }
