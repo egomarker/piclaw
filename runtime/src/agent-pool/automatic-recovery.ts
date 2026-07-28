@@ -13,7 +13,12 @@ export interface RetryBackoffSettings {
 }
 
 export interface AutomaticRecoveryConfig {
+  /** Legacy master switch for non-context automatic recovery. */
   enabled: boolean;
+  /** Whether failures classified as transient may retry automatically. */
+  transientRecoveryEnabled: boolean;
+  /** Whether transient continuation attempts may use tools. */
+  transientRecoveryToolsEnabled: boolean;
   maxAttempts: number;
   totalBudgetMs: number;
   baseDelayMs: number;
@@ -49,6 +54,8 @@ export interface RecoveryAttemptSnapshot {
   sawThinkingOnlyStop?: boolean;
   onlyReadOnlyToolActivity?: boolean;
   canDisableToolsForRecovery?: boolean;
+  /** True when a tool execution started without a matching terminal event. */
+  hasUnresolvedToolExecution?: boolean;
   hadToolFailure?: boolean;
   sawTerminalSideEffectToolActivity?: boolean;
   toolUseBudgetExceeded?: boolean;
@@ -77,6 +84,8 @@ export const DEFAULT_RETRY_BACKOFF_SETTINGS: Readonly<RetryBackoffSettings> = Ob
 
 export const DEFAULT_AUTOMATIC_RECOVERY_CONFIG: Readonly<AutomaticRecoveryConfig> = Object.freeze({
   enabled: true,
+  transientRecoveryEnabled: true,
+  transientRecoveryToolsEnabled: true,
   maxAttempts: DEFAULT_MAX_ATTEMPTS,
   totalBudgetMs: DEFAULT_TOTAL_BUDGET_MS,
   baseDelayMs: DEFAULT_RETRY_BASE_DELAY_MS,
@@ -107,6 +116,8 @@ export function getAutomaticRecoveryConfig(retrySettings?: Partial<RetryBackoffS
     // transient retries. Tool-history ceilings are terminal and require an
     // explicit continue instead of automatic compaction/replay.
     enabled: policy.automaticRecoveryEnabled,
+    transientRecoveryEnabled: policy.transientRecoveryEnabled,
+    transientRecoveryToolsEnabled: policy.transientRecoveryToolsEnabled,
     maxAttempts: policy.automaticRecoveryMaxAttempts > 0
       ? policy.automaticRecoveryMaxAttempts
       : normalizedRetry.maxRetries,
@@ -181,15 +192,6 @@ export function decideAutomaticRecovery(input: RecoveryDecisionInput): RecoveryD
   const toolHistoryPressure = Boolean(input.snapshot.toolUseBudgetExceeded)
     || /tool(?:-| )use budget exceeded|tool history pressure|too many tool (?:steps|calls)/i.test(errorText);
 
-  if (!input.config.enabled) {
-    return {
-      recover: false,
-      classifier: "disabled",
-      strategy: null,
-      reason: "Automatic turn recovery is disabled.",
-    };
-  }
-
   if (/stale-progress watchdog/i.test(errorText)) {
     return {
       recover: false,
@@ -248,8 +250,8 @@ export function decideAutomaticRecovery(input: RecoveryDecisionInput): RecoveryD
   if (input.snapshot.hadToolActivity) {
     // A terminal assistant reply is the only prior output that can make a
     // tool-bearing failure complete. Text emitted before a tool call is an
-    // intermediate lead-in; if the provider later stops or times out, run a
-    // tools-disabled continuation so completed side effects are not replayed.
+    // intermediate lead-in; if the provider later stops or times out, resume
+    // from persisted tool results unless execution state is still unresolved.
     const hadTerminalTurnOutput = input.snapshot.hadTerminalTurnOutput
       ?? Boolean(input.snapshot.hadCompletedTurnOutput);
     if (hadTerminalTurnOutput) {
@@ -292,28 +294,35 @@ export function decideAutomaticRecovery(input: RecoveryDecisionInput): RecoveryD
         reason: "Failure classified as non-recoverable.",
       };
     }
-    if (
-      input.snapshot.onlyReadOnlyToolActivity
-      && input.snapshot.sawAssistantToolCall
-      && !hadTerminalTurnOutput
-      && /without emitting an assistant reply before finalization|provider stopped after tool use without a final assistant reply/i.test(errorText)
-    ) {
+    const transientCandidate = isTransientFailure(errorText)
+      || Boolean(input.snapshot.hadPartialOutput)
+      || Boolean(input.snapshot.sawAssistantToolCall);
+    if (transientCandidate) {
+      if (!input.config.enabled || !input.config.transientRecoveryEnabled) {
+        return {
+          recover: false,
+          classifier: "disabled",
+          strategy: null,
+          reason: "Transient automatic recovery is disabled.",
+        };
+      }
+      const mustDisableTools = !input.config.transientRecoveryToolsEnabled
+        || Boolean(input.snapshot.hasUnresolvedToolExecution);
+      if (mustDisableTools && !input.snapshot.canDisableToolsForRecovery) {
+        return {
+          recover: false,
+          classifier: "tool_activity",
+          strategy: null,
+          reason: "Transient recovery requires tools to be disabled, but this session cannot control its active tool set.",
+        };
+      }
       return {
         recover: true,
         classifier: "transient",
         strategy: "retry",
-        reason: "Provider stopped after a read-only tool call without sending a final reply; retrying once is safe.",
-      };
-    }
-    if (
-      input.snapshot.canDisableToolsForRecovery
-      && (isTransientFailure(errorText) || input.snapshot.hadPartialOutput || input.snapshot.sawAssistantToolCall)
-    ) {
-      return {
-        recover: true,
-        classifier: "transient",
-        strategy: "retry",
-        reason: "Tool work completed without a terminal assistant reply; continuing once with tools disabled.",
+        reason: mustDisableTools
+          ? "Transient failure after tool activity; continuing with tools disabled by recovery policy."
+          : "Transient failure after resolved tool work; continuing from the persisted tool results with tools available.",
       };
     }
     return {
@@ -335,6 +344,14 @@ export function decideAutomaticRecovery(input: RecoveryDecisionInput): RecoveryD
 
   if (input.snapshot.sawThinkingOnlyStop && !input.snapshot.hadToolActivity) {
     if (input.recoveryAttemptsUsed === 0) {
+      if (!input.config.enabled) {
+        return {
+          recover: false,
+          classifier: "disabled",
+          strategy: null,
+          reason: "Automatic turn recovery is disabled.",
+        };
+      }
       return {
         recover: true,
         classifier: "thinking_only_stop",
@@ -390,11 +407,36 @@ export function decideAutomaticRecovery(input: RecoveryDecisionInput): RecoveryD
   }
 
   if (isTransientFailure(errorText) || input.snapshot.hadPartialOutput || !errorText) {
+    if (!input.config.enabled || !input.config.transientRecoveryEnabled) {
+      return {
+        recover: false,
+        classifier: "disabled",
+        strategy: null,
+        reason: "Transient automatic recovery is disabled.",
+      };
+    }
+    if (!input.config.transientRecoveryToolsEnabled && !input.snapshot.canDisableToolsForRecovery) {
+      return {
+        recover: false,
+        classifier: "disabled",
+        strategy: null,
+        reason: "Transient recovery tools are disabled, but this session cannot control its active tool set.",
+      };
+    }
     return {
       recover: true,
       classifier: "transient",
       strategy: "retry",
       reason: "Failure looks transient or interrupted mid-turn; retrying before compaction.",
+    };
+  }
+
+  if (!input.config.enabled) {
+    return {
+      recover: false,
+      classifier: "disabled",
+      strategy: null,
+      reason: "Automatic turn recovery is disabled.",
     };
   }
 

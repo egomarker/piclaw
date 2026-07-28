@@ -268,9 +268,12 @@ test("tool-execution watchdog heartbeat controller keeps pulsing while tools rem
     getIntervalMs: () => 10,
   });
 
+  expect(controller.getActiveExecutionCount()).toBe(0);
   controller.handleEvent({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "bash" });
+  expect(controller.getActiveExecutionCount()).toBe(1);
   await Bun.sleep(35);
   controller.handleEvent({ type: "tool_execution_end", toolCallId: "tool-1", toolName: "bash" });
+  expect(controller.getActiveExecutionCount()).toBe(0);
   const beatCountAfterEnd = beats.length;
   await Bun.sleep(25);
   controller.stop();
@@ -1995,6 +1998,7 @@ test("runAgentPrompt does not auto-recover generic failures after tool activity"
 
     expect(result.status).toBe("error");
     expect(result.error).toContain("Timed out after 30s");
+    expect(result.recovery?.diagnostics[0]?.hasUnresolvedToolExecution).toBe(true);
     expect(session.promptCalls).toBe(1);
     expect(session.compactCalls).toBe(0);
     expect(events).toEqual([]);
@@ -3698,7 +3702,7 @@ test("runAgentPrompt retries a persisted commentary-only error instead of classi
   }
 });
 
-test("runAgentPrompt requests closing prose after a non-terminal side-effecting tool", async () => {
+test("runAgentPrompt continues with tools after a resolved side-effecting tool", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
@@ -3732,7 +3736,7 @@ test("runAgentPrompt requests closing prose after a non-terminal side-effecting 
         }
         return;
       }
-      expect(this.activeTools).toEqual([]);
+      expect(this.activeTools).toEqual(["bash", "write"]);
       for (const listener of this.listeners) {
         listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Wrote /tmp/x successfully." } });
         listener({ type: "message_end", message: createAssistantMessage("Wrote /tmp/x successfully.") });
@@ -3949,6 +3953,7 @@ test("runAgentPrompt continues after a committed tool-use lead-in when closing p
       this.promptCalls += 1;
       this.promptTexts.push(text);
       if (this.promptCalls > 1) {
+        expect(this.activeTools).toEqual(["bash", "read"]);
         for (const listener of this.listeners) {
           listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Tests passed. The requested work is complete." } });
           listener({
@@ -4027,8 +4032,7 @@ test("runAgentPrompt continues after a committed tool-use lead-in when closing p
     expect(result.result).toBe("Tests passed. The requested work is complete.");
     expect(session.promptCalls).toBe(2);
     expect(session.promptTexts).toEqual(["run tests", RECOVERY_CONTINUATION_PROMPT]);
-    expect(session.toolSets).toContainEqual([]);
-    expect(session.toolSets.at(-1)).toEqual(["bash", "read"]);
+    expect(session.toolSets).toEqual([]);
     expect(completedTurns).toEqual([
       { text: "I will run the tests now.", followedByToolUse: true },
     ]);
@@ -4041,10 +4045,11 @@ test("runAgentPrompt continues after a committed tool-use lead-in when closing p
   }
 });
 
-test("runAgentPrompt uses a tools-disabled continuation after timeout with non-terminal tool output", async () => {
+test("runAgentPrompt honors the tools-disabled transient recovery opt-out", async () => {
   initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "0",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
@@ -4266,7 +4271,7 @@ test("runAgentPrompt clamps a recovery attempt to the remaining short timeout bu
         await new Promise<void>((resolve) => { this.resolveTimedOutPrompt = resolve; });
         return;
       }
-      expect(this.activeTools).toEqual([]);
+      expect(this.activeTools).toEqual(["bash", "read"]);
       for (const listener of this.listeners) {
         listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Recovered within the short budget." } });
         listener({ type: "message_end", message: createAssistantMessage("Recovered within the short budget.") });
@@ -4313,10 +4318,11 @@ test("runAgentPrompt clamps a recovery attempt to the remaining short timeout bu
   }
 });
 
-test("runAgentPrompt keeps tools disabled across repeated continuation attempts", async () => {
+test("runAgentPrompt keeps tools disabled across repeated opted-out continuation attempts", async () => {
   initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "0",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "3",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });

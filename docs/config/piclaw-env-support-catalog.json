@@ -3990,6 +3990,78 @@
       "migrationDisposition": "migrated-to-domain-config"
     },
     {
+      "name": "PICLAW_TURN_TRANSIENT_RECOVERY_ENABLED",
+      "owner": "agent-runtime",
+      "type": "boolean",
+      "default": true,
+      "bounds": null,
+      "allowedValues": [
+        "1",
+        "0",
+        "true",
+        "false",
+        "yes",
+        "no",
+        "on",
+        "off"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.recovery.transientRecoveryEnabled",
+      "deprecation": "compatibility env alias for domains.recovery.transientRecoveryEnabled",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753B1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED",
+      "owner": "agent-runtime",
+      "type": "boolean",
+      "default": true,
+      "bounds": null,
+      "allowedValues": [
+        "1",
+        "0",
+        "true",
+        "false",
+        "yes",
+        "no",
+        "on",
+        "off"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.recovery.transientRecoveryToolsEnabled",
+      "deprecation": "compatibility env alias for domains.recovery.transientRecoveryToolsEnabled",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753B1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
       "name": "PICLAW_UNKNOWN_MODEL_CONTEXT_WINDOW",
       "owner": "tools",
       "type": "integer",

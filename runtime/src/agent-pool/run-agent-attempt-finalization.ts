@@ -37,6 +37,7 @@ export interface PromptAttemptFinalizationInput {
   hadTerminalTurnOutput: boolean;
   sawAssistantToolCallMessage: boolean;
   onlyReadOnlyToolActivity: boolean;
+  hasUnresolvedToolExecution: boolean;
   sawTerminalSideEffectToolActivity: boolean;
   hadToolFailure: boolean;
   hadToolFailureBeforeSoftStop: boolean;
@@ -210,6 +211,7 @@ export function finalizePromptAttemptOutput(input: PromptAttemptFinalizationInpu
       onlyReadOnlyToolActivity: input.onlyReadOnlyToolActivity,
       canDisableToolsForRecovery: typeof (input.session as unknown as { getActiveToolNames?: unknown }).getActiveToolNames === "function"
         && typeof (input.session as unknown as { setActiveToolsByName?: unknown }).setActiveToolsByName === "function",
+      hasUnresolvedToolExecution: input.hasUnresolvedToolExecution,
       hadToolFailure: input.hadToolFailure,
       sawTerminalSideEffectToolActivity: input.sawTerminalSideEffectToolActivity,
       toolUseBudgetExceeded: input.toolUseBudgetExceeded,

@@ -17,6 +17,8 @@ test("keeps turn auto-recovery enabled when generic retry is disabled", () => {
   try {
     const config = getAutomaticRecoveryConfig({ enabled: false, maxRetries: 7, baseDelayMs: 1234, maxDelayMs: 5678 });
     expect(config.enabled).toBe(true);
+    expect(config.transientRecoveryEnabled).toBe(true);
+    expect(config.transientRecoveryToolsEnabled).toBe(true);
     expect(config.maxAttempts).toBe(7);
     expect(config.baseDelayMs).toBe(1234);
     expect(config.maxDelayMs).toBe(5678);
@@ -35,6 +37,23 @@ test("honors explicit turn auto-recovery env disable", () => {
   } finally {
     if (previous === undefined) delete process.env.PICLAW_TURN_AUTO_RECOVERY_ENABLED;
     else process.env.PICLAW_TURN_AUTO_RECOVERY_ENABLED = previous;
+  }
+});
+
+test("honors transient recovery and transient tool env controls", () => {
+  const previousRecovery = process.env.PICLAW_TURN_TRANSIENT_RECOVERY_ENABLED;
+  const previousTools = process.env.PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED;
+  process.env.PICLAW_TURN_TRANSIENT_RECOVERY_ENABLED = "0";
+  process.env.PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED = "false";
+  try {
+    const config = getAutomaticRecoveryConfig();
+    expect(config.transientRecoveryEnabled).toBe(false);
+    expect(config.transientRecoveryToolsEnabled).toBe(false);
+  } finally {
+    if (previousRecovery === undefined) delete process.env.PICLAW_TURN_TRANSIENT_RECOVERY_ENABLED;
+    else process.env.PICLAW_TURN_TRANSIENT_RECOVERY_ENABLED = previousRecovery;
+    if (previousTools === undefined) delete process.env.PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED;
+    else process.env.PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED = previousTools;
   }
 });
 
@@ -224,7 +243,7 @@ test("preserves a mixed terminal-side-effect and failed-tool outcome", () => {
   expect(decision.strategy).toBeNull();
 });
 
-test("uses a continuation retry after non-terminal tool activity times out", () => {
+test("uses a continuation retry after resolved non-terminal tool activity times out", () => {
   const decision = decideAutomaticRecovery({
     config: DEFAULT_AUTOMATIC_RECOVERY_CONFIG,
     errorText: "Timed out after 30s",
@@ -237,6 +256,7 @@ test("uses a continuation retry after non-terminal tool activity times out", () 
       hadTerminalTurnOutput: false,
       sawAssistantToolCall: true,
       canDisableToolsForRecovery: true,
+      hasUnresolvedToolExecution: false,
     },
   });
 
@@ -244,6 +264,60 @@ test("uses a continuation retry after non-terminal tool activity times out", () 
   expect(decision.recover).toBe(true);
   expect(decision.classifier).toBe("transient");
   expect(decision.strategy).toBe("retry");
+});
+
+test("suppresses all transient classifiers when transient recovery is disabled", () => {
+  const decision = decideAutomaticRecovery({
+    config: { ...DEFAULT_AUTOMATIC_RECOVERY_CONFIG, transientRecoveryEnabled: false },
+    errorText: "429 Too Many Requests",
+    recoveryAttemptsUsed: 0,
+    elapsedMs: 1000,
+    snapshot: {
+      hadToolActivity: true,
+      hadPartialOutput: false,
+      hadTerminalTurnOutput: false,
+      sawAssistantToolCall: true,
+      hasUnresolvedToolExecution: false,
+    },
+  });
+
+  expect(decision.recover).toBe(false);
+  expect(decision.classifier).toBe("disabled");
+  expect(decision.strategy).toBeNull();
+
+  const noToolDecision = decideAutomaticRecovery({
+    config: { ...DEFAULT_AUTOMATIC_RECOVERY_CONFIG, transientRecoveryEnabled: false },
+    errorText: "503 temporarily unavailable",
+    recoveryAttemptsUsed: 0,
+    elapsedMs: 1000,
+    snapshot: { hadToolActivity: false, hadPartialOutput: false },
+  });
+  expect(noToolDecision.recover).toBe(false);
+  expect(noToolDecision.classifier).toBe("disabled");
+});
+
+test("keeps context-pressure recovery enabled regardless of transient controls", () => {
+  const decision = decideAutomaticRecovery({
+    config: {
+      ...DEFAULT_AUTOMATIC_RECOVERY_CONFIG,
+      enabled: false,
+      transientRecoveryEnabled: false,
+      transientRecoveryToolsEnabled: false,
+    },
+    errorText: "maximum context length exceeded",
+    recoveryAttemptsUsed: 0,
+    elapsedMs: 1000,
+    snapshot: {
+      hadToolActivity: true,
+      hadPartialOutput: true,
+      hadTerminalTurnOutput: false,
+      hasUnresolvedToolExecution: true,
+    },
+  });
+
+  expect(decision.recover).toBe(true);
+  expect(decision.classifier).toBe("context_pressure");
+  expect(decision.strategy).toBe("compact_then_retry");
 });
 
 test("keeps legacy completed-turn snapshots terminal when terminal detail is absent", () => {
