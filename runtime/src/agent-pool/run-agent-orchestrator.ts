@@ -719,6 +719,7 @@ async function runPromptAttempt(
     unsub();
   }
 
+  tracker.finalizeAttempt();
   const trackedFinalText = tracker.getFinalText();
   const finalUsage = tracker.getFinalUsage();
   hadPartialOutput = hadPartialOutput || !!trackedFinalText;

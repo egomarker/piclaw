@@ -3432,7 +3432,9 @@ test("runAgentPrompt surfaces latent session state errors when no final text is 
   }
 });
 
-test("runAgentPrompt returns completed commentary-only visible output", async () => {
+test("runAgentPrompt does not return commentary-only output as a completed reply", async () => {
+  initDatabase();
+  const restoreEnv = setEnv({ PICLAW_TURN_AUTO_RECOVERY_ENABLED: "0" });
   class StubSession {
     private listeners: Array<(event: any) => void> = [];
     sessionManager = { getLeafId: () => "leaf-1" };
@@ -3476,16 +3478,122 @@ test("runAgentPrompt returns completed commentary-only visible output", async ()
     async abort() {}
   }
 
-  const session = new StubSession();
-  const turnCoordinator = new AgentTurnCoordinator({
-    takeAttachments: () => [],
-    touchSession: () => {},
-    recordMessageUsage: () => {},
-  });
+  try {
+    const session = new StubSession();
+    const discarded: Array<{ reason: string }> = [];
+    const turnCoordinator = new AgentTurnCoordinator({
+      takeAttachments: () => [],
+      touchSession: () => {},
+      recordMessageUsage: () => {},
+    });
 
-  const result = await runAgentPrompt("test", "web:default", { timeoutMs: 0 }, {
-    getOrCreateRuntime: async () => createRuntime(session, { enabled: false }) as any,
-    turnCoordinator,
+    const result = await runAgentPrompt("test", "web:default", {
+      timeoutMs: 0,
+      onTurnDiscard: (discard) => discarded.push(discard),
+    }, {
+      getOrCreateRuntime: async () => createRuntime(session, { enabled: false }) as any,
+      turnCoordinator,
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.result).toBeNull();
+    expect(result.error).toContain("without emitting an assistant reply");
+    expect(discarded).toEqual([{ reason: "commentary_only" }]);
+  } finally {
+    restoreEnv();
+  }
+});
+
+test("runAgentPrompt uses a later final answer after a commentary-only provider error", async () => {
+  initDatabase();
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    sessionManager = { getLeafId: () => "leaf-commentary-error-recovered" };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => {
+        this.listeners = this.listeners.filter((entry) => entry !== listener);
+      };
+    }
+    async prompt() {
+      const commentarySignature = JSON.stringify({ phase: "commentary" });
+      const finalSignature = JSON.stringify({ phase: "final_answer" });
+      for (const listener of this.listeners) {
+        listener({
+          type: "message_update",
+          assistantMessageEvent: {
+            type: "text_delta",
+            delta: "Searching saved output.",
+            contentIndex: 0,
+            partial: { content: [{ type: "text", textSignature: commentarySignature }] },
+          },
+        });
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "error",
+            errorMessage: "Temporary provider error; try again.",
+            content: [{ type: "text", text: "Searching saved output.", textSignature: commentarySignature }],
+          },
+        });
+        listener({
+          type: "message_update",
+          assistantMessageEvent: {
+            type: "text_start",
+            contentIndex: 1,
+            partial: { content: [
+              { type: "text", textSignature: commentarySignature },
+              { type: "text", textSignature: finalSignature },
+            ] },
+          },
+        });
+        listener({
+          type: "message_update",
+          assistantMessageEvent: {
+            type: "text_delta",
+            delta: "The request completed successfully.",
+            contentIndex: 1,
+            partial: { content: [
+              { type: "text", textSignature: commentarySignature },
+              { type: "text", textSignature: finalSignature },
+            ] },
+          },
+        });
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "stop",
+            content: [
+              { type: "text", text: "Checking one last detail. ", textSignature: commentarySignature },
+              { type: "text", text: "The request completed successfully.", textSignature: finalSignature },
+            ],
+          },
+        });
+      }
+    }
+    async abort() {}
+  }
+
+  const session = new StubSession();
+  const completed: Array<{ text: string }> = [];
+  const discarded: Array<{ reason: string }> = [];
+  const result = await runAgentPrompt("test", "web:default", {
+    timeoutMs: 0,
+    onTurnComplete: (turn) => completed.push({ text: turn.text }),
+    onTurnDiscard: (discard) => discarded.push(discard),
+  }, {
+    getOrCreateRuntime: async () => createRuntime(session) as any,
+    turnCoordinator: new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} }),
     clearAttachments: () => {},
     takeAttachments: () => [],
     logsDir: createTestLogsDir(),
@@ -3494,8 +3602,100 @@ test("runAgentPrompt returns completed commentary-only visible output", async ()
   });
 
   expect(result.status).toBe("success");
-  expect(result.result).toBe("progress update");
-  expect(result.attachments).toBeUndefined();
+  expect(result.result).toBe("The request completed successfully.");
+  expect(completed).toEqual([]);
+  expect(discarded).toEqual([{ reason: "commentary_only" }]);
+});
+
+test("runAgentPrompt retries a persisted commentary-only error instead of classifying it as completed output", async () => {
+  initDatabase();
+  const restoreEnv = setEnv({
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
+    PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
+  });
+
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    private leafId = "leaf-before-prompt";
+    sessionManager = { getLeafId: () => this.leafId };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    promptTexts: string[] = [];
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => {
+        this.listeners = this.listeners.filter((entry) => entry !== listener);
+      };
+    }
+    async prompt(text: string) {
+      this.promptTexts.push(text);
+      this.leafId = `leaf-after-prompt-${this.promptTexts.length}`;
+      const commentarySignature = JSON.stringify({ phase: "commentary" });
+      if (this.promptTexts.length === 1) {
+        for (const listener of this.listeners) {
+          listener({
+            type: "message_update",
+            assistantMessageEvent: {
+              type: "text_delta",
+              delta: "Checking transient state.",
+              contentIndex: 0,
+              partial: { content: [{ type: "text", textSignature: commentarySignature }] },
+            },
+          });
+          listener({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              stopReason: "error",
+              errorMessage: "Temporary provider error; try again.",
+              content: [{ type: "text", text: "Checking transient state.", textSignature: commentarySignature }],
+            },
+          });
+        }
+        return;
+      }
+      for (const listener of this.listeners) {
+        listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Recovered final answer." } });
+        listener({ type: "message_end", message: createAssistantMessage("Recovered final answer.") });
+      }
+    }
+    async abort() {}
+  }
+
+  try {
+    const session = new StubSession();
+    const completed: Array<{ text: string }> = [];
+    const discarded: Array<{ reason: string }> = [];
+    const result = await runAgentPrompt("test", "web:default", {
+      timeoutMs: 0,
+      onTurnComplete: (turn) => completed.push({ text: turn.text }),
+      onTurnDiscard: (discard) => discarded.push(discard),
+    }, {
+      getOrCreateRuntime: async () => createRuntime(session, { maxRetries: 2, baseDelayMs: 1, maxDelayMs: 60000 }) as any,
+      turnCoordinator: new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} }),
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.result).toBe("Recovered final answer.");
+    expect(result.recovery).toEqual(expect.objectContaining({
+      attemptsUsed: 1,
+      recovered: true,
+      lastClassifier: "transient",
+      strategyHistory: ["retry"],
+    }));
+    expect(session.promptTexts).toEqual(["test", RECOVERY_CONTINUATION_PROMPT]);
+    expect(completed).toEqual([]);
+    expect(discarded).toEqual([{ reason: "commentary_only" }]);
+  } finally {
+    restoreEnv();
+  }
 });
 
 test("runAgentPrompt requests closing prose after a non-terminal side-effecting tool", async () => {

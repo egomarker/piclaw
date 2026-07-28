@@ -30,7 +30,7 @@ export interface AgentTurnOutput {
 
 /** A completed assistant text stream intentionally kept out of durable output. */
 export interface AgentTurnDiscard {
-  reason: "tool_use_commentary";
+  reason: "tool_use_commentary" | "commentary_only";
 }
 
 /** Error state captured from an assistant message with stopReason "error". */
@@ -50,6 +50,8 @@ export interface AgentTerminalAssistantState {
 
 export interface AgentTurnTracker {
   handleMessageUpdate: (event: AgentSessionEvent) => void;
+  /** Resolve any unterminated streamed text before the prompt attempt is finalized. */
+  finalizeAttempt: () => void;
   getFinalText: () => string;
   getTurnCount: () => number;
   getError: () => AgentTurnError | null;
@@ -123,24 +125,51 @@ export class AgentTurnCoordinator {
       return resolveTextPhaseFromBlock(block);
     };
 
-    const extractAssistantTextFromContent = (content: unknown): { text: string; phase: AssistantTextPhase } => {
+    const extractAssistantTextFromContent = (content: unknown): {
+      text: string;
+      phase: AssistantTextPhase;
+      hasText: boolean;
+      hasCommentary: boolean;
+      commentaryOnly: boolean;
+    } => {
       if (!Array.isArray(content)) {
+        const text = typeof content === "string" ? content : "";
         return {
-          text: typeof content === "string" ? content : "",
+          text,
           phase: null,
+          hasText: Boolean(text.trim()),
+          hasCommentary: false,
+          commentaryOnly: false,
         };
       }
 
       const textBlocks = content.filter((block) => (block as AgentContentBlock | undefined)?.type === "text") as AgentContentBlock[];
-      const text = textBlocks
+      const finalAnswerText = textBlocks
+        .filter((block) => resolveTextPhaseFromBlock(block) === "final_answer")
         .map((block) => (typeof block.text === "string" ? block.text : ""))
         .join("");
-      const phase = [...textBlocks]
-        .reverse()
-        .map((block) => resolveTextPhaseFromBlock(block))
-        .find((candidate) => candidate !== null) ?? null;
+      const unphasedText = textBlocks
+        .filter((block) => resolveTextPhaseFromBlock(block) === null)
+        .map((block) => (typeof block.text === "string" ? block.text : ""))
+        .join("");
+      const commentaryText = textBlocks
+        .filter((block) => resolveTextPhaseFromBlock(block) === "commentary")
+        .map((block) => (typeof block.text === "string" ? block.text : ""))
+        .join("");
+      const allText = textBlocks
+        .map((block) => (typeof block.text === "string" ? block.text : ""))
+        .join("");
+      const hasFinalAnswer = Boolean(finalAnswerText.trim());
+      const text = hasFinalAnswer ? finalAnswerText : unphasedText;
+      const hasCommentary = Boolean(commentaryText.trim());
 
-      return { text, phase };
+      return {
+        text,
+        phase: hasFinalAnswer ? "final_answer" : null,
+        hasText: Boolean(allText.trim()),
+        hasCommentary,
+        commentaryOnly: hasCommentary && !text.trim(),
+      };
     };
 
     const resetCurrentTurn = () => {
@@ -235,9 +264,12 @@ export class AgentTurnCoordinator {
           usage?: Usage;
         } | undefined;
         if (message?.role === "assistant") {
-          if (message.stopReason === "error" && message.errorMessage) {
-            lastError = { stopReason: "error", errorMessage: message.errorMessage };
-          }
+          // The latest completed assistant provider response is authoritative.
+          // Keep historical errors in event logs, but do not let an earlier
+          // provider error override a later successful retry in the same prompt.
+          lastError = message.stopReason === "error" && message.errorMessage
+            ? { stopReason: "error", errorMessage: message.errorMessage }
+            : null;
           const contentBlocks = Array.isArray(message.content) ? message.content as AgentContentBlock[] : [];
           const extracted = extractAssistantTextFromContent(message.content);
           const hadTextContent = typeof message.content === "string"
@@ -258,8 +290,13 @@ export class AgentTurnCoordinator {
           // the finalized tool-call message, though, so retain the completed
           // stream as a fallback instead of silently losing what the UI showed.
           const streamedText = currentTurnText.trim();
-          currentTurnText = extracted.text.trim() || streamedText;
-          currentTurnPhase = extracted.text.trim() ? extracted.phase : currentTurnPhase;
+          const authoritativeTextSeen = extracted.hasText;
+          const streamedCommentaryOnly = !authoritativeTextSeen
+            && Boolean(streamedText)
+            && currentTurnPhase === "commentary";
+          const commentaryOnly = extracted.commentaryOnly || streamedCommentaryOnly;
+          currentTurnText = authoritativeTextSeen ? extracted.text.trim() : streamedText;
+          currentTurnPhase = authoritativeTextSeen ? extracted.phase : currentTurnPhase;
 
           this.options.onInfo?.("Assistant message completed", {
             operation: "turn_coordinator.message_end",
@@ -267,6 +304,8 @@ export class AgentTurnCoordinator {
             stopReason: message.stopReason ?? null,
             extractedTextLength: extracted.text.length,
             phase: extracted.phase,
+            hasCommentary: extracted.hasCommentary,
+            commentaryOnly,
             messageHasDelta,
             currentTurnTextLength: currentTurnText.length,
             hadTextContent,
@@ -276,15 +315,21 @@ export class AgentTurnCoordinator {
 
           messageHasDelta = false;
           messageComplete = true;
+          // Signed commentary is transient provider narration. Discard it at
+          // every completed-message boundary, not only before a tool call: an
+          // error/abort can otherwise leave it buffered for the next response
+          // to flush as a durable turn.
+          if (commentaryOnly) {
+            onTurnDiscard?.({
+              reason: message.stopReason === "toolUse" && hadToolCallContent
+                ? "tool_use_commentary"
+                : "commentary_only",
+            });
+            resetCurrentTurn();
+            return;
+          }
           if (message.stopReason === "toolUse" && hadToolCallContent) {
-            // Signed commentary is transient provider narration. GPT-5.5 can
-            // use it for terse internal-looking tool planning, so do not turn
-            // it into a durable assistant post. Explicit final-answer text and
-            // legacy unphased lead-ins retain the existing checkpoint behavior.
-            if (currentTurnPhase === "commentary") {
-              onTurnDiscard?.({ reason: "tool_use_commentary" });
-              resetCurrentTurn();
-            } else if (onTurnComplete) {
+            if (onTurnComplete) {
               flushTurn({ followedByToolUse: true });
             } else {
               resetCurrentTurn();
@@ -297,9 +342,20 @@ export class AgentTurnCoordinator {
       }
     };
 
+    const finalizeAttempt = () => {
+      // Providers can throw or abort without emitting message_end. Never let a
+      // dangling signed commentary stream become final text or a web draft
+      // fallback when the attempt is finalized.
+      if (currentTurnText.trim() && currentTurnPhase === "commentary") {
+        onTurnDiscard?.({ reason: "commentary_only" });
+        resetCurrentTurn();
+      }
+    };
+
     return {
       handleMessageUpdate,
-      getFinalText: () => currentTurnText.trim(),
+      finalizeAttempt,
+      getFinalText: () => currentTurnPhase === "commentary" ? "" : currentTurnText.trim(),
       getTurnCount: () => turnCount,
       getError: () => lastError,
       getLastAssistantState: () => lastAssistantState,
