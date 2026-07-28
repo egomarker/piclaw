@@ -4,7 +4,7 @@
 import path from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as actualCodingAgent from "../../../node_modules/@earendil-works/pi-coding-agent/dist/index.js";
-import { getCompactionRuntimeConfig, setCompactionRuntimeConfigForTests, type CompactionRuntimeConfig } from "../../src/core/config.js";
+import { resetCompactionRuntimeConfigForTests, setCompactionRuntimeConfigForTests } from "../../src/core/config.js";
 
 // We test the module by importing its factory and invoking it with a
 // mock ExtensionAPI, then firing the session_before_compact handler.
@@ -200,6 +200,7 @@ import {
   detectRecentTopicShift,
 } from "../../src/extensions/smart-compaction/selective-prompt.js";
 import { validateCompactionSummaryResponse } from "../../src/extensions/smart-compaction/summary-validation.js";
+import { runProgressiveCompaction } from "../../src/extensions/smart-compaction/progressive.js";
 import { canonicalizeFileLists } from "../../src/extensions/smart-compaction/noop.js";
 import { clearRemoteCompactionBackoffForTests } from "../../src/extensions/smart-compaction/remote-compaction.js";
 import {
@@ -374,11 +375,9 @@ describe("smart-compaction output validation", () => {
 
 describe("smart-compaction", () => {
   let handler: ((event: any, ctx: any) => Promise<any>) | null = null;
-  let runtimeConfigBefore: Readonly<CompactionRuntimeConfig>;
 
   beforeEach(() => {
     handler = null;
-    runtimeConfigBefore = getCompactionRuntimeConfig();
     // Method selection is mutable process state. Keep default-method tests
     // isolated from earlier parametrized or cross-file cases.
     delete process.env.PICLAW_SMART_COMPACTION_METHOD;
@@ -397,7 +396,7 @@ describe("smart-compaction", () => {
   });
 
   afterEach(() => {
-    setCompactionRuntimeConfigForTests({ ...runtimeConfigBefore });
+    resetCompactionRuntimeConfigForTests();
     clearRemoteCompactionBackoffForTests();
   });
 
@@ -1006,10 +1005,32 @@ describe("smart-compaction", () => {
     expect(getCompactionReasoningEffort({ provider: "github-copilot", id: "claude-opus-4.8", reasoning: true, contextWindow: 200_000, thinkingLevelMap: { xhigh: "xhigh" } }, "selective")).toBeUndefined();
   });
 
+  it("uses domain-backed smart-compaction reasoning fallback while preserving phase env precedence", () => {
+    const explicitCompactionMap = { minimal: "minimal", low: "low", medium: "medium", high: "high" };
+    const previousChunkReasoning = process.env.PICLAW_PROGRESSIVE_CHUNK_REASONING;
+    try {
+      delete process.env.PICLAW_PROGRESSIVE_CHUNK_REASONING;
+      setCompactionRuntimeConfigForTests({ smartCompactionReasoning: "high" });
+      expect(getCompactionReasoningEffort({ provider: "test", id: "domain-reasoning", reasoning: true, contextWindow: 512_000, thinkingLevelMap: explicitCompactionMap }, "progressive_chunk")).toBe("high");
+
+      process.env.PICLAW_PROGRESSIVE_CHUNK_REASONING = "minimal";
+      expect(getCompactionReasoningEffort({ provider: "test", id: "phase-env-reasoning", reasoning: true, contextWindow: 512_000, thinkingLevelMap: explicitCompactionMap }, "progressive_chunk")).toBe("minimal");
+    } finally {
+      if (previousChunkReasoning === undefined) delete process.env.PICLAW_PROGRESSIVE_CHUNK_REASONING;
+      else process.env.PICLAW_PROGRESSIVE_CHUNK_REASONING = previousChunkReasoning;
+      resetCompactionRuntimeConfigForTests();
+    }
+  });
+
+  it("uses domain-backed progressive force flag", () => {
+    setCompactionRuntimeConfigForTests({ progressiveCompaction: true });
+    expect(getProgressiveCompactionBudget({ contextWindow: 128_000 }).forceProgressive).toBe(true);
+  });
+
   it.each(["selective", "pipelined"])("cancels %s compaction on provider input overflow rather than retrying with omitted source", async (method) => {
     const previousMethod = process.env.PICLAW_SMART_COMPACTION_METHOD;
     const previousProgressiveBudget = process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS;
-    process.env.PICLAW_SMART_COMPACTION_METHOD = method;
+    setCompactionRuntimeConfigForTests({ smartCompactionMethod: method as "selective" | "pipelined" });
     process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS = "100000";
     (completeSimple as any).mockRejectedValueOnce(new Error("input context length exceeded"));
 
@@ -1264,7 +1285,7 @@ describe("smart-compaction", () => {
 
   it("dispatches Pipelined through the shared single-pass lifecycle", async () => {
     const previousMethod = process.env.PICLAW_SMART_COMPACTION_METHOD;
-    process.env.PICLAW_SMART_COMPACTION_METHOD = "pipelined";
+    setCompactionRuntimeConfigForTests({ smartCompactionMethod: "pipelined" });
     const summaryText = "## Goal\nPipelined goal\n\n## Current Active Topic\n- audited pipeline\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- do not deploy\n\n## Progress\n### Done\n- [x] source projected\n\n### In Progress\n- [ ] continue\n\n### Blocked\n- none\n\n## Key Decisions\n- **Coverage**: validate every source event.\n\n## Next Steps\n1. Continue.\n\n## Critical Context\n- pipeline context";
     (completeSimple as any).mockResolvedValueOnce({
       content: [{ type: "text", text: summaryText }],
@@ -1298,7 +1319,7 @@ describe("smart-compaction", () => {
 
   it.each(["selective", "pipelined"])("preserves previous summary, split-turn source, retained context, tool failure, and terminal shape with %s", async (method) => {
     const previousMethod = process.env.PICLAW_SMART_COMPACTION_METHOD;
-    process.env.PICLAW_SMART_COMPACTION_METHOD = method;
+    setCompactionRuntimeConfigForTests({ smartCompactionMethod: method as "selective" | "pipelined" });
     const summaryText = "## Goal\nCross-method continuity\n\n## Current Active Topic\n- preserve current split-turn work\n\n## Historical / Background Context\n- previous summary retained\n\n## Constraints & Preferences\n- never deploy\n\n## Progress\n### Done\n- [x] source projected\n### In Progress\n- [ ] resolve failed command\n### Blocked\n- command failed\n\n## Key Decisions\n- **Coverage**: retain every source class\n\n## Next Steps\n1. resolve failure\n\n## Critical Context\n- retained context survives";
     (completeSimple as any).mockResolvedValueOnce({
       content: [{ type: "text", text: summaryText }],
@@ -1372,7 +1393,7 @@ describe("smart-compaction", () => {
 
   it.each(["selective", "pipelined"])("cancels %s before dispatch without making a model call", async (method) => {
     const previousMethod = process.env.PICLAW_SMART_COMPACTION_METHOD;
-    process.env.PICLAW_SMART_COMPACTION_METHOD = method;
+    setCompactionRuntimeConfigForTests({ smartCompactionMethod: method as "selective" | "pipelined" });
     const controller = new AbortController();
     controller.abort();
     try {
@@ -1391,7 +1412,7 @@ describe("smart-compaction", () => {
 
   it("captures the configured method once per generation while applying changes to the next compaction", async () => {
     const previousMethod = process.env.PICLAW_SMART_COMPACTION_METHOD;
-    process.env.PICLAW_SMART_COMPACTION_METHOD = "selective";
+    setCompactionRuntimeConfigForTests({ smartCompactionMethod: "selective" });
     const summaryText = "## Goal\nCaptured method\n\n## Current Active Topic\n- stable generation dispatch\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- do not switch in flight\n\n## Progress\n### Done\n- [x] method captured\n### In Progress\n- [ ] continue\n### Blocked\n- none\n\n## Key Decisions\n- **Dispatch**: one method per generation\n\n## Next Steps\n1. continue\n\n## Critical Context\n- setting changes affect only the next compaction";
     (completeSimple as any).mockResolvedValue({
       content: [{ type: "text", text: summaryText }],
@@ -1404,7 +1425,7 @@ describe("smart-compaction", () => {
         branchEntries: [],
         signal: new AbortController().signal,
       }, makeCtx());
-      process.env.PICLAW_SMART_COMPACTION_METHOD = "pipelined";
+      setCompactionRuntimeConfigForTests({ smartCompactionMethod: "pipelined" });
       await firstPromise;
       await handler!({
         preparation: makePreparation(18),
@@ -1427,7 +1448,7 @@ describe("smart-compaction", () => {
   it("routes Pipelined oversized source through shared complete progressive coverage", async () => {
     const previousMethod = process.env.PICLAW_SMART_COMPACTION_METHOD;
     const previousPromptChars = process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS;
-    process.env.PICLAW_SMART_COMPACTION_METHOD = "pipelined";
+    setCompactionRuntimeConfigForTests({ smartCompactionMethod: "pipelined" });
     process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS = "3000";
     const messages = Array.from({ length: 20 }, (_, index) => userMsg(`PIPELINED_FACT_${index} ${"x".repeat(1_200)}`));
     const prompts: string[] = [];
@@ -1489,7 +1510,7 @@ describe("smart-compaction", () => {
 
   it.each(["selective", "pipelined"])("keeps a malformed %s request on the selected method for its one repair retry", async (method) => {
     const previousMethod = process.env.PICLAW_SMART_COMPACTION_METHOD;
-    process.env.PICLAW_SMART_COMPACTION_METHOD = method;
+    setCompactionRuntimeConfigForTests({ smartCompactionMethod: method as "selective" | "pipelined" });
     (completeSimple as any).mockResolvedValue({
       content: [{ type: "text", text: "## Goal\ntruncated" }],
       stopReason: "length",
@@ -2396,11 +2417,9 @@ describe("smart-compaction", () => {
 
     it("gives Selective progressive exact source provenance and rolls split groups back atomically", async () => {
       const previousMethod = process.env.PICLAW_SMART_COMPACTION_METHOD;
-      const previousForced = process.env.PICLAW_PROGRESSIVE_COMPACTION;
       const previousPromptChars = process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS;
       const previousTimeout = process.env.PICLAW_COMPACTION_TIMEOUT_MS;
-      process.env.PICLAW_SMART_COMPACTION_METHOD = "selective";
-      process.env.PICLAW_PROGRESSIVE_COMPACTION = "1";
+      setCompactionRuntimeConfigForTests({ smartCompactionMethod: "selective", progressiveCompaction: true });
       process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS = "4000";
       process.env.PICLAW_COMPACTION_TIMEOUT_MS = "300000";
 
@@ -2506,8 +2525,7 @@ describe("smart-compaction", () => {
         dateSpy.mockRestore();
         if (previousMethod === undefined) delete process.env.PICLAW_SMART_COMPACTION_METHOD;
         else process.env.PICLAW_SMART_COMPACTION_METHOD = previousMethod;
-        if (previousForced === undefined) delete process.env.PICLAW_PROGRESSIVE_COMPACTION;
-        else process.env.PICLAW_PROGRESSIVE_COMPACTION = previousForced;
+        resetCompactionRuntimeConfigForTests();
         if (previousPromptChars === undefined) delete process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS;
         else process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS = previousPromptChars;
         if (previousTimeout === undefined) delete process.env.PICLAW_COMPACTION_TIMEOUT_MS;
@@ -3216,6 +3234,75 @@ describe("smart-compaction", () => {
       }
     });
 
+    it("returns a bounded partial checkpoint when the final progressive merge runs out of time", async () => {
+      const sourceUnits = Array.from({ length: 6 }, (_, index) => ({
+        id: `unit-${index}`,
+        groupId: `group-${index}`,
+        renderedText: `SOURCE_${index} ${"s".repeat(6_000)}`,
+        sourceIndexes: [index],
+        sourceEntryIds: [`entry-${index}`],
+        segmentIndex: 1,
+        segmentCount: 1,
+      }));
+      const chunkSummary = (index: number) => `## Chunk Range\n- ${index}-${index}\n\n## Goals / User Intent\n- Preserve bounded fallback facts\n\n## Constraints & Preferences\n- Retain unsummarized source verbatim\n\n## Decisions\n- Use a bounded partial checkpoint\n\n## Files / Commands / Tool Outcomes\n- none\n\n## Progress\n- Done: chunk summarized\n- In progress: final merge\n- Blocked: time budget\n\n## Open Questions / Next Steps\n- Continue from the retained source boundary\n\n## Key Continuity Facts\n- CHUNK_${index} ${"x".repeat(6_500)}`;
+
+      let now = 1;
+      let chunkCalls = 0;
+      const dateSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+      (completeSimple as any).mockImplementation(async (_model: any, context: any) => {
+        const prompt = context.messages[0].content[0].text as string;
+        if (!prompt.includes("deterministic chunk")) {
+          throw new Error("the expired merge budget must not start another model request");
+        }
+        const index = chunkCalls;
+        chunkCalls += 1;
+        if (chunkCalls === sourceUnits.length) now = 270_000;
+        return {
+          content: [{ type: "text", text: chunkSummary(index) }],
+          stopReason: "stop",
+        };
+      });
+
+      try {
+        const result = await runProgressiveCompaction({
+          llmMessages: [],
+          sourceUnits,
+          humanUserIndexes: new Set<number>(),
+          model: { provider: "test", id: "bounded-merge-timeout", contextWindow: 128_000, reasoning: false },
+          auth: {},
+          settings: { reserveTokens: 8_192 },
+          fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
+          budget: {
+            contextWindow: 128_000,
+            promptBudgetChars: 8_000,
+            chunkBudgetChars: 8_000,
+            mergeBudgetChars: 8_000,
+            forceProgressive: true,
+          },
+          abortSignal: new AbortController().signal,
+          ctx: { ui: { setStatus: vi.fn() } },
+          streamFn: compactionStreamFn,
+          timeoutMs: 300_000,
+          startedAt: 1,
+        });
+
+        expect(result.complete).toBe(false);
+        expect(result.processedChunkCount).toBeGreaterThan(0);
+        expect(result.processedChunkCount).toBeLessThan(result.totalChunkCount);
+        expect(result.nextUnprocessedSourceMessageIndex).toBe(result.processedChunkCount);
+        expect(result.nextUnprocessedEntryId).toBe(`entry-${result.processedChunkCount}`);
+        expect(result.summary.length).toBeLessThanOrEqual(8_192 * 4);
+        expect(validateCompactionSummaryResponse(
+          { content: [{ type: "text", text: result.summary }], stopReason: "stop" },
+          "final",
+          8_192 * 4,
+        ).ok).toBe(true);
+        expect(chunkCalls).toBe(sourceUnits.length);
+      } finally {
+        dateSpy.mockRestore();
+      }
+    });
+
     it("records a real failure reason instead of plain user-cancel when progressive time budget is exhausted", async () => {
       const longMessages: any[] = [];
       for (let i = 0; i < 80; i++) {
@@ -3286,26 +3373,20 @@ describe("smart-compaction", () => {
     });
 
     it("uses the shared overhead override and token-estimate safety multiplier at fit thresholds", () => {
-      const previousOverhead = process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS;
-      const previousMultiplier = process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER;
       try {
-        process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS = "4000";
-        process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER = "1";
+        setCompactionRuntimeConfigForTests({ systemPromptOverheadTokens: 4_000, tokenEstimateSafetyMultiplier: 1 });
         const fourThousandOverhead = estimatePostCompactionFit("x".repeat(4_000), 1_000, 6_000);
         expect(fourThousandOverhead).toMatchObject({ estimatedTotal: 6_000, fits: false, overheadTokens: 4_000 });
 
-        process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS = "1000";
+        setCompactionRuntimeConfigForTests({ systemPromptOverheadTokens: 1_000, tokenEstimateSafetyMultiplier: 1 });
         const overriddenOverhead = estimatePostCompactionFit("x".repeat(4_000), 1_000, 6_000);
         expect(overriddenOverhead).toMatchObject({ estimatedTotal: 3_000, fits: true, overheadTokens: 1_000 });
 
-        process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER = "1.25";
+        setCompactionRuntimeConfigForTests({ systemPromptOverheadTokens: 1_000, tokenEstimateSafetyMultiplier: 1.25 });
         const safetyAdjusted = estimatePostCompactionFit("x".repeat(4_000), 1_000, 3_500);
         expect(safetyAdjusted).toMatchObject({ estimatedTotal: 3_500, fits: false, summaryTokens: 1_250 });
       } finally {
-        if (previousOverhead === undefined) delete process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS;
-        else process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS = previousOverhead;
-        if (previousMultiplier === undefined) delete process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER;
-        else process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER = previousMultiplier;
+        resetCompactionRuntimeConfigForTests();
       }
     });
 
@@ -3678,27 +3759,17 @@ describe("smart-compaction", () => {
     });
 
     it("uses isolated request framing—not full agent overhead—when sizing compaction output", () => {
-      const previousSystemOverhead = process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS;
-      const previousRequestOverhead = process.env.PICLAW_COMPACTION_REQUEST_OVERHEAD_TOKENS;
-      const previousMultiplier = process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER;
       try {
-        process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS = "4000";
-        process.env.PICLAW_COMPACTION_REQUEST_OVERHEAD_TOKENS = "1000";
-        process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER = "1";
+        setCompactionRuntimeConfigForTests({ systemPromptOverheadTokens: 4_000, compactionRequestOverheadTokens: 1_000, tokenEstimateSafetyMultiplier: 1 });
         const safe = getSafeCompactionMaxTokens({ contextWindow: 8_000 }, "x".repeat(4_000), 16_000);
         expect(safe.promptTokens).toBe(2_000);
         expect(safe.maxTokens).toBeLessThan(16_000);
         expect(safe.promptTokens + safe.maxTokens).toBeLessThanOrEqual(8_000);
 
-        process.env.PICLAW_COMPACTION_REQUEST_OVERHEAD_TOKENS = "2000";
+        setCompactionRuntimeConfigForTests({ compactionRequestOverheadTokens: 2_000, tokenEstimateSafetyMultiplier: 1 });
         expect(getSafeCompactionMaxTokens({ contextWindow: 8_000 }, "x".repeat(4_000), 16_000).promptTokens).toBe(3_000);
       } finally {
-        if (previousSystemOverhead === undefined) delete process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS;
-        else process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS = previousSystemOverhead;
-        if (previousRequestOverhead === undefined) delete process.env.PICLAW_COMPACTION_REQUEST_OVERHEAD_TOKENS;
-        else process.env.PICLAW_COMPACTION_REQUEST_OVERHEAD_TOKENS = previousRequestOverhead;
-        if (previousMultiplier === undefined) delete process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER;
-        else process.env.PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER = previousMultiplier;
+        resetCompactionRuntimeConfigForTests();
       }
     });
 
@@ -5428,7 +5499,7 @@ describe("smart-compaction", () => {
 
     it.each(["selective", "pipelined"])("compacts the complete split-turn prefix when ordinary history is empty with %s", async (method) => {
       const previousMethod = process.env.PICLAW_SMART_COMPACTION_METHOD;
-      process.env.PICLAW_SMART_COMPACTION_METHOD = method;
+      setCompactionRuntimeConfigForTests({ smartCompactionMethod: method as "selective" | "pipelined" });
       let capturedPrompt = "";
       (completeSimple as any).mockImplementationOnce((_model: any, opts: any) => {
         capturedPrompt = opts.messages[0].content[0].text;

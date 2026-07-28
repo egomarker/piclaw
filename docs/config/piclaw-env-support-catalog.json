@@ -1,0 +1,5018 @@
+{
+  "version": 1,
+  "description": "Reviewed support metadata for production Piclaw-owned PICLAW_* variables. Generated observations live in piclaw-env-observations.json.",
+  "configSourcePrecedence": [
+    "CLI flags",
+    "process.env",
+    ".env",
+    ".piclaw/config.json",
+    "defaults"
+  ],
+  "bootstrapEnvAllowlist": [
+    "PICLAW_WORKSPACE",
+    "PICLAW_STORE",
+    "PICLAW_DATA",
+    "PICLAW_RUNTIME_ROOT",
+    "PICLAW_PI_AGENT_DIR",
+    "PICLAW_KEYCHAIN_KEY",
+    "PICLAW_KEYCHAIN_KEY_FILE",
+    "PICLAW_WEB_TLS_CERT",
+    "PICLAW_WEB_TLS_KEY",
+    "PICLAW_INTERNAL_SECRET",
+    "PICLAW_WEB_INTERNAL_SECRET",
+    "PICLAW_WEB_EXTERNAL_URL",
+    "PICLAW_DB_IN_MEMORY",
+    "PICLAW_SKEL_DIR"
+  ],
+  "entries": [
+    {
+      "name": "PICLAW_ABORT_SETTLE_TIMEOUT_MS",
+      "owner": "agent-control",
+      "type": "integer",
+      "default": 1000,
+      "bounds": "0..10000 ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.agentControl.abortSettleTimeoutMs",
+      "deprecation": "migrated to typed domains.agentControl.abortSettleTimeoutMs config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts typed operational domain configuration (#755C)",
+      "migrationDisposition": "migrated-to-domain-config",
+      "supportedPersistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ]
+    },
+    {
+      "name": "PICLAW_ADDITIONAL_DEFAULT_TOOLS",
+      "owner": "tools",
+      "type": "string",
+      "default": null,
+      "bounds": "identifier/reference only; not a supported environment input",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "removed",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "reference-only identifier with no environment reader",
+      "migrationDisposition": "removed-reference-only",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_ADDON_API_FAILURE_BACKOFF_MS",
+      "owner": "addons",
+      "type": "integer",
+      "default": 60000,
+      "bounds": "positive integer ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.addons.apiFailureBackoffMs",
+      "deprecation": "migrated to typed domains.addons.apiFailureBackoffMs config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts typed operational domain configuration (#755C)",
+      "migrationDisposition": "migrated-to-domain-config",
+      "supportedPersistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ]
+    },
+    {
+      "name": "PICLAW_AGENT_DIR_ENV",
+      "owner": "core",
+      "type": "path",
+      "default": null,
+      "bounds": "identifier/reference only; not a supported environment input",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "removed",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "reference-only identifier with no environment reader",
+      "migrationDisposition": "removed-reference-only",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_AGENT_LOG_CLEANUP_INTERVAL_MS",
+      "owner": "logging",
+      "type": "integer",
+      "default": 3600000,
+      "bounds": "positive milliseconds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.logging.cleanupIntervalMs",
+      "deprecation": "compatibility env alias for domains.logging.cleanupIntervalMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-integrations.ts domain schema (#753A1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_AGENT_LOG_RETENTION_DAYS",
+      "owner": "logging",
+      "type": "integer",
+      "default": 30,
+      "bounds": "positive days, capped by retention max",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env(PICLAW_AGENT_LOG_RETENTION_MS)",
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.logging.retentionMs",
+      "deprecation": "compatibility env alias for domains.logging.retentionMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-integrations.ts domain schema (#753A1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_AGENT_LOG_RETENTION_MS",
+      "owner": "logging",
+      "type": "integer",
+      "default": 2592000000,
+      "bounds": "positive milliseconds, capped by retention max",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.logging.retentionMs",
+      "deprecation": "compatibility env alias for domains.logging.retentionMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-integrations.ts domain schema (#753A1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_AGENT_TIMEOUT",
+      "owner": "agent",
+      "type": "integer",
+      "default": 3600000,
+      "bounds": "positive milliseconds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.agent.timeoutMs",
+      "deprecation": "compatibility env alias for domains.agent.timeoutMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753A1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_AGGRESSIVE_WORKSPACE_INDEX_MEMORY",
+      "owner": "core",
+      "type": "path",
+      "default": null,
+      "bounds": "implementation-only tuning; source-defined default and bounds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime implementation tuning retained outside public config",
+      "migrationDisposition": "internal-runtime-tuning",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_ALLOW_LIVE_DB_IN_TESTS",
+      "owner": "storage",
+      "type": "boolean",
+      "default": false,
+      "bounds": "removed; use explicit setAllowLiveDbInTestsForTests() hook",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [],
+      "status": "removed",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "removed from runtime/src/db/connection.ts (#755E)",
+      "migrationDisposition": "removed-test-only-env",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_ASSISTANT_AVATAR",
+      "owner": "identity",
+      "type": "string",
+      "default": "",
+      "bounds": null,
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.identity.assistantAvatar",
+      "deprecation": "compatibility env alias for domains.identity.assistantAvatar",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-identity.ts domain schema (#752A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_ASSISTANT_NAME",
+      "owner": "identity",
+      "type": "string",
+      "default": "PiClaw",
+      "bounds": null,
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.identity.assistantName",
+      "deprecation": "compatibility env alias for domains.identity.assistantName",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-identity.ts domain schema (#752A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_AUTO_COMPACTION_ENABLED",
+      "owner": "core",
+      "type": "boolean",
+      "default": true,
+      "bounds": null,
+      "allowedValues": [
+        "1",
+        "0",
+        "true",
+        "false",
+        "yes",
+        "no",
+        "on",
+        "off"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.compaction.autoCompactionEnabled",
+      "deprecation": "compatibility env alias for domains.compaction.autoCompactionEnabled",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753C1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_AUTO_COMPACTION_SCOPE",
+      "owner": "core",
+      "type": "enum",
+      "default": "total",
+      "bounds": null,
+      "allowedValues": [
+        "total",
+        "body_after_prefix"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.compaction.autoCompactionScope",
+      "deprecation": "compatibility env alias for domains.compaction.autoCompactionScope",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753C1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_BACKGROUND_AGENT_TIMEOUT",
+      "owner": "agent",
+      "type": "integer",
+      "default": 0,
+      "bounds": "non-negative milliseconds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.agent.backgroundTimeoutMs",
+      "deprecation": "compatibility env alias for domains.agent.backgroundTimeoutMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753A1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_BASE",
+      "owner": "tools",
+      "type": "string",
+      "default": null,
+      "bounds": "identifier/reference only; not a supported environment input",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "removed",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "reference-only identifier with no environment reader",
+      "migrationDisposition": "removed-reference-only",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_CHAT_JID",
+      "owner": "core",
+      "type": "string",
+      "default": "web:default",
+      "bounds": "per-invocation chat JID",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "request payload",
+        "process.env",
+        "default"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "retained IPC per-invocation targeting contract (#755E)",
+      "migrationDisposition": "retain-per-invocation-context",
+      "supportedPersistence": [
+        "env"
+      ]
+    },
+    {
+      "name": "PICLAW_COMPACTION_BACKOFF_BASE_MS",
+      "owner": "core",
+      "type": "integer",
+      "default": 900000,
+      "bounds": "positive integer ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.compaction.backoffBaseMs",
+      "deprecation": "compatibility env alias for domains.compaction.backoffBaseMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753C1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_COMPACTION_BACKOFF_DECAY_FACTOR",
+      "owner": "core",
+      "type": "number",
+      "default": 0.5,
+      "bounds": ">0..1",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.compaction.backoffDecayFactor",
+      "deprecation": "compatibility env alias for domains.compaction.backoffDecayFactor",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753C1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_COMPACTION_BACKOFF_MAX_MS",
+      "owner": "core",
+      "type": "integer",
+      "default": 21600000,
+      "bounds": "positive integer ms; normalized >= base",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.compaction.backoffMaxMs",
+      "deprecation": "compatibility env alias for domains.compaction.backoffMaxMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753C1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_COMPACTION_HARD_CEILING_PERCENT",
+      "owner": "core",
+      "type": "number",
+      "default": 100,
+      "bounds": ">0..100 percent",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.compaction.hardCeilingPercent",
+      "deprecation": "compatibility env alias for domains.compaction.hardCeilingPercent",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753C1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_COMPACTION_MAX_THRESHOLD_TOKENS",
+      "owner": "core",
+      "type": "integer",
+      "default": 0,
+      "bounds": "non-negative integer tokens",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.compaction.maxThresholdTokens",
+      "deprecation": "compatibility env alias for domains.compaction.maxThresholdTokens",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753C1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_COMPACTION_MAX_WORK_UNITS",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 1000000,
+      "bounds": "internal fixed 1,000,000 work-unit ceiling",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": "removed environment support; fixed internal compaction guardrail",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/agent-pool/compaction.ts constant (#753C2b)",
+      "migrationDisposition": "constant"
+    },
+    {
+      "name": "PICLAW_COMPACTION_REQUEST_OVERHEAD_TOKENS",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 1000,
+      "bounds": "positive integer tokens",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.compaction.compactionRequestOverheadTokens",
+      "deprecation": "migrated to typed domains.compaction config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domains.compaction.compactionRequestOverheadTokens (#753C3)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_COMPACTION_SETTLEMENT_GRACE_MS",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 5000,
+      "bounds": "internal fixed 5-second timeout-settlement grace",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": "removed environment support; fixed internal compaction guardrail",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/agent-pool/compaction.ts constant (#753C2b)",
+      "migrationDisposition": "constant"
+    },
+    {
+      "name": "PICLAW_COMPACTION_THRESHOLD_PERCENT",
+      "owner": "core",
+      "type": "number",
+      "default": 80,
+      "bounds": ">0..100 percent",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.compaction.thresholdPercent",
+      "deprecation": "compatibility env alias for domains.compaction.thresholdPercent",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753C1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_COMPACTION_TIMEOUT_MS",
+      "owner": "core",
+      "type": "integer",
+      "default": 300000,
+      "bounds": "positive integer ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.compaction.timeoutMs",
+      "deprecation": "compatibility env alias for domains.compaction.timeoutMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753C1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_COMPACTION_WARNING_THRESHOLD",
+      "owner": "core",
+      "type": "integer",
+      "default": 3,
+      "bounds": "non-negative integer",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.compaction.warningThreshold",
+      "deprecation": "compatibility env alias for domains.compaction.warningThreshold",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753C1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_CONFIG_PATH",
+      "owner": "core",
+      "type": "path",
+      "default": null,
+      "bounds": "identifier/reference only; not a supported environment input",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "removed",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "reference-only identifier with no environment reader",
+      "migrationDisposition": "removed-reference-only",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_DATA",
+      "owner": "storage/bootstrap",
+      "type": "path",
+      "default": "/workspace/.piclaw/data",
+      "bounds": null,
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "process.env",
+        "defaults"
+      ],
+      "status": "bootstrap",
+      "compatibilityAliasFor": null,
+      "deprecation": "retained runtime-data bootstrap path; consumers use config-context accessors",
+      "removalVersion": null,
+      "bootstrapAllowed": true,
+      "source": "runtime/src/core/config-paths.ts call-time data bootstrap (#810A)",
+      "migrationDisposition": "retain-path-bootstrap"
+    },
+    {
+      "name": "PICLAW_DB_IN_MEMORY",
+      "owner": "storage",
+      "type": "boolean",
+      "default": false,
+      "bounds": "true values: 1 or true",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "process.env",
+        "defaults"
+      ],
+      "status": "bootstrap",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": true,
+      "source": "retained test/database bootstrap contract (#755E)",
+      "migrationDisposition": "retain-bootstrap-test-boundary",
+      "supportedPersistence": [
+        "env"
+      ]
+    },
+    {
+      "name": "PICLAW_DEBUG_CARD_SUBMISSIONS",
+      "owner": "web",
+      "type": "boolean",
+      "default": false,
+      "bounds": null,
+      "allowedValues": [
+        "1",
+        "0",
+        "true",
+        "false",
+        "yes",
+        "no",
+        "on",
+        "off"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.web.debugCardSubmissions",
+      "deprecation": "compatibility env alias for domains.web.debugCardSubmissions",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_DISABLE_BACKGROUND_WORKSPACE_INDEX",
+      "owner": "core",
+      "type": "boolean",
+      "default": null,
+      "bounds": "implementation-only tuning; source-defined default and bounds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime implementation tuning retained outside public config",
+      "migrationDisposition": "internal-runtime-tuning",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_DISABLE_PRIVATE_UPSTREAM_AUTO_COMPACTION_SUPPRESSOR",
+      "owner": "agent-runtime",
+      "type": "boolean",
+      "default": true,
+      "bounds": "internal upstream auto-compaction suppressor always enabled",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": "removed environment support; fixed internal compaction guardrail",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/agent-pool/run-agent-orchestrator.ts fixed behavior (#753C2b)",
+      "migrationDisposition": "constant"
+    },
+    {
+      "name": "PICLAW_DISABLE_RUNTIME_LOCK",
+      "owner": "core",
+      "type": "boolean",
+      "default": null,
+      "bounds": "implementation-only tuning; source-defined default and bounds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime implementation tuning retained outside public config",
+      "migrationDisposition": "internal-runtime-tuning",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_DREAM_AGENT_TIMEOUT_MS",
+      "owner": "dream",
+      "type": "integer",
+      "default": 360000,
+      "bounds": "positive integer ms; defaults to domains.agent.backgroundTimeoutMs when positive",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.dream.agentTimeoutMs",
+      "deprecation": "migrated to typed domains.dream.agentTimeoutMs config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts typed domains.dream configuration (#755B)",
+      "migrationDisposition": "migrated-to-domain-config",
+      "supportedPersistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ]
+    },
+    {
+      "name": "PICLAW_DREAM_BACKUP_KEEP",
+      "owner": "dream",
+      "type": "integer",
+      "default": 10,
+      "bounds": "positive integer backups",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.dream.backupKeep",
+      "deprecation": "migrated to typed domains.dream.backupKeep config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts typed domains.dream configuration (#755B)",
+      "migrationDisposition": "migrated-to-domain-config",
+      "supportedPersistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ]
+    },
+    {
+      "name": "PICLAW_DREAM_CRON",
+      "owner": "dream",
+      "type": "cron",
+      "default": "0 1 * * *",
+      "bounds": "non-empty cron expression",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.dream.cron",
+      "deprecation": "migrated to typed domains.dream.cron config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts typed domains.dream configuration (#755B)",
+      "migrationDisposition": "migrated-to-domain-config",
+      "supportedPersistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ]
+    },
+    {
+      "name": "PICLAW_DREAM_CUE_FULL_SLICE_MAX_MESSAGES",
+      "owner": "core",
+      "type": "integer",
+      "default": null,
+      "bounds": "implementation-only tuning; source-defined default and bounds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime implementation tuning retained outside public config",
+      "migrationDisposition": "internal-runtime-tuning",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_DREAM_CUE_FULL_SLICE_MAX_SESSION_TREES",
+      "owner": "core",
+      "type": "integer",
+      "default": null,
+      "bounds": "implementation-only tuning; source-defined default and bounds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime implementation tuning retained outside public config",
+      "migrationDisposition": "internal-runtime-tuning",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_DREAM_CUE_MAX_SNIPPETS",
+      "owner": "core",
+      "type": "integer",
+      "default": null,
+      "bounds": "implementation-only tuning; source-defined default and bounds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime implementation tuning retained outside public config",
+      "migrationDisposition": "internal-runtime-tuning",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_DREAM_CUE_SMALL_TREE_MAX_MESSAGES",
+      "owner": "core",
+      "type": "integer",
+      "default": null,
+      "bounds": "implementation-only tuning; source-defined default and bounds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime implementation tuning retained outside public config",
+      "migrationDisposition": "internal-runtime-tuning",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_DREAM_MODEL",
+      "owner": "dream",
+      "type": "string",
+      "default": "",
+      "bounds": "optional provider/model label",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.dream.model",
+      "deprecation": "migrated to typed domains.dream.model config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts typed domains.dream configuration (#755B)",
+      "migrationDisposition": "migrated-to-domain-config",
+      "supportedPersistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ]
+    },
+    {
+      "name": "PICLAW_ENABLE_M365_EXPERIMENTAL",
+      "owner": "agent-runtime",
+      "type": "boolean",
+      "default": false,
+      "bounds": "truthy enables experimental extension",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env"
+      ],
+      "precedence": [
+        "process.env",
+        "default"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "optional extension startup gate",
+      "migrationDisposition": "retain-experimental-extension-gate",
+      "supportedPersistence": [
+        "env"
+      ]
+    },
+    {
+      "name": "PICLAW_EXTERNAL_PROGRESS_WATCHDOG",
+      "owner": "core",
+      "type": "boolean",
+      "default": true,
+      "bounds": "false-like values disable external monitor",
+      "allowedValues": [
+        "1",
+        "0",
+        "true",
+        "false",
+        "yes",
+        "no",
+        "on",
+        "off"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.watchdog.externalMonitorEnabled",
+      "deprecation": "compatibility env alias for domains.watchdog.externalMonitorEnabled",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753B2)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_GITHUB_COPILOT_DYNAMIC_MODELS",
+      "owner": "tools",
+      "type": "boolean",
+      "default": true,
+      "bounds": "legacy false values: 0, false, no; any other supplied value enables",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.githubCopilotDynamicModels",
+      "deprecation": "migrated to typed domains.tools.githubCopilotDynamicModels config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.githubCopilotDynamicModels (#754A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_GITHUB_COPILOT_MODELS_TIMEOUT_MS",
+      "owner": "tools",
+      "type": "integer",
+      "default": 3500,
+      "bounds": ">=500 ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.githubCopilotModelsTimeoutMs",
+      "deprecation": "migrated to typed domains.tools.githubCopilotModelsTimeoutMs config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.githubCopilotModelsTimeoutMs (#754A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_IDLE_AUTO_COMPACTION_DELAY_MS",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 5000,
+      "bounds": "non-negative integer ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.compaction.idleAutoCompactionDelayMs",
+      "deprecation": "compatibility env alias for domains.compaction.idleAutoCompactionDelayMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753C2a)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_INTERNAL_SECRET",
+      "owner": "web/security",
+      "type": "secret",
+      "default": null,
+      "bounds": null,
+      "allowedValues": [],
+      "secret": true,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        ".piclaw/config.json",
+        "defaults"
+      ],
+      "status": "bootstrap",
+      "compatibilityAliasFor": "PICLAW_WEB_INTERNAL_SECRET",
+      "deprecation": "retained process/.env secret bootstrap alias; not persisted by typed domain config",
+      "removalVersion": null,
+      "bootstrapAllowed": true,
+      "source": "runtime/src/core/config-secrets.ts internal-secret primary bootstrap alias (#810B)",
+      "migrationDisposition": "retain-secret-bootstrap"
+    },
+    {
+      "name": "PICLAW_KEYCHAIN_KEY",
+      "owner": "security",
+      "type": "secret",
+      "default": null,
+      "bounds": null,
+      "allowedValues": [],
+      "secret": true,
+      "persistence": [
+        "env"
+      ],
+      "precedence": [
+        "process.env"
+      ],
+      "status": "bootstrap",
+      "compatibilityAliasFor": null,
+      "deprecation": "retained process-only keychain master-key bootstrap; never persisted to JSON",
+      "removalVersion": null,
+      "bootstrapAllowed": true,
+      "source": "runtime/src/core/config-secrets.ts keychain process-env bootstrap (#810B)",
+      "migrationDisposition": "retain-secret-bootstrap"
+    },
+    {
+      "name": "PICLAW_KEYCHAIN_KEY_FILE",
+      "owner": "security",
+      "type": "path",
+      "default": null,
+      "bounds": null,
+      "allowedValues": [],
+      "secret": true,
+      "persistence": [
+        "env"
+      ],
+      "precedence": [
+        "process.env"
+      ],
+      "status": "bootstrap",
+      "compatibilityAliasFor": null,
+      "deprecation": "retained process-only keychain key-file bootstrap; never persisted to JSON",
+      "removalVersion": null,
+      "bootstrapAllowed": true,
+      "source": "runtime/src/core/config-secrets.ts keychain key-file bootstrap (#810B)",
+      "migrationDisposition": "retain-secret-bootstrap"
+    },
+    {
+      "name": "PICLAW_LOG_LEVEL",
+      "owner": "core",
+      "type": "enum",
+      "default": "info",
+      "bounds": "debug|info|warn|error",
+      "allowedValues": [
+        "debug",
+        "info",
+        "warn",
+        "error"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.logging.level",
+      "deprecation": "migrated to typed domains.logging.level config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-integrations.ts typed domains.logging configuration (#755D)",
+      "migrationDisposition": "migrated-to-domain-config",
+      "supportedPersistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ]
+    },
+    {
+      "name": "PICLAW_M365_YOLO",
+      "owner": "tools",
+      "type": "boolean",
+      "default": false,
+      "bounds": "1|true|yes|on",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env"
+      ],
+      "precedence": [
+        "process.env",
+        "default"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "experimental M365 consent override",
+      "migrationDisposition": "retain-experimental-emergency-override",
+      "supportedPersistence": [
+        "env"
+      ]
+    },
+    {
+      "name": "PICLAW_MAIN_SESSION_IDLE_TTL_MS",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 180000,
+      "bounds": "positive integer ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.sessionPool.mainIdleTtlMs",
+      "deprecation": "compatibility env alias for domains.sessionPool.mainIdleTtlMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753A2a)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_MAIN_SESSION_POOL_MAX_SIZE",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 1,
+      "bounds": "non-negative integer",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.sessionPool.mainSessionPoolMaxSize",
+      "deprecation": "compatibility env alias for domains.sessionPool.mainSessionPoolMaxSize",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753A2a)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_MAIN_SESSION_PRESSURE_IDLE_TTL_MS",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 60000,
+      "bounds": "positive integer ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.sessionPool.memoryPressureMainIdleTtlMs",
+      "deprecation": "compatibility env alias for domains.sessionPool.memoryPressureMainIdleTtlMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753A2a)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_MAIN_SESSION_PRESSURE_POOL_MAX_SIZE",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 1,
+      "bounds": "non-negative integer",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.sessionPool.memoryPressureMainSessionPoolMaxSize",
+      "deprecation": "compatibility env alias for domains.sessionPool.memoryPressureMainSessionPoolMaxSize",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753A2a)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_MAIN_SESSION_PRESSURE_RSS_BYTES",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 402653184,
+      "bounds": "non-negative integer bytes",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.sessionPool.memoryPressureRssBytes",
+      "deprecation": "compatibility env alias for domains.sessionPool.memoryPressureRssBytes",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753A2a)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_MANUAL_COMPACTION_EXTERNAL_FAILSAFE",
+      "owner": "core",
+      "type": "boolean",
+      "default": true,
+      "bounds": "internal external watchdog enabled outside test runtimes",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": "removed environment support; fixed internal compaction guardrail",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/agent-control/handlers/control.ts fixed behavior (#753C2b)",
+      "migrationDisposition": "constant"
+    },
+    {
+      "name": "PICLAW_MANUAL_COMPACTION_FAILSAFE_GRACE_MS",
+      "owner": "core",
+      "type": "integer",
+      "default": 15000,
+      "bounds": "internal fixed 15-second external-watchdog grace",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": "removed environment support; fixed internal compaction guardrail",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/agent-control/handlers/control.ts constant (#753C2b)",
+      "migrationDisposition": "constant"
+    },
+    {
+      "name": "PICLAW_MCP_TOOL_TIMEOUT_MS",
+      "owner": "tools",
+      "type": "integer",
+      "default": 120000,
+      "bounds": ">=0 ms; 0 disables the outer wrapper timeout",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.mcpToolTimeoutMs",
+      "deprecation": "migrated to typed domains.tools.mcpToolTimeoutMs config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.mcpToolTimeoutMs (#754A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 64,
+      "bounds": "1..512 completed tool executions",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.agent.toolUseMessageBudget",
+      "deprecation": "legacy per-attempt ceiling; now a lowest-priority alias for the per-turn completed-execution budget",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts compatibility alias to domains.agent.toolUseMessageBudget",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_PACKAGE_ROOT",
+      "owner": "tools",
+      "type": "path",
+      "default": "",
+      "bounds": "empty derives installed package root",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.packageRoot",
+      "deprecation": "migrated to typed domains.tools.packageRoot config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.packageRoot (#754B)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_PI_AGENT_DIR",
+      "owner": "storage/bootstrap",
+      "type": "path",
+      "default": null,
+      "bounds": null,
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env"
+      ],
+      "precedence": [
+        "process.env",
+        "defaults"
+      ],
+      "status": "bootstrap",
+      "compatibilityAliasFor": null,
+      "deprecation": "retained process bootstrap path and synchronized to PI_CODING_AGENT_DIR",
+      "removalVersion": null,
+      "bootstrapAllowed": true,
+      "source": "runtime/src/core/agent-dir.ts canonical Pi agent-directory bootstrap",
+      "migrationDisposition": "retain-path-bootstrap"
+    },
+    {
+      "name": "PICLAW_PORT",
+      "owner": "tools",
+      "type": null,
+      "default": null,
+      "bounds": null,
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "removed",
+      "compatibilityAliasFor": null,
+      "deprecation": "unsupported harness-only fallback removed; use PICLAW_WEB_PORT",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "removed from runtime/extensions/experimental/azure-openai.harness.ts in #810D; use PICLAW_WEB_PORT",
+      "migrationDisposition": "removed-reference-only",
+      "supportedPersistence": [
+        "env"
+      ]
+    },
+    {
+      "name": "PICLAW_PREPROMPT_COMPACTION_FOREGROUND_MS",
+      "owner": "web",
+      "type": "integer",
+      "default": 250,
+      "bounds": "non-negative integer ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.compaction.prePromptForegroundMs",
+      "deprecation": "compatibility env alias for domains.compaction.prePromptForegroundMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753C2a)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_PROGRESS_WATCHDOG_ENABLED",
+      "owner": "core",
+      "type": "boolean",
+      "default": false,
+      "bounds": null,
+      "allowedValues": [
+        "1",
+        "0",
+        "true",
+        "false",
+        "yes",
+        "no",
+        "on",
+        "off"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.watchdog.enabled",
+      "deprecation": "compatibility env alias for domains.watchdog.enabled",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753B2)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_PROGRESS_WATCHDOG_ESCALATE_ON_STALL",
+      "owner": "core",
+      "type": "boolean",
+      "default": false,
+      "bounds": null,
+      "allowedValues": [
+        "1",
+        "0",
+        "true",
+        "false",
+        "yes",
+        "no",
+        "on",
+        "off",
+        "restart",
+        "exit"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.watchdog.escalateOnStall",
+      "deprecation": "compatibility env alias for domains.watchdog.escalateOnStall",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753B2)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_PROGRESS_WATCHDOG_RESTART_ON_STALL",
+      "owner": "core",
+      "type": "boolean",
+      "default": false,
+      "bounds": null,
+      "allowedValues": [
+        "1",
+        "0",
+        "true",
+        "false",
+        "yes",
+        "no",
+        "on",
+        "off",
+        "restart",
+        "exit"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.watchdog.escalateOnStall",
+      "deprecation": "compatibility env alias for domains.watchdog.escalateOnStall",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753B2)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_PROGRESS_WATCHDOG_TIMEOUT_MS",
+      "owner": "core",
+      "type": "integer",
+      "default": 300000,
+      "bounds": "non-negative integer ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.watchdog.timeoutMs",
+      "deprecation": "compatibility env alias for domains.watchdog.timeoutMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753B2)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_PROGRESSIVE_CHUNK_REASONING",
+      "owner": "tools",
+      "type": "string",
+      "default": null,
+      "bounds": "implementation-only tuning; source-defined default and bounds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime implementation tuning retained outside public config",
+      "migrationDisposition": "internal-runtime-tuning",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_PROGRESSIVE_COMPACTION",
+      "owner": "core",
+      "type": "boolean",
+      "default": false,
+      "bounds": "compat env preserves legacy enabled-only semantics: value 1=true; all other values=false",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.compaction.progressiveCompaction",
+      "deprecation": "migrated to typed domains.compaction config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domains.compaction.progressiveCompaction (#753C3)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_PROGRESSIVE_COMPACTION_CONCURRENCY",
+      "owner": "tools",
+      "type": "string",
+      "default": null,
+      "bounds": "implementation-only tuning; source-defined default and bounds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime implementation tuning retained outside public config",
+      "migrationDisposition": "internal-runtime-tuning",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_PROGRESSIVE_COMPACTION_MAX_CHUNKS",
+      "owner": "tools",
+      "type": "integer",
+      "default": null,
+      "bounds": "implementation-only tuning; source-defined default and bounds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime implementation tuning retained outside public config",
+      "migrationDisposition": "internal-runtime-tuning",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS",
+      "owner": "tools",
+      "type": "string",
+      "default": null,
+      "bounds": "implementation-only tuning; source-defined default and bounds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime implementation tuning retained outside public config",
+      "migrationDisposition": "internal-runtime-tuning",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_PROGRESSIVE_COMPRESS_REASONING",
+      "owner": "tools",
+      "type": "string",
+      "default": null,
+      "bounds": "implementation-only tuning; source-defined default and bounds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime implementation tuning retained outside public config",
+      "migrationDisposition": "internal-runtime-tuning",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_PROGRESSIVE_FINAL_REASONING",
+      "owner": "tools",
+      "type": "string",
+      "default": null,
+      "bounds": "implementation-only tuning; source-defined default and bounds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime implementation tuning retained outside public config",
+      "migrationDisposition": "internal-runtime-tuning",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_PROGRESSIVE_MERGE_REASONING",
+      "owner": "tools",
+      "type": "string",
+      "default": null,
+      "bounds": "implementation-only tuning; source-defined default and bounds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime implementation tuning retained outside public config",
+      "migrationDisposition": "internal-runtime-tuning",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_PROVIDER_USAGE_TTL_MS",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 60000,
+      "bounds": "internal fixed 60-second cache TTL",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": "removed environment support; fixed internal cache policy",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/agent-pool/provider-usage.ts constant (#753A2b)",
+      "migrationDisposition": "constant"
+    },
+    {
+      "name": "PICLAW_RECORDINGS_DIR",
+      "owner": "storage",
+      "type": "path",
+      "default": "<PICLAW_DATA>/session-recordings",
+      "bounds": "non-empty path",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.sessionRecordings.directory",
+      "deprecation": "migrated to typed domains.sessionRecordings.directory config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts typed operational domain configuration (#755C)",
+      "migrationDisposition": "migrated-to-domain-config",
+      "supportedPersistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ]
+    },
+    {
+      "name": "PICLAW_RECOVERY_LOOP_GUARD_ENABLED",
+      "owner": "agent-runtime",
+      "type": "boolean",
+      "default": true,
+      "bounds": null,
+      "allowedValues": [
+        "1",
+        "0",
+        "true",
+        "false",
+        "yes",
+        "no",
+        "on",
+        "off"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.recovery.loopGuardEnabled",
+      "deprecation": "compatibility env alias for domains.recovery.loopGuardEnabled",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753B1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_RECOVERY_LOOP_GUARD_MAX_FAILURES",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 3,
+      "bounds": "positive integer failures",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.recovery.loopGuardMaxFailures",
+      "deprecation": "compatibility env alias for domains.recovery.loopGuardMaxFailures",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753B1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_RECOVERY_LOOP_GUARD_WINDOW_MS",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 600000,
+      "bounds": "positive integer ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.recovery.loopGuardWindowMs",
+      "deprecation": "compatibility env alias for domains.recovery.loopGuardWindowMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753B1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_REMOTE_COMPACTION_ENABLED",
+      "owner": "remote-interop",
+      "type": "boolean",
+      "default": false,
+      "bounds": null,
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.remote.remoteCompactionEnabled",
+      "deprecation": "migrated to typed domains.remote.remoteCompactionEnabled config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domains.remote.remoteCompactionEnabled (#755A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_REMOTE_COMPACTION_TIMEOUT_MS",
+      "owner": "remote-interop",
+      "type": "integer",
+      "default": 300000,
+      "bounds": "positive integer ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.remote.remoteCompactionTimeoutMs",
+      "deprecation": "migrated to typed domains.remote.remoteCompactionTimeoutMs config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domains.remote.remoteCompactionTimeoutMs (#755A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_REMOTE_INSTANCE_NAME",
+      "owner": "remote-interop",
+      "type": "string",
+      "default": "",
+      "bounds": null,
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.remote.instanceName",
+      "deprecation": "migrated to typed domains.remote.instanceName config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domains.remote.instanceName (#755A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_REMOTE_INTEROP_ALLOW_HTTP",
+      "owner": "remote-interop",
+      "type": "boolean",
+      "default": false,
+      "bounds": "true only for legacy 1 or true",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.remote.allowHttp",
+      "deprecation": "migrated to typed domains.remote.allowHttp config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domains.remote.allowHttp (#755A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_REMOTE_INTEROP_ALLOW_PRIVATE_NETWORK",
+      "owner": "remote-interop",
+      "type": "boolean",
+      "default": false,
+      "bounds": "true only for legacy 1 or true",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.remote.allowPrivateNetwork",
+      "deprecation": "migrated to typed domains.remote.allowPrivateNetwork config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domains.remote.allowPrivateNetwork (#755A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_REMOTE_INTEROP_DECISION_MODEL",
+      "owner": "remote-interop",
+      "type": "string",
+      "default": "",
+      "bounds": "provider/model label",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.remote.decisionModel",
+      "deprecation": "migrated to typed domains.remote.decisionModel config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domains.remote.decisionModel (#755A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_REMOTE_INTEROP_ENABLED",
+      "owner": "remote-interop",
+      "type": "boolean",
+      "default": false,
+      "bounds": "true only for legacy 1 or true",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.remote.enabled",
+      "deprecation": "migrated to typed domains.remote.enabled config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domains.remote.enabled (#755A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_REMOTE_SHORT_CIRCUIT_ENABLED",
+      "owner": "remote-interop",
+      "type": "boolean",
+      "default": false,
+      "bounds": "true only for legacy 1 or true",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.remote.shortCircuitEnabled",
+      "deprecation": "migrated to typed domains.remote.shortCircuitEnabled config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domains.remote.shortCircuitEnabled (#755A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_RUNTIME_DOCS_DIR",
+      "owner": "web",
+      "type": "path",
+      "default": "<runtime-root>/docs",
+      "bounds": "runtime documentation directory",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "default"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "web static documentation deployment path",
+      "migrationDisposition": "retain-deployment-path",
+      "supportedPersistence": [
+        "env",
+        "dotenv"
+      ]
+    },
+    {
+      "name": "PICLAW_RUNTIME_ROOT",
+      "owner": "storage/bootstrap",
+      "type": "path",
+      "default": null,
+      "bounds": null,
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env"
+      ],
+      "precedence": [
+        "process.env",
+        "defaults"
+      ],
+      "status": "bootstrap",
+      "compatibilityAliasFor": null,
+      "deprecation": "retained packaged-resource bootstrap path; consumers use config-context accessors",
+      "removalVersion": null,
+      "bootstrapAllowed": true,
+      "source": "runtime/src/core/config-paths.ts call-time packaged runtime-root bootstrap (#810A)",
+      "migrationDisposition": "retain-path-bootstrap"
+    },
+    {
+      "name": "PICLAW_SCOPED_MODELS_ONLY",
+      "owner": "tools",
+      "type": "boolean",
+      "default": false,
+      "bounds": null,
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.scopedModelsOnly",
+      "deprecation": "migrated to typed domains.tools.scopedModelsOnly config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.scopedModelsOnly (#754B)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_SEARCH_MATCH_MODE",
+      "owner": "workspace",
+      "type": "enum",
+      "default": "or",
+      "bounds": "or|and",
+      "allowedValues": [
+        "or",
+        "and"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.searchMatchMode",
+      "deprecation": "migrated to typed domains.tools.searchMatchMode config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts typed tools domain (#747 closure)",
+      "migrationDisposition": "migrated-to-domain-config",
+      "supportedPersistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ]
+    },
+    {
+      "name": "PICLAW_SESSION_AUTO_ROTATE",
+      "owner": "session",
+      "type": "boolean",
+      "default": true,
+      "bounds": null,
+      "allowedValues": [
+        "1",
+        "0",
+        "true",
+        "false",
+        "yes",
+        "no",
+        "on",
+        "off"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.session.autoRotate",
+      "deprecation": "compatibility env alias for domains.session.autoRotate",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753A1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_SESSION_CLEANUP_INTERVAL_MS",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 30000,
+      "bounds": "positive integer ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.sessionPool.cleanupIntervalMs",
+      "deprecation": "compatibility env alias for domains.sessionPool.cleanupIntervalMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753A2a)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_SESSION_FILE_PRELOAD_SANITIZE_MIN_BYTES",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 1048576,
+      "bounds": "positive integer bytes",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.sessionPersistence.filePreloadSanitizeMinBytes",
+      "deprecation": "compatibility env alias for domains.sessionPersistence.filePreloadSanitizeMinBytes",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753A2b)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_SESSION_IDLE_COMPACTION_MAX_WAIT_MS",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": null,
+      "bounds": "implementation-only tuning; source-defined default and bounds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime implementation tuning retained outside public config",
+      "migrationDisposition": "internal-runtime-tuning",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_SESSION_IDLE_MAX_WAIT_MS",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": null,
+      "bounds": "implementation-only tuning; source-defined default and bounds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime implementation tuning retained outside public config",
+      "migrationDisposition": "internal-runtime-tuning",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_SESSION_IDLE_TTL_MS",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": null,
+      "bounds": "positive integer ms; fallback alias for main/side idle TTL",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.sessionPool.mainIdleTtlMs and sideIdleTtlMs",
+      "deprecation": "compatibility env alias for domains.sessionPool.mainIdleTtlMs and sideIdleTtlMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753A2a)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_SESSION_ISOLATION",
+      "owner": "session-runtime",
+      "type": "enum",
+      "default": "none",
+      "bounds": null,
+      "allowedValues": [
+        "none",
+        "summary",
+        "full"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.session.isolation",
+      "deprecation": "compatibility env alias for domains.session.isolation",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753A2b)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_SESSION_MAX_COMPACTIONS",
+      "owner": "session",
+      "type": "integer",
+      "default": 3,
+      "bounds": "1..20 compactions",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.session.maxCompactionsBeforeRotation",
+      "deprecation": "compatibility env alias for domains.session.maxCompactionsBeforeRotation",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753A1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_SESSION_MAX_LINES",
+      "owner": "session",
+      "type": "integer",
+      "default": 8000,
+      "bounds": "100..50000 lines",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.session.maxLines",
+      "deprecation": "compatibility env alias for domains.session.maxLines",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753A1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_SESSION_MAX_SIZE_MB",
+      "owner": "session",
+      "type": "integer",
+      "default": 32,
+      "bounds": "1..256 MiB",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.session.maxSizeMb",
+      "deprecation": "compatibility env alias for domains.session.maxSizeMb",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753A1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_SESSION_POOL_MAX_SIZE",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": null,
+      "bounds": "non-negative integer; fallback alias for main pool size",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.sessionPool.mainSessionPoolMaxSize",
+      "deprecation": "compatibility env alias for domains.sessionPool.mainSessionPoolMaxSize",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753A2a)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_SESSION_TOOL_RESULT_MAX_PERSIST_BYTES",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 262144,
+      "bounds": "positive integer bytes",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.sessionPersistence.toolResultMaxPersistBytes",
+      "deprecation": "compatibility env alias for domains.sessionPersistence.toolResultMaxPersistBytes",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753A2b)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_SESSION_TOOL_RESULT_PREVIEW_CHARS",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 4096,
+      "bounds": "positive integer characters",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.sessionPersistence.toolResultPreviewChars",
+      "deprecation": "compatibility env alias for domains.sessionPersistence.toolResultPreviewChars",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753A2b)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_SIDE_SESSION_IDLE_TTL_MS",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 60000,
+      "bounds": "positive integer ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.sessionPool.sideIdleTtlMs",
+      "deprecation": "compatibility env alias for domains.sessionPool.sideIdleTtlMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753A2a)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_SKEL_DIR",
+      "owner": "core",
+      "type": "path",
+      "default": "<package-root>/skel",
+      "bounds": "startup skeleton directory path",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "process.env",
+        "default"
+      ],
+      "status": "bootstrap",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": true,
+      "source": "retained deployment/package bootstrap contract (#755E)",
+      "migrationDisposition": "retain-deployment-bootstrap",
+      "supportedPersistence": [
+        "env"
+      ]
+    },
+    {
+      "name": "PICLAW_SMART_COMPACTION_METHOD",
+      "owner": "core",
+      "type": "enum",
+      "default": "selective",
+      "bounds": null,
+      "allowedValues": [
+        "selective",
+        "pipelined",
+        "traditional-pipelined",
+        "traditional_pipelined",
+        "traditional pipelined"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.compaction.smartCompactionMethod",
+      "deprecation": "compatibility env alias for domains.compaction.smartCompactionMethod",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753C1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_SMART_COMPACTION_PROGRESS_INTERVAL_MS",
+      "owner": "tools",
+      "type": "integer",
+      "default": null,
+      "bounds": "implementation-only tuning; source-defined default and bounds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime implementation tuning retained outside public config",
+      "migrationDisposition": "internal-runtime-tuning",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_SMART_COMPACTION_REASONING",
+      "owner": "core",
+      "type": "enum",
+      "default": "",
+      "bounds": "empty string means phase defaults",
+      "allowedValues": [
+        "",
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.compaction.smartCompactionReasoning",
+      "deprecation": "migrated to typed domains.compaction config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domains.compaction.smartCompactionReasoning (#753C3)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_SMART_COMPACTION_SELECTIVE_REASONING",
+      "owner": "tools",
+      "type": "string",
+      "default": null,
+      "bounds": "implementation-only tuning; source-defined default and bounds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime implementation tuning retained outside public config",
+      "migrationDisposition": "internal-runtime-tuning",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_SSH_KNOWN_HOSTS_KEYCHAIN",
+      "owner": "tools",
+      "type": "string",
+      "default": "",
+      "bounds": "optional keychain entry name",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "cli"
+      ],
+      "precedence": [
+        "CLI flag",
+        "process.env",
+        "default"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "SSH core bootstrap fallback",
+      "migrationDisposition": "retain-cli-compatibility",
+      "supportedPersistence": [
+        "env",
+        "cli"
+      ]
+    },
+    {
+      "name": "PICLAW_SSH_PORT",
+      "owner": "tools",
+      "type": "integer",
+      "default": 22,
+      "bounds": "1..65535",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "cli"
+      ],
+      "precedence": [
+        "CLI flag",
+        "process.env",
+        "default"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "SSH core bootstrap fallback",
+      "migrationDisposition": "retain-cli-compatibility",
+      "supportedPersistence": [
+        "env",
+        "cli"
+      ]
+    },
+    {
+      "name": "PICLAW_SSH_PRIVATE_KEY_KEYCHAIN",
+      "owner": "tools",
+      "type": "string",
+      "default": "",
+      "bounds": "required keychain entry name when SSH env fallback is used",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "cli"
+      ],
+      "precedence": [
+        "CLI flag",
+        "process.env"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "SSH core bootstrap fallback",
+      "migrationDisposition": "retain-cli-keychain-reference",
+      "supportedPersistence": [
+        "env",
+        "cli"
+      ]
+    },
+    {
+      "name": "PICLAW_SSH_STRICT_HOST_KEY_CHECKING",
+      "owner": "tools",
+      "type": "enum",
+      "default": "accept-new",
+      "bounds": "yes|accept-new|no",
+      "allowedValues": [
+        "yes",
+        "accept-new",
+        "no"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "cli"
+      ],
+      "precedence": [
+        "CLI flag",
+        "process.env",
+        "default"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "SSH core bootstrap fallback",
+      "migrationDisposition": "retain-cli-compatibility",
+      "supportedPersistence": [
+        "env",
+        "cli"
+      ]
+    },
+    {
+      "name": "PICLAW_SSH_TARGET",
+      "owner": "tools",
+      "type": "string",
+      "default": "",
+      "bounds": "user@host[:path]",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "cli"
+      ],
+      "precedence": [
+        "CLI flag",
+        "process.env"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "SSH core bootstrap fallback",
+      "migrationDisposition": "retain-cli-compatibility",
+      "supportedPersistence": [
+        "env",
+        "cli"
+      ]
+    },
+    {
+      "name": "PICLAW_STALE_ACTIVE_COMPACTION_BACKOFF_MS",
+      "owner": "web",
+      "type": "integer",
+      "default": 14400000,
+      "bounds": "internal fixed 4-hour stale-compaction backoff",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": "removed environment support; fixed internal compaction guardrail",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/channels/web/runtime/recovery.ts constant (#753C2b)",
+      "migrationDisposition": "constant"
+    },
+    {
+      "name": "PICLAW_STALE_ACTIVE_COMPACTION_RECOVERY_MS",
+      "owner": "web",
+      "type": "integer",
+      "default": 240000,
+      "bounds": "internal fixed 4-minute stale-compaction age",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "internal",
+      "compatibilityAliasFor": null,
+      "deprecation": "removed environment support; fixed internal compaction guardrail",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/channels/web/runtime/recovery.ts constant (#753C2b)",
+      "migrationDisposition": "constant"
+    },
+    {
+      "name": "PICLAW_STALE_PREFLIGHT_BACKOFF_MS",
+      "owner": "web",
+      "type": "integer",
+      "default": 14400000,
+      "bounds": "positive integer ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.webRecovery.stalePreflightBackoffMs",
+      "deprecation": "compatibility env alias for domains.webRecovery.stalePreflightBackoffMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753B1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_STALE_PREFLIGHT_RECOVERY_MS",
+      "owner": "web",
+      "type": "integer",
+      "default": 240000,
+      "bounds": "positive integer ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.webRecovery.stalePreflightRecoveryMs",
+      "deprecation": "compatibility env alias for domains.webRecovery.stalePreflightRecoveryMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753B1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_STARTUP_WARM_DEFAULT_CHAT",
+      "owner": "core",
+      "type": "boolean",
+      "default": false,
+      "bounds": "startup-only boolean",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env"
+      ],
+      "precedence": [
+        "process.env",
+        "default"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "startup session warmup policy",
+      "migrationDisposition": "retain-startup-tuning",
+      "supportedPersistence": [
+        "env"
+      ]
+    },
+    {
+      "name": "PICLAW_STARTUP_WARMUP_RECENT_LIMIT",
+      "owner": "core",
+      "type": "integer",
+      "default": 0,
+      "bounds": "0..8 chats",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env"
+      ],
+      "precedence": [
+        "process.env",
+        "default"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "startup session warmup policy",
+      "migrationDisposition": "retain-startup-tuning",
+      "supportedPersistence": [
+        "env"
+      ]
+    },
+    {
+      "name": "PICLAW_STATE_SCHEMA",
+      "owner": "web",
+      "type": "string",
+      "default": null,
+      "bounds": "identifier/reference only; not a supported environment input",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "removed",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "reference-only identifier with no environment reader",
+      "migrationDisposition": "removed-reference-only",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_STORE",
+      "owner": "storage/bootstrap",
+      "type": "path",
+      "default": "/workspace/.piclaw/store",
+      "bounds": null,
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "process.env",
+        "defaults"
+      ],
+      "status": "bootstrap",
+      "compatibilityAliasFor": null,
+      "deprecation": "retained database bootstrap path; consumers use config-context accessors",
+      "removalVersion": null,
+      "bootstrapAllowed": true,
+      "source": "runtime/src/core/config-paths.ts call-time store bootstrap and :memory: sentinel (#810A)",
+      "migrationDisposition": "retain-path-bootstrap"
+    },
+    {
+      "name": "PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 4000,
+      "bounds": "positive integer tokens",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.compaction.systemPromptOverheadTokens",
+      "deprecation": "migrated to typed domains.compaction config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domains.compaction.systemPromptOverheadTokens (#753C3)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TERMINAL",
+      "owner": "web",
+      "type": "integer",
+      "default": null,
+      "bounds": "identifier/reference only; not a supported environment input",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [],
+      "precedence": [],
+      "status": "removed",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "reference-only identifier with no environment reader",
+      "migrationDisposition": "removed-reference-only",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_TERMINAL_IMAGE_PROTOCOL",
+      "owner": "web",
+      "type": "string",
+      "default": "iterm2",
+      "bounds": "non-empty string",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.web.terminalImageProtocol",
+      "deprecation": "compatibility env alias for domains.web.terminalImageProtocol",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752B)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TEST_PLATFORM",
+      "owner": "web",
+      "type": "string",
+      "default": null,
+      "bounds": "removed; use explicit platform operation injection",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [],
+      "status": "removed",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "removed from runtime/src/channels/web/handlers/addons.ts (#755E)",
+      "migrationDisposition": "removed-test-only-env",
+      "supportedPersistence": []
+    },
+    {
+      "name": "PICLAW_TOKEN_ESTIMATE_SAFETY_MULTIPLIER",
+      "owner": "agent-runtime",
+      "type": "number",
+      "default": 1.1,
+      "bounds": ">=1",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.compaction.tokenEstimateSafetyMultiplier",
+      "deprecation": "migrated to typed domains.compaction config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domains.compaction.tokenEstimateSafetyMultiplier (#753C3)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TOOL_OUTPUT_CLEANUP_INTERVAL_MS",
+      "owner": "tools",
+      "type": "integer",
+      "default": 900000,
+      "bounds": "positive integer ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.toolOutputCleanupIntervalMs",
+      "deprecation": "migrated to typed domains.tools.toolOutputCleanupIntervalMs config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.toolOutputCleanupIntervalMs (#754C2)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TOOL_OUTPUT_PREVIEW_LINE_CHARS",
+      "owner": "tools",
+      "type": "integer",
+      "default": 200,
+      "bounds": "positive integer characters",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.toolOutputPreviewLineChars",
+      "deprecation": "migrated to typed domains.tools.toolOutputPreviewLineChars config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.toolOutputPreviewLineChars (#754C1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TOOL_OUTPUT_PREVIEW_LINES",
+      "owner": "tools",
+      "type": "integer",
+      "default": 8,
+      "bounds": "positive integer lines",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.toolOutputPreviewLines",
+      "deprecation": "migrated to typed domains.tools.toolOutputPreviewLines config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.toolOutputPreviewLines (#754C1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TOOL_OUTPUT_RETENTION_DAYS",
+      "owner": "tools",
+      "type": "integer",
+      "default": 30,
+      "bounds": "positive days capped at 30",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.toolOutputRetentionMs",
+      "deprecation": "migrated to typed domains.tools.toolOutputRetentionMs config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.toolOutputRetentionMs (#754C2)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TOOL_OUTPUT_RETENTION_MS",
+      "owner": "tools",
+      "type": "integer",
+      "default": 2592000000,
+      "bounds": "1..2592000000 ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.toolOutputRetentionMs",
+      "deprecation": "migrated to typed domains.tools.toolOutputRetentionMs config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.toolOutputRetentionMs (#754C2)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TOOL_OUTPUT_STORE_BYTES",
+      "owner": "tools",
+      "type": "integer",
+      "default": 5000,
+      "bounds": "500..100000 bytes",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.toolOutputStoreBytes",
+      "deprecation": "migrated to typed domains.tools.toolOutputStoreBytes config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.toolOutputStoreBytes (#754C1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TOOL_OUTPUT_STORE_LINES",
+      "owner": "tools",
+      "type": "integer",
+      "default": 40,
+      "bounds": "positive integer lines",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.toolOutputStoreLines",
+      "deprecation": "migrated to typed domains.tools.toolOutputStoreLines config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.toolOutputStoreLines (#754C1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TOOL_OUTPUT_STORE_THRESHOLDS_BY_TOOL",
+      "owner": "tools",
+      "type": "json",
+      "default": {},
+      "bounds": "tool-name object with positive bytes/lines",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.toolResultCompactionThresholdsByTool",
+      "deprecation": "migrated to typed domains.tools.toolResultCompactionThresholdsByTool config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.toolResultCompactionThresholdsByTool (#754C2)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TOOL_RESULT_COMPACTION_ENABLED",
+      "owner": "tools",
+      "type": "boolean",
+      "default": true,
+      "bounds": null,
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.toolResultCompactionEnabled",
+      "deprecation": "migrated to typed domains.tools.toolResultCompactionEnabled config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.toolResultCompactionEnabled (#754C2)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TOOL_RESULT_COMPACTION_TOOLS",
+      "owner": "tools",
+      "type": "json",
+      "default": [
+        "bash",
+        "powershell",
+        "exec_batch"
+      ],
+      "bounds": "normalized unique tool-name array",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.toolResultCompactionTools",
+      "deprecation": "migrated to typed domains.tools.toolResultCompactionTools config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.toolResultCompactionTools (#754C2)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED",
+      "owner": "tools",
+      "type": "boolean",
+      "default": true,
+      "bounds": null,
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.toolResultSemanticSummaryEnabled",
+      "deprecation": "migrated to typed domains.tools.toolResultSemanticSummaryEnabled config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.toolResultSemanticSummaryEnabled (#754C2)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_INPUT_CHARS",
+      "owner": "tools",
+      "type": "integer",
+      "default": 12000,
+      "bounds": "500..200000 characters",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.toolResultSemanticSummaryMaxInputChars",
+      "deprecation": "migrated to typed domains.tools.toolResultSemanticSummaryMaxInputChars config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.toolResultSemanticSummaryMaxInputChars (#754C2)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_MAX_TOKENS",
+      "owner": "tools",
+      "type": "integer",
+      "default": 320,
+      "bounds": "64..4096 tokens",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.toolResultSemanticSummaryMaxTokens",
+      "deprecation": "migrated to typed domains.tools.toolResultSemanticSummaryMaxTokens config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.toolResultSemanticSummaryMaxTokens (#754C2)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS",
+      "owner": "tools",
+      "type": "integer",
+      "default": 12000,
+      "bounds": "positive integer ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.toolResultSemanticSummaryTimeoutMs",
+      "deprecation": "migrated to typed domains.tools.toolResultSemanticSummaryTimeoutMs config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.toolResultSemanticSummaryTimeoutMs (#754C2)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TOTP_SECRET",
+      "owner": "core",
+      "type": "secret",
+      "default": null,
+      "bounds": null,
+      "allowedValues": [],
+      "secret": true,
+      "persistence": [
+        "env",
+        "dotenv",
+        "keychain"
+      ],
+      "precedence": [
+        "CLI flags",
+        "process.env",
+        ".env",
+        ".piclaw/config.json",
+        "defaults"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "PICLAW_WEB_TOTP_SECRET",
+      "deprecation": "legacy TOTP alias; prefer PICLAW_WEB_TOTP_SECRET or keychain/service environment",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts legacy TOTP alias compatibility",
+      "migrationDisposition": "retain-secret-compatibility"
+    },
+    {
+      "name": "PICLAW_TRUST_PROXY",
+      "owner": "web",
+      "type": "boolean",
+      "default": false,
+      "bounds": null,
+      "allowedValues": [
+        "1",
+        "0",
+        "true",
+        "false",
+        "yes",
+        "no",
+        "on",
+        "off"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.web.trustProxy",
+      "deprecation": "compatibility env alias for domains.web.trustProxy",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752B)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TURN_AUTO_RECOVERY_ENABLED",
+      "owner": "agent-runtime",
+      "type": "boolean",
+      "default": true,
+      "bounds": null,
+      "allowedValues": [
+        "1",
+        "0",
+        "true",
+        "false",
+        "yes",
+        "no",
+        "on",
+        "off"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.recovery.automaticRecoveryEnabled",
+      "deprecation": "compatibility env alias for domains.recovery.automaticRecoveryEnabled",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753B1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 0,
+      "bounds": "positive env override; domain 0 inherits retry max",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.recovery.automaticRecoveryMaxAttempts",
+      "deprecation": "compatibility env alias for domains.recovery.automaticRecoveryMaxAttempts",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753B1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 30000,
+      "bounds": "positive integer ms",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.recovery.automaticRecoveryTotalBudgetMs",
+      "deprecation": "compatibility env alias for domains.recovery.automaticRecoveryTotalBudgetMs",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domain schema (#753B1)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_TURN_MAX_TOOL_EXECUTIONS",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 64,
+      "bounds": "1..512 completed tool executions (Settings writes clamp to >=8)",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.agent.toolUseMessageBudget",
+      "deprecation": "canonical environment compatibility alias for the typed per-turn execution budget",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domains.agent.toolUseMessageBudget",
+      "migrationDisposition": "migrated-to-domain-config",
+      "supportedPersistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ]
+    },
+    {
+      "name": "PICLAW_TURN_MAX_TOOL_USE_MESSAGES",
+      "owner": "agent-runtime",
+      "type": "integer",
+      "default": 64,
+      "bounds": "1..512 completed tool executions (Settings writes clamp to >=8)",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.agent.toolUseMessageBudget",
+      "deprecation": "legacy message-count name; now maps to the authoritative completed-execution budget",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-runtime.ts domains.agent.toolUseMessageBudget (authoritative execution budget)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_UNKNOWN_MODEL_CONTEXT_WINDOW",
+      "owner": "tools",
+      "type": "integer",
+      "default": 64000,
+      "bounds": "positive integer tokens",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.unknownModelContextWindow",
+      "deprecation": "migrated to typed domains.tools.unknownModelContextWindow config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.unknownModelContextWindow (#754B)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_USER_AVATAR",
+      "owner": "identity",
+      "type": "string",
+      "default": "",
+      "bounds": null,
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.identity.userAvatar",
+      "deprecation": "compatibility env alias for domains.identity.userAvatar",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-identity.ts domain schema (#752A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_USER_AVATAR_BACKGROUND",
+      "owner": "identity",
+      "type": "string",
+      "default": "",
+      "bounds": null,
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.identity.userAvatarBackground",
+      "deprecation": "compatibility env alias for domains.identity.userAvatarBackground",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-identity.ts domain schema (#752A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_USER_NAME",
+      "owner": "identity",
+      "type": "string",
+      "default": "",
+      "bounds": null,
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.identity.userName",
+      "deprecation": "compatibility env alias for domains.identity.userName",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-identity.ts domain schema (#752A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_VNC_ALLOW_DIRECT",
+      "owner": "web",
+      "type": "boolean",
+      "default": "platform-dependent (true on Linux/macOS/Windows)",
+      "bounds": null,
+      "allowedValues": [
+        "1",
+        "0",
+        "true",
+        "false",
+        "yes",
+        "no",
+        "on",
+        "off"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.web.vncAllowDirect",
+      "deprecation": "compatibility env alias for domains.web.vncAllowDirect",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752B)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_VNC_TARGETS",
+      "owner": "web",
+      "type": "json",
+      "default": "",
+      "bounds": "JSON array or object encoded as a string",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.web.vncTargets",
+      "deprecation": "compatibility env alias for domains.web.vncTargets",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752B)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_WEB_COMPOSE_UPLOAD_LIMIT_MB",
+      "owner": "web",
+      "type": "integer",
+      "default": 32,
+      "bounds": "1..512",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.web.composeUploadLimitMb",
+      "deprecation": "compatibility env alias for domains.web.composeUploadLimitMb",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_WEB_EXTERNAL_URL",
+      "owner": "remote-interop",
+      "type": "string",
+      "default": null,
+      "bounds": "absolute URL when set",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        ".piclaw/config.json",
+        "defaults"
+      ],
+      "status": "bootstrap",
+      "compatibilityAliasFor": null,
+      "deprecation": "retained immutable deployment bootstrap; not persisted to ordinary JSON config",
+      "removalVersion": null,
+      "bootstrapAllowed": true,
+      "source": "runtime/src/core/config-network-bootstrap.ts call-time public-origin bootstrap (#810C)",
+      "migrationDisposition": "retain-network-bootstrap"
+    },
+    {
+      "name": "PICLAW_WEB_HOST",
+      "owner": "web",
+      "type": "string",
+      "default": "0.0.0.0",
+      "bounds": "bind host",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "cli"
+      ],
+      "precedence": [
+        "CLI flag",
+        "process.env",
+        ".env",
+        "default"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "web server deployment binding",
+      "migrationDisposition": "retain-deployment-binding",
+      "supportedPersistence": [
+        "env",
+        "dotenv",
+        "cli"
+      ]
+    },
+    {
+      "name": "PICLAW_WEB_IDLE_TIMEOUT",
+      "owner": "web",
+      "type": "integer",
+      "default": 0,
+      "bounds": ">= 0 seconds",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "CLI flags",
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.web.idleTimeout",
+      "deprecation": "compatibility env alias for domains.web.idleTimeout",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752B)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_WEB_INTERNAL_SECRET",
+      "owner": "web/security",
+      "type": "secret",
+      "default": null,
+      "bounds": null,
+      "allowedValues": [],
+      "secret": true,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        ".piclaw/config.json",
+        "defaults"
+      ],
+      "status": "bootstrap",
+      "compatibilityAliasFor": null,
+      "deprecation": "retained process/.env secret bootstrap alias; not persisted by typed domain config",
+      "removalVersion": null,
+      "bootstrapAllowed": true,
+      "source": "runtime/src/core/config-secrets.ts internal-secret web alias (#810B)",
+      "migrationDisposition": "retain-secret-bootstrap"
+    },
+    {
+      "name": "PICLAW_WEB_MAX_CONTENT_CHARS",
+      "owner": "web",
+      "type": "integer",
+      "default": 262144,
+      "bounds": "positive integer characters",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.web.contentMaxChars",
+      "deprecation": "migrated to typed domains.web.contentMaxChars config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts typed operational domain configuration (#755C)",
+      "migrationDisposition": "migrated-to-domain-config",
+      "supportedPersistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ]
+    },
+    {
+      "name": "PICLAW_WEB_NOTIFICATION_DEBUG_LABELS",
+      "owner": "web",
+      "type": "boolean",
+      "default": false,
+      "bounds": null,
+      "allowedValues": [
+        "1",
+        "0",
+        "true",
+        "false",
+        "yes",
+        "no",
+        "on",
+        "off"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.web.notificationDebugLabels",
+      "deprecation": "compatibility env alias for domains.web.notificationDebugLabels",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_WEB_PASSKEY_MODE",
+      "owner": "web",
+      "type": "enum",
+      "default": "totp-fallback",
+      "bounds": null,
+      "allowedValues": [
+        "totp-fallback",
+        "totp-only",
+        "passkey-only"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.web.passkeyMode",
+      "deprecation": "compatibility env alias for domains.web.passkeyMode",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752B)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_WEB_PERSIST_THINKING",
+      "owner": "web",
+      "type": "boolean",
+      "default": false,
+      "bounds": null,
+      "allowedValues": [
+        "1",
+        "0",
+        "true",
+        "false",
+        "yes",
+        "no",
+        "on",
+        "off"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.web.persistThinking",
+      "deprecation": "compatibility env alias for domains.web.persistThinking",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_WEB_PERSIST_THINKING_MAX_CHARS",
+      "owner": "web",
+      "type": "integer",
+      "default": 100000,
+      "bounds": ">=1",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.web.persistThinkingMaxChars",
+      "deprecation": "compatibility env alias for domains.web.persistThinkingMaxChars",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_WEB_PORT",
+      "owner": "web",
+      "type": "integer",
+      "default": 8080,
+      "bounds": "valid TCP port",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "cli"
+      ],
+      "precedence": [
+        "CLI flag",
+        "process.env",
+        ".env",
+        "default"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "web server deployment binding and service templates",
+      "migrationDisposition": "retain-deployment-binding",
+      "supportedPersistence": [
+        "env",
+        "dotenv",
+        "cli"
+      ]
+    },
+    {
+      "name": "PICLAW_WEB_PREVIEW_CHARS",
+      "owner": "web",
+      "type": "integer",
+      "default": 16000,
+      "bounds": "positive integer characters; capped at contentMaxChars",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.web.contentPreviewChars",
+      "deprecation": "migrated to typed domains.web.contentPreviewChars config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts typed operational domain configuration (#755C)",
+      "migrationDisposition": "migrated-to-domain-config",
+      "supportedPersistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ]
+    },
+    {
+      "name": "PICLAW_WEB_PUSH_SUBSCRIPTION_CAP",
+      "owner": "web",
+      "type": "integer",
+      "default": 32,
+      "bounds": ">= 1",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.web.pushSubscriptionCap",
+      "deprecation": "compatibility env alias for domains.web.pushSubscriptionCap",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752B)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_WEB_PUSH_VAPID_SUBJECT",
+      "owner": "web",
+      "type": "string",
+      "default": "mailto:notifications@localhost.invalid",
+      "bounds": "non-empty string",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.web.pushVapidSubject",
+      "deprecation": "compatibility env alias for domains.web.pushVapidSubject",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752B)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_WEB_SESSION_TTL",
+      "owner": "web",
+      "type": "integer",
+      "default": 604800,
+      "bounds": ">= 1 second",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.web.sessionTtl",
+      "deprecation": "compatibility env alias for domains.web.sessionTtl",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752B)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_WEB_STATIC_DIR",
+      "owner": "web",
+      "type": "path",
+      "default": "<runtime-root>/web/static",
+      "bounds": "web static asset directory",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "default"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "web static asset deployment path",
+      "migrationDisposition": "retain-deployment-path",
+      "supportedPersistence": [
+        "env",
+        "dotenv"
+      ]
+    },
+    {
+      "name": "PICLAW_WEB_TERMINAL_ENABLED",
+      "owner": "web",
+      "type": "boolean",
+      "default": "platform-dependent (true on Linux/macOS)",
+      "bounds": null,
+      "allowedValues": [
+        "1",
+        "0",
+        "true",
+        "false",
+        "yes",
+        "no",
+        "on",
+        "off"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.web.terminalEnabled",
+      "deprecation": "compatibility env alias for domains.web.terminalEnabled",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752B)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_WEB_TLS_CERT",
+      "owner": "web",
+      "type": "path",
+      "default": "workspace default cert path if present",
+      "bounds": null,
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "CLI flags",
+        "process.env",
+        ".env",
+        ".piclaw/config.json",
+        "defaults"
+      ],
+      "status": "bootstrap",
+      "compatibilityAliasFor": null,
+      "deprecation": "retained immutable TLS deployment bootstrap with CLI precedence; not domain-persisted",
+      "removalVersion": null,
+      "bootstrapAllowed": true,
+      "source": "runtime/src/core/config-network-bootstrap.ts TLS certificate bootstrap (#810C)",
+      "migrationDisposition": "retain-network-bootstrap"
+    },
+    {
+      "name": "PICLAW_WEB_TLS_KEY",
+      "owner": "web",
+      "type": "path",
+      "default": "workspace default key path if present",
+      "bounds": null,
+      "allowedValues": [],
+      "secret": true,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "CLI flags",
+        "process.env",
+        ".env",
+        ".piclaw/config.json",
+        "defaults"
+      ],
+      "status": "bootstrap",
+      "compatibilityAliasFor": null,
+      "deprecation": "retained immutable secret TLS deployment bootstrap with CLI precedence; never domain-persisted",
+      "removalVersion": null,
+      "bootstrapAllowed": true,
+      "source": "runtime/src/core/config-network-bootstrap.ts TLS private-key bootstrap (#810C)",
+      "migrationDisposition": "retain-network-bootstrap"
+    },
+    {
+      "name": "PICLAW_WEB_TOTP_SECRET",
+      "owner": "web/security",
+      "type": "secret",
+      "default": "",
+      "bounds": "TOTP base32 secret",
+      "allowedValues": [],
+      "secret": true,
+      "persistence": [
+        "env",
+        "dotenv",
+        "keychain"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "legacy JSON compatibility",
+        "default"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": null,
+      "deprecation": "plaintext JSON is a legacy compatibility path; new deployment secrets use keychain/service environment",
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-secrets.ts web TOTP secret bootstrap and config-web runtime rotation (#810B)",
+      "migrationDisposition": "retain-secret-compatibility",
+      "supportedPersistence": [
+        "env",
+        "dotenv",
+        "keychain"
+      ]
+    },
+    {
+      "name": "PICLAW_WEB_TOTP_WINDOW",
+      "owner": "web",
+      "type": "integer",
+      "default": 1,
+      "bounds": ">= 0",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.web.totpWindow",
+      "deprecation": "compatibility env alias for domains.web.totpWindow",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752B)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_WEB_UI_MODE",
+      "owner": "web",
+      "type": "enum",
+      "default": "classic",
+      "bounds": null,
+      "allowedValues": [
+        "classic",
+        "visual"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.web.uiMode",
+      "deprecation": "compatibility env alias for domains.web.uiMode",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_WEB_VNC_ALLOW_DIRECT",
+      "owner": "web",
+      "type": "boolean",
+      "default": "platform-dependent (true on Linux/macOS/Windows)",
+      "bounds": null,
+      "allowedValues": [
+        "1",
+        "0",
+        "true",
+        "false",
+        "yes",
+        "no",
+        "on",
+        "off"
+      ],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.web.vncAllowDirect",
+      "deprecation": "compatibility env alias for domains.web.vncAllowDirect",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752B)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_WEB_VNC_TARGETS",
+      "owner": "web",
+      "type": "json",
+      "default": "",
+      "bounds": "JSON array or object encoded as a string",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.web.vncTargets",
+      "deprecation": "compatibility env alias for domains.web.vncTargets",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752B)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_WEB_WIDGET_TOKEN",
+      "owner": "web/security",
+      "type": "secret",
+      "default": "",
+      "bounds": "opaque widget bearer token",
+      "allowedValues": [],
+      "secret": true,
+      "persistence": [
+        "env",
+        "dotenv",
+        "keychain"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "legacy JSON compatibility",
+        "default"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": null,
+      "deprecation": "plaintext JSON is a legacy compatibility path; new deployment secrets use keychain/service environment",
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-secrets.ts widget-token secret bootstrap and config-web runtime rotation (#810B)",
+      "migrationDisposition": "retain-secret-compatibility",
+      "supportedPersistence": [
+        "env",
+        "dotenv",
+        "keychain"
+      ]
+    },
+    {
+      "name": "PICLAW_WEB_WORKSPACE_UPLOAD_LIMIT_MB",
+      "owner": "web",
+      "type": "integer",
+      "default": 256,
+      "bounds": "1..1024",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "process.env",
+        ".env",
+        "json-config",
+        "defaults"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": "domains.web.workspaceUploadLimitMb",
+      "deprecation": "compatibility env alias for domains.web.workspaceUploadLimitMb",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-web.ts domain schema (#752A)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_WORKSPACE",
+      "owner": "storage/bootstrap",
+      "type": "path",
+      "default": "/workspace",
+      "bounds": null,
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "cli"
+      ],
+      "precedence": [
+        "CLI flags",
+        "process.env",
+        "defaults"
+      ],
+      "status": "bootstrap",
+      "compatibilityAliasFor": null,
+      "deprecation": "retained deployment/bootstrap path; consumers use config-context accessors",
+      "removalVersion": null,
+      "bootstrapAllowed": true,
+      "source": "runtime/src/core/config-paths.ts call-time workspace bootstrap with CLI precedence (#810A)",
+      "migrationDisposition": "retain-path-bootstrap"
+    },
+    {
+      "name": "PICLAW_WORKSPACE_SEARCH_EXTENSIONS",
+      "owner": "workspace",
+      "type": "json",
+      "default": [],
+      "bounds": "string array",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.workspaceSearchExtensions",
+      "deprecation": "migrated to typed domains.tools.workspaceSearchExtensions config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.workspaceSearchExtensions (#754B)",
+      "migrationDisposition": "migrated-to-domain-config"
+    },
+    {
+      "name": "PICLAW_WORKSPACE_SEARCH_ROOTS",
+      "owner": "workspace",
+      "type": "json",
+      "default": [
+        "notes",
+        ".pi/skills"
+      ],
+      "bounds": "non-empty string array",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv",
+        "json-config"
+      ],
+      "precedence": [
+        "compat-env",
+        "persisted",
+        "default"
+      ],
+      "status": "compatibility",
+      "compatibilityAliasFor": "domains.tools.workspaceSearchRoots",
+      "deprecation": "migrated to typed domains.tools.workspaceSearchRoots config; compatibility environment alias remains until 3.0.0",
+      "removalVersion": "3.0.0",
+      "bootstrapAllowed": false,
+      "source": "runtime/src/core/config-tools.ts domains.tools.workspaceSearchRoots (#754B)",
+      "migrationDisposition": "migrated-to-domain-config"
+    }
+  ]
+}

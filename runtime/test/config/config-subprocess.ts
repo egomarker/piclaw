@@ -1,4 +1,5 @@
-import * as config from "../../src/core/config.js";
+const initialEnv = { ...process.env };
+const config = await import("../../src/core/config.js");
 
 const requested = (process.env.PICLAW_CONFIG_EXPORTS || "")
   .split(",")
@@ -25,6 +26,19 @@ function resolveRequestedValue(name: string): unknown {
       throw new Error(`Unknown config getter requested: ${fnName}`);
     }
     return serialize(fn.call(config));
+  }
+
+  if (name.startsWith("env:")) {
+    return process.env[name.slice(4)] ?? null;
+  }
+
+  if (name.startsWith("env-initial:")) {
+    return initialEnv[name.slice(12)] ?? null;
+  }
+
+  if (name.startsWith("env-unchanged:")) {
+    const key = name.slice(14);
+    return (process.env[key] ?? null) === (initialEnv[key] ?? null);
   }
 
   if (name.startsWith("same:")) {

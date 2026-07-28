@@ -361,7 +361,7 @@ async function main() {
         },
     });
 
-    console.log(`[vnc-harness] listening on http://${args.host}:${args.port}`);
+    console.log(`[vnc-harness] listening on ${server.url.href.replace(/\/$/, '')}`);
     console.log(`[vnc-harness] bridge target ${parsedTarget.label}`);
     console.log(`[vnc-harness] default password length ${String(args.password || '').length}`);
 }

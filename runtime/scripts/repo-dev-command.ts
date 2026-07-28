@@ -36,7 +36,7 @@ export function createRepoDevCommandPlan(commandName: string, projectDir = proce
   }
 
   const runtimeDir = resolve(packageDir, "runtime");
-  const eslintConfigPath = resolve(runtimeDir, "eslint.config.js");
+  const eslintConfigPath = resolve(packageDir, "eslint.config.js");
 
   switch (commandName) {
     case "build":
@@ -94,9 +94,16 @@ export function createRepoDevCommandPlan(commandName: string, projectDir = proce
       return {
         packageDir,
         runtimeDir,
-        cwd: runtimeDir,
+        cwd: packageDir,
         binaryPath: resolveRepoBinary(packageDir, "eslint"),
-        args: ["--config", eslintConfigPath, "src/**/*.ts", "test/**/*.ts"],
+        args: [
+          "--config",
+          eslintConfigPath,
+          "runtime/src/**/*.ts",
+          "runtime/test/**/*.ts",
+          "runtime/scripts/**/*.ts",
+          "scripts/**/*.ts",
+        ],
         requiredBinaries: ["eslint"],
       };
     default:

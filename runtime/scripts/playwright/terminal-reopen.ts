@@ -266,7 +266,6 @@ async function main() {
   const terminalNetwork: Array<Record<string, unknown>> = [];
   let browser: Browser | null = null;
   let context: BrowserContext | null = null;
-  let page: Page | null = null;
 
   try {
     const storageState = await bootstrapE2EStorageState({
@@ -281,7 +280,7 @@ async function main() {
     });
     context = await browser.newContext({ storageState });
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
-    page = await context.newPage();
+    const page = await context.newPage();
 
     await installPageInstrumentation(page);
 

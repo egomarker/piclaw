@@ -15,28 +15,14 @@
 
 import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import {
+  getSessionIsolationLevel,
+  setSessionIsolationLevel,
+  type SessionIsolationLevel,
+} from "../core/config.js";
 
-// ── Session isolation setting ────────────────────────────────────
-
-export type SessionIsolationLevel = "none" | "summary" | "full";
-
-let isolationLevel: SessionIsolationLevel = "none";
-
-export function getSessionIsolationLevel(): SessionIsolationLevel {
-  return isolationLevel;
-}
-
-export function setSessionIsolationLevel(level: SessionIsolationLevel): void {
-  if (level === "none" || level === "summary" || level === "full") {
-    isolationLevel = level;
-  }
-}
-
-// Read from environment on startup
-const envLevel = (process.env.PICLAW_SESSION_ISOLATION || "").trim().toLowerCase();
-if (envLevel === "summary" || envLevel === "full" || envLevel === "none") {
-  isolationLevel = envLevel;
-}
+export { getSessionIsolationLevel, setSessionIsolationLevel };
+export type { SessionIsolationLevel };
 
 // ── Global activity tracker ──────────────────────────────────────
 

@@ -2,6 +2,7 @@
  * automatic-recovery.ts – Shared mid-turn recovery policy for agent runs.
  */
 
+import { getRecoveryPolicyConfig } from "../core/config.js";
 import type { AgentRecoveryMetadata } from "./contracts.js";
 
 export interface RetryBackoffSettings {
@@ -67,19 +68,6 @@ const DEFAULT_TOTAL_BUDGET_MS = 30_000;
 const DEFAULT_RETRY_BASE_DELAY_MS = 2_000;
 const DEFAULT_RETRY_MAX_DELAY_MS = 60_000;
 
-function parsePositiveInt(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(String(value || "").trim(), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function parseBoolean(value: string | undefined, fallback: boolean): boolean {
-  const normalized = String(value || "").trim().toLowerCase();
-  if (!normalized) return fallback;
-  if (["1", "true", "yes", "on"].includes(normalized)) return true;
-  if (["0", "false", "no", "off"].includes(normalized)) return false;
-  return fallback;
-}
-
 export const DEFAULT_RETRY_BACKOFF_SETTINGS: Readonly<RetryBackoffSettings> = Object.freeze({
   enabled: true,
   maxRetries: DEFAULT_MAX_ATTEMPTS,
@@ -112,14 +100,17 @@ export function normalizeRetryBackoffSettings(settings?: Partial<RetryBackoffSet
 
 export function getAutomaticRecoveryConfig(retrySettings?: Partial<RetryBackoffSettings> | null): Readonly<AutomaticRecoveryConfig> {
   const normalizedRetry = normalizeRetryBackoffSettings(retrySettings);
+  const policy = getRecoveryPolicyConfig();
   return Object.freeze({
     // The SDK retry toggle controls provider/request retries. Piclaw turn recovery
     // is a separate safety mechanism for genuine context pressure and bounded
     // transient retries. Tool-history ceilings are terminal and require an
     // explicit continue instead of automatic compaction/replay.
-    enabled: parseBoolean(process.env.PICLAW_TURN_AUTO_RECOVERY_ENABLED, DEFAULT_AUTOMATIC_RECOVERY_CONFIG.enabled),
-    maxAttempts: parsePositiveInt(process.env.PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS, normalizedRetry.maxRetries),
-    totalBudgetMs: parsePositiveInt(process.env.PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS, DEFAULT_AUTOMATIC_RECOVERY_CONFIG.totalBudgetMs),
+    enabled: policy.automaticRecoveryEnabled,
+    maxAttempts: policy.automaticRecoveryMaxAttempts > 0
+      ? policy.automaticRecoveryMaxAttempts
+      : normalizedRetry.maxRetries,
+    totalBudgetMs: policy.automaticRecoveryTotalBudgetMs,
     baseDelayMs: normalizedRetry.baseDelayMs,
     maxDelayMs: normalizedRetry.maxDelayMs,
   });

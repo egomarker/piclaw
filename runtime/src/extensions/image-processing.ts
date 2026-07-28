@@ -15,7 +15,7 @@ import type {
 import { existsSync, statSync } from "node:fs";
 import { resolve, basename, extname, dirname, join } from "node:path";
 import { stripBaseDirForDisplay } from "../utils/path-safety.js";
-import { WORKSPACE_DIR } from "../core/config.js";
+import { getWorkspaceDir as getConfiguredWorkspaceDir } from "../core/config.js";
 const SUPPORTED_OUTPUT_FORMATS = ["png", "jpeg", "webp", "avif", "tiff", "gif"] as const;
 type OutputFormat = typeof SUPPORTED_OUTPUT_FORMATS[number];
 
@@ -95,8 +95,7 @@ const ImageProcessSchema = Type.Object({
 type ImageProcessParams = Static<typeof ImageProcessSchema>;
 
 function getWorkspaceDir(): string {
-  const configured = process.env.PICLAW_WORKSPACE?.trim();
-  return resolve(configured || WORKSPACE_DIR);
+  return getConfiguredWorkspaceDir();
 }
 
 function resolveWorkspacePath(input: string): string {

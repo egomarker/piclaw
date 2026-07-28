@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { WORKSPACE_DIR } from "../../../core/config.js";
+import { getWorkspaceDir as getConfiguredWorkspaceDir } from "../../../core/config.js";
 import { createLogger } from "../../../utils/logger.js";
 
 const log = createLogger("web.addon-config-api");
@@ -42,7 +42,7 @@ let registryInstalled = false;
 let addonConfigLoadPromise: Promise<void> | null = null;
 
 function getWorkspaceDir(): string {
-  return process.env.PICLAW_WORKSPACE || WORKSPACE_DIR;
+  return getConfiguredWorkspaceDir();
 }
 
 function listAddonPackageDirs(addonsNodeModulesDir: string): string[] {
@@ -202,15 +202,6 @@ export async function handleRegisteredAddonConfigApiRequest(
     });
     return json({ error: String((error as Error)?.message || error) }, 500);
   }
-}
-
-export function getRegisteredAddonConfigApis(): Array<{ addonId: string; action: string; extensionPath: string; registeredAt: string }> {
-  return [...registrations.values()].map((entry) => ({
-    addonId: entry.addonId,
-    action: entry.action,
-    extensionPath: entry.extensionPath,
-    registeredAt: entry.registeredAt,
-  }));
 }
 
 export function resetAddonConfigApiRegistryForTests(): void {

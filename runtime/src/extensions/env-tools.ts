@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { dirname, join, resolve } from "path";
+import { dirname, join } from "path";
 import { Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { applyEnvironmentOverrides } from "../environment-overrides.js";
+import { getWorkspaceDir } from "../core/config.js";
 
 const ENV_TOOL_SCHEMA = Type.Object({
   action: Type.Union([
@@ -56,7 +57,7 @@ const ENV_TOOL_HINT = [
 ].join("\n");
 
 function getWorkspaceRoot(): string {
-  return resolve(process.env.PICLAW_WORKSPACE || "/workspace");
+  return getWorkspaceDir();
 }
 
 function getEnvScriptPath(): string {
@@ -198,8 +199,9 @@ export const envTools: ExtensionFactory = (pi: ExtensionAPI) => {
     label: "env",
     description: `Get, set, or clear persistent workspace-scoped environment variables. Writes a managed block into ${getWorkspaceRoot()}/.env.sh, persists state under ${getWorkspaceRoot()}/.piclaw/env-tool.json, updates process.env immediately for later tool calls, and supports copying existing vars via $NAME on set. Prefer keychain for secrets.`,
     promptSnippet: `env: get/set/clear persistent workspace-scoped environment variables in ${getWorkspaceRoot()}/.env.sh (use $NAME to copy an existing env var; prefer keychain for secrets).`,
+    // The action-dependent optional fields are a permissive schema. Advertising
+    // strict sampling makes Codex reject it before dispatching any request.
     parameters: ENV_TOOL_SCHEMA,
-    constrainedSampling: { type: "json_schema", strict: "prefer" },
     async execute(_toolCallId, params: EnvToolParams): Promise<AgentToolResult<EnvToolDetails>> {
       const current = loadManagedEnv();
       const name = normalizeName(params.name);

@@ -27,7 +27,7 @@ import { resolveSmartCompactionModelRequest } from "./model-request.js";
 import { runCompactionModelExecution } from "./model-execution.js";
 import {
   attemptRemoteCompaction,
-  blockRemoteCompactionPayload,
+  stripRemoteCompactionMarker,
   getLatestRemoteCompactionState,
   injectRemoteCompactionPayload,
   isRemoteCompactionCompatible,
@@ -75,12 +75,12 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
     const state = getLatestRemoteCompactionState(ctx.sessionManager.getBranch());
     if (!state) return;
     if (state.kind === "invalid") {
-      log.warn("Blocked malformed provider-native compaction replay", {
+      log.warn("Dropped malformed provider-native compaction replay marker", {
         operation: "remote_compaction.replay",
         outcome: "malformed",
         reason: state.message,
       });
-      return blockRemoteCompactionPayload(event.payload);
+      return stripRemoteCompactionMarker(event.payload);
     }
     const details = state.details;
     const replay = injectRemoteCompactionPayload(event.payload, ctx.model as any, details);
@@ -94,14 +94,14 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
       });
       return replay.payload;
     }
-    log.warn("Blocked incompatible or malformed provider-native compaction replay", {
+    log.warn("Dropped un-replayable provider-native compaction window; continuing without it", {
       operation: "remote_compaction.replay",
       outcome: replay.code,
       provider: details.provider,
       modelId: details.modelId,
       reason: replay.message,
     });
-    return replay.blockedPayload;
+    return replay.fallbackPayload;
   });
 
   pi.on("session_before_compact", async (event, rawCtx) => {

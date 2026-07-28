@@ -11,14 +11,14 @@ import {
   getIdentityConfig,
   getOrCreateWebWidgetToken,
   getSessionStorageConfig,
-  getToolUseMessageBudget,
+  getToolUseBudget,
   getWebRuntimeConfig,
   getSearchMatchMode,
   getScopedModelsOnly,
   setAssistantAvatar,
   setAssistantName,
   setSessionStorageConfig,
-  setToolUseMessageBudget,
+  setToolUseBudget,
   getToolOutputStoreThreshold,
   setToolOutputStoreThreshold,
   setSearchMatchMode,
@@ -32,7 +32,6 @@ import {
   setWebWorkspaceUploadLimitMb,
   type SearchMatchMode,
 } from "../../../core/config.js";
-import { updateAssistantConfig, updateUserConfig } from "../../../agent-control/agent-control-helpers.js";
 import { generateTotpQr } from "../../../utils/totp-qr.js";
 import { ensureAvatarCache, resolveAvatarUrl, type AvatarKind } from "../media/avatar-service.js";
 import { getServerUiOutputConfig, getServerUiThemeConfig, setServerUiOutputConfig, setServerUiThemeConfig } from "../ui-state.js";
@@ -197,7 +196,7 @@ export function getGeneralSettingsData(): GeneralSettingsData {
     webTerminalEnabled: web.terminalEnabled,
     composeUploadLimitMb: web.composeUploadLimitMb,
     workspaceUploadLimitMb: web.workspaceUploadLimitMb,
-    toolUseBudget: getToolUseMessageBudget(),
+    toolUseBudget: getToolUseBudget(),
     toolOutputStoreThreshold: getToolOutputStoreThreshold(),
     sessionMaxCompactions: session.maxCompactionsBeforeRotation,
     instanceTotp: buildTotpSettingsData(),
@@ -219,35 +218,28 @@ export function rotateWidgetTokenSettings(): GeneralSettingsData {
 export async function saveGeneralSettings(input: GeneralSettingsInput): Promise<GeneralSettingsData> {
   const nextAssistantName = normalizeOptionalString(input.assistantName);
   if (nextAssistantName !== undefined) {
-    const updated = updateAssistantConfig({ name: nextAssistantName });
-    setAssistantName(updated.name || process.env.PICLAW_ASSISTANT_NAME || process.env.ASSISTANT_NAME || "PiClaw");
+    setAssistantName(nextAssistantName || "PiClaw");
   }
 
   const nextAssistantAvatar = normalizeOptionalString(input.assistantAvatar);
   if (nextAssistantAvatar !== undefined) {
-    const updated = updateAssistantConfig({ avatar: nextAssistantAvatar });
-    const effectiveAvatar = updated.avatar || process.env.PICLAW_ASSISTANT_AVATAR || process.env.ASSISTANT_AVATAR || "";
+    const effectiveAvatar = nextAssistantAvatar || "";
     setAssistantAvatar(effectiveAvatar);
     await maybePrecacheAvatar("agent", effectiveAvatar);
   }
 
   const nextUserName = normalizeOptionalString(input.userName);
   if (nextUserName !== undefined) {
-    const updated = updateUserConfig({ name: nextUserName });
-    setUserName(updated.name || process.env.PICLAW_USER_NAME || "");
+    setUserName(nextUserName || "");
   }
 
   const nextUserAvatar = normalizeOptionalString(input.userAvatar);
   if (nextUserAvatar !== undefined) {
-    const updated = updateUserConfig({
-      avatar: nextUserAvatar,
-      avatarBackground: nextUserAvatar === null ? null : undefined,
-    });
-    const effectiveAvatar = updated.avatar || process.env.PICLAW_USER_AVATAR || "";
+    const effectiveAvatar = nextUserAvatar || "";
     setUserAvatar(effectiveAvatar);
     await maybePrecacheAvatar("user", effectiveAvatar);
     if (nextUserAvatar === null) {
-      setUserAvatarBackground(process.env.PICLAW_USER_AVATAR_BACKGROUND || "");
+      setUserAvatarBackground("");
     }
   }
 
@@ -285,7 +277,7 @@ export async function saveGeneralSettings(input: GeneralSettingsInput): Promise<
 
   const nextToolUseBudget = normalizeOptionalInt(input.toolUseBudget, 8, 512);
   if (nextToolUseBudget !== undefined) {
-    setToolUseMessageBudget(nextToolUseBudget);
+    setToolUseBudget(nextToolUseBudget);
   }
 
   const nextToolOutputThreshold = normalizeOptionalInt(input.toolOutputStoreThreshold, 500, 100000);

@@ -247,7 +247,7 @@ const server = Bun.serve({
 if (!PROXY_KEY) {
   console.warn("[proxy] WARNING: No PROXY_KEY set — proxy is unauthenticated!");
 }
-console.log(`[proxy] Azure OpenAI proxy listening on ${BIND}:${PORT}`);
+console.log(`[proxy] Azure OpenAI proxy listening on ${server.hostname}:${server.port}`);
 console.log(`[proxy] Allowed targets: ${ALLOWED_TARGETS.join(", ")}`);
 if (FOUNDRY_SERVICES_BASE_URL) {
   console.log(`[proxy] Foundry services (BFL) base: ${FOUNDRY_SERVICES_BASE_URL} → /bfl/...`);

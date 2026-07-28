@@ -34,7 +34,7 @@ import type { Provider } from "@earendil-works/pi-ai";
 
 import { type AgentControlCommand, type AgentControlResult } from "./agent-control/index.js";
 import { getPiclawAgentDir } from "./core/agent-dir.js";
-import { SESSIONS_DIR, WORKSPACE_DIR, getAgentLogConfig } from "./core/config.js";
+import { SESSIONS_DIR, WORKSPACE_DIR, getAgentLogConfig, getSessionPoolConfig } from "./core/config.js";
 import { getChatChannel, getChatJid } from "./core/chat-context.js";
 import { registerChannelDetector } from "./router.js";
 import { createTrackedBashOperations } from "./tools/tracked-bash.js";
@@ -145,67 +145,7 @@ export interface AgentPoolMemoryInstrumentationSnapshot {
   recovery: AgentPoolRecoveryInstrumentationSnapshot;
 }
 
-/** How long (ms) an idle main session stays cached before being disposed. */
-const DEFAULT_MAIN_IDLE_TTL = 3 * 60 * 1000; // 3 minutes
-/** How long (ms) an idle side session stays cached before being disposed. */
-const DEFAULT_SIDE_IDLE_TTL = 60 * 1000; // 1 minute
-const DEFAULT_CLEANUP_INTERVAL = 30 * 1000; // check every 30 seconds
-const DEFAULT_MAIN_SESSION_POOL_MAX_SIZE = 1;
-// 384 MB: with mmap, pool=1, and explicit disposal clearing, normal RSS should
-// be well below this. Trigger pressure mode for genuine memory stress.
-const DEFAULT_MEMORY_PRESSURE_RSS_BYTES = 384 * 1024 * 1024;
-// 60 s under genuine pressure: 30 s was too short — sessions were killed and
-// immediately recreated, causing high churn with no net memory benefit.
-const DEFAULT_MEMORY_PRESSURE_MAIN_IDLE_TTL = 60 * 1000;
-const DEFAULT_MEMORY_PRESSURE_MAIN_SESSION_POOL_MAX_SIZE = 1;
 
-function parsePositiveMs(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(String(value || "").trim(), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function parseNonNegativeInt(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(String(value || "").trim(), 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
-}
-
-function loadAgentPoolConfig() {
-  const mainIdleTtlMs = parsePositiveMs(
-    process.env.PICLAW_MAIN_SESSION_IDLE_TTL_MS ?? process.env.PICLAW_SESSION_IDLE_TTL_MS,
-    DEFAULT_MAIN_IDLE_TTL,
-  );
-  const sideIdleTtlMs = parsePositiveMs(
-    process.env.PICLAW_SIDE_SESSION_IDLE_TTL_MS ?? process.env.PICLAW_SESSION_IDLE_TTL_MS,
-    DEFAULT_SIDE_IDLE_TTL,
-  );
-  const cleanupIntervalMs = parsePositiveMs(process.env.PICLAW_SESSION_CLEANUP_INTERVAL_MS, DEFAULT_CLEANUP_INTERVAL);
-  const mainSessionPoolMaxSize = parseNonNegativeInt(
-    process.env.PICLAW_MAIN_SESSION_POOL_MAX_SIZE ?? process.env.PICLAW_SESSION_POOL_MAX_SIZE,
-    DEFAULT_MAIN_SESSION_POOL_MAX_SIZE,
-  );
-  const memoryPressureRssBytes = parseNonNegativeInt(
-    process.env.PICLAW_MAIN_SESSION_PRESSURE_RSS_BYTES,
-    DEFAULT_MEMORY_PRESSURE_RSS_BYTES,
-  );
-  const memoryPressureMainIdleTtlMs = parsePositiveMs(
-    process.env.PICLAW_MAIN_SESSION_PRESSURE_IDLE_TTL_MS,
-    DEFAULT_MEMORY_PRESSURE_MAIN_IDLE_TTL,
-  );
-  const memoryPressureMainSessionPoolMaxSize = parseNonNegativeInt(
-    process.env.PICLAW_MAIN_SESSION_PRESSURE_POOL_MAX_SIZE,
-    DEFAULT_MEMORY_PRESSURE_MAIN_SESSION_POOL_MAX_SIZE,
-  );
-
-  return {
-    mainIdleTtlMs,
-    sideIdleTtlMs,
-    cleanupIntervalMs,
-    mainSessionPoolMaxSize,
-    memoryPressureRssBytes,
-    memoryPressureMainIdleTtlMs,
-    memoryPressureMainSessionPoolMaxSize,
-  };
-}
 const DEFAULT_PROVIDER_RATE_LIMIT_MAX_RETRIES = 5;
 const DEFAULT_PROVIDER_RATE_LIMIT_BASE_DELAY_MS = 5000;
 
@@ -248,7 +188,7 @@ export class AgentPool {
   private branchManager: AgentPoolServices["branchManager"];
   private runtimeFacade: AgentPoolServices["runtimeFacade"];
   private sideStreamSimple?: NonNullable<AgentPoolOptions["sideStreamSimple"]>;
-  private readonly config = loadAgentPoolConfig();
+  private readonly config = getSessionPoolConfig();
 
   constructor(options: AgentPoolOptions) {
     this.createSession = options.createSession;
@@ -358,29 +298,36 @@ export class AgentPool {
 
   /** Run a prompt against the persistent session for `chatJid`. */
   async runAgent(prompt: string, chatJid: string, options: RunAgentOptions = {}): Promise<AgentOutput> {
-    const output = await runAgentPrompt(prompt, chatJid, options, {
-      getOrCreateRuntime: (nextChatJid) => this.getOrCreateRuntime(nextChatJid),
-      turnCoordinator: this.turnCoordinator,
-      clearAttachments: (nextChatJid) => this.attachments.clear(nextChatJid),
-      takeAttachments: (nextChatJid) => this.attachments.take(nextChatJid),
-      logsDir: this.logsDir,
-      setActiveForkBaseLeaf: (nextChatJid, leafId) => this.activeForkBaseLeafByChat.set(nextChatJid, leafId),
-      clearActiveForkBaseLeaf: (nextChatJid) => {
-        this.activeForkBaseLeafByChat.delete(nextChatJid);
-      },
-      onInfo: (message, details) => log.info(message, details),
-      onWarn: (message, details) => log.warn(message, details),
-      onError: (message, details) => log.error(message, details),
-    });
+    // Acquire before session lookup: the cleanup timer can run after getOrCreate
+    // returns but before AgentSession flips isStreaming at prompt start.
+    const releaseEvictionProtection = this.sessionManager.acquireEvictionProtection(chatJid);
+    try {
+      const output = await runAgentPrompt(prompt, chatJid, options, {
+        getOrCreateRuntime: (nextChatJid) => this.getOrCreateRuntime(nextChatJid),
+        turnCoordinator: this.turnCoordinator,
+        clearAttachments: (nextChatJid) => this.attachments.clear(nextChatJid),
+        takeAttachments: (nextChatJid) => this.attachments.take(nextChatJid),
+        logsDir: this.logsDir,
+        setActiveForkBaseLeaf: (nextChatJid, leafId) => this.activeForkBaseLeafByChat.set(nextChatJid, leafId),
+        clearActiveForkBaseLeaf: (nextChatJid) => {
+          this.activeForkBaseLeafByChat.delete(nextChatJid);
+        },
+        onInfo: (message, details) => log.info(message, details),
+        onWarn: (message, details) => log.warn(message, details),
+        onError: (message, details) => log.error(message, details),
+      });
 
-    const recovery = output.recovery;
-    if (recovery) {
-      this.recoveryStats.attemptsTotal += Math.max(0, recovery.attemptsUsed || 0);
-      if (recovery.recovered) this.recoveryStats.recoveredRuns += 1;
-      if (recovery.exhausted) this.recoveryStats.exhaustedRuns += 1;
+      const recovery = output.recovery;
+      if (recovery) {
+        this.recoveryStats.attemptsTotal += Math.max(0, recovery.attemptsUsed || 0);
+        if (recovery.recovered) this.recoveryStats.recoveredRuns += 1;
+        if (recovery.exhausted) this.recoveryStats.exhaustedRuns += 1;
+      }
+
+      return output;
+    } finally {
+      releaseEvictionProtection();
     }
-
-    return output;
   }
 
   async applyControlCommand(chatJid: string, command: AgentControlCommand): Promise<AgentControlResult> {

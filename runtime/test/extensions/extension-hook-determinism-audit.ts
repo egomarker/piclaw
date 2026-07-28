@@ -51,19 +51,19 @@ function createRegistrationSnapshot(factories: ExtensionFactory[]): Registration
 
   for (const factory of factories) {
     const extensionName = factory.name || "anonymous_extension";
-    const api: ExtensionAPI = {
-      on(event, handler) {
+    const api = {
+      on(event: string, handler: any) {
         if (event === "before_agent_start") {
           beforeAgentStart.push({ extensionName, handler: handler as RegisteredBeforeAgentStartHandler["handler"] });
         }
         if (event === "context") {
-          contextHandlers.push({ extensionName, handler: handler as RegisteredContextHandler["handler"] });
+          contextHandlers.push({ extensionName, handler: handler as unknown as RegisteredContextHandler["handler"] });
         }
       },
-      registerTool(def) {
+      registerTool(def: { name: string }) {
         tools.push(`${extensionName}:${def.name}`);
       },
-      registerCommand(name) {
+      registerCommand(name: string) {
         commands.push(`${extensionName}:${name}`);
       },
       getAllTools() {
@@ -72,7 +72,7 @@ function createRegistrationSnapshot(factories: ExtensionFactory[]): Registration
       getThinkingLevel() {
         return "off";
       },
-    } as ExtensionAPI;
+    } as unknown as ExtensionAPI;
 
     factory(api);
   }

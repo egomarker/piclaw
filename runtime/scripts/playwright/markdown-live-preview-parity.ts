@@ -5,7 +5,6 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join, resolve } from 'node:path';
 
 const runtimeRoot = resolve(import.meta.dir, '../..');
-const repoRoot = resolve(runtimeRoot, '..');
 const fixturePath = join(runtimeRoot, 'test/fixtures/markdown-live-preview-parity/atomic-port-parity.md');
 const workDir = join(runtimeRoot, 'generated/cache/markdown-live-preview-parity');
 const outDir = join(workDir, 'dist');
@@ -185,9 +184,12 @@ async function runScenario(page: Page, baseUrl: string, scenario: typeof scenari
       checkedAfter: afterBoxes.filter((box) => box.checked).length,
     };
   });
-  assert(checkboxToggle.found, `${scenario.name}: checkbox toggle target not found`);
-  assert(checkboxToggle.doc.includes('- [ ] Top-level checked task'), `${scenario.name}: checkbox toggle did not update source markdown`);
-  assert(checkboxToggle.checkedAfter < checkboxToggle.checkedBefore, `${scenario.name}: checkbox toggle did not update visible checked state`);
+  if (!checkboxToggle.found) {
+    throw new Error(`${scenario.name}: checkbox toggle target not found`);
+  }
+  const toggledCheckbox = checkboxToggle as { found: true; doc: string; checkedBefore: number; checkedAfter: number };
+  assert(toggledCheckbox.doc.includes('- [ ] Top-level checked task'), `${scenario.name}: checkbox toggle did not update source markdown`);
+  assert(toggledCheckbox.checkedAfter < toggledCheckbox.checkedBefore, `${scenario.name}: checkbox toggle did not update visible checked state`);
   await page.evaluate(() => (window as any).__piclawMarkdownHarness.reset());
   await page.waitForTimeout(160);
 

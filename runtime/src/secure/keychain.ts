@@ -22,8 +22,8 @@
  *   - cli.ts exposes keychain sub-commands.
  */
 
-import { readFileSync } from "fs";
 import { getDb } from "../db/connection.js";
+import { readKeychainBootstrapKeyMaterial } from "../core/config.js";
 // External provider fallback — see docs/keychain.md#external-keychain-providers
 import { getFromExternalProviders, listFromExternalProviders } from "./keychain-providers.js";
 
@@ -87,11 +87,7 @@ export interface KeyMaterialProvider {
 }
 
 function readKeyMaterialFromEnv(): Uint8Array {
-  let rawKey = process.env.PICLAW_KEYCHAIN_KEY || "";
-  const keyFile = process.env.PICLAW_KEYCHAIN_KEY_FILE;
-  if (!rawKey && keyFile) {
-    rawKey = readFileSync(keyFile, "utf8").trim();
-  }
+  const rawKey = readKeychainBootstrapKeyMaterial();
   if (!rawKey) {
     throw new Error("Keychain is disabled. Set PICLAW_KEYCHAIN_KEY or PICLAW_KEYCHAIN_KEY_FILE.");
   }

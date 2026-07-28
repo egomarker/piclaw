@@ -582,53 +582,98 @@ export async function runProgressiveCompaction(input: {
       ].join("\n");
     }
   };
-  const buildTimeBudgetPartial = (chunk: ProgressiveCompactionChunk, elapsed: number): ProgressiveCompactionResult => {
-    let processedChunkCount = chunkSummaries.length;
-    const nextGroupIds = new Set(chunk.groupIds ?? []);
-    if (nextGroupIds.size > 0) {
-      while (processedChunkCount > 0) {
-        const previousChunk = chunks[processedChunkCount - 1];
-        const previousGroupIds = previousChunk?.groupIds ?? [];
-        if (!previousGroupIds.some((groupId) => nextGroupIds.has(groupId))) break;
-        processedChunkCount -= 1;
+  const buildTimeBudgetPartial = (
+    maxProcessedChunkCount: number,
+    elapsed: number,
+    sourceReason?: string,
+  ): ProgressiveCompactionResult => {
+    const outputMaxChars = maxTokens * 4;
+    const rollbackAtomicGroup = (count: number): number => {
+      if (count <= 0) return 0;
+      const removedGroupIds = new Set(chunks[count - 1]?.groupIds ?? []);
+      let boundary = count - 1;
+      while (boundary > 0 && removedGroupIds.size > 0) {
+        const previousGroupIds = chunks[boundary - 1]?.groupIds ?? [];
+        if (!previousGroupIds.some((groupId) => removedGroupIds.has(groupId))) break;
+        for (const groupId of previousGroupIds) removedGroupIds.add(groupId);
+        boundary -= 1;
       }
-    }
-    if (processedChunkCount === 0) {
-      throw new Error(
-        `Progressive compaction time budget exhausted before first complete atomic group (${Math.round(elapsed / 1000)}s of ${Math.round((input.timeoutMs ?? 0) / 1000)}s)`,
-      );
-    }
-    const nextChunk = chunks[processedChunkCount] ?? chunk;
-    const retainedSummaries = chunkSummaries.slice(0, processedChunkCount);
-    const rolledBack = chunkSummaries.length - processedChunkCount;
-    const reason = `time budget exhausted after ${formatProgressCount(processedChunkCount, chunks.length)} complete chunks${rolledBack > 0 ? `; rolled back ${rolledBack} partial atomic chunk${rolledBack === 1 ? "" : "s"}` : ""} (${Math.round(elapsed / 1000)}s of ${Math.round((input.timeoutMs ?? 0) / 1000)}s)`;
-    return {
-      summary: buildDeterministicProgressiveSummary({
+      return boundary;
+    };
+    const alignWithNextAtomicGroup = (count: number): number => {
+      if (count <= 0 || count >= chunks.length) return count;
+      const nextGroupIds = new Set(chunks[count]?.groupIds ?? []);
+      let boundary = count;
+      while (boundary > 0 && nextGroupIds.size > 0) {
+        const previousGroupIds = chunks[boundary - 1]?.groupIds ?? [];
+        if (!previousGroupIds.some((groupId) => nextGroupIds.has(groupId))) break;
+        for (const groupId of previousGroupIds) nextGroupIds.add(groupId);
+        boundary -= 1;
+      }
+      return boundary;
+    };
+
+    let processedChunkCount = alignWithNextAtomicGroup(Math.min(
+      maxProcessedChunkCount,
+      chunkSummaries.length,
+      Math.max(0, chunks.length - 1),
+    ));
+    while (processedChunkCount > 0) {
+      const retainedSummaries = chunkSummaries.slice(0, processedChunkCount);
+      const rolledBack = chunkSummaries.length - processedChunkCount;
+      const reason = `${sourceReason ?? "time budget exhausted"}; retained ${formatProgressCount(processedChunkCount, chunks.length)} complete chunks${rolledBack > 0 ? ` and rolled back ${rolledBack} chunk${rolledBack === 1 ? "" : "s"}` : ""} (${Math.round(elapsed / 1000)}s of ${Math.round((input.timeoutMs ?? 0) / 1000)}s)`;
+      const buildCandidate = (includePreviousSummary: boolean) => buildDeterministicProgressiveSummary({
         summaries: retainedSummaries,
         chunks,
         complete: false,
         reason,
-        // Native continuity has already passed through its dedicated chunk;
-        // never persist the synthetic request-time placeholder as context.
-        // Text summaries remain duplicated here for lossless local fallback.
-        previousSummary: input.onPayload ? undefined : input.previousSummary,
+        // Native continuity has already passed through its dedicated chunk.
+        // Prefer the raw text for a lossless local checkpoint, but allow its
+        // validated chunk summary to stand in when the duplicate source alone
+        // would make the checkpoint exceed the final output contract.
+        previousSummary: input.onPayload || !includePreviousSummary ? undefined : input.previousSummary,
         keptMessagesSummary: input.keptMessagesSummary,
         turnPrefixSummary: input.turnPrefixSummary,
         customInstructions: input.customInstructions,
-      }),
-      complete: false,
-      processedChunkCount,
-      totalChunkCount: chunks.length,
-      modelCallCount,
-      nextUnprocessedMessageIndex: nextChunk.startMessageIndex,
-      nextUnprocessedSourceMessageIndex: input.sourceUnits
-        ? nextChunk.sourceIndexes?.[0]
-        : sourceIndexForLlmIndex(input.sourceIndexesByLlmIndex, nextChunk.startMessageIndex),
-      nextUnprocessedEntryId: input.sourceUnits
-        ? nextChunk.sourceEntryIds?.[0]
-        : sourceEntryIdForLlmIndex(input.sourceEntryIdsByLlmIndex, nextChunk.startMessageIndex),
-      partialReason: reason,
-    };
+      });
+      let summary = buildCandidate(true);
+      let validation = validateCompactionSummaryResponse(
+        { content: [{ type: "text", text: summary }], stopReason: "stop" },
+        "final",
+        outputMaxChars,
+      );
+      if (!validation.ok && input.previousSummary && !input.onPayload) {
+        summary = buildCandidate(false);
+        validation = validateCompactionSummaryResponse(
+          { content: [{ type: "text", text: summary }], stopReason: "stop" },
+          "final",
+          outputMaxChars,
+        );
+      }
+      if (validation.ok) {
+        const nextChunk = chunks[processedChunkCount]!;
+        return {
+          summary: validation.text,
+          complete: false,
+          processedChunkCount,
+          totalChunkCount: chunks.length,
+          modelCallCount,
+          nextUnprocessedMessageIndex: nextChunk.startMessageIndex,
+          nextUnprocessedSourceMessageIndex: input.sourceUnits
+            ? nextChunk.sourceIndexes?.[0]
+            : sourceIndexForLlmIndex(input.sourceIndexesByLlmIndex, nextChunk.startMessageIndex),
+          nextUnprocessedEntryId: input.sourceUnits
+            ? nextChunk.sourceEntryIds?.[0]
+            : sourceEntryIdForLlmIndex(input.sourceEntryIdsByLlmIndex, nextChunk.startMessageIndex),
+          partialReason: reason,
+        };
+      }
+      processedChunkCount = rollbackAtomicGroup(processedChunkCount);
+    }
+
+    throw new Error(
+      `Progressive compaction time budget exhausted without a bounded complete atomic checkpoint (${Math.round(elapsed / 1000)}s of ${Math.round((input.timeoutMs ?? 0) / 1000)}s)`,
+    );
   };
 
   for (let offset = 0; offset < chunks.length;) {
@@ -638,7 +683,7 @@ export async function runProgressiveCompaction(input: {
     if (input.timeoutMs && input.startedAt) {
       const elapsed = Date.now() - input.startedAt;
       if (elapsed > input.timeoutMs * PROGRESSIVE_TIME_BUDGET_FRACTION) {
-        return buildTimeBudgetPartial(firstChunk, elapsed);
+        return buildTimeBudgetPartial(chunkSummaries.length, elapsed);
       }
     }
 
@@ -719,26 +764,11 @@ export async function runProgressiveCompaction(input: {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (!/time budget exhausted/i.test(msg)) throw err;
-    return {
-      summary: buildDeterministicProgressiveSummary({
-        summaries: chunkSummaries,
-        chunks,
-        complete: true,
-        reason: msg,
-        // Native continuity has already passed through its dedicated chunk;
-        // never persist the synthetic request-time placeholder as context.
-        // Text summaries remain duplicated because chunk output can be lossy.
-        previousSummary: input.onPayload ? undefined : input.previousSummary,
-        keptMessagesSummary: input.keptMessagesSummary,
-        turnPrefixSummary: input.turnPrefixSummary,
-        customInstructions: input.customInstructions,
-      }),
-      complete: true,
-      processedChunkCount: chunkSummaries.length,
-      totalChunkCount: chunks.length,
-      modelCallCount,
-      partialReason: msg,
-    };
+    const elapsed = input.startedAt ? Date.now() - input.startedAt : input.timeoutMs ?? 0;
+    // A deterministic fallback that embeds every chunk summary can exceed the
+    // same final output contract as the failed merge. Retain a bounded prefix
+    // and leave at least one complete atomic tail group verbatim instead.
+    return buildTimeBudgetPartial(chunkSummaries.length - 1, elapsed, msg);
   }
 }
 

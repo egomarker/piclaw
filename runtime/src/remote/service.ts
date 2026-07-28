@@ -3,7 +3,7 @@
  */
 
 import type { AgentPool } from "../agent-pool.js";
-import { getRemoteInteropConfig, DATA_DIR, type RemoteInteropConfig } from "../core/config.js";
+import { getRemoteInteropConfig, getWebExternalUrl, DATA_DIR, type RemoteInteropConfig } from "../core/config.js";
 import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
@@ -43,14 +43,10 @@ import {
 const log = createLogger("remote.service");
 
 function isRemoteInteropEnabled(config: Readonly<RemoteInteropConfig>): boolean {
-  if (config.enabled) return true;
-  const raw = (process.env.PICLAW_REMOTE_INTEROP_ENABLED || "").trim().toLowerCase();
-  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+  return config.enabled;
 }
 
 function getRemoteInteropDecisionModel(config: Readonly<RemoteInteropConfig>): string {
-  const raw = (process.env.PICLAW_REMOTE_INTEROP_DECISION_MODEL || "").trim();
-  if (raw) return raw;
   return config.decisionModel || "";
 }
 
@@ -77,7 +73,7 @@ export class RemoteInteropService {
     private readonly agentPool?: AgentPool,
     private readonly remoteConfig: Readonly<RemoteInteropConfig> = getRemoteInteropConfig(),
   ) {
-    if (isRemoteInteropEnabled(this.remoteConfig) && !process.env.PICLAW_WEB_EXTERNAL_URL) {
+    if (isRemoteInteropEnabled(this.remoteConfig) && !getWebExternalUrl()) {
       log.warn("PICLAW_WEB_EXTERNAL_URL is not set — pair callback URLs will use localhost, which is unlikely to work for real deployments.", { operation: "remote.service.init" });
     }
   }

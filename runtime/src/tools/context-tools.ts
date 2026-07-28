@@ -19,13 +19,11 @@ import { existsSync } from "fs";
 import { Type } from "typebox";
 import { createBashTool } from "@earendil-works/pi-coding-agent";
 
+import { getToolOutputPresentationConfig } from "../core/config.js";
 import { buildPreview, saveToolOutput, searchToolOutput, getToolOutput, readToolOutputFile } from "../tool-output.js";
 import { createTrackedBashOperations } from "./tracked-bash.js";
 
-const STORE_THRESHOLD_BYTES = parseInt(process.env.PICLAW_TOOL_OUTPUT_STORE_BYTES || "4096", 10);
-const STORE_THRESHOLD_LINES = parseInt(process.env.PICLAW_TOOL_OUTPUT_STORE_LINES || "40", 10);
-const PREVIEW_LINES = parseInt(process.env.PICLAW_TOOL_OUTPUT_PREVIEW_LINES || "8", 10);
-const PREVIEW_LINE_CHARS = parseInt(process.env.PICLAW_TOOL_OUTPUT_PREVIEW_LINE_CHARS || "200", 10);
+const { storeBytes: STORE_THRESHOLD_BYTES, storeLines: STORE_THRESHOLD_LINES, previewLines: PREVIEW_LINES, previewLineChars: PREVIEW_LINE_CHARS } = getToolOutputPresentationConfig();
 
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes)) return "0 B";

@@ -17,7 +17,7 @@ Upstream references:
 Full Piclaw test suite run:
 - command: `bun run test`
 - result: pass
-- controlled report: `runtime/generated/controlled-test-report.json`
+- historical controlled report path at the time of this run: `runtime/generated/controlled-test-report.json` (current controlled runs require `--report` for JSON output)
 - report summary:
   - total files: `484`
   - stages completed: `20`

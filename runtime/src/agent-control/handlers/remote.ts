@@ -4,7 +4,7 @@
  * Commands:
  *   /ask <instance_id|fingerprint> <prompt>
  *     – Send a prompt to a paired remote instance via the mediated proposal
- *       endpoint. Requires PICLAW_REMOTE_INTEROP_ENABLED=1 and a paired peer
+ *       endpoint. Requires domains.remote.enabled=true and a paired peer
  *       record with a base_url.
  */
 
@@ -27,7 +27,7 @@ export async function handleAsk(_session: AgentSession, command: AskCommand): Pr
   if (!config.enabled) {
     return {
       status: "error",
-      message: "Cross-instance IPC is disabled. Set PICLAW_REMOTE_INTEROP_ENABLED=1 to enable it.",
+      message: "Cross-instance IPC is disabled. Set domains.remote.enabled=true to enable it.",
     };
   }
 

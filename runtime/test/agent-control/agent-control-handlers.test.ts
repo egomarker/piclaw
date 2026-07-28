@@ -477,7 +477,7 @@ test("agent control queue, compact, and abort commands", async () => {
   expect(autoCompactOn.message).toContain("on");
   const configModule = await import("../../src/core/config.js");
   expect(configModule.getCompactionRuntimeConfig().autoCompactionEnabled).toBe(true);
-  expect(JSON.parse(readFileSync(getConfigPath(), "utf-8")).compaction.autoCompactionEnabled).toBe(true);
+  expect(JSON.parse(readFileSync(getConfigPath(), "utf-8")).domains.compaction.autoCompactionEnabled).toBe(true);
   // Piclaw owns this preference; the upstream session auto-compactor remains suppressed.
   expect(session.autoCompactionEnabled).toBe(false);
 

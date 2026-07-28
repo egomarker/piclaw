@@ -1,7 +1,7 @@
 /**
  * extensions/remote-pair.ts – /pair and /unpair slash commands for cross-instance IPC.
  *
- * Only registers when PICLAW_REMOTE_INTEROP_ENABLED is set. Drives the full
+ * Only registers when domains.remote.enabled is true. Drives the full
  * pairing handshake in the background and reports the result to the chat.
  *
  * Commands:
@@ -38,7 +38,7 @@ import {
 import { loadOrCreateIdentity, deriveFingerprint } from "../../../src/remote/identity.js";
 import { buildCanonicalRequest, hashBody, signRequest, buildSignedRequestHeaders } from "../../../src/remote/signature.js";
 import { verifyCallbackProof } from "../../../src/remote/service-security.js";
-import { WEB_SERVER_CONFIG, DATA_DIR } from "../../../src/core/config.js";
+import { WEB_SERVER_CONFIG, DATA_DIR, getRemoteInteropConfig, getWebExternalUrl } from "../../../src/core/config.js";
 import { getChatJid } from "../../../src/core/chat-context.js";
 import { getWebOrigin } from "../../../src/channels/web/auth/request-origin.js";
 import { createLogger, debugSuppressedError } from "../../../src/utils/logger.js";
@@ -57,7 +57,7 @@ function getAllRemotePeers(): RemotePeerRecord[] {
 }
 
 export function getMyBaseUrl(chatJid = getChatJid()): string {
-  const env = (process.env.PICLAW_WEB_EXTERNAL_URL || "").trim();
+  const env = getWebExternalUrl();
   if (env) return env.replace(/\/$/, "");
 
   // Prefer the origin the current browser actually used. This lets one Piclaw
@@ -701,12 +701,9 @@ export async function runSetModeFlow(idOrFingerprint: string, mode: string, pi: 
   pi.sendMessage({ customType: "remote-pair", content: `Set mode to \`${mode}\` for peer \`${formatFingerprint(peer.instance_id)}\`.`, display: true });
 }
 
-/** Extension factory for /pair command. Only active when PICLAW_REMOTE_INTEROP_ENABLED=1. */
+/** Extension factory for /pair command. Only active when remote interop is enabled. */
 export const remotePair: ExtensionFactory = (pi: ExtensionAPI) => {
-  const interopEnabled =
-    process.env.PICLAW_REMOTE_INTEROP_ENABLED === "1" ||
-    (process.env.PICLAW_REMOTE_INTEROP_ENABLED || "").toLowerCase() === "true";
-  if (!interopEnabled) return;
+  if (!getRemoteInteropConfig().enabled) return;
 
   // On session start, notify the operator of any pending inbound pair requests
   // so they know to run /pair accept. Does not initiate any network activity.

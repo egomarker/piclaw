@@ -62,8 +62,12 @@ test('buildPostTimeTooltip includes persisted agent timing and token stats when 
 });
 
 test('terminal agent outcomes attach agent_timing content blocks', () => {
-  const source = readFileSync(resolve(repoRoot, 'runtime/src/channels/web/handlers/agent.ts'), 'utf8');
-  expect(source).toContain('type: "agent_timing"');
-  expect(source).toContain('normalizeAgentUsageForTiming');
-  expect(source).toContain('buildAgentTimingBlock(output.usage)');
+  const handlerSource = readFileSync(resolve(repoRoot, 'runtime/src/channels/web/handlers/agent.ts'), 'utf8');
+  const streamingRuntimeSource = readFileSync(
+    resolve(repoRoot, 'runtime/src/channels/web/runtime/process-chat-streaming-runtime.ts'),
+    'utf8',
+  );
+  expect(handlerSource).toContain('streamRuntime.buildAgentTimingBlock(output.usage)');
+  expect(streamingRuntimeSource).toContain('type: "agent_timing"');
+  expect(streamingRuntimeSource).toContain('buildAgentTimingBlock: (usage) =>');
 });

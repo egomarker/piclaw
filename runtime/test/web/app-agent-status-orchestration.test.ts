@@ -45,6 +45,35 @@ test('refreshAgentStatusForChat clears local state when server reports no active
   expect(events).toContain('setExtensionWorkingState:null');
 });
 
+test('refreshAgentStatusForChat applies a polled terminal payload even without prior local active state', async () => {
+  const events: string[] = [];
+  await refreshAgentStatusForChat({
+    currentChatJid: 'web:chat',
+    getAgentStatus: async () => ({ status: 'idle', data: { type: 'done', title: 'Completed /session-rotate' } }),
+    activeChatJidRef: { current: 'web:chat' },
+    wasAgentActiveRef: { current: false },
+    viewStateRef: { current: { currentHashtag: null, searchQuery: null, searchOpen: false } },
+    refreshTimeline: () => { events.push('refreshTimeline'); },
+    clearAgentRunState: () => events.push('clearAgentRunState'),
+    agentStatusRef: { current: null },
+    pendingRequestRef: { current: null },
+    thoughtBufferRef: { current: '' },
+    draftBufferRef: { current: '' },
+    setAgentStatus: () => undefined,
+    setAgentDraft: () => undefined,
+    setAgentPlan: () => undefined,
+    setAgentThought: () => undefined,
+    setPendingRequest: () => undefined,
+    setExtensionWorkingState: () => undefined,
+    setActiveTurn: () => undefined,
+    noteAgentActivity: () => undefined,
+    clearLastActivityFlag: () => undefined,
+  });
+
+  expect(events).toContain('refreshTimeline');
+  expect(events).toContain('clearAgentRunState');
+});
+
 test('refreshAgentStatusForChat restores draft/thought previews for active payloads', async () => {
   let thoughtState: any = { text: '', totalLines: 0 };
   let draftState: any = { text: '', totalLines: 0 };

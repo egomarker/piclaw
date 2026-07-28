@@ -18,7 +18,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import { createMedia, getMediaById } from "../db.js";
-import { WORKSPACE_DIR } from "../core/config.js";
+import { WORKSPACE_DIR, getWorkspaceDir } from "../core/config.js";
 import { AttachmentRegistry, getAttachmentRegistry } from "../agent-pool/attachments.js";
 import { getChatJid } from "../core/chat-context.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
@@ -99,7 +99,7 @@ function formatBytes(bytes: number): string {
 
 function buildExportPath(id: number, filename: string): string {
   const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const workspaceDir = resolve(process.env.PICLAW_WORKSPACE?.trim() || WORKSPACE_DIR);
+  const workspaceDir = getWorkspaceDir();
   return resolve(workspaceDir, "tmp", `${id}-${safeName}`);
 }
 

@@ -1282,7 +1282,12 @@ function isRecentlyActive(item: CollatedItem, nowMs: number, activeWithinHours?:
 }
 
 function toOutputItem(item: CollatedItem): CollatedItem {
-  const { github_id, node_id, closed_at, merged_at, raw_json, ...output } = item;
+  const output: Partial<CollatedItem> = { ...item };
+  delete output.github_id;
+  delete output.node_id;
+  delete output.closed_at;
+  delete output.merged_at;
+  delete output.raw_json;
   return output as CollatedItem;
 }
 

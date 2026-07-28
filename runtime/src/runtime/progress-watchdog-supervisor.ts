@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { resolve } from "node:path";
 
+import { getProgressWatchdogConfig } from "../core/config.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
 import {
   type ProgressWatchdogSnapshot,
@@ -38,7 +39,7 @@ function ensurePreShutdownHookRegistered(): void {
 
 function isExternalProgressWatchdogDisabled(): boolean {
   if (externalProgressWatchdogDisabledOverride !== null) return externalProgressWatchdogDisabledOverride;
-  return ["0", "false", "off", "disabled", "no"].includes(String(process.env.PICLAW_EXTERNAL_PROGRESS_WATCHDOG || "").trim().toLowerCase());
+  return !getProgressWatchdogConfig().externalMonitorEnabled;
 }
 
 function isDbInMemoryForWatchdog(): boolean {

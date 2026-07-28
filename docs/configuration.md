@@ -19,6 +19,51 @@ This page lists Piclaw's environment variables, config files, secrets, authentic
 [External workspace](#using-an-external-workspace) ·
 [Cross-instance interop](#cross-instance-interop)
 
+## Configuration surface policy
+
+Piclaw keeps `PICLAW_*` environment variables for immutable deployment bootstrap, secrets, and compatibility aliases. Runtime code should read ordinary settings through typed config helpers instead of open-coded `process.env.PICLAW_*` expressions.
+
+The machine-readable generated observations are `docs/config/piclaw-env-observations.json`; the reviewed support catalog is `docs/config/piclaw-env-support-catalog.json`. Regenerate or check both with:
+
+```bash
+bun run scripts/audit-piclaw-env-surface.ts --write
+bun run check:env-surface
+```
+
+The observations record where each `PICLAW_*` name appears and count both direct `process.env.PICLAW_*` reads and semantic helper reads such as `readEnvValue("PICLAW_...")`. The support catalog records reviewed metadata for production names. Tranche 1 uses these files as drift guards; it does not claim that supported environment variables have been removed. The catalog also stores the config-source precedence chain:
+
+1. CLI flags where a setting supports them
+2. `process.env`
+3. workspace `.env`
+4. `.piclaw/config.json`
+5. built-in defaults
+
+New settings should prefer `.piclaw/config.json` plus typed config access unless they are bootstrap paths, secrets, process-manager toggles, or deliberate compatibility aliases.
+
+### Internal module layout
+
+`runtime/src/core/config.ts` is the stable public façade. Existing runtime code should continue importing from it unless it is implementing another config module. The façade re-exports these ownership modules:
+
+| Module | Ownership |
+|--------|-----------|
+| `config-context.ts` | One startup snapshot of CLI flags, `.env`, paths, JSON config and domain runtime options |
+| `config-web.ts` | Web server, TLS, auth/session, terminal, VNC, upload limits, widget token and TOTP settings |
+| `config-tools.ts` | Provider/tool integration, tool-output policy, workspace search, model scoping and tool activation |
+| `config-runtime.ts` | Agent timeouts/budgets, Dream, session lifecycle/storage, remote interop, compaction, recovery and watchdog settings |
+| `config-identity.ts` | Mutable assistant/user identity, trigger routing and UI theme |
+| `config-integrations.ts` | Logging, agent-log retention and Pushover |
+| `config-cli.ts`, `config-paths.ts`, `config-sources.ts` | Stateless bootstrap parsing and source helpers |
+| `domain-config.ts` | Typed schemas, compatibility precedence, validation and persistence |
+
+The modules share `config-context.ts` rather than re-reading dotenv or JSON state. Domain modules do not import the public façade; this keeps module initialisation acyclic. Mutable setters update their typed domain state and legacy live exports together.
+
+Bootstrap environment variables are reviewed as an allowlist in the inventory. The current allowlist is:
+
+- `PICLAW_WORKSPACE`, `PICLAW_STORE`, `PICLAW_DATA`, `PICLAW_RUNTIME_ROOT`, `PICLAW_PI_AGENT_DIR`
+- `PICLAW_KEYCHAIN_KEY`, `PICLAW_KEYCHAIN_KEY_FILE`
+- `PICLAW_WEB_TLS_CERT`, `PICLAW_WEB_TLS_KEY`
+- `PICLAW_INTERNAL_SECRET`, `PICLAW_WEB_INTERNAL_SECRET`, `PICLAW_WEB_EXTERNAL_URL`
+
 ## Path overrides
 
 | Variable | Default | Purpose |
@@ -27,6 +72,13 @@ This page lists Piclaw's environment variables, config files, secrets, authentic
 | `PICLAW_STORE` | `/workspace/.piclaw/store` | SQLite database location |
 | `PICLAW_DATA` | `/workspace/.piclaw/data` | Sessions, IPC, chats.json |
 | `SUPERVISOR_CONF` | `/workspace/.piclaw/supervisor/supervisord.conf` | Supervisor config path (falls back to `/etc/supervisor/supervisord.conf`) |
+| `PICLAW_SKEL_DIR` | packaged `skel/` directory | Deployment/package bootstrap override for the workspace skeleton source. Retained env-only because it is needed before ordinary domain config is available. |
+| `PICLAW_DB_IN_MEMORY` | `0` | Test/database bootstrap switch (`1` or `true`). Retained env-only because it selects the database before persisted config can safely be read. |
+| `PICLAW_CHAT_JID` | `web:default` | Per-invocation IPC target fallback. Request payload fields take precedence; this value is intentionally not persisted. |
+
+## Logging
+
+`domains.logging.level` persists the runtime logging threshold in `.piclaw/config.json`. `PICLAW_LOG_LEVEL` and the older `LOG_LEVEL` name remain compatibility aliases until 3.0.0 and override the persisted value for startup and live logger checks. Allowed values are `debug`, `info`, `warn`, and `error`; the default is `info`.
 
 ## Web server
 
@@ -43,10 +95,20 @@ This page lists Piclaw's environment variables, config files, secrets, authentic
 | `PICLAW_WEB_PERSIST_THINKING_MAX_CHARS` | `100000` | Per-turn cap on persisted thinking text (UTF-16 surrogate-safe). |
 | `PICLAW_WEB_TLS_CERT` | _(empty)_ | Path to TLS certificate; enables HTTPS |
 | `PICLAW_WEB_TLS_KEY` | _(empty)_ | Path to TLS private key; enables HTTPS |
-| `PICLAW_WEB_MAX_CONTENT_CHARS` | `262144` | Max message size in characters; oversized messages are truncated with metadata |
+| `PICLAW_WEB_MAX_CONTENT_CHARS` | `262144` | Compatibility alias for `domains.web.contentMaxChars`; max message size in characters, with oversized messages truncated with metadata. |
+| `PICLAW_SEARCH_MATCH_MODE` | `or` | Compatibility alias for `domains.tools.searchMatchMode`; choose `or` (any keyword) or `and` (all keywords) for multi-word FTS queries. |
+| `PICLAW_WEB_PREVIEW_CHARS` | `16000` | Compatibility alias for `domains.web.contentPreviewChars`; preview threshold, capped at the hard content limit. |
 | `PICLAW_TRUST_PROXY` | `0` | Trust `Forwarded` / `X-Forwarded-*` headers from a reverse proxy for origin, host, proto, and client IP handling |
 
 If `PICLAW_WEB_TLS_CERT` and `PICLAW_WEB_TLS_KEY` are both omitted, piclaw checks for `.piclaw/certs/sandbox.local.crt` and `.piclaw/certs/sandbox.local.key` and enables HTTPS automatically if both exist.
+
+The following operational settings are persisted under typed domains in `.piclaw/config.json`; their legacy variables remain compatibility aliases until 3.0.0:
+
+| Typed setting | Compatibility variable | Default | Purpose |
+|---------------|------------------------|---------|---------|
+| `domains.sessionRecordings.directory` | `PICLAW_RECORDINGS_DIR` | `<PICLAW_DATA>/session-recordings` | Root directory for opt-in session trace recordings. |
+| `domains.addons.apiFailureBackoffMs` | `PICLAW_ADDON_API_FAILURE_BACKOFF_MS` | `60000` | Suppression period for repeated identical add-on API failures. |
+| `domains.agentControl.abortSettleTimeoutMs` | `PICLAW_ABORT_SETTLE_TIMEOUT_MS` | `1000` | Bounded `0..10000` ms wait for abort cleanup to settle. |
 
 ### VNC target examples
 
@@ -235,6 +297,7 @@ Piclaw's `/login` provider picker uses Earendil's runtime provider catalog plus 
 - Radius (`radius`) — supports OAuth subscription login and API-key gateways.
 - NVIDIA (`nvidia`) and Together (`together`) — API-key providers.
 - Ant Ling (`ant-ling`) — API-key provider.
+- Amazon Bedrock (`amazon-bedrock`) — external AWS credential chain or Bedrock bearer token; see [Amazon Bedrock](providers/amazon-bedrock.md) for Claude Opus 5 inference profiles, regions, caching, and the opt-in smoke command.
 
 Use `/login <provider-id>` to configure one of these providers directly. Provider composition details are available in the `/agent/models` payload under `provider_diagnostics`; the payload includes non-secret auth source/label and composition flags.
 
@@ -273,8 +336,7 @@ For the packaged Azure managed-identity/static-key path and its additional token
 | `PICLAW_USER_AVATAR_BACKGROUND` | _(empty)_ | CSS background colour for the user avatar circle |
 | `PICLAW_SESSION_MAX_SIZE_MB` | `32` | Session file size threshold (MB) for auto-rotation warnings and pre-prompt rotation |
 | `PICLAW_SESSION_AUTO_ROTATE` | `1` | Automatically rotate oversized session files before the next prompt |
-| `PICLAW_TURN_MAX_TOOL_USE_MESSAGES` | `64` | Per-turn assistant tool-use message budget before soft-stop/recovery handling |
-| `PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING` | `48` | Last-resort executed-tool safety ceiling inside one prompt attempt; values above `512` are clamped. Reaching it does not itself imply context pressure or trigger compaction. |
+| `PICLAW_TURN_MAX_TOOL_EXECUTIONS` | `64` | Authoritative per-turn completed tool-execution budget. Settings persists `domains.agent.toolUseMessageBudget`; values are clamped to `8..512`. Legacy `PICLAW_TURN_MAX_TOOL_USE_MESSAGES` and `PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING` are lower-priority compatibility aliases. |
 | `PICLAW_SMART_COMPACTION_METHOD` | `selective` | Smart-compaction local processing method: `selective` or `pipelined` |
 | `PICLAW_REMOTE_COMPACTION_ENABLED` | `0` | Opt in to provider-native compaction before the selected local method |
 | `PICLAW_REMOTE_COMPACTION_TIMEOUT_MS` | `300000` | Provider-native compaction request deadline before deterministic local fallback; aligned with Codex's long-running compact endpoint |
@@ -305,7 +367,7 @@ For the packaged Azure managed-identity/static-key path and its additional token
 
 Notes:
 
-- `PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING` is separate from `PICLAW_TURN_MAX_TOOL_USE_MESSAGES`: the former counts executed tools inside one prompt attempt as a safety abort, while the latter is the visible per-turn tool-use budget.
+- The Settings **Tool use budget** is authoritative and counts completed tool executions across all attempts in one user turn. Piclaw warns near the limit without changing the advertised tool set, admits at most the configured number of executions (including parallel batches), and blocks additional calls before execution. The former `PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING` setting is ignored and removed when Settings saves the budget.
 - Tool output retention defaults to **30 days** and is capped at 30 days. `PICLAW_TOOL_OUTPUT_RETENTION_MS` overrides the legacy `PICLAW_TOOL_OUTPUT_RETENTION_DAYS`.
 - Tool-result compaction supports both a global gate (`PICLAW_TOOL_RESULT_COMPACTION_ENABLED`) and per-tool allowlisting (`PICLAW_TOOL_RESULT_COMPACTION_TOOLS`).
 - Semantic summaries are enabled by default for compacted tool results; if generation fails or times out (`PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_TIMEOUT_MS`), Piclaw falls back to preview-based summaries.
@@ -661,11 +723,19 @@ Default windows:
 AutoDream is gated, but nightly cadence no longer waits for a full 24-hour gap.
 It runs when there has been activity since the last consolidation.
 
+Dream runtime settings are persisted under `domains.dream` in `.piclaw/config.json`. The legacy environment variables remain compatibility aliases until 3.0.0 and override persisted values without being mutated by runtime.
+
+| Typed setting | Compatibility variable | Default | Purpose |
+|---------------|------------------------|---------|---------|
+| `domains.dream.cron` | `PICLAW_DREAM_CRON` | `0 1 * * *` | Cron schedule for AutoDream. Evaluated in the runtime timezone (`TZ` / runtime timing config), so the default is 01:00 local runtime time. |
+| `domains.dream.model` | `PICLAW_DREAM_MODEL` | _(unset — inherits session model)_ | Pin Dream / AutoDream to a specific model label (e.g. `anthropic/claude-sonnet-4-20250514`). The Dream pass applies it to the temporary Dream chat, so it also covers manual `/dream` runs. |
+| `domains.dream.backupKeep` | `PICLAW_DREAM_BACKUP_KEEP` | `10` | Number of pre-Dream note backups to retain. |
+| `domains.dream.agentTimeoutMs` | `PICLAW_DREAM_AGENT_TIMEOUT_MS` | background-agent timeout, or `360000` | Positive timeout for the out-of-band Dream model turn. |
+
+Additional Dream cue tuning remains environment-only:
+
 | Variable | Default | Purpose |
-|----------|---------|---------||
-| `PICLAW_DREAM_CRON` | `0 1 * * *` | Cron schedule for AutoDream. Evaluated in the runtime timezone (`TZ` / runtime timing config), so the default is 01:00 local runtime time. |
-| `PICLAW_DREAM_MODEL` | _(unset — inherits session model)_ | Pin Dream / AutoDream to a specific model label (e.g. `anthropic/claude-sonnet-4-20250514`). The Dream pass applies it to the temporary Dream chat, so it also covers manual `/dream` runs. |
-| `PICLAW_DREAM_BACKUP_KEEP` | `10` | Number of pre-Dream note backups to retain |
+|----------|---------|---------|
 | `PICLAW_DREAM_CUE_FULL_SLICE_MAX_MESSAGES` | `50` | `DREAM_CUES` full-slice cutoff for day message count |
 | `PICLAW_DREAM_CUE_FULL_SLICE_MAX_SESSION_TREES` | `2` | `DREAM_CUES` full-slice cutoff for session-tree count |
 | `PICLAW_DREAM_CUE_SMALL_TREE_MAX_MESSAGES` | `10` | Per-session-tree cue cutoff under which all messages from that tree are included |
@@ -699,7 +769,7 @@ You can gate the entire web UI behind a 6-digit TOTP challenge and optionally en
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `PICLAW_WEB_TOTP_SECRET` | _(empty)_ | Base32 TOTP secret. When set, `/login` requires a 6-digit code before issuing a `piclaw_session` cookie. Leave unset to keep the UI open until you initialize TOTP with `/totp`. |
+| `PICLAW_WEB_TOTP_SECRET` | _(empty)_ | Base32 TOTP secret. When set, `/login` requires a 6-digit code before issuing a `piclaw_session` cookie. Prefer keychain/service-environment storage; plaintext JSON remains a legacy compatibility path for the existing `/totp` flow. |
 | `PICLAW_WEB_PASSKEY_MODE` | `totp-fallback` | Passkey mode: `totp-fallback`, `passkey-only`, or `totp-only`. |
 | `PICLAW_WEB_TOTP_WINDOW` | `1` | TOTP step skew (number of 30s windows to accept on either side). |
 | `PICLAW_WEB_SESSION_TTL` | `604800` (7 days) | Session cookie lifetime in seconds. |

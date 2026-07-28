@@ -6,14 +6,10 @@
  */
 import { existsSync } from "fs";
 import { isAbsolute, relative, resolve, sep } from "path";
-import { WORKSPACE_DIR } from "../core/config.js";
+import { getWorkspaceDir } from "../core/config.js";
 
 function resolveWorkspaceDir(): string {
-  const envDir = process.env.PICLAW_WORKSPACE;
-  if (envDir && envDir.trim()) {
-    return resolve(envDir.trim());
-  }
-  return WORKSPACE_DIR;
+  return getWorkspaceDir();
 }
 
 const MAX_COMMAND_LENGTH = 2000;

@@ -6,9 +6,9 @@
  */
 
 import { mkdirSync, readFileSync, writeFileSync, existsSync, chmodSync } from "fs";
-import { join, resolve } from "path";
+import { join } from "path";
 import { createHash, generateKeyPairSync, createPrivateKey, createPublicKey, sign, verify } from "crypto";
-import { getRemoteInteropConfig } from "../core/config.js";
+import { getDataDir, getRemoteInteropConfig } from "../core/config.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
 
 const log = createLogger("remote.identity");
@@ -27,8 +27,7 @@ let cachedIdentity: InteropIdentity | null = null;
 
 /** Compute the identity file path from the current environment at call time. */
 function getIdentityPath(): string {
-  const dataDir = resolve(process.env.PICLAW_DATA || join(resolve(process.env.PICLAW_WORKSPACE || "/workspace"), ".piclaw", "data"));
-  return join(dataDir, "interop", "identity.json");
+  return join(getDataDir(), "interop", "identity.json");
 }
 
 function base64UrlEncode(buffer: Uint8Array): string {

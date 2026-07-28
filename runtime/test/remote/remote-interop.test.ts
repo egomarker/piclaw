@@ -176,7 +176,7 @@ describe("remote interop", () => {
       allowPrivateNetwork: false,
       shortCircuitEnabled: false,
       instanceName: "test",
-      decisionModel: "",
+      decisionModel: "github-copilot/gpt-5-mini",
     });
     originalFetch = globalThis.fetch;
   });

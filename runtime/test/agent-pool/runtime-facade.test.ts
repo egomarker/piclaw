@@ -9,6 +9,7 @@ import { SESSIONS_DIR } from "../../src/core/config.js";
 import { sanitiseJid } from "../../src/agent-pool/session.js";
 import { initDatabase } from "../../src/db.js";
 import "../helpers.js";
+import { bedrockOpus5Fixtures } from "../fixtures/bedrock-opus5.js";
 
 function createRuntime(session: any): AgentSessionRuntime {
   return {
@@ -364,6 +365,28 @@ test("AgentRuntimeFacade restores persisted current model for a cold chat withou
   } finally {
     rmSync(sessionDir, { recursive: true, force: true });
   }
+});
+
+test("AgentRuntimeFacade projects Bedrock Opus 5 native xhigh into Settings model options", async () => {
+  const bedrockOpus = bedrockOpus5Fixtures().find((model) => model.id === "us.anthropic.claude-opus-5")!;
+  const fixture = createFacade({
+    modelRegistry: {
+      refresh: () => {},
+      getAvailable: () => [bedrockOpus],
+      getAll: () => [bedrockOpus],
+      registerProvider: () => {},
+    } as any,
+  });
+
+  const available = await fixture.facade.getAvailableModels("web:bedrock-cold");
+  expect(available.models).toEqual(["amazon-bedrock/us.anthropic.claude-opus-5"]);
+  expect(available.model_options[0]).toMatchObject({
+    provider: "amazon-bedrock",
+    context_window: 1_000_000,
+    reasoning: true,
+  });
+  expect(available.model_options[0]?.thinking_levels).toContain("xhigh");
+  expect(available.model_options[0]?.thinking_levels).toContain("max");
 });
 
 test("AgentRuntimeFacade uses the most recently modified persisted session when restoring cold model state", async () => {

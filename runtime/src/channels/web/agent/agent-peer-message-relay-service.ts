@@ -137,11 +137,15 @@ export class WebAgentPeerMessageRelayService {
       `http://internal${pathname}?chat_jid=${encodeURIComponent(targetChat.chat_jid)}`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Piclaw-Persist-Steer": "1",
+        },
         body: JSON.stringify({
           content: forwardedContent,
           content_blocks: [forwardedBlock],
           mode,
+          persist_steer: true,
         }),
       },
     );

@@ -123,7 +123,7 @@ export class TestAgentControlSession {
   sessionContext: any;
   seededEntries: Array<Array<any>> = [];
   extensionRunner: any;
-  promptTemplates: Array<{ name: string; description: string }>;
+  promptTemplates: Array<{ name: string; description: string; sourceInfo?: Record<string, unknown> }>;
   resourceLoader: any;
   modelRegistry: any;
   modelRuntime: any;
@@ -314,7 +314,7 @@ export class TestAgentControlSession {
     this.sessionName = name;
   }
 
-  async newSession(options?: { setup?: (sessionManager: any) => Promise<void> | void }) {
+  async newSession(options?: { parentSession?: string; setup?: (sessionManager: any) => Promise<void> | void }) {
     const nextFile = join(dirname(this.sessionFile), `rotated-${Date.now()}.jsonl`);
     const recorded: Array<any[]> = [];
     if (options?.setup) {
@@ -334,13 +334,15 @@ export class TestAgentControlSession {
     return true;
   }
 
-  async switchSession() {
+  async switchSession(_path?: string) {
     return true;
   }
 
-  async fork() {
+  async fork(_entryId?: string) {
     return { cancelled: false, selectedText: "Selected" } as any;
   }
+
+  dispose() {}
 
   getUserMessagesForForking() {
     return [{ entryId: "entry-1", text: "hello" }];

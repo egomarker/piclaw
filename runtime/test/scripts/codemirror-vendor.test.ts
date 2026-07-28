@@ -84,6 +84,7 @@ test("codemirror package overrides pin the singleton command/state/view/language
 test("codemirror vendor bundle keeps EditorState compatible with exported minimalSetup", async () => {
   const base = join(tmpdir(), `piclaw-codemirror-vendor-runtime-${Date.now()}`);
   const outFile = join(base, "codemirror.js");
+  const metaFile = join(base, "codemirror.meta.json");
   mkdirSync(base, { recursive: true });
 
   const proc = Bun.spawnSync(
@@ -94,6 +95,8 @@ test("codemirror vendor bundle keeps EditorState compatible with exported minima
       "vendor-manifests/codemirror-editor.json",
       "--outfile",
       outFile,
+      "--meta-out",
+      metaFile,
     ],
     {
       cwd: "/workspace/piclaw/runtime",

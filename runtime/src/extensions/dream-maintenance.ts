@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
-import { DATA_DIR } from "../core/config.js";
+import { getDataDir } from "../core/config.js";
 import { getChatJid } from "../core/chat-context.js";
 import { createUuid } from "../utils/ids.js";
 
@@ -32,7 +32,7 @@ export const dreamMaintenance: ExtensionFactory = (pi: ExtensionAPI) => {
       }
 
       try {
-        const tasksDir = join(process.env.PICLAW_DATA || DATA_DIR, "ipc", "tasks");
+        const tasksDir = join(getDataDir(), "ipc", "tasks");
         mkdirSync(tasksDir, { recursive: true });
         const payload = {
           type: "run_dream",

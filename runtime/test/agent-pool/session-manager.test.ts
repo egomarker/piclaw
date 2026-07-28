@@ -243,6 +243,46 @@ test("AgentSessionManager disposes a cached side runtime when reseeding it is ca
   expect(fixture.state.warns).toContain("Failed to reseed side session from main context");
 });
 
+test("AgentSessionManager protects pending and in-flight chats from TTL and pool-limit eviction", async () => {
+  let disposed = 0;
+  const protectedSession = {
+    isStreaming: false,
+    isBashRunning: false,
+    isCompacting: false,
+    dispose() { disposed += 1; },
+  };
+  const otherSession = {
+    isStreaming: false,
+    isBashRunning: false,
+    isCompacting: false,
+    dispose() { disposed += 1; },
+  };
+  const fixture = createManager({ mainSessionMaxSize: 1 });
+  fixture.pool.set("web:protected", { runtime: createRuntime(protectedSession), lastUsed: Date.now() - 10_000 });
+  fixture.pool.set("web:other", { runtime: createRuntime(otherSession), lastUsed: Date.now() - 10_000 });
+
+  const releaseFirst = fixture.manager.acquireEvictionProtection("web:protected");
+  const releaseSecond = fixture.manager.acquireEvictionProtection("web:protected");
+  expect(fixture.manager.getInstrumentationSnapshot().evictionProtectedChats).toBe(1);
+
+  // Keep both entries within the TTL window so the max-size path—not TTL—must
+  // choose the unprotected candidate.
+  fixture.manager.evictIdle({ mainIdleTtlMs: 60_000, sideIdleTtlMs: 60_000, mainSessionMaxSizeOverride: 1 });
+  expect(fixture.pool.has("web:protected")).toBe(true);
+  expect(fixture.pool.has("web:other")).toBe(false);
+
+  releaseFirst();
+  fixture.manager.evictIdle({ mainIdleTtlMs: 1, sideIdleTtlMs: 1, mainSessionMaxSizeOverride: 1 });
+  expect(fixture.pool.has("web:protected")).toBe(true);
+
+  releaseSecond();
+  expect(fixture.manager.getInstrumentationSnapshot().evictionProtectedChats).toBe(0);
+  fixture.pool.get("web:protected")!.lastUsed = Date.now() - 10_000;
+  fixture.manager.evictIdle({ mainIdleTtlMs: 1, sideIdleTtlMs: 1, mainSessionMaxSizeOverride: 1 });
+  expect(fixture.pool.has("web:protected")).toBe(false);
+  expect(disposed).toBe(2);
+});
+
 test("AgentSessionManager evicts idle sessions and shuts down remaining sessions", async () => {
   let disposed = 0;
   const oldSession = {

@@ -32,9 +32,13 @@ test('saveWorkspaceSettings persists and applies workspace settings immediately'
 
     const persisted = JSON.parse(readFileSync(join(workspace.workspace, '.piclaw', 'config.json'), 'utf8'));
     expect(persisted).toMatchObject({
+      domains: {
+        web: {
+          terminalEnabled: false,
+          vncAllowDirect: false,
+        },
+      },
       web: {
-        terminalEnabled: false,
-        vncAllowDirect: false,
         workspace: {
           treeMaxDepth: 3,
           treeMaxEntries: 1250,

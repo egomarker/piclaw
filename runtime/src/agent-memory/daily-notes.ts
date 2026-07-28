@@ -1,11 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import { resolve } from "path";
 
-import { WORKSPACE_DIR, getRuntimeTimingConfig } from "../core/config.js";
+import { getRuntimeTimingConfig, getWorkspaceDir } from "../core/config.js";
 import { getDb } from "../db.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
 
-export const DAILY_NOTES_DIR = resolve(WORKSPACE_DIR, "notes/daily");
+export const DAILY_NOTES_DIR = resolve(getWorkspaceDir(), "notes/daily");
 const SUMMARY_MARKER = "<!-- NEEDS_SUMMARY -->";
 const SUMMARY_UPDATE_MARKER = "<!-- NEEDS_SUMMARY_UPDATE -->";
 const INCOMPLETE_WARNING_TITLE = "> ⚠ **Incomplete daily note**";
@@ -64,7 +64,7 @@ export interface DailyNoteSummaryBacklog {
 }
 
 function getDailyNotesDir(): string {
-  return resolve(process.env.PICLAW_WORKSPACE || WORKSPACE_DIR, "notes/daily");
+  return resolve(getWorkspaceDir(), "notes/daily");
 }
 
 function formatDateLong(iso: string): string {
@@ -525,7 +525,7 @@ function loadDailyMessageStatsSince(cutoffDay: string, scope: { clause: string; 
 
 export function inspectDailyNoteSummaryBacklog(options?: { recentDays?: number }): DailyNoteSummaryBacklog {
   const recentDays = Math.max(1, Math.floor(Number(options?.recentDays) || 7));
-  const dailyNotesDir = resolve(process.env.PICLAW_WORKSPACE || WORKSPACE_DIR, "notes/daily");
+  const dailyNotesDir = resolve(getWorkspaceDir(), "notes/daily");
   const cutoff = windowStartDay(recentDays);
   const today = todayStr();
   const allChatsScope = resolveScope("*");

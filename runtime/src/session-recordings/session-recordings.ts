@@ -8,7 +8,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 
-import { DATA_DIR } from "../core/config.js";
+import { getSessionRecordingsConfig } from "../core/config.js";
 import type { InteractionRow } from "../db.js";
 import { createUuid } from "../utils/ids.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
@@ -75,7 +75,7 @@ interface ActiveRecordingState {
 const activeByChat = new Map<string, ActiveRecordingState>();
 
 function recordingsDir(): string {
-  return resolve(process.env.PICLAW_RECORDINGS_DIR || join(DATA_DIR, "session-recordings"));
+  return resolve(getSessionRecordingsConfig().directory);
 }
 
 function safeRecordingId(id: string): string {

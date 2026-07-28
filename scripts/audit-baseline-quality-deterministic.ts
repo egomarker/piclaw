@@ -194,6 +194,10 @@ const groupDefinitions: GroupDefinition[] = [
         "message-write-service.test.ts",
         "pending-steering.test.ts",
         "post-mutations.test.ts",
+        "process-chat-control-runtime.test.ts",
+        "process-chat-finalization-runtime.test.ts",
+        "process-chat-preflight-runtime.test.ts",
+        "process-chat-streaming-runtime.test.ts",
         "queued-followup-lifecycle-service.test.ts",
         "recovery.test.ts",
         "runtime-followup-facade-service.test.ts",
@@ -855,7 +859,9 @@ async function runRootGate(gate: RootGate): Promise<GateResult> {
   };
 }
 
-async function runGroup(group: (typeof groups)[number]): Promise<GroupResult> {
+type DeterministicGroup = (typeof groupDefinitions)[number] & { files: string[] };
+
+async function runGroup(group: DeterministicGroup): Promise<GroupResult> {
   if (group.files.length === 0) {
     throw new Error(`Deterministic group ${group.id} resolved to zero files.`);
   }

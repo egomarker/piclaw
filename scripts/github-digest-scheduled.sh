@@ -94,5 +94,21 @@ if [[ "$total_items" == "0" && "$star_changes" == "0" ]]; then
 fi
 
 POST_CONTENT="$(cat "$LATEST_MD")"
-"$PICLAW_BIN" --post "$TARGET_CHAT_JID" "$POST_CONTENT" >/dev/null
+tmp_post_stderr="$(mktemp "$OUTPUT_DIR/github-digest-post.XXXXXX.stderr")"
+cleanup_post() {
+  rm -f "$tmp_post_stderr"
+}
+trap cleanup_post EXIT
+
+if "$PICLAW_BIN" --post "$TARGET_CHAT_JID" "$POST_CONTENT" >/dev/null 2>"$tmp_post_stderr"; then
+  # CLI startup can emit structured compatibility warnings for deprecated env
+  # aliases inherited by the scheduled task. They are not report output. Keep
+  # every other diagnostic visible, and preserve the full stderr on failure.
+  grep -Ev '"operation"[[:space:]]*:[[:space:]]*"domain_config\.compat_env"' "$tmp_post_stderr" >&2 || true
+else
+  post_status=$?
+  cat "$tmp_post_stderr" >&2
+  exit "$post_status"
+fi
+
 printf '%s\n' "[github-digest] Report posted to $TARGET_CHAT_JID."

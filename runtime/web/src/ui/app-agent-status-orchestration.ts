@@ -95,7 +95,9 @@ export async function refreshAgentStatusForChat(options: RefreshAgentStatusForCh
     }
 
     if (!response || response.status !== 'active' || !response.data) {
-      if (wasAgentActiveRef.current && isMainTimelineView(viewStateRef.current)) {
+      const terminalType = response?.data?.type;
+      const hasTerminalPayload = terminalType === 'done' || terminalType === 'error';
+      if ((wasAgentActiveRef.current || hasTerminalPayload) && isMainTimelineView(viewStateRef.current)) {
         void refreshTimeline();
       }
 

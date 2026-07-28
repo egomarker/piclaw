@@ -52,6 +52,7 @@ describe("direct chat tool runtime relay", () => {
 
     expect(forwarded.url).toBe("http://internal/agent/default/message?chat_jid=web%3Atarget");
     expect(forwarded.headers?.["reply-to"]).toBe("@source-handle <jid:web:source>");
+    expect(forwarded.headers?.["x-piclaw-persist-steer"]).toBe("1");
     expect(forwarded.payload).toEqual({
       content: "From: Smith (@source-handle) <jid:web:source>\nReply-To: @source-handle <jid:web:source>\nTo: @research <jid:web:target>\n\nPlease inspect this branch.",
       content_blocks: [{
@@ -92,6 +93,7 @@ describe("direct chat tool runtime relay", () => {
         body: "Please inspect this branch.",
       }],
       mode: "queue",
+      persist_steer: true,
     });
     expect(result).toMatchObject({
       status: "ok",

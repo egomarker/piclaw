@@ -11,7 +11,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { getDb } from "./db.js";
-import { WORKSPACE_DIR, getWorkspaceSearchConfig } from "./core/config.js";
+import { getWorkspaceDir, getWorkspaceSearchConfig } from "./core/config.js";
 import { createLogger, debugSuppressedError } from "./utils/logger.js";
 
 const log = createLogger("workspace-index-core");
@@ -81,22 +81,14 @@ export const normalizeWorkspaceSearchScope = (scope: WorkspaceSearchScope | stri
   return "all";
 };
 
-const getWorkspaceRoot = (): string => {
-  return path.resolve(process.env.PICLAW_WORKSPACE || WORKSPACE_DIR);
-};
+const getWorkspaceRoot = (): string => getWorkspaceDir();
 
 const getBuiltInRoots = (): string[] => {
   const root = getWorkspaceRoot();
   return [path.join(root, "notes"), path.join(root, ".pi", "skills")];
 };
 
-const getConfiguredRoots = (): string[] => {
-  const envRoots = process.env.PICLAW_WORKSPACE_SEARCH_ROOTS
-    ?.split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-  return envRoots && envRoots.length > 0 ? envRoots : getWorkspaceSearchConfig().roots;
-};
+const getConfiguredRoots = (): string[] => getWorkspaceSearchConfig().roots;
 
 const getDefaultRoots = (): string[] => {
   const root = getWorkspaceRoot();
@@ -119,11 +111,7 @@ const toRelative = (absPath: string): string => {
 };
 
 function getIndexedExtensions(): Set<string> {
-  const envExtras = process.env.PICLAW_WORKSPACE_SEARCH_EXTENSIONS
-    ?.split(",")
-    .map((e) => e.trim())
-    .filter(Boolean);
-  const extras = envExtras && envExtras.length > 0 ? envExtras : getWorkspaceSearchConfig().extraExtensions;
+  const extras = getWorkspaceSearchConfig().extraExtensions;
   if (!extras || extras.length === 0) return DEFAULT_EXTS;
   const merged = new Set(DEFAULT_EXTS);
   for (const ext of extras) {

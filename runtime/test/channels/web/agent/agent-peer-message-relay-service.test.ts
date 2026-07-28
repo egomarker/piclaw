@@ -68,6 +68,7 @@ describe("WebAgentPeerMessageRelayService", () => {
       pathname?: string;
       chatJid?: string;
       agentId?: string;
+      headers?: Record<string, string>;
       payload?: Record<string, unknown>;
     } = {};
     const service = createService({
@@ -81,6 +82,7 @@ describe("WebAgentPeerMessageRelayService", () => {
         forwarded.pathname = pathname;
         forwarded.chatJid = chatJid;
         forwarded.agentId = agentId;
+        forwarded.headers = Object.fromEntries(req.headers.entries());
         forwarded.payload = await req.json() as Record<string, unknown>;
         return jsonResponse({ queued: "followup", thread_id: null }, 201);
       },
@@ -101,6 +103,10 @@ describe("WebAgentPeerMessageRelayService", () => {
       pathname: "/agent/default/message",
       chatJid: "web:branch",
       agentId: "default",
+      headers: {
+        "content-type": "application/json",
+        "x-piclaw-persist-steer": "1",
+      },
       payload: {
         content: "from: @source-handle <jid:web:source>\n\nPlease inspect the plan.",
         content_blocks: [{
@@ -112,6 +118,7 @@ describe("WebAgentPeerMessageRelayService", () => {
           body: "Please inspect the plan.",
         }],
         mode: "queue",
+        persist_steer: true,
       },
     });
     expect(response.status).toBe(201);
@@ -142,6 +149,7 @@ describe("WebAgentPeerMessageRelayService", () => {
         getAgentHandleForChat: () => "fallback-source",
       },
       forwardAgentMessageRequest: async (req) => {
+        expect(req.headers.get("x-piclaw-persist-steer")).toBe("1");
         expect(await req.json()).toEqual({
           content: "from: @manual-source <jid:web:source>\n\nHello there",
           content_blocks: [{
@@ -153,6 +161,7 @@ describe("WebAgentPeerMessageRelayService", () => {
             body: "Hello there",
           }],
           mode: "auto",
+          persist_steer: true,
         });
         return jsonResponse({ created: true }, 202);
       },

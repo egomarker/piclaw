@@ -19,6 +19,56 @@ test("dream token defaults and auto gate follow nightly cadence", async () => {
   expect(dream.shouldRunAutoDream("2026-04-06T23:22:39.203Z", 1)).toEqual({ ok: true, reason: null });
 });
 
+test("Dream scheduler uses typed restart configuration for cron and model", () => {
+  const workspace = createTempWorkspace("piclaw-dream-scheduler-config-");
+  try {
+    mkdirSync(join(workspace.workspace, ".piclaw"), { recursive: true });
+    writeFileSync(join(workspace.workspace, ".piclaw", "config.json"), JSON.stringify({
+      domains: {
+        dream: {
+          cron: "45 3 * * *",
+          backupKeep: 6,
+          model: "github-copilot/gpt-5-mini",
+          agentTimeoutMs: 180000,
+        },
+      },
+    }), "utf8");
+    const script = `
+      import { initDatabase } from "./src/db.js";
+      import { DREAM_TASK_CRON, ensureDreamTask } from "./src/dream.js";
+      initDatabase();
+      const task = ensureDreamTask("web:default");
+      console.log(JSON.stringify({ cron: DREAM_TASK_CRON, schedule: task?.schedule_value, model: task?.model }));
+    `;
+    const proc = Bun.spawnSync(["bun", "--no-env-file", "-e", script], {
+      cwd: join(import.meta.dir, ".."),
+      env: {
+        PATH: process.env.PATH || "",
+        HOME: process.env.HOME || "/tmp",
+        PICLAW_WORKSPACE: workspace.workspace,
+        PICLAW_STORE: workspace.store,
+        PICLAW_DATA: workspace.data,
+        PICLAW_DB_IN_MEMORY: "1",
+        PICLAW_DREAM_CRON: undefined,
+        PICLAW_DREAM_BACKUP_KEEP: undefined,
+        PICLAW_DREAM_MODEL: undefined,
+        PICLAW_DREAM_AGENT_TIMEOUT_MS: undefined,
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(proc.exitCode, proc.stderr.toString() || proc.stdout.toString()).toBe(0);
+    const outputLine = proc.stdout.toString().trim().split("\n").filter(Boolean).at(-1) || "";
+    expect(JSON.parse(outputLine)).toEqual({
+      cron: "45 3 * * *",
+      schedule: "45 3 * * *",
+      model: "github-copilot/gpt-5-mini",
+    });
+  } finally {
+    workspace.cleanup();
+  }
+});
+
 test("runDreamMaintenance skips when a live Dream lock belongs to an inaccessible process", async () => {
   const workspace = createTempWorkspace("piclaw-dream-lock-");
   try {

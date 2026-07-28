@@ -4,28 +4,21 @@
  *
  * pi-mcp-adapter 2.11 forwards abort signals and supports requestTimeoutMs for
  * MCP protocol requests. This outer guard remains for existing Piclaw installs
- * that rely on PICLAW_MCP_TOOL_TIMEOUT_MS and on Piclaw's 120-second default.
+ * that rely on the legacy PICLAW_MCP_TOOL_TIMEOUT_MS alias and Piclaw's 120-second default.
  * The shorter of this guard and the adapter/SDK request timeout wins.
  *
- * Configurable via PICLAW_MCP_TOOL_TIMEOUT_MS (default: 120000 = 2 minutes).
- * Set PICLAW_MCP_TOOL_TIMEOUT_MS=0 to disable the wrapper timeout while still
+ * Configurable via domains.tools.mcpToolTimeoutMs (default: 120000 = 2 minutes).
+ * Set the field to 0 to disable the wrapper timeout while still
  * leaving upstream MCP adapter behavior untouched.
  */
 
 import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
-const DEFAULT_MCP_TOOL_TIMEOUT_MS = 120_000; // 2 minutes
+import { getToolsIntegrationConfig } from "../core/config.js";
 
 export function getMcpToolTimeoutMs(): number | null {
-  const env = process.env.PICLAW_MCP_TOOL_TIMEOUT_MS;
-  if (env) {
-    const parsed = Number(env);
-    if (Number.isFinite(parsed)) {
-      if (parsed === 0) return null;
-      if (parsed > 0) return parsed;
-    }
-  }
-  return DEFAULT_MCP_TOOL_TIMEOUT_MS;
+  const timeoutMs = getToolsIntegrationConfig().mcpToolTimeoutMs;
+  return timeoutMs === 0 ? null : timeoutMs;
 }
 
 /**

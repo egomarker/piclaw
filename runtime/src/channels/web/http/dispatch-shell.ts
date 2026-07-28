@@ -2,7 +2,7 @@
  * web/http/dispatch-shell.ts – Shell/static/avatar route dispatch helpers.
  */
 
-import { WEB_RUNTIME_CONFIG } from "../../../core/config.js";
+import { WEB_RUNTIME_CONFIG, getRuntimeRoot } from "../../../core/config.js";
 import type { WebChannelLike } from "../core/web-channel-contracts.js";
 import type { RouteFlags } from "./route-flags.js";
 
@@ -111,7 +111,7 @@ export async function handleShellRoutes(
 
   if (req.method === "GET" && (pathname === "/export/timeline" || pathname === "/internal/export/timeline")) {
     const { handleExportTimeline } = await import("../export/export-timeline-endpoint.js");
-    const runtimeDir = process.env.PICLAW_RUNTIME_ROOT || new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
+    const runtimeDir = getRuntimeRoot(new URL("../../../../", import.meta.url).pathname.replace(/\/$/, ""));
     return handleExportTimeline(req, { runtimeDir });
   }
 

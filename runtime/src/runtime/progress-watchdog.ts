@@ -7,7 +7,7 @@
  * and periodically heartbeat it while work is progressing.
  */
 
-import { getCompactionRuntimeConfig } from "../core/config.js";
+import { getCompactionRuntimeConfig, getProgressWatchdogConfig } from "../core/config.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
 
 const log = createLogger("runtime.progress-watchdog");
@@ -56,8 +56,7 @@ let publishSnapshot: ((snapshot: ProgressWatchdogSnapshot) => void) | null = nul
 let progressWatchdogTimeoutOverrideMs: number | null = null;
 
 function shouldEscalateProgressWatchdogStall(): boolean {
-  const normalized = String(process.env.PICLAW_PROGRESS_WATCHDOG_RESTART_ON_STALL || process.env.PICLAW_PROGRESS_WATCHDOG_ESCALATE_ON_STALL || "").trim().toLowerCase();
-  return ["1", "true", "yes", "on", "restart", "exit"].includes(normalized);
+  return getProgressWatchdogConfig().escalateOnStall;
 }
 
 function getProgressWatchdogScanIntervalMs(timeoutMs: number): number {

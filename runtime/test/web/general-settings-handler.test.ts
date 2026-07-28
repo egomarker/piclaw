@@ -7,9 +7,19 @@ import { importFresh, withTempWorkspaceEnv } from '../helpers.js';
 
 test('saveGeneralSettings persists and applies general settings immediately', async () => {
   await withTempWorkspaceEnv('piclaw-general-settings-', {
+    PICLAW_ASSISTANT_NAME: undefined,
+    PICLAW_ASSISTANT_AVATAR: undefined,
+    PICLAW_USER_NAME: undefined,
+    PICLAW_USER_AVATAR: undefined,
+    PICLAW_USER_AVATAR_BACKGROUND: undefined,
+    PICLAW_WEB_UI_MODE: undefined,
+    PICLAW_WEB_PERSIST_THINKING: undefined,
+    PICLAW_WEB_PERSIST_THINKING_MAX_CHARS: undefined,
     PICLAW_WEB_COMPOSE_UPLOAD_LIMIT_MB: undefined,
     PICLAW_WEB_WORKSPACE_UPLOAD_LIMIT_MB: undefined,
-    PICLAW_USER_AVATAR_BACKGROUND: undefined,
+    PICLAW_WEB_NOTIFICATION_DEBUG_LABELS: undefined,
+    PICLAW_WEB_TERMINAL_ENABLED: undefined,
+    PICLAW_DEBUG_CARD_SUBMISSIONS: undefined,
   }, async (workspace) => {
     const handler = await importFresh<typeof import('../../src/channels/web/handlers/general-settings.js')>(
       '../src/channels/web/handlers/general-settings.js',
@@ -63,27 +73,53 @@ test('saveGeneralSettings persists and applies general settings immediately', as
 
     const persisted = JSON.parse(readFileSync(join(workspace.workspace, '.piclaw', 'config.json'), 'utf8'));
     expect(persisted).toMatchObject({
-      assistant: {
-        assistantName: 'Smith',
-        assistantAvatar: 'https://example.test/assistant.png',
-      },
-      user: {
-        userName: 'Rui',
-        userAvatar: 'https://example.test/user.png',
-      },
-      sessionAutoRotate: false,
-      sessionMaxSizeMb: 48,
-      turnMaxToolUseMessages: 23,
-      web: {
-        terminalEnabled: false,
-        composeUploadLimitMb: 24,
-        workspaceUploadLimitMb: 256,
+      domains: {
+        identity: {
+          assistantName: 'Smith',
+          assistantAvatar: 'https://example.test/assistant.png',
+          userName: 'Rui',
+          userAvatar: 'https://example.test/user.png',
+        },
+        web: {
+          terminalEnabled: false,
+          composeUploadLimitMb: 24,
+          workspaceUploadLimitMb: 256,
+        },
+        agent: {
+          toolUseMessageBudget: 23,
+        },
+        session: {
+          autoRotate: false,
+          maxSizeMb: 48,
+        },
       },
       ui: {
         theme: 'dracula',
         tint: '#7c3aed',
       },
     });
+    for (const name of [
+      'PICLAW_ASSISTANT_NAME',
+      'PICLAW_ASSISTANT_AVATAR',
+      'PICLAW_USER_NAME',
+      'PICLAW_USER_AVATAR',
+      'PICLAW_USER_AVATAR_BACKGROUND',
+      'PICLAW_WEB_UI_MODE',
+      'PICLAW_WEB_PERSIST_THINKING',
+      'PICLAW_WEB_PERSIST_THINKING_MAX_CHARS',
+      'PICLAW_WEB_COMPOSE_UPLOAD_LIMIT_MB',
+      'PICLAW_WEB_WORKSPACE_UPLOAD_LIMIT_MB',
+      'PICLAW_WEB_NOTIFICATION_DEBUG_LABELS',
+      'PICLAW_WEB_TERMINAL_ENABLED',
+      'PICLAW_SESSION_AUTO_ROTATE',
+      'PICLAW_SESSION_MAX_SIZE_MB',
+      'PICLAW_SESSION_MAX_LINES',
+      'PICLAW_SESSION_MAX_COMPACTIONS',
+      'PICLAW_TURN_MAX_TOOL_USE_MESSAGES',
+      'PICLAW_DEBUG_CARD_SUBMISSIONS',
+    ]) {
+      expect(process.env[name], name).toBeUndefined();
+    }
   });
 });
 

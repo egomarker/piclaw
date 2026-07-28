@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+import { WEB_RUNTIME_CONFIG } from "../../../src/core/config.js";
 import { upsertStoredWebPushSubscription, listStoredWebPushSubscriptions } from "../../../src/channels/web/push/web-push-store.js";
 import {
   buildStoredAgentReplyWebPushNotification,
@@ -37,6 +38,20 @@ function createSubscription(id: number, deviceId: string | null = null) {
     },
     ...(deviceId ? { deviceId } : {}),
   };
+}
+
+const DIRECT_ENV_READS = [
+  "process.env.PICLAW_TERMINAL_IMAGE_PROTOCOL",
+  "process.env.PICLAW_WEB_PUSH_SUBSCRIPTION_CAP",
+  "process.env.PICLAW_WEB_PUSH_VAPID_SUBJECT",
+] as const;
+
+function listRuntimeSourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = join(dir, entry.name);
+    if (entry.isDirectory()) return listRuntimeSourceFiles(entryPath);
+    return entryPath.endsWith(".ts") ? [entryPath] : [];
+  });
 }
 
 describe("web push service", () => {
@@ -83,22 +98,42 @@ describe("web push service", () => {
 
   test("defaults to the configured VAPID subject when one is not supplied", async () => {
     const baseDir = createTempPushDir();
+    const previousSubject = WEB_RUNTIME_CONFIG.pushVapidSubject;
+    WEB_RUNTIME_CONFIG.pushVapidSubject = "mailto:configured@example.com";
     upsertStoredWebPushSubscription(createSubscription(11), { baseDir });
 
-    const deliveries: Array<Record<string, unknown>> = [];
-    const result = await sendStoredWebPushNotification({
-      title: "Default subject",
-      body: "Uses the deployment URL subject",
-    }, {
-      baseDir,
-      sendNotification: async (_subscription, _payload, options) => {
-        deliveries.push(options.vapidDetails as Record<string, unknown>);
-      },
+    try {
+      const deliveries: Array<Record<string, unknown>> = [];
+      const result = await sendStoredWebPushNotification({
+        title: "Default subject",
+        body: "Uses the deployment URL subject",
+      }, {
+        baseDir,
+        sendNotification: async (_subscription, _payload, options) => {
+          deliveries.push(options.vapidDetails as Record<string, unknown>);
+        },
+      });
+
+      expect(result).toEqual({ attempted: 1, sent: 1, removed: 0, failed: 0 });
+      expect(deliveries).toHaveLength(1);
+      expect(deliveries[0]?.subject).toBe("mailto:configured@example.com");
+    } finally {
+      WEB_RUNTIME_CONFIG.pushVapidSubject = previousSubject;
+    }
+  });
+
+  test("runtime source routes migrated web compatibility env through core config only", () => {
+    const sourceRoot = join(import.meta.dir, "../../../src");
+    const offenders = listRuntimeSourceFiles(sourceRoot).flatMap((filePath) => {
+      if (filePath.endsWith("/core/config.ts")) return [];
+      const source = readFileSync(filePath, "utf8");
+      const matchedKeys = DIRECT_ENV_READS.filter((key) => source.includes(key));
+      return matchedKeys.length > 0
+        ? [`${filePath.replace(`${sourceRoot}/`, "")}: ${matchedKeys.join(", ")}`]
+        : [];
     });
 
-    expect(result).toEqual({ attempted: 1, sent: 1, removed: 0, failed: 0 });
-    expect(deliveries).toHaveLength(1);
-    expect(deliveries[0]?.subject).toBe(process.env.PICLAW_WEB_PUSH_VAPID_SUBJECT?.trim() || "mailto:notifications@localhost.invalid");
+    expect(offenders).toEqual([]);
   });
 
   test("removes expired subscriptions and keeps non-expired failures", async () => {

@@ -10,10 +10,11 @@
 import { dirname, extname, resolve } from "node:path";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { registerExtensionRoute } from "./extension-routes.js";
+import { getRuntimeRoot } from "../../../core/config.js";
 import { isRealPathWithin } from "../../../utils/path-safety.js";
 
 const EXT_DIR = resolve(
-  process.env.PICLAW_RUNTIME_ROOT || resolve(import.meta.dir, "..", "..", "..", ".."),
+  getRuntimeRoot(resolve(import.meta.dir, "..", "..", "..", "..")),
   "extensions",
   "viewers",
   "editor",

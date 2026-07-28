@@ -6,10 +6,6 @@ const cycles = Number(process.env.PICLAW_RACE_CYCLES || '12');
 const reopenWaitMs = Number(process.env.PICLAW_RACE_REOPEN_WAIT_MS || '40');
 const typeDelayMs = Number(process.env.PICLAW_RACE_TYPE_DELAY_MS || '8');
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function readState(page: any) {
   return page.evaluate(() => {
     const host = document.querySelector('.terminal-live-host');

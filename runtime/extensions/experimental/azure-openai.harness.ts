@@ -13,7 +13,7 @@ type AzureHarnessProviderConfig = Parameters<ExtensionAPI["registerProvider"]>[1
 type AzureHarnessProviderRegistrar = (name: string, config: AzureHarnessProviderConfig) => void;
 import OpenAI from "openai";
 import {
-  AssistantMessageEventStream,
+  createAssistantMessageEventStream,
   getSupportedThinkingLevels,
   type AssistantMessage,
   type Model,
@@ -33,6 +33,8 @@ import {
 import { streamSimple as streamSimpleOpenAICompletions } from "@earendil-works/pi-ai/api/openai-completions";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { getWebServerConfig } from "../../src/core/config-web.js";
+import { getWebSecretBootstrapConfig } from "../../src/core/config-secrets.js";
 
 import {
   tryNormalizeFoundryServiceBase,
@@ -758,14 +760,14 @@ function parseArgs(input: string): ImageArgs | null {
       continue;
     }
     if (token === "--quality" && tokens[i + 1]) {
-      const quality = tokens[i + 1] as ImageArgs["quality"];
-      if (["low", "medium", "high"].includes(quality)) args.quality = quality;
+      const quality = tokens[i + 1] as ImageArgs["quality"] | undefined;
+      if (quality && ["low", "medium", "high"].includes(quality)) args.quality = quality;
       i += 1;
       continue;
     }
     if (token === "--style" && tokens[i + 1]) {
-      const style = tokens[i + 1] as ImageArgs["style"];
-      if (["natural", "vivid"].includes(style)) args.style = style;
+      const style = tokens[i + 1] as ImageArgs["style"] | undefined;
+      if (style && ["natural", "vivid"].includes(style)) args.style = style;
       i += 1;
       continue;
     }
@@ -797,7 +799,7 @@ function parseArgs(input: string): ImageArgs | null {
 // nearest proportionally matching size.
 const AOAI_IMAGE_SIZES = ["1024x1024", "1024x1536", "1536x1024"] as const;
 
-function snapToSupportedSize(size: string | undefined): string {
+function snapToSupportedSize(size: string | undefined): "auto" | typeof AOAI_IMAGE_SIZES[number] {
   if (!size || size === "auto") return "auto";
   const m = size.toLowerCase().match(/(\d+)\s*x\s*(\d+)/);
   if (!m) return "1024x1024";
@@ -806,10 +808,10 @@ function snapToSupportedSize(size: string | undefined): string {
   if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return "1024x1024";
   const ratio = w / h;
   // Pick the supported size whose aspect ratio is closest
-  let best = AOAI_IMAGE_SIZES[0];
+  let best: typeof AOAI_IMAGE_SIZES[number] = AOAI_IMAGE_SIZES[0];
   let bestDiff = Infinity;
   for (const candidate of AOAI_IMAGE_SIZES) {
-    const [cw, ch] = candidate.split("x").map(Number);
+    const [cw = 0, ch = 1] = candidate.split("x").map(Number);
     const diff = Math.abs(ratio - cw / ch);
     if (diff < bestDiff) {
       bestDiff = diff;
@@ -823,14 +825,16 @@ async function generateImage(baseUrl: string, model: string, args: ImageArgs, in
   await getAccessToken();
   const client = createAzureClient(baseUrl, {});
 
-  const payload: Record<string, any> = {
+  const payload: OpenAI.Images.ImageGenerateParamsNonStreaming = {
     model,
     prompt: args.prompt,
-    size: snapToSupportedSize(args.size),
+    size: snapToSupportedSize(args.size) as OpenAI.Images.ImageGenerateParamsNonStreaming["size"],
     quality: args.quality || "high",
     n: args.count || 1,
   };
-  if (includeStyle && args.style) payload.style = args.style;
+  if (includeStyle && args.style) {
+    (payload as OpenAI.Images.ImageGenerateParamsNonStreaming & { style?: ImageArgs["style"] }).style = args.style;
+  }
 
   const response = await client.images.generate(payload);
   const images = response.data || [];
@@ -937,13 +941,8 @@ function saveImages(prefix: string, prompt: string, images: Array<{ b64_json?: s
   return lines;
 }
 
-const PICLAW_PORT = process.env.PICLAW_WEB_PORT || process.env.PICLAW_PORT || "8080";
-const PICLAW_BASE = `http://localhost:${PICLAW_PORT}`;
-const INTERNAL_SECRET =
-  process.env.PICLAW_INTERNAL_SECRET ||
-  process.env.PICLAW_WEB_INTERNAL_SECRET ||
-  process.env.WEB_INTERNAL_SECRET ||
-  "";
+const PICLAW_BASE = `http://localhost:${getWebServerConfig().port}`;
+const INTERNAL_SECRET = getWebSecretBootstrapConfig().internalSecret || process.env.WEB_INTERNAL_SECRET || "";
 
 async function postPlaceholder(content: string, threadId?: number): Promise<number | string | null> {
   try {
@@ -983,12 +982,12 @@ async function updatePost(id: number, content: string, threadId?: number): Promi
 
 
 function streamAzureOpenAIResponses(model: any, context: any, options: any) {
-  const stream = new AssistantMessageEventStream();
+  const stream = createAssistantMessageEventStream();
 
 
 
   (async () => {
-    const output = {
+    const output: AssistantMessage = {
       role: "assistant",
       content: [],
       api: model.api,
@@ -1184,13 +1183,13 @@ function streamAzureOpenAIResponses(model: any, context: any, options: any) {
         (output as any).errorMessage = undefined;
         (output as any).reasoning = undefined;
 
-        let openaiStream;
+        let openaiStream: AsyncIterable<any>;
         try {
-          openaiStream = await createStream();
+          openaiStream = await createStream() as unknown as AsyncIterable<any>;
         } catch (error) {
           if (!isAuthError(error)) throw error;
           if (!STATIC_API_KEY) await ensureToken(true);
-          openaiStream = await createStream();
+          openaiStream = await createStream() as unknown as AsyncIterable<any>;
         }
 
         const outputPhases = new Map<string, string>();
@@ -1241,7 +1240,7 @@ function streamAzureOpenAIResponses(model: any, context: any, options: any) {
         }
 
         // Success — break out of retry loop
-        if (output.stopReason !== "aborted" && output.stopReason !== "error") {
+        if (output.stopReason === "stop" || output.stopReason === "length" || output.stopReason === "toolUse") {
           stream.push({ type: "done", reason: output.stopReason, message: output });
           stream.end();
           return;
@@ -1279,7 +1278,7 @@ function streamAzureOpenAIResponses(model: any, context: any, options: any) {
 }
 
 function streamSimpleAzureOpenAIResponses(model: any, context: any, options: any) {
-  const base = buildBaseOptions(model, options, options?.apiKey);
+  const base = buildBaseOptions(model, context, options, options?.apiKey);
   const reasoningEffort = getSupportedThinkingLevels(model).includes(options?.reasoning)
     ? options?.reasoning
     : clampReasoning(options?.reasoning);
@@ -1313,7 +1312,7 @@ export function registerAzureProviders(register: AzureHarnessProviderRegistrar, 
         name: MODEL_NAMES[idx] || (id === MODEL_ID ? MODEL_NAME : `Azure ${id}`),
         api: AZURE_API,
         reasoning: spec.reasoning ?? true,
-        input: ["text"],
+        input: ["text" as const],
         contextWindow: spec.contextWindow ?? 200000,
         maxTokens: spec.maxTokens ?? 64000,
         rateLimits,
@@ -1337,12 +1336,12 @@ export function registerAzureProviders(register: AzureHarnessProviderRegistrar, 
       name: FOUNDRY_MODEL_NAMES[idx] || `Azure Foundry ${id}`,
       api: FOUNDRY_API,
       reasoning: spec.reasoning ?? false,
-      input: ["text"],
+      input: ["text" as const],
       contextWindow: spec.contextWindow ?? 200000,
       maxTokens: spec.maxTokens ?? 64000,
       compat: {
         supportsStore: false,
-        maxTokensField: "max_tokens",
+        maxTokensField: "max_tokens" as const,
         supportsReasoningEffort: false,
         requiresAssistantAfterToolResult: true,
       },

@@ -3,7 +3,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import {
   attemptRemoteCompaction,
-  blockRemoteCompactionPayload,
+  stripRemoteCompactionMarker,
   clearRemoteCompactionBackoffForTests,
   extractRemoteCompactionReadableCheckpoint,
   getLatestRemoteCompactionDetails,
@@ -332,11 +332,8 @@ describe("opaque state persistence and replay", () => {
     });
   });
 
-  test("fails closed when a local-fallback provider payload cannot accept opaque input", () => {
-    expect(prependRemoteCompactionPayload({ model: "gpt-5.1" }, details())).toEqual({
-      model: "__piclaw_remote_compaction_replay_blocked__",
-      input: [],
-    });
+  test("drops the marker when a local-fallback provider payload cannot accept opaque input", () => {
+    expect(prependRemoteCompactionPayload({ model: "gpt-5.1" }, details())).toEqual({ model: "gpt-5.1" });
   });
 
   test("merges deterministic file facts for a later local fallback", () => {
@@ -349,34 +346,40 @@ describe("opaque state persistence and replay", () => {
     expect([...merged.edited]).toEqual(["prior-edit.ts", "current-edit.ts"]);
   });
 
-  test("scrubs every prompt-bearing field from a blocked non-Responses payload", () => {
-    const blocked = blockRemoteCompactionPayload({
+  test("strips the marker from every prompt-bearing field without destroying the request", () => {
+    const sentinelItem = { role: "user", content: [{ type: "input_text", text: REMOTE_COMPACTION_SUMMARY_SENTINEL }] };
+    const stripped = stripRemoteCompactionMarker({
       model: "other",
-      input: [{ private: "input" }],
-      messages: [{ content: "private messages" }],
-      contents: [{ text: "private contents" }],
-      prompt: "private prompt",
+      input: [sentinelItem, { role: "user", content: [{ type: "input_text", text: "keep me" }] }],
+      messages: [{ content: [{ type: "text", text: REMOTE_COMPACTION_SUMMARY_SENTINEL }] }, { content: "keep me too" }],
+      contents: [{ content: REMOTE_COMPACTION_SUMMARY_SENTINEL }],
     });
-    expect(blocked).toEqual({
-      model: "__piclaw_remote_compaction_replay_blocked__",
-      input: [],
-    });
-    expect(JSON.stringify(blocked)).not.toContain("private");
-    expect(blockRemoteCompactionPayload("private primitive")).toEqual(blocked);
+
+    // The un-replayable marker is removed, but the real prompt survives and the
+    // request stays valid (a poisoned payload would break every later turn).
+    expect(JSON.stringify(stripped)).not.toContain(REMOTE_COMPACTION_SUMMARY_SENTINEL);
+    expect(stripped).toMatchObject({ model: "other" });
+    expect((stripped as any).input).toHaveLength(1);
+    expect(JSON.stringify(stripped)).toContain("keep me");
+    expect(JSON.stringify(stripped)).toContain("keep me too");
+    expect(stripRemoteCompactionMarker("primitive")).toBe("primitive");
   });
 
-  test("blocks cross-model replay without preserving original input", () => {
+  test("cross-model replay drops the marker and still sends a usable request", () => {
     const persisted = details();
     expect(isRemoteCompactionCompatible(model(), persisted)).toBe(true);
     const replay = injectRemoteCompactionPayload(
-      { model: "other", input: [{ role: "user", content: [{ type: "input_text", text: REMOTE_COMPACTION_SUMMARY_SENTINEL }] }, { role: "user", content: [{ type: "input_text", text: "private suffix" }] }] },
+      { model: "other", input: [{ role: "user", content: [{ type: "input_text", text: REMOTE_COMPACTION_SUMMARY_SENTINEL }] }, { role: "user", content: [{ type: "input_text", text: "current prompt" }] }] },
       model({ id: "other" }),
       persisted,
     );
     expect(replay).toMatchObject({ ok: false, code: "incompatible" });
     if (!replay.ok) {
-      expect(replay.blockedPayload).toMatchObject({ model: "__piclaw_remote_compaction_replay_blocked__", input: [] });
-      expect(JSON.stringify(replay.blockedPayload)).not.toContain("private suffix");
+      // Regression: the fallback must keep a real model id, otherwise every
+      // request in the session fails with provider 400 model_not_supported.
+      expect(replay.fallbackPayload).toMatchObject({ model: "other" });
+      expect(JSON.stringify(replay.fallbackPayload)).not.toContain(REMOTE_COMPACTION_SUMMARY_SENTINEL);
+      expect(JSON.stringify(replay.fallbackPayload)).toContain("current prompt");
     }
   });
 

@@ -30,7 +30,8 @@ type CachedUsage = { expiresAt: number; value: ProviderUsageSnapshot | null };
 type SupportedProviderId = ProviderUsageSnapshot["provider"];
 type UsageModelRuntime = Pick<ModelRuntime, "getAuth">;
 
-const USAGE_CACHE_TTL_MS = Number(process.env.PICLAW_PROVIDER_USAGE_TTL_MS || "60000");
+// Internal cache policy, not a user-facing runtime setting.
+const USAGE_CACHE_TTL_MS = 60_000;
 const usageCache = new Map<string, CachedUsage>();
 const usageRefreshInFlight = new Map<string, Promise<ProviderUsageSnapshot | null>>();
 const log = createLogger("agent-pool.provider-usage");

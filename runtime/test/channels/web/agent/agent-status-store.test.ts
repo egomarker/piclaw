@@ -51,12 +51,47 @@ describe("web agent status store", () => {
     store.update("web:1", { type: "intent", title: "Thinking" });
     expect(store.get("web:1")).toMatchObject({ type: "intent", title: "Thinking" });
 
-    store.update("web:1", { type: "done" });
-    expect(store.get("web:1")).toBeNull();
+    store.update("web:1", { type: "done", title: "Completed /session-rotate" });
+    expect(store.get("web:1")).toMatchObject({ type: "done", title: "Completed /session-rotate" });
 
     // Phase 3: update() must not touch persistence at all
     expect(saveCalls.length).toBe(0);
     expect(setStatusCalls.length).toBe(0);
+  });
+
+  test("terminal status remains pollable briefly, then expires", async () => {
+    const state = {
+      load: () => {},
+      save: () => {},
+      setAgentStatus: () => {},
+      getAgentStatuses: () => ({}),
+    };
+    const store = new AgentStatusStore(state, { getInflightRuns: () => [] }, 1);
+
+    store.update("web:terminal", { type: "error", title: "Rotation failed" });
+    expect(store.get("web:terminal")).toMatchObject({ type: "error", title: "Rotation failed" });
+    expect((store as any).terminalStatusTimers.size).toBe(1);
+    await Bun.sleep(5);
+    expect((store as any).activeAgentStatuses.has("web:terminal")).toBe(false);
+    expect((store as any).terminalStatusTimers.size).toBe(0);
+    expect(store.get("web:terminal")).toBeNull();
+  });
+
+  test("a newer active status cancels pending terminal expiry", async () => {
+    const state = {
+      load: () => {},
+      save: () => {},
+      setAgentStatus: () => {},
+      getAgentStatuses: () => ({}),
+    };
+    const store = new AgentStatusStore(state, { getInflightRuns: () => [] }, 5);
+
+    store.update("web:replacement", { type: "done", title: "First run completed" });
+    store.update("web:replacement", { type: "intent", title: "Second run started" });
+    await Bun.sleep(10);
+
+    expect(store.get("web:replacement")).toMatchObject({ type: "intent", title: "Second run started" });
+    expect((store as any).terminalStatusTimers.size).toBe(0);
   });
 
   test("get derives a fresh recovery status from durable inflight state after restart", () => {

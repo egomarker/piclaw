@@ -24,12 +24,60 @@ interface ProviderModelPricingRule extends ProviderModelPricingReference {
 
 // Tag this reference snapshot with the commit date that introduced it so future
 // updates can track pricing provenance without guessing.
-export const PROVIDER_MODEL_PRICING_REFERENCE_TAG = "2026-07-14";
+export const PROVIDER_MODEL_PRICING_REFERENCE_TAG = "2026-07-25";
 
 const ANTHROPIC_PRICING_SOURCE = "https://docs.anthropic.com/en/docs/about-claude/pricing";
 const OPENAI_PRICING_SOURCE = "https://developers.openai.com/api/docs/pricing";
+const KIMI_K3_PRICING_SOURCE = "https://platform.kimi.ai/docs/pricing/chat-k3";
+const OPENROUTER_MODELS_SOURCE = "https://openrouter.ai/api/v1/models";
 
 const PRICING_RULES: ProviderModelPricingRule[] = [
+  {
+    id: "claude-opus-5-openrouter",
+    models: ["anthropic/claude-opus-5"],
+    providers: ["openrouter"],
+    canonicalModel: "Claude Opus 5 (OpenRouter)",
+    basis: `Live OpenRouter API pricing (${OPENROUTER_MODELS_SOURCE}), accessed 2026-07-25`,
+    inputPerMTok: 5,
+    outputPerMTok: 25,
+    cacheReadPerMTok: 0.5,
+    cacheWritePerMTok: 6.25,
+    notes: "OpenRouter route mirrors Anthropic standard Opus 5 pricing; 1h cache-write route field is $10/MTok, but the local single cache-write field stores the 5-minute rate.",
+  },
+  {
+    id: "claude-opus-5-fast-openrouter",
+    models: ["anthropic/claude-opus-5-fast"],
+    providers: ["openrouter"],
+    canonicalModel: "Claude Opus 5 Fast (OpenRouter)",
+    basis: `Live OpenRouter API pricing (${OPENROUTER_MODELS_SOURCE}), accessed 2026-07-25`,
+    inputPerMTok: 10,
+    outputPerMTok: 50,
+    cacheReadPerMTok: 1,
+    cacheWritePerMTok: 12.5,
+    notes: "OpenRouter route mirrors Anthropic Fast mode pricing; 1h cache-write route field is $20/MTok, but the local single cache-write field stores the 5-minute rate.",
+  },
+  {
+    id: "claude-opus-5",
+    models: ["claude-opus-5"],
+    canonicalModel: "Claude Opus 5",
+    basis: `Anthropic standard API pricing (${ANTHROPIC_PRICING_SOURCE}), accessed 2026-07-25`,
+    inputPerMTok: 5,
+    outputPerMTok: 25,
+    cacheReadPerMTok: 0.5,
+    cacheWritePerMTok: 6.25,
+    notes: "Same standard rates as Opus 4.8; 5m cache writes $6.25, 1h cache writes $10. Model ID: claude-opus-5.",
+  },
+  {
+    id: "claude-opus-5-fast",
+    models: ["claude-opus-5-fast"],
+    canonicalModel: "Claude Opus 5 Fast",
+    basis: `Anthropic Fast mode pricing (${ANTHROPIC_PRICING_SOURCE}), accessed 2026-07-25`,
+    inputPerMTok: 10,
+    outputPerMTok: 50,
+    cacheReadPerMTok: 1,
+    cacheWritePerMTok: 12.5,
+    notes: "Fast mode is a research preview at 2x Opus 5 base pricing; prompt caching multipliers stack, so 5m cache writes are $12.50/MTok and 1h writes are $20/MTok.",
+  },
   {
     id: "claude-opus-4.5",
     models: ["claude-opus-4.5"],
@@ -343,6 +391,29 @@ const PRICING_RULES: ProviderModelPricingRule[] = [
     notes: "Cache write uses ordinary routed input as an explicit fallback.",
   },
   {
+    id: "kimi-k3-openrouter",
+    models: ["moonshotai/kimi-k3"],
+    providers: ["openrouter"],
+    canonicalModel: "Kimi K3 (OpenRouter)",
+    basis: `Live OpenRouter API pricing (${OPENROUTER_MODELS_SOURCE}), accessed 2026-07-25`,
+    inputPerMTok: 3,
+    outputPerMTok: 15,
+    cacheReadPerMTok: 0.3,
+    cacheWritePerMTok: 3,
+    notes: "OpenRouter route publishes prompt/output/cache-read rates, but no separate cache-write rate; cache writes use ordinary routed input as an explicit fallback.",
+  },
+  {
+    id: "kimi-k3",
+    models: ["kimi-k3"],
+    canonicalModel: "Kimi K3",
+    basis: `Moonshot/Kimi first-party pricing (${KIMI_K3_PRICING_SOURCE}), accessed 2026-07-25`,
+    inputPerMTok: 3,
+    outputPerMTok: 15,
+    cacheReadPerMTok: 0.3,
+    cacheWritePerMTok: 3,
+    notes: "Moonshot publishes cache-miss input ($3/MTok), cache-hit input ($0.30/MTok), and output ($15/MTok), but no separate cache-write tariff; cache writes use ordinary cache-miss input as an explicit fallback.",
+  },
+  {
     id: "kimi-k2.6-fireworks-router",
     models: ["kimi-k2p6-turbo", "kimi-k2p6-fast"],
     providers: ["fireworks-ai"],
@@ -495,6 +566,8 @@ function normalizeModel(model: string): string {
     "fireworks/kimi-k2p6-fast": "kimi-k2p6-fast",
     "accounts/fireworks/models/kimi-k2p6": "kimi-k2.6",
     "fireworks/kimi-k2p6": "kimi-k2.6",
+    "moonshotai/kimi-k3": "moonshotai/kimi-k3",
+    "moonshot/kimi-k3": "kimi-k3",
     "moonshotai/kimi-k2.5": "kimi-k2.5",
     "accounts/fireworks/models/kimi-k2p5": "kimi-k2.5",
     "fireworks/kimi-k2p5": "kimi-k2.5",

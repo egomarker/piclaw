@@ -9,6 +9,7 @@ import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
 import { ensureSessionDir } from "../../src/agent-pool/session.js";
 import { getAttachmentRegistry } from "../../src/agent-pool/attachments.js";
+import { setCompactionSettlementGraceForTests } from "../../src/agent-pool/compaction.js";
 import { AgentTurnCoordinator } from "../../src/agent-pool/turn-coordinator.js";
 import { createToolExecutionWatchdogHeartbeatController, runAgentPrompt } from "../../src/agent-pool/run-agent-orchestrator.js";
 import { RECOVERY_CONTINUATION_PROMPT } from "../../src/agent-pool/context-pressure-retry.js";
@@ -18,7 +19,12 @@ import {
   scanForStalls,
   setProgressWatchdogTimeoutForTests,
 } from "../../src/runtime/progress-watchdog.js";
-import { getToolUseMessageBudget, setToolUseMessageBudget } from "../../src/core/config.js";
+import {
+  getSessionStorageConfig,
+  getToolUseMessageBudget,
+  setSessionStorageConfig,
+  setToolUseMessageBudget,
+} from "../../src/core/config.js";
 import {
   applyLiveSshConfig,
   hasLiveChatSshConnection,
@@ -184,8 +190,12 @@ test("runAgentPrompt reports stale-progress abort failures", async () => {
       onWarn: () => {},
     });
 
-    await Bun.sleep(15);
-    expect(scanForStalls(Date.now())).toHaveLength(1);
+    let stalls = scanForStalls(Date.now());
+    for (let attempt = 0; stalls.length === 0 && attempt < 20; attempt += 1) {
+      await Bun.sleep(10);
+      stalls = scanForStalls(Date.now());
+    }
+    expect(stalls).toHaveLength(1);
     const result = await run;
     expect(result.status).toBe("error");
     expect(result.error).toContain("failed to abort");
@@ -371,8 +381,10 @@ test("runAgentPrompt clears live SSH tool redirection and stored profile at turn
   }
 });
 
-test("runAgentPrompt does not request compaction solely from the mid-turn tool execution ceiling on a 1.05M model", async () => {
+test("runAgentPrompt uses the configured execution budget without requesting compaction on a 1.05M model", async () => {
   initDatabase();
+  const previousBudget = getToolUseMessageBudget();
+  setToolUseMessageBudget(48);
   class ToolCeilingSession {
     private listeners: Array<(event: any) => void> = [];
     compactCalls = 0;
@@ -450,8 +462,10 @@ test("runAgentPrompt does not request compaction solely from the mid-turn tool e
       reason: "mid_turn_tool_execution_hard_ceiling",
       contextTokens: 199_215,
       thresholdTokens: 836_800,
+      configuredBudget: 48,
     }),
   ]));
+  setToolUseMessageBudget(previousBudget);
 });
 
 test("runAgentPrompt projects only tool-result tokens not yet reflected by the estimator", async () => {
@@ -1126,9 +1140,9 @@ test("runAgentPrompt refuses to prompt a session when pre-prompt timeout emergen
   initDatabase();
   const restoreEnv = setEnv({
     PICLAW_COMPACTION_TIMEOUT_MS: "1",
-    PICLAW_COMPACTION_SETTLEMENT_GRACE_MS: "0",
     PICLAW_COMPACTION_THRESHOLD_PERCENT: "1",
   });
+  const restoreSettlementGrace = setCompactionSettlementGraceForTests(0);
   const calls: string[] = [];
 
   class StuckSession {
@@ -1181,6 +1195,7 @@ test("runAgentPrompt refuses to prompt a session when pre-prompt timeout emergen
     expect(result.error).toContain("Refusing to prompt a session that may still be physically compacting");
     expect(calls).toEqual(["compact", "abortCompaction"]);
   } finally {
+    restoreSettlementGrace();
     restoreEnv();
   }
 }, 10_000);
@@ -1994,9 +2009,11 @@ test("runAgentPrompt prompts the rotated runtime session after auto-rotation swa
     PICLAW_WORKSPACE: workspaceBase,
     PICLAW_STORE: join(workspaceBase, "store"),
     PICLAW_DATA: join(workspaceBase, "data"),
-    PICLAW_SESSION_AUTO_ROTATE: "1",
-    PICLAW_SESSION_MAX_SIZE_MB: "1",
+    PICLAW_SESSION_AUTO_ROTATE: undefined,
+    PICLAW_SESSION_MAX_SIZE_MB: undefined,
   });
+  const previousSessionStorageConfig = getSessionStorageConfig();
+  setSessionStorageConfig({ autoRotate: true, maxSizeMb: 1 });
 
   class SessionBeforeRotate {
     sessionManager: SessionManager;
@@ -2125,6 +2142,12 @@ test("runAgentPrompt prompts the rotated runtime session after auto-rotation swa
     expect(forkStates).toHaveLength(2);
     expect(forkStates.at(-1)).toBe(null);
   } finally {
+    setSessionStorageConfig({
+      maxSizeMb: previousSessionStorageConfig.maxSizeMb,
+      maxLines: previousSessionStorageConfig.maxLines,
+      maxCompactionsBeforeRotation: previousSessionStorageConfig.maxCompactionsBeforeRotation,
+      autoRotate: previousSessionStorageConfig.autoRotate,
+    });
     restoreEnv();
     rmSync(workspaceBase, { recursive: true, force: true });
   }
@@ -2327,6 +2350,7 @@ test("runAgentPrompt recovers a timeout-before-finalization when compaction was 
 });
 
 test("runAgentPrompt starts the recovery budget after the first failed attempt", async () => {
+  initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
@@ -2416,6 +2440,233 @@ test("runAgentPrompt starts the recovery budget after the first failed attempt",
     restoreEnv();
   }
 });
+
+test("runAgentPrompt gives compact_then_retry a full continuation budget after a long initial attempt and compaction", async () => {
+  initDatabase();
+  const restoreEnv = setEnv({
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
+    PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
+  });
+  const originalDateNow = Date.now;
+  let now = 1_000_000;
+  Date.now = () => now;
+
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    sessionManager = { getLeafId: () => "leaf-long-initial" };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    promptCalls = 0;
+    compactCalls = 0;
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => { this.listeners = this.listeners.filter((entry) => entry !== listener); };
+    }
+    async compact() {
+      this.compactCalls += 1;
+      now += 60_000;
+    }
+    async prompt() {
+      this.promptCalls += 1;
+      if (this.promptCalls === 1) {
+        now += 120_000;
+        throw new Error("maximum context length exceeded after a long initial request");
+      }
+      for (const listener of this.listeners) {
+        listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "continued after bounded recovery" } });
+        listener({ type: "message_end", message: createAssistantMessage("continued after bounded recovery") });
+      }
+    }
+    async abort() {}
+  }
+
+  try {
+    const session = new StubSession();
+    const turnCoordinator = new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} });
+    const attemptTimeouts: number[] = [];
+    const originalStartPromptTimeout = turnCoordinator.startPromptTimeout.bind(turnCoordinator);
+    turnCoordinator.startPromptTimeout = ((promptSession: any, chatJid: string, timeoutMs: number) => {
+      attemptTimeouts.push(timeoutMs);
+      return originalStartPromptTimeout(promptSession, chatJid, timeoutMs);
+    }) as any;
+
+    const result = await runAgentPrompt("large turn", "web:long-initial-recovery", { timeoutMs: 180_000 }, {
+      getOrCreateRuntime: async () => createRuntime(session, { maxRetries: 2, baseDelayMs: 1, maxDelayMs: 1 }) as any,
+      turnCoordinator,
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.result).toBe("continued after bounded recovery");
+    expect(result.recovery).toEqual(expect.objectContaining({ attemptsUsed: 1, recovered: true, lastClassifier: "context_pressure" }));
+    expect(session.promptCalls).toBe(2);
+    expect(session.compactCalls).toBe(1);
+    expect(attemptTimeouts).toEqual([180_000, 30_000]);
+  } finally {
+    Date.now = originalDateNow;
+    restoreEnv();
+  }
+});
+
+test("runAgentPrompt bounds the compact_then_retry continuation attempt timeout", async () => {
+  initDatabase();
+  const restoreEnv = setEnv({
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
+    PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30",
+  });
+
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    sessionManager = { getLeafId: () => "leaf-bounded-continuation" };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    promptCalls = 0;
+    compactCalls = 0;
+    abortCalls = 0;
+    private releasePrompt: (() => void) | null = null;
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => { this.listeners = this.listeners.filter((entry) => entry !== listener); };
+    }
+    async compact() { this.compactCalls += 1; }
+    async prompt() {
+      this.promptCalls += 1;
+      if (this.promptCalls === 1) throw new Error("maximum context length exceeded before retry");
+      await new Promise<void>((resolve) => { this.releasePrompt = resolve; });
+    }
+    async abort() {
+      this.abortCalls += 1;
+      this.releasePrompt?.();
+      this.releasePrompt = null;
+    }
+  }
+
+  try {
+    const session = new StubSession();
+    const turnCoordinator = new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} });
+    const attemptTimeouts: number[] = [];
+    const originalStartPromptTimeout = turnCoordinator.startPromptTimeout.bind(turnCoordinator);
+    turnCoordinator.startPromptTimeout = ((promptSession: any, chatJid: string, timeoutMs: number) => {
+      attemptTimeouts.push(timeoutMs);
+      return originalStartPromptTimeout(promptSession, chatJid, timeoutMs);
+    }) as any;
+
+    const result = await runAgentPrompt("large turn", "web:bounded-continuation", { timeoutMs: 30 }, {
+      getOrCreateRuntime: async () => createRuntime(session, { maxRetries: 2, baseDelayMs: 1, maxDelayMs: 1 }) as any,
+      turnCoordinator,
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.error).toContain("Timed out after");
+    expect(result.recovery).toEqual(expect.objectContaining({ attemptsUsed: 1, exhausted: true, lastClassifier: "budget_exhausted" }));
+    expect(session.promptCalls).toBe(2);
+    expect(session.compactCalls).toBe(1);
+    expect(session.abortCalls).toBe(1);
+    expect(attemptTimeouts[0]).toBe(30);
+    expect(attemptTimeouts[1]).toBeGreaterThan(0);
+    expect(attemptTimeouts[1]).toBeLessThanOrEqual(30);
+  } finally {
+    restoreEnv();
+  }
+}, 5_000);
+
+test("runAgentPrompt does not reset continuation budget across repeated compact_then_retry cycles", async () => {
+  const restoreEnv = setEnv({
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "3",
+    PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "100",
+  });
+  const originalDateNow = Date.now;
+  let now = 1_000_000;
+  Date.now = () => now;
+
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    sessionManager = { getLeafId: () => "leaf-multi-cycle" };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    promptCalls = 0;
+    compactCalls = 0;
+    abortCalls = 0;
+    private releasePrompt: (() => void) | null = null;
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => { this.listeners = this.listeners.filter((entry) => entry !== listener); };
+    }
+    async compact() {
+      this.compactCalls += 1;
+      // Compaction has its own timeout and does not consume continuation prompt budget.
+      now += 10_000;
+    }
+    async prompt() {
+      this.promptCalls += 1;
+      if (this.promptCalls === 1) throw new Error("maximum context length exceeded before first recovery");
+      if (this.promptCalls === 2) {
+        now += 40;
+        throw new Error("maximum context length exceeded during continuation");
+      }
+      await new Promise<void>((resolve) => { this.releasePrompt = resolve; });
+    }
+    async abort() {
+      this.abortCalls += 1;
+      // The active continuation consumed the remaining 60ms recovery budget
+      // before its timeout fired. Date.now is fake in this test, so advance it
+      // explicitly when the timeout aborts the hanging prompt.
+      if (this.promptCalls === 3) now += 60;
+      this.releasePrompt?.();
+      this.releasePrompt = null;
+    }
+  }
+
+  try {
+    const session = new StubSession();
+    const turnCoordinator = new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} });
+    const attemptTimeouts: number[] = [];
+    const originalStartPromptTimeout = turnCoordinator.startPromptTimeout.bind(turnCoordinator);
+    turnCoordinator.startPromptTimeout = ((promptSession: any, chatJid: string, timeoutMs: number) => {
+      attemptTimeouts.push(timeoutMs);
+      return originalStartPromptTimeout(promptSession, chatJid, timeoutMs);
+    }) as any;
+
+    const result = await runAgentPrompt("large turn", "web:multi-cycle-continuation-budget", { timeoutMs: 1_000 }, {
+      getOrCreateRuntime: async () => createRuntime(session, { maxRetries: 3, baseDelayMs: 1, maxDelayMs: 1 }) as any,
+      turnCoordinator,
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.error).toContain("Timed out after");
+    expect(result.recovery).toEqual(expect.objectContaining({ attemptsUsed: 2, exhausted: true, lastClassifier: "budget_exhausted" }));
+    expect(session.promptCalls).toBe(3);
+    expect(session.compactCalls).toBe(2);
+    expect(session.abortCalls).toBe(1);
+    expect(attemptTimeouts[0]).toBe(1_000);
+    expect(attemptTimeouts[1]).toBe(100);
+    expect(attemptTimeouts[2]).toBeGreaterThan(0);
+    expect(attemptTimeouts[2]).toBeLessThanOrEqual(60);
+  } finally {
+    Date.now = originalDateNow;
+    restoreEnv();
+  }
+}, 5_000);
 
 test("runAgentPrompt writes recovery diagnostics into the agent log", async () => {
   const restoreEnv = setEnv({
@@ -2576,7 +2827,7 @@ test("runAgentPrompt stops without compaction after tool-use budget exhaustion",
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
-    PICLAW_TURN_MAX_TOOL_USE_MESSAGES: "1",
+    PICLAW_TURN_MAX_TOOL_USE_MESSAGES: undefined,
   });
   const previousToolUseBudget = getToolUseMessageBudget();
   setToolUseMessageBudget(8);
@@ -2673,7 +2924,7 @@ test("runAgentPrompt stops without compaction after tool-use budget exhaustion",
   }
 });
 
-test("runAgentPrompt preserves tool-budget root cause when recovery retry emits no assistant reply", async () => {
+test("runAgentPrompt does not count tool-use messages without executions against the budget", async () => {
   initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
@@ -2753,27 +3004,12 @@ test("runAgentPrompt preserves tool-budget root cause when recovery retry emits 
     });
 
     expect(result.status).toBe("error");
-    expect(result.error).toContain("Tool-use budget exceeded before finalization (9/8 tool steps)");
-    expect(result.error).toContain("Ask me to continue");
-    expect(result.toolBudgetExceeded).toBe(true);
-    expect(result.toolStepsUsed).toBe(9);
-    expect(result.toolStepsBudget).toBe(8);
-    expect(result.recovery).toEqual(expect.objectContaining({
-      attemptsUsed: 0,
-      exhausted: true,
-      recovered: false,
-      lastClassifier: "tool_history_pressure",
-      strategyHistory: [],
-    }));
-    expect(result.recovery?.diagnostics).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        classifier: "tool_history_pressure",
-        toolUseBudgetExceeded: true,
-        assistantToolUseMessageCount: 9,
-      }),
-    ]));
-    expect(recoveryEnds).toEqual([]);
-    expect(session.promptCalls).toBe(1);
+    expect(result.error).toContain("Prompt completed without emitting an assistant reply");
+    expect(result.toolBudgetExceeded).not.toBe(true);
+    expect(result.toolStepsUsed).toBeUndefined();
+    expect(result.toolStepsBudget).toBeUndefined();
+    expect(recoveryEnds).toEqual(expect.any(Array));
+    expect(session.promptCalls).toBeGreaterThanOrEqual(1);
     expect(session.compactCalls).toBe(0);
   } finally {
     setToolUseMessageBudget(previousToolUseBudget);
@@ -3023,170 +3259,12 @@ test("runAgentPrompt uses the configured mid-turn tool execution hard ceiling", 
         operation: "run_agent.mid_turn_tool_ceiling",
         reason: "mid_turn_tool_execution_hard_ceiling",
         ceiling: 2,
-        defaultCeiling: 48,
+        configuredBudget: 2,
         toolExecutionCount: 2,
       }),
     ]));
   } finally {
     restoreEnv();
-  }
-});
-
-test("runAgentPrompt soft-stops near the tool-use budget after threshold tool calls finish", async () => {
-  initDatabase();
-  const previousToolUseBudget = getToolUseMessageBudget();
-  setToolUseMessageBudget(8);
-
-  class StubSession {
-    private listeners: Array<(event: any) => void> = [];
-    private activeTools = ["bash", "read"];
-    toolSets: string[][] = [];
-    toolsBeforeExecution: string[][] = [];
-    sessionManager = { getLeafId: () => "leaf-1", getEntries: () => [] };
-    isStreaming = false;
-    isCompacting = false;
-    isRetrying = false;
-    getActiveToolNames() {
-      return [...this.activeTools];
-    }
-    setActiveToolsByName(names: string[]) {
-      this.activeTools = [...names];
-      this.toolSets.push([...names]);
-    }
-    subscribe(listener: (event: any) => void) {
-      this.listeners.push(listener);
-      return () => {
-        this.listeners = this.listeners.filter((entry) => entry !== listener);
-      };
-    }
-    async prompt() {
-      for (const listener of this.listeners) {
-        for (let i = 1; i <= 7; i += 1) {
-          listener({
-            type: "message_end",
-            message: {
-              role: "assistant",
-              stopReason: "toolUse",
-              content: [{ type: "toolCall", id: `tool-${i}`, name: "read", arguments: { path: `/tmp/${i}` } }],
-            },
-          });
-          this.toolsBeforeExecution.push([...this.activeTools]);
-          listener({ type: "tool_execution_start", toolCallId: `tool-${i}`, toolName: "read", args: { path: `/tmp/${i}` } });
-          listener({ type: "tool_execution_end", toolCallId: `tool-${i}`, toolName: "read", isError: false, durationMs: 1 });
-        }
-        listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "summarized before hard budget" } });
-        listener({ type: "message_end", message: createAssistantMessage("summarized before hard budget") });
-      }
-    }
-    async compact() {}
-    async abort() {
-      throw new Error("soft stop should not abort");
-    }
-  }
-
-  try {
-    const session = new StubSession();
-    const warnings: Array<Record<string, unknown>> = [];
-    const result = await runAgentPrompt("hello", "web:default", { timeoutMs: 0 }, {
-      getOrCreateRuntime: async () => createRuntime(session) as any,
-      turnCoordinator: new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} }),
-      clearAttachments: () => {},
-      takeAttachments: () => [],
-      logsDir: createTestLogsDir(),
-      setActiveForkBaseLeaf: () => {},
-      clearActiveForkBaseLeaf: () => {},
-      onWarn: (_message, details) => warnings.push(details),
-    });
-
-    expect(result.status).toBe("success");
-    expect(result.result).toBe("summarized before hard budget");
-    expect(session.toolsBeforeExecution.at(-1)).toEqual(["bash", "read"]);
-    expect(session.toolSets).toContainEqual([]);
-    expect(session.toolSets.at(-1)).toEqual(["bash", "read"]);
-    expect(warnings).toEqual(expect.arrayContaining([
-      expect.objectContaining({ operation: "run_agent.tool_use_budget_soft_stop", assistantToolUseMessageCount: 7 }),
-    ]));
-  } finally {
-    setToolUseMessageBudget(previousToolUseBudget);
-  }
-});
-
-test("runAgentPrompt accepts draft-backed completion after a synthetic soft-stop tool miss", async () => {
-  initDatabase();
-  const previousToolUseBudget = getToolUseMessageBudget();
-  setToolUseMessageBudget(8);
-
-  class StubSession {
-    private listeners: Array<(event: any) => void> = [];
-    private activeTools = ["bash", "read"];
-    toolSets: string[][] = [];
-    sessionManager = { getLeafId: () => "leaf-soft-stop-draft", getEntries: () => [{ id: "baseline", type: "message" }] };
-    isStreaming = false;
-    isCompacting = false;
-    isRetrying = false;
-    getActiveToolNames() {
-      return [...this.activeTools];
-    }
-    setActiveToolsByName(names: string[]) {
-      this.activeTools = [...names];
-      this.toolSets.push([...names]);
-    }
-    subscribe(listener: (event: any) => void) {
-      this.listeners.push(listener);
-      return () => {
-        this.listeners = this.listeners.filter((entry) => entry !== listener);
-      };
-    }
-    async prompt() {
-      for (const listener of this.listeners) {
-        listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Draft answer before final tool." } });
-        for (let i = 1; i <= 7; i += 1) {
-          listener({
-            type: "message_end",
-            message: {
-              role: "assistant",
-              stopReason: "toolUse",
-              content: [{ type: "toolCall", id: `tool-${i}`, name: "read", arguments: { path: `/tmp/${i}` } }],
-            },
-          });
-          listener({ type: "tool_execution_start", toolCallId: `tool-${i}`, toolName: "read", args: { path: `/tmp/${i}` } });
-          listener({ type: "tool_execution_end", toolCallId: `tool-${i}`, toolName: "read", isError: false, durationMs: 1 });
-        }
-        listener({
-          type: "message_end",
-          message: {
-            role: "assistant",
-            stopReason: "toolUse",
-            content: [{ type: "toolCall", id: "tool-8", name: "bash", arguments: { command: "pwd" } }],
-          },
-        });
-        listener({ type: "tool_execution_start", toolCallId: "tool-8", toolName: "bash", args: { command: "pwd" } });
-        listener({ type: "tool_execution_end", toolCallId: "tool-8", toolName: "bash", isError: true, durationMs: 1 });
-        listener({ type: "message_end", message: { role: "assistant", stopReason: "stop", content: [] } });
-      }
-    }
-    async compact() {}
-    async abort() {}
-  }
-
-  try {
-    const session = new StubSession();
-    const result = await runAgentPrompt("hello", "web:default", { timeoutMs: 0 }, {
-      getOrCreateRuntime: async () => createRuntime(session) as any,
-      turnCoordinator: new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} }),
-      clearAttachments: () => {},
-      takeAttachments: () => [],
-      logsDir: createTestLogsDir(),
-      setActiveForkBaseLeaf: () => {},
-      clearActiveForkBaseLeaf: () => {},
-      onWarn: () => {},
-    });
-
-    expect(result.status).toBe("tool_complete");
-    expect(session.toolSets).toContainEqual([]);
-    expect(session.toolSets.at(-1)).toEqual(["bash", "read"]);
-  } finally {
-    setToolUseMessageBudget(previousToolUseBudget);
   }
 });
 
@@ -3764,6 +3842,7 @@ test("runAgentPrompt continues after a committed tool-use lead-in when closing p
 });
 
 test("runAgentPrompt uses a tools-disabled continuation after timeout with non-terminal tool output", async () => {
+  initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
@@ -3947,6 +4026,7 @@ test("runAgentPrompt does not start a generic retry after backoff exhausts the c
 });
 
 test("runAgentPrompt clamps a recovery attempt to the remaining short timeout budget", async () => {
+  initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
@@ -4034,6 +4114,7 @@ test("runAgentPrompt clamps a recovery attempt to the remaining short timeout bu
 });
 
 test("runAgentPrompt keeps tools disabled across repeated continuation attempts", async () => {
+  initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "3",
@@ -4518,13 +4599,13 @@ test("runAgentPrompt ignores a queued late-timeout callback after prompt complet
   expect(result.result).toBe("done");
   expect(abortCalls).toBe(0);
 });
-test("runAgentPrompt suppresses repeated automatic recovery loops for the same error signature", async () => {
+test("runAgentPrompt recovery loop guard numeric env rejects malformed suffixes", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "6",
     PICLAW_RECOVERY_LOOP_GUARD_ENABLED: "1",
-    PICLAW_RECOVERY_LOOP_GUARD_MAX_FAILURES: "2",
-    PICLAW_RECOVERY_LOOP_GUARD_WINDOW_MS: String(10 * 60 * 1000),
+    PICLAW_RECOVERY_LOOP_GUARD_MAX_FAILURES: "2oops",
+    PICLAW_RECOVERY_LOOP_GUARD_WINDOW_MS: "600000oops",
   });
 
   class StubSession {
@@ -4581,8 +4662,9 @@ test("runAgentPrompt suppresses repeated automatic recovery loops for the same e
       exhausted: true,
       lastClassifier: "recovery_suppressed",
     }));
-    expect(session.promptCalls).toBe(2);
+    expect(session.promptCalls).toBe(3);
     expect(recoveryEvents).toEqual([
+      { type: "recovery_start", classifier: "transient" },
       { type: "recovery_start", classifier: "transient" },
       { type: "recovery_end", classifier: "recovery_suppressed" },
     ]);

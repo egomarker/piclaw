@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { FFIType, dlopen, ptr } from "bun:ffi";
 import type { ServerWebSocket } from "bun";
 
-import { WORKSPACE_DIR } from "../../../core/config.js";
+import { WORKSPACE_DIR, getWebRuntimeConfig } from "../../../core/config.js";
 import { DEFAULT_WEB_USER_ID, getWebSession } from "../../../db.js";
 import { createLogger, debugSuppressedError } from "../../../utils/logger.js";
 import { getSessionTokenFromRequest } from "../auth/session-auth.js";
@@ -43,7 +43,7 @@ interface TerminalProcessLike {
 }
 
 export interface TerminalSessionServiceOptions {
-  spawnProcess?: (cwd: string) => TerminalProcessLike;
+  spawnProcess?: (cwd: string, env: NodeJS.ProcessEnv) => TerminalProcessLike;
   handoffTtlMs?: number;
   reconnectGraceMs?: number;
 }
@@ -386,7 +386,26 @@ function buildShellArgs(): string[] {
   return IS_ZSH ? ["+o", "PROMPT_SP", "-i"] : ["-i"];
 }
 
-function defaultSpawnProcess(cwd: string): TerminalProcessLike {
+function buildTerminalProcessEnv(): NodeJS.ProcessEnv {
+  const terminalImageProtocol = getWebRuntimeConfig().terminalImageProtocol;
+  return {
+    ...process.env,
+    TERM: process.env.TERM || "xterm-256color",
+    COLORTERM: process.env.COLORTERM || "truecolor",
+    CLICOLOR: process.env.CLICOLOR || "1",
+    FORCE_COLOR: process.env.FORCE_COLOR || "1",
+    PICLAW_TERMINAL: "1",
+    PICLAW_TERMINAL_IMAGE_PROTOCOL: terminalImageProtocol,
+    TERM_INLINE_IMAGE_PROTOCOL: process.env.TERM_INLINE_IMAGE_PROTOCOL || terminalImageProtocol,
+    HOME: process.env.HOME || "/home/agent",
+    COLUMNS: String(DEFAULT_COLS),
+    LINES: String(DEFAULT_ROWS),
+    PROMPT_EOL_MARK: "",
+    SHELL_SESSION_DID_INIT: "1",
+  };
+}
+
+function defaultSpawnProcess(cwd: string, env: NodeJS.ProcessEnv): TerminalProcessLike {
   // macOS: prefer native PTY addon for proper resize (including setuid apps like top).
   if (IS_MACOS) {
     const proc = spawnMacOSNativePty(cwd, DEFAULT_COLS, DEFAULT_ROWS);
@@ -401,21 +420,7 @@ function defaultSpawnProcess(cwd: string): TerminalProcessLike {
     : { bin: EXPECT_BIN, args: ["-c", `log_user 0; spawn -noecho ${USER_SHELL} ${shellArgs.join(" ")}; log_user 1; interact`] };
   return spawn(command.bin, command.args, {
     cwd,
-    env: {
-      ...process.env,
-      TERM: process.env.TERM || "xterm-256color",
-      COLORTERM: process.env.COLORTERM || "truecolor",
-      CLICOLOR: process.env.CLICOLOR || "1",
-      FORCE_COLOR: process.env.FORCE_COLOR || "1",
-      PICLAW_TERMINAL: "1",
-      PICLAW_TERMINAL_IMAGE_PROTOCOL: process.env.PICLAW_TERMINAL_IMAGE_PROTOCOL || "iterm2",
-      TERM_INLINE_IMAGE_PROTOCOL: process.env.TERM_INLINE_IMAGE_PROTOCOL || process.env.PICLAW_TERMINAL_IMAGE_PROTOCOL || "iterm2",
-      HOME: process.env.HOME || "/home/agent",
-      COLUMNS: String(DEFAULT_COLS),
-      LINES: String(DEFAULT_ROWS),
-      PROMPT_EOL_MARK: "",
-      SHELL_SESSION_DID_INIT: "1",
-    },
+    env,
     stdio: ["pipe", "pipe", "pipe"],
   }) as ChildProcessWithoutNullStreams;
 }
@@ -423,7 +428,7 @@ function defaultSpawnProcess(cwd: string): TerminalProcessLike {
 export class TerminalSessionService {
   private readonly sessions = new Map<string, TerminalSessionRecord>();
   private readonly handoffs = new Map<string, TerminalHandoffRecord>();
-  private readonly spawnProcess: (cwd: string) => TerminalProcessLike;
+  private readonly spawnProcess: (cwd: string, env: NodeJS.ProcessEnv) => TerminalProcessLike;
   private readonly handoffTtlMs: number;
   private readonly reconnectGraceMs: number;
 
@@ -683,7 +688,7 @@ export class TerminalSessionService {
     const existing = this.sessions.get(owner.token);
     if (existing) return existing;
 
-    const proc = this.spawnProcess(WORKSPACE_DIR);
+    const proc = this.spawnProcess(WORKSPACE_DIR, buildTerminalProcessEnv());
     const session: TerminalSessionRecord = {
       id: createTerminalSessionId(),
       owner,

@@ -318,7 +318,7 @@
               <td>Default tests</td>
               <td><span class="mono">make test</span> / <span class="mono">bun run test</span></td>
               <td><span class="mono">runtime/scripts/controlled-test-runner.ts</span></td>
-              <td>Sequential staged execution with memory sampling and JSON report output.</td>
+              <td>Sequential staged execution with memory sampling; JSON report output only when <span class="mono">--report</span> is supplied.</td>
             </tr>
             <tr>
               <td>Raw tests</td>
@@ -406,7 +406,7 @@
         <div class="check">
           <div class="label">Telemetry</div>
           <h3>Memory-aware reporting</h3>
-          <p>Samples process-tree RSS and cgroup memory, emits a JSON report to <span class="mono">runtime/generated/controlled-test-report.json</span>.</p>
+          <p>Samples process-tree RSS and cgroup memory. Default runs print telemetry without writing a report; pass <span class="mono">--report artifacts/performance/controlled-test-report.json</span> for durable evidence.</p>
         </div>
       </div>
       <div class="table-shell" style="margin-top:16px;">
@@ -547,9 +547,9 @@ cd .. &amp;&amp; make build-web</div>
         </div>
         <div class="layer">
           <div class="label">When debugging test memory</div>
-          <h3>Use the controlled runner report</h3>
+          <h3>Use an explicit controlled runner report</h3>
           <ul>
-            <li>inspect <span class="mono">runtime/generated/controlled-test-report.json</span></li>
+            <li>pass <span class="mono">--report artifacts/performance/controlled-test-report.json</span></li>
             <li>adjust stage size / sampling if you need sharper memory evidence</li>
             <li>use the report as an audit artifact, not just a pass/fail signal</li>
           </ul>

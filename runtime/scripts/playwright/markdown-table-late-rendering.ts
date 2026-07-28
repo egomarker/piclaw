@@ -127,7 +127,7 @@ try {
   const result = await page.evaluate(async () => {
     const harness = (window as any).__lateTableHarness;
     const view = harness.editor.view;
-    const { EditorView, syntaxTree } = harness.vendor;
+    const { syntaxTree } = harness.vendor;
 
     const parserTables: Array<{ line: number; from: number; first: string }> = [];
     syntaxTree(view.state).iterate({

@@ -174,24 +174,6 @@ function snippetAt(source: string, index: number): string {
   return source.slice(start, end).trim();
 }
 
-function isIdentifierChar(ch: string | undefined): boolean {
-  return !!ch && /[A-Za-z0-9_$]/.test(ch);
-}
-
-function isWhitespace(ch: string | undefined): boolean {
-  return !!ch && /\s/.test(ch);
-}
-
-function skipWhitespace(source: string, index: number, mask: Uint8Array): number {
-  let cursor = index;
-  while (cursor < source.length) {
-    const ch = source[cursor];
-    if (!mask[cursor] && !isWhitespace(ch)) break;
-    cursor++;
-  }
-  return cursor;
-}
-
 function skipBalancedGroup(source: string, index: number, mask: Uint8Array, open: string, close: string): number {
   if (source[index] !== open) return index;
   let depth = 0;

@@ -42,6 +42,41 @@ describe("provider/model pricing reference", () => {
     });
   });
 
+  test("resolves Opus 5 and Kimi K3 first-party and routed prices", () => {
+    expect(resolveProviderModelPricing("anthropic", "claude-opus-5")).toMatchObject({
+      canonicalModel: "Claude Opus 5",
+      inputPerMTok: 5,
+      outputPerMTok: 25,
+      cacheReadPerMTok: 0.5,
+      cacheWritePerMTok: 6.25,
+    });
+    expect(resolveProviderModelPricing("anthropic", "claude-opus-5-fast")).toMatchObject({
+      canonicalModel: "Claude Opus 5 Fast",
+      inputPerMTok: 10,
+      outputPerMTok: 50,
+      cacheReadPerMTok: 1,
+      cacheWritePerMTok: 12.5,
+    });
+    expect(resolveProviderModelPricing("openrouter", "anthropic/claude-opus-5")).toMatchObject({
+      canonicalModel: "Claude Opus 5 (OpenRouter)",
+      inputPerMTok: 5,
+      outputPerMTok: 25,
+    });
+    expect(resolveProviderModelPricing("moonshot", "kimi-k3")).toMatchObject({
+      canonicalModel: "Kimi K3",
+      inputPerMTok: 3,
+      outputPerMTok: 15,
+      cacheReadPerMTok: 0.3,
+      cacheWritePerMTok: 3,
+    });
+    expect(resolveProviderModelPricing("openrouter", "moonshotai/kimi-k3")).toMatchObject({
+      canonicalModel: "Kimi K3 (OpenRouter)",
+      inputPerMTok: 3,
+      outputPerMTok: 15,
+      cacheReadPerMTok: 0.3,
+    });
+  });
+
   test("prices local inference at zero metered API cost", () => {
     expect(resolveProviderModelPricing("milkv-local", "gemma4-e4b-qat-mtp")).toMatchObject({
       inputPerMTok: 0,

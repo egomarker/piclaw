@@ -560,43 +560,64 @@ export async function attemptRemoteCompaction(options: {
   }
 }
 
+function partContainsSentinel(part: unknown): boolean {
+  if (typeof part === "string") return part.includes(REMOTE_COMPACTION_SUMMARY_SENTINEL);
+  if (!part || typeof part !== "object" || Array.isArray(part)) return false;
+  const content = part as Record<string, unknown>;
+  return typeof content.text === "string" && content.text.includes(REMOTE_COMPACTION_SUMMARY_SENTINEL);
+}
+
 function inputItemContainsSentinel(item: unknown): boolean {
   if (!item || typeof item !== "object" || Array.isArray(item)) return false;
   const record = item as Record<string, unknown>;
+  if (typeof record.content === "string") return partContainsSentinel(record.content);
   if (!Array.isArray(record.content)) return false;
-  return record.content.some((part) => {
-    if (!part || typeof part !== "object" || Array.isArray(part)) return false;
-    const content = part as Record<string, unknown>;
-    return content.type === "input_text"
-      && typeof content.text === "string"
-      && content.text.includes(REMOTE_COMPACTION_SUMMARY_SENTINEL);
-  });
+  return record.content.some(partContainsSentinel);
+}
+
+/**
+ * Prompt-bearing payload fields across provider APIs. Responses uses `input`,
+ * Anthropic Messages uses `messages`, Gemini uses `contents`.
+ */
+const PROMPT_ARRAY_FIELDS = ["input", "messages", "contents"] as const;
+
+/**
+ * Drop the replay marker when the persisted native window cannot be replayed.
+ *
+ * The marker is a placeholder standing in for a provider-native compacted
+ * window. If that window cannot be rehydrated (incompatible provider/model, or
+ * unreadable state) the marker must not reach the provider, but the turn itself
+ * must still proceed: the alternative is a session that fails every request for
+ * as long as the incompatible state remains persisted.
+ */
+export function stripRemoteCompactionMarker(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const record = payload as Record<string, unknown>;
+  let changed = false;
+  const next: Record<string, unknown> = { ...record };
+  for (const field of PROMPT_ARRAY_FIELDS) {
+    const value = record[field];
+    if (!Array.isArray(value)) continue;
+    const filtered = value.filter((item) => !inputItemContainsSentinel(item));
+    if (filtered.length === value.length) continue;
+    next[field] = filtered;
+    changed = true;
+  }
+  return changed ? next : payload;
 }
 
 export type RemoteCompactionReplayResult =
   | { ok: true; payload: unknown; injectedItems: number }
-  | { ok: false; code: "incompatible" | "malformed"; message: string; blockedPayload: unknown };
+  | { ok: false; code: "incompatible" | "malformed"; message: string; fallbackPayload: unknown };
 
 /** Prepend canonical native state to a direct local-fallback model request. */
 export function prependRemoteCompactionPayload(payload: unknown, details: RemoteCompactionDetails): unknown {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return blockRemoteCompactionPayload(payload);
+    return stripRemoteCompactionMarker(payload);
   }
   const record = payload as Record<string, unknown>;
-  if (!Array.isArray(record.input)) return blockRemoteCompactionPayload(payload);
+  if (!Array.isArray(record.input)) return stripRemoteCompactionMarker(payload);
   return { ...record, input: [...structuredClone(details.output), ...record.input] };
-}
-
-export function blockRemoteCompactionPayload(_payload: unknown): unknown {
-  // before_provider_request errors are intentionally isolated by Pi. Replace
-  // the entire payload rather than spreading it: non-Responses providers use
-  // prompt-bearing fields such as `messages` or `contents`, and retaining any
-  // original field could leak a marker projection or current prompt after an
-  // incompatible model switch.
-  return {
-    model: "__piclaw_remote_compaction_replay_blocked__",
-    input: [],
-  };
 }
 
 export function injectRemoteCompactionPayload(
@@ -609,19 +630,19 @@ export function injectRemoteCompactionPayload(
       ok: false,
       code: "incompatible",
       message: "Persisted remote compaction state is incompatible with the active provider or model",
-      blockedPayload: blockRemoteCompactionPayload(payload),
+      fallbackPayload: stripRemoteCompactionMarker(payload),
     };
   }
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return { ok: false, code: "malformed", message: "Provider payload was not an object", blockedPayload: blockRemoteCompactionPayload(payload) };
+    return { ok: false, code: "malformed", message: "Provider payload was not an object", fallbackPayload: stripRemoteCompactionMarker(payload) };
   }
   const record = payload as Record<string, unknown>;
   if (!Array.isArray(record.input)) {
-    return { ok: false, code: "malformed", message: "Provider payload had no input array", blockedPayload: blockRemoteCompactionPayload(payload) };
+    return { ok: false, code: "malformed", message: "Provider payload had no input array", fallbackPayload: stripRemoteCompactionMarker(payload) };
   }
   const markerIndex = record.input.findIndex(inputItemContainsSentinel);
   if (markerIndex < 0) {
-    return { ok: false, code: "malformed", message: "Remote compaction replay marker was missing", blockedPayload: blockRemoteCompactionPayload(payload) };
+    return { ok: false, code: "malformed", message: "Remote compaction replay marker was missing", fallbackPayload: stripRemoteCompactionMarker(payload) };
   }
   const output = structuredClone(details.output);
   return {

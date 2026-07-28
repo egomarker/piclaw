@@ -141,6 +141,53 @@ describe("messages tool extension", () => {
     ]);
   });
 
+  test("get resolves explicit row IDs across chats by default", async () => {
+    const otherChatJid = `${chatJid}:other`;
+    db.storeChatMetadata(otherChatJid, new Date().toISOString(), "Other");
+    const rowId = db.storeMessage({
+      id: `msg-${Math.random().toString(36).slice(2, 10)}`,
+      chat_jid: otherChatJid,
+      sender: "web-agent",
+      sender_name: "Other Agent",
+      content: "cross-chat referenced row",
+      timestamp: new Date().toISOString(),
+      is_from_me: false,
+      is_bot_message: true,
+    });
+
+    const { tool } = await getTool();
+    const implicit = await runWithContext(tool, { action: "get", row_ids: [rowId] });
+    expect(implicit.details.count).toBe(1);
+    expect(implicit.details.messages[0].message.chat_jid).toBe(otherChatJid);
+    expect(implicit.content[0].text).toContain("cross-chat referenced row");
+
+    const scoped = await runWithContext(tool, { action: "get", row_ids: [rowId], chat_jid: chatJid });
+    expect(scoped.details.count).toBe(0);
+    expect(scoped.details.missing_row_ids).toEqual([rowId]);
+  });
+
+  test("get renders content-block-only rows with a useful preview", async () => {
+    const rowId = db.storeMessage({
+      id: `msg-${Math.random().toString(36).slice(2, 10)}`,
+      chat_jid: chatJid,
+      sender: "web-agent",
+      sender_name: "Smith",
+      content: "",
+      content_blocks: [{ type: "turn_outcome_marker", title: "OpenAI API authentication failed", label: "provider auth" }],
+      timestamp: new Date().toISOString(),
+      is_from_me: false,
+      is_bot_message: true,
+    });
+
+    const { tool } = await getTool();
+    const result = await runWithContext(tool, { action: "get", row_ids: [rowId] });
+    expect(result.details.count).toBe(1);
+    expect(result.details.messages[0].message.content_blocks).toEqual([
+      { type: "turn_outcome_marker", title: "OpenAI API authentication failed", label: "provider auth" },
+    ]);
+    expect(result.content[0].text).toContain("turn_outcome_marker: OpenAI API authentication failed");
+  });
+
   test("search supports wildcard all-rows query", async () => {
     insertMessage("alpha message");
     insertMessage("beta message");

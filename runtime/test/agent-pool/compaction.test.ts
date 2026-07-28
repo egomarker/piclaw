@@ -10,9 +10,13 @@ import {
   noteCompactionFailure,
   noteCompactionSuccess,
   runCompactionWithTimeout,
+  scheduleIdleAutoCompaction,
+  setCompactionSettlementGraceForTests,
 } from "../../src/agent-pool/compaction.js";
 import { getChatAutoCompactionWindow, getChatCompactionBackoff, initDatabase, setChatCompactionBackoff } from "../../src/db.js";
+import { resetCompactionRuntimeConfigForTests, setCompactionRuntimeConfigForTests } from "../../src/core/config.js";
 import { recordCompactionCancellationReason } from "../../src/agent-pool/compaction-cancel-reason.js";
+import { getActivePiclawCompactionTrigger } from "../../src/agent-pool/compaction-trigger-context.js";
 import { getSessionActivitySnapshot } from "../../src/extensions/session-status.js";
 
 beforeEach(() => {
@@ -596,11 +600,9 @@ test("runCompactionWithTimeout keeps the single-flight lock until timed-out comp
   }
 });
 
-test("a never-settling timed-out compaction quarantines its mutable session", async () => {
+test("fixed compaction timeout grace keeps a timed-out compaction quarantined until settlement", async () => {
   const previousTimeout = process.env.PICLAW_COMPACTION_TIMEOUT_MS;
-  const previousGrace = process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS;
   process.env.PICLAW_COMPACTION_TIMEOUT_MS = "5";
-  process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS = "0";
   try {
     const never = deferred<void>();
     let calls = 0;
@@ -615,29 +617,79 @@ test("a never-settling timed-out compaction quarantines its mutable session", as
       return "impossible";
     };
 
-    const owner = await runCompactionWithTimeout(session, "web:timeout-quarantine", {}, compact);
-    const joined = await runCompactionWithTimeout(session, "web:timeout-quarantine", {}, compact);
+    const ownerPromise = runCompactionWithTimeout(session, "web:timeout-quarantine", {}, compact);
+    await Bun.sleep(25);
+    expect(getSessionActivitySnapshot("web:timeout-quarantine")?.isCompacting).toBe(true);
 
+    never.resolve();
+    const owner = await ownerPromise;
     expect(owner.ok).toBe(false);
     expect(owner.joined).toBe(false);
-    expect(joined.ok).toBe(false);
-    expect(joined.joined).toBe(true);
-    expect(joined.generationId).toBe(owner.generationId);
     expect(calls).toBe(1);
-    expect(getSessionActivitySnapshot("web:timeout-quarantine")?.isCompacting).toBe(true);
+    expect(getSessionActivitySnapshot("web:timeout-quarantine")?.isCompacting).toBe(false);
   } finally {
     if (previousTimeout === undefined) delete process.env.PICLAW_COMPACTION_TIMEOUT_MS;
     else process.env.PICLAW_COMPACTION_TIMEOUT_MS = previousTimeout;
-    if (previousGrace === undefined) delete process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS;
-    else process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS = previousGrace;
+  }
+});
+
+test("compaction trigger uses the fixed internal max-work-units ceiling", async () => {
+  const previousTimeout = process.env.PICLAW_COMPACTION_TIMEOUT_MS;
+  process.env.PICLAW_COMPACTION_TIMEOUT_MS = "5000";
+  try {
+    const session = makeSession([]);
+    let observedMaxWorkUnits: unknown;
+    const result = await runCompactionWithTimeout(session, "web:max-work-units", {}, async () => {
+      observedMaxWorkUnits = getActivePiclawCompactionTrigger()?.maxWorkUnits;
+      return "done";
+    });
+
+    expect(result).toEqual({ ok: true, result: "done" });
+    expect(observedMaxWorkUnits).toBe(1_000_000);
+  } finally {
+    if (previousTimeout === undefined) delete process.env.PICLAW_COMPACTION_TIMEOUT_MS;
+    else process.env.PICLAW_COMPACTION_TIMEOUT_MS = previousTimeout;
+  }
+});
+
+test("idle auto-compaction delay env preserves zero and rejects malformed suffixes", async () => {
+  const previousDelay = process.env.PICLAW_IDLE_AUTO_COMPACTION_DELAY_MS;
+  try {
+    const session = {
+      ...makeSession([{ role: "user", content: "large" }], 90_000),
+      model: { provider: "test", id: "idle-delay", contextWindow: 100_000 },
+      settingsManager: { getCompactionSettings: () => ({ enabled: true, reserveTokens: 25_000 }) },
+      isStreaming: false,
+      isCompacting: false,
+      isRetrying: false,
+      compact: async () => undefined,
+    };
+
+    process.env.PICLAW_IDLE_AUTO_COMPACTION_DELAY_MS = "0";
+    let zeroDelayFired = false;
+    scheduleIdleAutoCompaction(session as any, "web:idle-zero-delay", {}, () => {
+      zeroDelayFired = true;
+    });
+    await Bun.sleep(25);
+    expect(zeroDelayFired).toBe(true);
+
+    process.env.PICLAW_IDLE_AUTO_COMPACTION_DELAY_MS = "0oops";
+    let malformedDelayFired = false;
+    scheduleIdleAutoCompaction(session as any, "web:idle-malformed-delay", {}, () => {
+      malformedDelayFired = true;
+    });
+    await Bun.sleep(25);
+    expect(malformedDelayFired).toBe(false);
+  } finally {
+    if (previousDelay === undefined) delete process.env.PICLAW_IDLE_AUTO_COMPACTION_DELAY_MS;
+    else process.env.PICLAW_IDLE_AUTO_COMPACTION_DELAY_MS = previousDelay;
   }
 });
 
 test("a late timed-out compaction cannot clear a replacement generation's active state", async () => {
   const previousTimeout = process.env.PICLAW_COMPACTION_TIMEOUT_MS;
-  const previousGrace = process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS;
   process.env.PICLAW_COMPACTION_TIMEOUT_MS = "20";
-  process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS = "5";
+  const restoreSettlementGrace = setCompactionSettlementGraceForTests(5);
   const chatJid = "web:late-compaction-generation";
 
   try {
@@ -670,18 +722,16 @@ test("a late timed-out compaction cannot clear a replacement generation's active
     expect(await replacement).toEqual({ ok: true, result: "replacement-result" });
     expect(getSessionActivitySnapshot(chatJid)?.isCompacting).toBe(false);
   } finally {
+    restoreSettlementGrace();
     if (previousTimeout === undefined) delete process.env.PICLAW_COMPACTION_TIMEOUT_MS;
     else process.env.PICLAW_COMPACTION_TIMEOUT_MS = previousTimeout;
-    if (previousGrace === undefined) delete process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS;
-    else process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS = previousGrace;
   }
 });
 
 test("late cancellation cleanup cannot consume a replacement generation's reason", async () => {
   const previousTimeout = process.env.PICLAW_COMPACTION_TIMEOUT_MS;
-  const previousGrace = process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS;
   process.env.PICLAW_COMPACTION_TIMEOUT_MS = "50";
-  process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS = "0";
+  const restoreSettlementGrace = setCompactionSettlementGraceForTests(0);
   const chatJid = "web:late-cancellation-reason";
 
   try {
@@ -723,18 +773,16 @@ test("late cancellation cleanup cannot consume a replacement generation's reason
 
     expect(await replacement).toEqual({ ok: false, errorMessage: "replacement generation reason" });
   } finally {
+    restoreSettlementGrace();
     if (previousTimeout === undefined) delete process.env.PICLAW_COMPACTION_TIMEOUT_MS;
     else process.env.PICLAW_COMPACTION_TIMEOUT_MS = previousTimeout;
-    if (previousGrace === undefined) delete process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS;
-    else process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS = previousGrace;
   }
 });
 
 test("maybeAutoCompactSessionBeforePrompt subtracts overhead before threshold checks", async () => {
   const previousThreshold = process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT;
-  const previousOverhead = process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS;
   process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT = "75";
-  process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS = "4000";
+  setCompactionRuntimeConfigForTests({ systemPromptOverheadTokens: 4_000 });
   try {
     const events: any[] = [];
     let compactCalls = 0;
@@ -785,10 +833,9 @@ test("maybeAutoCompactSessionBeforePrompt subtracts overhead before threshold ch
       contextWindow: 100_000,
     }));
   } finally {
+    resetCompactionRuntimeConfigForTests();
     if (previousThreshold === undefined) delete process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT;
     else process.env.PICLAW_COMPACTION_THRESHOLD_PERCENT = previousThreshold;
-    if (previousOverhead === undefined) delete process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS;
-    else process.env.PICLAW_SYSTEM_PROMPT_OVERHEAD_TOKENS = previousOverhead;
   }
 });
 

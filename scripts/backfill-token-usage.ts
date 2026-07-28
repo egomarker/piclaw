@@ -149,7 +149,7 @@ const processFile = (filePath: string, chatJid: string) => {
 };
 
 const walk = (dir: string, chatJid?: string) => {
-  let entries: string[] = [];
+  let entries: string[];
   try {
     entries = readdirSync(dir);
   } catch {

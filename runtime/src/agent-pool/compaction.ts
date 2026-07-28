@@ -4,7 +4,7 @@
 
 import { type AgentSession, type AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
-import { getCompactionRuntimeConfig } from "../core/config.js";
+import { getCompactionRuntimeConfig, getIdleAutoCompactionDelayMs } from "../core/config.js";
 import {
   clearChatCompactionActive,
   clearChatCompactionBackoff,
@@ -25,13 +25,15 @@ import { applyTokenEstimateSafetyMultiplier, getContextThresholdTokens, getConte
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
 
 const log = createLogger("agent-pool.compaction");
+const COMPACTION_MAX_WORK_UNITS = 1_000_000;
+const COMPACTION_SETTLEMENT_GRACE_MS = 5_000;
+let compactionSettlementGraceOverrideMs: number | null = null;
 
 export interface CompactionLifecycleOptions {
   onInfo?: (message: string, details: Record<string, unknown>) => void;
   onWarn?: (message: string, details: Record<string, unknown>) => void;
 }
 
-const DEFAULT_IDLE_AUTO_COMPACTION_DELAY_MS = 5_000;
 const idleAutoCompactionTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 type BaseCompactionOutcome<T> = { ok: true; result: T } | { ok: false; errorMessage: string };
@@ -416,15 +418,6 @@ export function getModelContextWindow(session: AgentSession): number | null {
   return getContextWindowFromModel(session.model);
 }
 
-function parseNonNegativeInt(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(String(value || "").trim(), 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
-}
-
-function getIdleAutoCompactionDelayMs(): number {
-  return parseNonNegativeInt(process.env.PICLAW_IDLE_AUTO_COMPACTION_DELAY_MS, DEFAULT_IDLE_AUTO_COMPACTION_DELAY_MS);
-}
-
 function getCompactionBackoffBaseMs(): number {
   return getCompactionRuntimeConfig().backoffBaseMs;
 }
@@ -576,8 +569,19 @@ function defaultTriggerForReason(reason: string): PiclawCompactionTrigger {
 }
 
 function getCompactionMaxWorkUnits(): number {
-  const parsed = Number.parseInt(process.env.PICLAW_COMPACTION_MAX_WORK_UNITS || "1000000", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.max(1, Math.trunc(parsed)) : 1_000_000;
+  return COMPACTION_MAX_WORK_UNITS;
+}
+
+/** Test-only override for bounded timeout-settlement coverage. */
+export function setCompactionSettlementGraceForTests(value: number): () => void {
+  if (process.env.PICLAW_DB_IN_MEMORY !== "1" && process.env.NODE_ENV !== "test") {
+    throw new Error("setCompactionSettlementGraceForTests requires a test runtime");
+  }
+  const previous = compactionSettlementGraceOverrideMs;
+  compactionSettlementGraceOverrideMs = Math.max(0, Math.round(value));
+  return () => {
+    compactionSettlementGraceOverrideMs = previous;
+  };
 }
 
 function buildCompactionTriggerMetadata(
@@ -742,10 +746,7 @@ async function runCompactionWithTimeoutExclusive<T>(
   // finish their cleanup (finally blocks, UI teardown) before the caller
   // can dispose the session.  Without this, emergency rotation can call
   // session.dispose() while the extension's ctx is still in use.
-  const settlementGraceMs = parseNonNegativeInt(
-    process.env.PICLAW_COMPACTION_SETTLEMENT_GRACE_MS,
-    5_000,
-  );
+  const settlementGraceMs = compactionSettlementGraceOverrideMs ?? COMPACTION_SETTLEMENT_GRACE_MS;
   await Promise.race([
     compactionOutcome,
     new Promise<void>((r) => setTimeout(r, settlementGraceMs)),

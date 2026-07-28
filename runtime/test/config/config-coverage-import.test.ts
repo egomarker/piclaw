@@ -92,7 +92,7 @@ test("plain import covers config module init branches with isolated argv and env
         "same:getRemoteInteropConfig:REMOTE_INTEROP_CONFIG",
         "TOOL_OUTPUT_CONFIG",
         "call:getToolOutputConfig",
-        "call:getMidTurnToolExecutionHardCeiling",
+        "call:getToolUseBudget",
         "same:getToolOutputConfig:TOOL_OUTPUT_CONFIG",
         "TOOL_ACTIVATION_CONFIG",
         "call:getToolActivationConfig",
@@ -125,7 +125,8 @@ test("plain import covers config module init branches with isolated argv and env
           PICLAW_REMOTE_INTEROP_DECISION_MODEL: "decision-model-c",
           PICLAW_TOOL_OUTPUT_RETENTION_MS: "14400000",
           PICLAW_TOOL_OUTPUT_CLEANUP_INTERVAL_MS: "60000",
-          PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING: "96",
+          PICLAW_TURN_MAX_TOOL_EXECUTIONS: "96",
+          PICLAW_TURN_MAX_TOOL_USE_MESSAGES: undefined,
           PICLAW_AGENT_TIMEOUT: "120000",
           PICLAW_BACKGROUND_AGENT_TIMEOUT: "45000",
           PICLAW_SESSION_MAX_SIZE_MB: undefined,
@@ -154,6 +155,9 @@ test("plain import covers config module init branches with isolated argv and env
       widgetToken: "",
       passkeyMode: "passkey-only",
       terminalEnabled: true,
+      terminalImageProtocol: "iterm2",
+      pushSubscriptionCap: 32,
+      pushVapidSubject: "mailto:notifications@localhost.invalid",
       notificationDebugLabels: false,
       vncAllowDirect: false,
       vncTargetsRaw: "",
@@ -182,7 +186,7 @@ test("plain import covers config module init branches with isolated argv and env
     expect(snapshot["same:getRemoteInteropConfig:REMOTE_INTEROP_CONFIG"]).toBe(true);
     expect(snapshot.TOOL_OUTPUT_CONFIG).toEqual({ retentionMs: 14400000, cleanupIntervalMs: 60000 });
     expect(snapshot["same:getToolOutputConfig:TOOL_OUTPUT_CONFIG"]).toBe(true);
-    expect(snapshot["call:getMidTurnToolExecutionHardCeiling"]).toBe(96);
+    expect(snapshot["call:getToolUseBudget"]).toBe(96);
     expect(snapshot.TOOL_ACTIVATION_CONFIG).toEqual({ additionalDefaultTools: [] });
     expect(snapshot["same:getToolActivationConfig:TOOL_ACTIVATION_CONFIG"]).toBe(true);
     expect(snapshot.PUSHOVER_CONFIG).toEqual({ appToken: "push-app", userKey: "push-user", device: "push-device", priority: 1, sound: "magic" });

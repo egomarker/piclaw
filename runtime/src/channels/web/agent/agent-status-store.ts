@@ -58,11 +58,37 @@ function buildRestartRecoveryStatus(
 /** In-memory + persisted lifecycle store for active web agent statuses. */
 export class AgentStatusStore {
   private activeAgentStatuses = new Map<string, Record<string, unknown>>();
+  private terminalStatusExpiresAt = new Map<string, number>();
+  private terminalStatusTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
     private readonly state: AgentStatusStateStore,
     private readonly inflightStore: AgentStatusInflightStore = { getPreflightRuns, getInflightRuns },
+    private readonly terminalStatusTtlMs = 15_000,
   ) {}
+
+  private clearTerminalStatusTimer(chatJid: string): void {
+    const timer = this.terminalStatusTimers.get(chatJid);
+    if (timer) clearTimeout(timer);
+    this.terminalStatusTimers.delete(chatJid);
+  }
+
+  private clearAllTerminalStatusTimers(): void {
+    for (const timer of this.terminalStatusTimers.values()) clearTimeout(timer);
+    this.terminalStatusTimers.clear();
+  }
+
+  private scheduleTerminalStatusExpiry(chatJid: string, expiresAt: number): void {
+    this.clearTerminalStatusTimer(chatJid);
+    const timer = setTimeout(() => {
+      if (this.terminalStatusExpiresAt.get(chatJid) !== expiresAt) return;
+      this.activeAgentStatuses.delete(chatJid);
+      this.terminalStatusExpiresAt.delete(chatJid);
+      this.terminalStatusTimers.delete(chatJid);
+    }, Math.max(0, expiresAt - Date.now()));
+    (timer as { unref?: () => void }).unref?.();
+    this.terminalStatusTimers.set(chatJid, timer);
+  }
 
   load(): void {
     this.state.load();
@@ -89,22 +115,33 @@ export class AgentStatusStore {
     }
 
     this.activeAgentStatuses = nextStatuses;
+    this.clearAllTerminalStatusTimers();
+    this.terminalStatusExpiresAt.clear();
   }
 
   update(chatJid: string, status: Record<string, unknown>): void {
     const type = status?.type;
-    if (type === "done" || type === "error") {
-      this.activeAgentStatuses.delete(chatJid);
-      return;
-    }
-
     const stamped = withRuntimeGeneration(status);
     this.activeAgentStatuses.set(chatJid, stamped);
+    if (type === "done" || type === "error") {
+      const expiresAt = Date.now() + this.terminalStatusTtlMs;
+      this.terminalStatusExpiresAt.set(chatJid, expiresAt);
+      this.scheduleTerminalStatusExpiry(chatJid, expiresAt);
+      return;
+    }
+    this.clearTerminalStatusTimer(chatJid);
+    this.terminalStatusExpiresAt.delete(chatJid);
   }
 
   get(chatJid: string): Record<string, unknown> | null {
     const active = this.activeAgentStatuses.get(chatJid);
-    if (active) return active;
+    if (active) {
+      const expiresAt = this.terminalStatusExpiresAt.get(chatJid);
+      if (expiresAt === undefined || expiresAt > Date.now()) return active;
+      this.activeAgentStatuses.delete(chatJid);
+      this.terminalStatusExpiresAt.delete(chatJid);
+      this.clearTerminalStatusTimer(chatJid);
+    }
 
     const inflight = this.inflightStore.getInflightRuns().find((entry) => entry.chatJid === chatJid);
     if (inflight) return buildRestartRecoveryStatus(inflight, "inflight");
@@ -121,6 +158,8 @@ export class AgentStatusStore {
     const persisted = this.state.getAgentStatuses();
     const chatJids = Object.keys(persisted);
     this.activeAgentStatuses.clear();
+    this.clearAllTerminalStatusTimers();
+    this.terminalStatusExpiresAt.clear();
     if (chatJids.length === 0) return;
     for (const chatJid of chatJids) {
       this.state.setAgentStatus(chatJid, null);

@@ -4,6 +4,7 @@
 
 import { createPrivateKey } from "node:crypto";
 
+import { getWebRuntimeConfig } from "../../../core/config.js";
 import type { InteractionRow } from "../../../db.js";
 import { createLogger, debugSuppressedError } from "../../../utils/logger.js";
 import {
@@ -18,9 +19,6 @@ import {
 } from "./web-notification-presence-service.js";
 
 const log = createLogger("web.push.service");
-const DEFAULT_VAPID_SUBJECT = typeof process.env.PICLAW_WEB_PUSH_VAPID_SUBJECT === "string" && process.env.PICLAW_WEB_PUSH_VAPID_SUBJECT.trim()
-  ? process.env.PICLAW_WEB_PUSH_VAPID_SUBJECT.trim()
-  : "mailto:notifications@localhost.invalid";
 const DEFAULT_WEB_PUSH_REQUEST_TIMEOUT_MS = 15_000;
 const AUTH_FAILURE_PRUNE_THRESHOLD = 3;
 const SETUP_BREAKER_COOLDOWN_MS = 5 * 60 * 1000;
@@ -124,6 +122,11 @@ function normalizePayload(payload: WebPushNotificationPayload): WebPushNotificat
   };
 }
 
+function getDefaultVapidSubject(): string {
+  const configuredSubject = String(getWebRuntimeConfig().pushVapidSubject || "").trim();
+  return configuredSubject || "mailto:notifications@localhost.invalid";
+}
+
 function getStoredVapidDetails(baseDir?: string, vapidSubject?: string): {
   subject: string;
   publicKey: string;
@@ -137,7 +140,7 @@ function getStoredVapidDetails(baseDir?: string, vapidSubject?: string): {
   }
 
   return {
-    subject: typeof vapidSubject === "string" && vapidSubject.trim() ? vapidSubject.trim() : DEFAULT_VAPID_SUBJECT,
+    subject: typeof vapidSubject === "string" && vapidSubject.trim() ? vapidSubject.trim() : getDefaultVapidSubject(),
     publicKey: keys.publicKey,
     privateKey,
   };

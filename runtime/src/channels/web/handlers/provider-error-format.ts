@@ -93,6 +93,22 @@ function extractRequestId(text: string, parsed: Record<string, unknown>, nested:
 }
 
 const MODEL_AVAILABILITY_PATTERN = /unsupported model|model(?:\s+is)?\s+not supported|model unavailable/i;
+// A transient hint means the model itself is valid but currently unreachable
+// (outage/overload/capacity), so retrying the same model may succeed.
+const MODEL_TRANSIENT_PATTERN = /outage|overloaded|temporarily|unavailable|capacity|try again|retry[- ]?after/i;
+// A definitive rejection means the provider does not accept this model id for
+// the account; retrying the same model will never succeed and the user must
+// switch models.
+const MODEL_DEFINITIVE_PATTERN = /model_not_supported|model_not_found|model_not_available|unknown[_ ]model|invalid model|no access to (?:this )?model|does not exist/i;
+
+function isDefinitiveModelRejection(parsed: ParsedProviderError): boolean {
+  const text = [parsed.message, parsed.type, parsed.code].filter(Boolean).join(" ");
+  if (MODEL_DEFINITIVE_PATTERN.test(text)) return true;
+  // A 400 invalid_request_error about the model is definitive, not transient;
+  // 5xx/outage phrasing stays transient and keeps retry guidance.
+  if (MODEL_TRANSIENT_PATTERN.test(text)) return false;
+  return parsed.status === 400 && /invalid_request/i.test(parsed.type ?? "");
+}
 const OUTPUT_LIMIT_PATTERN = /finish[_ -]?reason\s*:?\s*length|stop\s*reason\s*:?\s*length|\bstopReason\s*:?\s*length|max(?:imum)? output (?:tokens?|length)|output token limit|hit (?:the )?(?:maximum )?output/i;
 const NETWORK_ERROR_PATTERN = /\bENOTFOUND\b|\bECONNREFUSED\b|\bETIMEDOUT\b|\bECONNRESET\b|getaddrinfo|dns.*failed|network.*error|connection.*(?:error|refused|reset|lost|ended|closed)|websocket.*(?:closed|ended|1006)|fetch failed|socket hang up|socket connection was closed unexpectedly/i;
 
@@ -273,7 +289,9 @@ export function formatProviderError(errorText: string | null | undefined): Provi
     detail = [detail, guidance].filter(Boolean).join(" — ").slice(0, 900);
   }
   if (category === "model_availability") {
-    const guidance = "This may be a temporary provider outage even when your model is valid. Retry shortly or switch provider/model.";
+    const guidance = isDefinitiveModelRejection(parsed)
+      ? "The provider does not accept this model id for your account. Switch to a supported model (use /model or switch_model); retrying the same model will not help."
+      : "This may be a temporary provider outage even when your model is valid. Retry shortly or switch provider/model.";
     detail = [detail, guidance].filter(Boolean).join(" — ").slice(0, 900);
   }
   if (category === "output_limit") {

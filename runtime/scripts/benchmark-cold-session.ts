@@ -201,12 +201,13 @@ function runParent(): void {
       encoding: "utf8",
     });
     const line = child.stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) || "";
-    let parsed: ChildResult | null = null;
-    try {
-      parsed = JSON.parse(line) as ChildResult;
-    } catch {
-      throw new Error(`Cold-session child did not return JSON. exit=${child.status}\nstdout=${child.stdout}\nstderr=${child.stderr}`);
-    }
+    const parsed = (() => {
+      try {
+        return JSON.parse(line) as ChildResult;
+      } catch {
+        throw new Error(`Cold-session child did not return JSON. exit=${child.status}\nstdout=${child.stdout}\nstderr=${child.stderr}`);
+      }
+    })();
     if (!parsed.ok || child.status !== 0) {
       throw new Error(parsed.error || child.stderr || `Cold-session child failed with exit ${child.status}`);
     }

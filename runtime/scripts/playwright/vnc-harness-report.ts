@@ -249,10 +249,7 @@ async function main() {
 
     let browser: Browser | null = null;
     const consoleLines: string[] = [];
-    let synthetic: VncHarnessSyntheticResult | null = null;
-    let snapshot: VncHarnessSnapshot | null = null;
     const liveRuns: VncHarnessLiveRun[] = [];
-    let screenshotPath = '';
 
     try {
         const ready = await waitForHealth(baseUrl, 15000);
@@ -277,7 +274,7 @@ async function main() {
 
         const encodingSequence = parseEncodingList(args.encodings);
 
-        synthetic = await page.evaluate(async () => {
+        const synthetic = await page.evaluate(async () => {
             return await window.__VNC_HARNESS__!.runSyntheticSuite();
         });
 
@@ -310,11 +307,11 @@ async function main() {
             });
         }
 
-        snapshot = await page.evaluate(() => window.__VNC_HARNESS__!.snapshot());
+        const snapshot = await page.evaluate(() => window.__VNC_HARNESS__!.snapshot());
 
         mkdirSync(reportDir, { recursive: true });
         const stamp = new Date().toISOString().replace(/[.:]/g, '-');
-        screenshotPath = join(reportDir, `vnc-harness-${stamp}.png`);
+        const screenshotPath = join(reportDir, `vnc-harness-${stamp}.png`);
         await page.screenshot({ path: screenshotPath, fullPage: true });
 
         const jsonPath = join(reportDir, `vnc-harness-${stamp}.json`);

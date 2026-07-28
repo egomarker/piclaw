@@ -374,6 +374,25 @@ function parseMessageContentBlocks(raw: string | null | undefined): unknown[] | 
   }
 }
 
+function summarizeContentBlocks(blocks: unknown[] | undefined): string {
+  if (!blocks?.length) return "";
+  const labels = blocks
+    .map((block) => {
+      if (!block || typeof block !== "object") return "content block";
+      const record = block as Record<string, unknown>;
+      const type = typeof record.type === "string" && record.type.trim() ? record.type.trim() : "content block";
+      const title = typeof record.title === "string" && record.title.trim() ? record.title.trim() : "";
+      const label = typeof record.label === "string" && record.label.trim() ? record.label.trim() : "";
+      return [type, title || label].filter(Boolean).join(": ");
+    })
+    .filter(Boolean);
+  return labels.length > 0 ? `[${labels.join(", ")}]` : `[${blocks.length} content block${blocks.length === 1 ? "" : "s"}]`;
+}
+
+function messagePreviewText(row: Pick<MessageResultRow, "content" | "content_blocks">): string {
+  return row.content || summarizeContentBlocks(row.content_blocks) || "[empty message]";
+}
+
 function clipContent(row: MessageRow, limit?: number): MessageResultRow {
   const max = Number.isFinite(limit ?? NaN) ? Math.max(limit as number, 0) : undefined;
   const parsedAnnotations = parseMessageContentBlocks(row.annotations);
@@ -770,7 +789,7 @@ function executeGet(params: MessagesParams, defaultChat: string): AgentToolResul
     };
   }
 
-  const chatJid = normalizeChatJid(params.chat_jid, defaultChat);
+  const chatJid = params.chat_jid === undefined ? null : normalizeChatJid(params.chat_jid, defaultChat);
   const roleFilter = normalizeRole(params.role);
   const senderFilter = normalizeSender(params.sender);
   const contextBefore = Math.min(Math.max(params.context_before ?? 0, 0), 20);
@@ -818,12 +837,12 @@ function executeGet(params: MessagesParams, defaultChat: string): AgentToolResul
 
   const output = messages
     .map((item) => {
-      const header = `- [${item.message.rowid}] ${item.message.sender_name || item.message.sender}: ${item.message.content}`;
+      const header = `- [${item.message.rowid}] ${item.message.sender_name || item.message.sender}: ${messagePreviewText(item.message)}`;
       const before = item.context_before
-        .map((r) => `  [${r.rowid}] ${r.sender_name || r.sender}: ${r.content}`)
+        .map((r) => `  [${r.rowid}] ${r.sender_name || r.sender}: ${messagePreviewText(r)}`)
         .join("\n");
       const after = item.context_after
-        .map((r) => `  [${r.rowid}] ${r.sender_name || r.sender}: ${r.content}`)
+        .map((r) => `  [${r.rowid}] ${r.sender_name || r.sender}: ${messagePreviewText(r)}`)
         .join("\n");
       const parts = [header];
       // Show attachments if present

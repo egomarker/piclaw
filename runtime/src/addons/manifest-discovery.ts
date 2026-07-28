@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { WORKSPACE_DIR } from "../core/config.js";
+import { getWorkspaceDir as getConfiguredWorkspaceDir } from "../core/config.js";
 
 export interface AddonRuntimeNonWebCommandPolicyManifest {
   chatJidPrefixes: string[];
@@ -30,7 +30,7 @@ type InstalledAddonManifest = {
 };
 
 function getWorkspaceDir(): string {
-  return process.env.PICLAW_WORKSPACE || WORKSPACE_DIR;
+  return getConfiguredWorkspaceDir();
 }
 
 function listAddonPackageDirs(addonsNodeModulesDir: string): string[] {

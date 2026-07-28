@@ -60,6 +60,7 @@ export interface AgentSessionManagerOptions {
 export interface AgentSessionManagerInstrumentationSnapshot {
   branchSeedRealizationsInFlight: number;
   createInFlight: number;
+  evictionProtectedChats: number;
   invalidDeferredSeedErrors: number;
   prewarmInFlight: number;
   queuedPrewarms: number;
@@ -79,10 +80,33 @@ export class AgentSessionManager {
   private readonly queuedPrewarms = new Set<string>();
   private readonly prewarmQueue: Array<{ chatJid: string; mode: "full" | "lightweight" }> = [];
   private readonly prewarmCooldownByChat = new Map<string, number>();
+  private readonly evictionProtectionCounts = new Map<string, number>();
   private prewarmLoopActive = false;
   private isShuttingDown = false;
 
   constructor(private readonly options: AgentSessionManagerOptions) {}
+
+  /**
+   * Protect a chat from every idle/pool-limit eviction path while work is
+   * pending or in flight. Protection is reference-counted for overlapping runs.
+   */
+  acquireEvictionProtection(chatJid: string): () => void {
+    const normalized = String(chatJid || "").trim();
+    if (!normalized) return () => {};
+    this.evictionProtectionCounts.set(normalized, (this.evictionProtectionCounts.get(normalized) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const next = (this.evictionProtectionCounts.get(normalized) ?? 1) - 1;
+      if (next > 0) this.evictionProtectionCounts.set(normalized, next);
+      else this.evictionProtectionCounts.delete(normalized);
+    };
+  }
+
+  private getEvictionProtectedChatJids(explicit: string[] = []): string[] {
+    return [...new Set([...explicit, ...this.evictionProtectionCounts.keys()])];
+  }
 
   private getBlockingInvalidSeedError(chatJid: string): Error | null {
     const knownInvalidSeedState = this.invalidDeferredBranchSeedErrors.get(chatJid);
@@ -354,6 +378,7 @@ export class AgentSessionManager {
     return {
       branchSeedRealizationsInFlight: this.branchSeedRealizationInFlight.size,
       createInFlight: this.createInFlight.size,
+      evictionProtectedChats: this.evictionProtectionCounts.size,
       invalidDeferredSeedErrors: this.invalidDeferredBranchSeedErrors.size,
       prewarmInFlight: this.prewarmInFlight.size,
       queuedPrewarms: this.queuedPrewarms.size,
@@ -367,6 +392,7 @@ export class AgentSessionManager {
     this.queuedPrewarms.clear();
     this.prewarmQueue.length = 0;
     this.prewarmCooldownByChat.clear();
+    this.evictionProtectionCounts.clear();
 
     for (const jid of [...this.options.pool.keys()]) {
       await this.disposeEntry(this.options.pool, jid, "shutdown.dispose_main_session");
@@ -408,11 +434,11 @@ export class AgentSessionManager {
   evictIdle(options: { mainIdleTtlMs: number; sideIdleTtlMs: number; mainSessionMaxSizeOverride?: number | null; protectedChatJids?: string[] }): void {
     const now = Date.now();
     const { mainIdleTtlMs, sideIdleTtlMs, mainSessionMaxSizeOverride } = options;
-    const explicitProtectedChatJids = new Set(
+    const explicitProtectedChatJids = new Set(this.getEvictionProtectedChatJids(
       Array.isArray(options.protectedChatJids)
         ? options.protectedChatJids.map((chatJid) => String(chatJid || "").trim()).filter(Boolean)
         : [],
-    );
+    ));
     let protectedRecentMainChatJid: string | null = null;
     let protectedRecentMainLastUsed = -Infinity;
     for (const [jid, entry] of this.options.pool) {
@@ -474,11 +500,11 @@ export class AgentSessionManager {
     const maxSize = Number.isFinite(resolvedMaxSize) ? resolvedMaxSize : 0;
     if (maxSize <= 0 || this.options.pool.size <= maxSize) return;
 
-    const protectedChatJids = new Set(
+    const protectedChatJids = new Set(this.getEvictionProtectedChatJids(
       Array.isArray(options.protectedChatJids)
         ? options.protectedChatJids.map((chatJid) => String(chatJid || "").trim()).filter(Boolean)
         : [],
-    );
+    ));
     const candidates = [...this.options.pool.entries()]
       .filter(([chatJid, entry]) => !protectedChatJids.has(chatJid) && !this.shouldKeepSessionCached(entry.runtime.session, Date.now(), entry))
       .sort((left, right) => left[1].lastUsed - right[1].lastUsed);

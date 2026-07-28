@@ -18,6 +18,8 @@ export interface AgentMessagePayload {
   thread_id?: number | null;
   media_ids?: number[];
   mode?: "auto" | "queue" | "steer";
+  /** Internal trusted relay hint: persist a visible timeline row when a steer is queued. */
+  persist_steer?: boolean;
   content_blocks?: unknown[];
   link_previews?: unknown[];
   screen_hint?: string;
@@ -116,6 +118,7 @@ export function storeAgentUserMessage(
     linkPreviews?: unknown[];
     threadId?: number | null;
     screenHint?: string;
+    isSteeringMessage?: boolean;
   }
 ): InteractionRow | null {
   return channel.storeMessage(chatJid, payload.content, false, payload.mediaIds, {
@@ -123,5 +126,6 @@ export function storeAgentUserMessage(
     linkPreviews: payload.linkPreviews,
     threadId: payload.threadId ?? undefined,
     screenHint: payload.screenHint,
+    isSteeringMessage: payload.isSteeringMessage,
   });
 }

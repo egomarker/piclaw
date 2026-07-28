@@ -31,8 +31,8 @@ import type {
   Context,
   Message,
   Model,
-  Provider,
   SimpleStreamOptions,
+  ThinkingLevel,
   Tool,
   ToolCall,
   ToolResultMessage,
@@ -337,7 +337,7 @@ function materializeModels(providers: RegisteredProvider[]): HarnessModel[] {
       id: model.id || "",
       name: model.name || model.id || "",
       api: (model.api || providerConfig.api) as Api,
-      provider: providerConfig.name as Provider,
+      provider: providerConfig.name,
       baseUrl: providerConfig.baseUrl,
       reasoning: Boolean(model.reasoning),
       input: (model.input || ["text"]) as Array<"text" | "image">,
@@ -349,6 +349,10 @@ function materializeModels(providers: RegisteredProvider[]): HarnessModel[] {
       providerConfig,
     } satisfies HarnessModel));
   });
+}
+
+function isThinkingLevel(value: string): value is ThinkingLevel {
+  return ["minimal", "low", "medium", "high", "xhigh", "max"].includes(value);
 }
 
 function filterModels(models: HarnessModel[], args: HarnessArgs): HarnessModel[] {
@@ -368,11 +372,11 @@ function selectReasoning(
   model: HarnessModel,
   requested: string | undefined,
   explicit = false
-): string | undefined {
+): ThinkingLevel | undefined {
   if (!model.reasoning) return undefined;
   const base = requested || "high";
   if (!explicit && model.id === "gpt-5-mini" && base === "high") return "medium";
-  return base;
+  return isThinkingLevel(base) ? base : "high";
 }
 
 function userMessage(text: string): Message {
@@ -672,7 +676,7 @@ async function runSingleStream(
 
 async function runSmokeCase(
   model: HarnessModel,
-  reasoning: string | undefined,
+  reasoning: ThinkingLevel | undefined,
   timeoutMs: number,
   maxTokens: number,
   retry429Max: number,
@@ -726,7 +730,7 @@ async function runSmokeCase(
 
 async function runJsonCase(
   model: HarnessModel,
-  reasoning: string | undefined,
+  reasoning: ThinkingLevel | undefined,
   timeoutMs: number,
   maxTokens: number,
   retry429Max: number,
@@ -748,12 +752,13 @@ async function runJsonCase(
   });
   const text = textBlocksToString(result.message);
   const normalized = normalizeJsonCandidate(text);
-  let parsed: Record<string, unknown> | null = null;
-  try {
-    parsed = JSON.parse(normalized);
-  } catch {
-    parsed = null;
-  }
+  const parsed = (() => {
+    try {
+      return JSON.parse(normalized) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  })();
   const requestInvariantFailure = findRequestInvariantFailure(result.payloadCaptures, {
     sessionId,
     requirePromptCacheKey: String(model.provider) === "azure-openai" && model.reasoning === true,
@@ -788,7 +793,7 @@ async function runJsonCase(
 
 async function runToolCase(
   model: HarnessModel,
-  reasoning: string | undefined,
+  reasoning: ThinkingLevel | undefined,
   timeoutMs: number,
   maxTokens: number,
   toolRounds: number,
@@ -817,7 +822,7 @@ async function runToolCase(
   let durationMs = 0;
   let lastPayloadSummary: Record<string, unknown> | undefined;
   let lastUsage: AssistantMessage["usage"] | undefined;
-  let finalPreview = "";
+  let finalPreview: string;
   let finalStopReason: string | undefined;
   let retries = 0;
   const retryDelaysMs: number[] = [];
@@ -942,8 +947,6 @@ async function runToolCase(
     });
 
     const followUpText = textBlocksToString(followUp.message);
-    finalPreview = followUpText;
-    finalStopReason = followUp.message?.stopReason;
     const roundOk = !followUpInvariantFailure
       && (followUp.message?.stopReason === "stop" || followUp.message?.stopReason === "length")
       && followUpText.includes(`TOOL_OK ${token}`)
@@ -1058,7 +1061,7 @@ async function runToolCase(
 
 async function runHistoryCase(
   model: HarnessModel,
-  reasoning: string | undefined,
+  reasoning: ThinkingLevel | undefined,
   timeoutMs: number,
   maxTokens: number,
   historyTurns: number,

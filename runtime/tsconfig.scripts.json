@@ -6,14 +6,8 @@
     "allowImportingTsExtensions": true
   },
   "include": [
-    "../scripts/integration-test-suite.ts",
-    "../scripts/release/build-experimental-shell-artifact.ts",
-    "../scripts/release/build-linux-run-artifact.ts",
-    "../scripts/release/build-portable-artifact.ts",
-    "scripts/vnc-harness-standalone.ts",
-    "scripts/playwright/oobe-local-container.ts",
-    "scripts/playwright/vnc-harness-report.ts",
-    "scripts/playwright/terminal-reopen.ts",
-    "scripts/playwright/web-auth-bootstrap.ts"
+    "src/**/*.d.ts",
+    "../scripts/**/*.ts",
+    "scripts/**/*.ts"
   ]
 }

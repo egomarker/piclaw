@@ -591,13 +591,23 @@ describe("web agent message handler", () => {
 
     const queuedFollowups: Array<{ chatJid: string; content: string }> = [];
     const sentMessages: Array<{ chatJid: string; content: string; threadId: number | null }> = [];
-    const broadcasts: Array<{ event: string; payload: unknown }> = [];
+    const broadcasts: Array<{ event: string; payload: any }> = [];
+    const statusUpdates: Array<Record<string, any>> = [];
+    const contextUsages: Array<Record<string, any>> = [];
     let applyCalls = 0;
 
     const channel = {
       agentPool: {
         isStreaming: () => false,
         isActive: () => false,
+        getCurrentModelLabel: async () => "github-copilot/gpt-5.4",
+        getAvailableModels: async () => ({
+          current: "github-copilot/gpt-5.4",
+          thinking_level: "high",
+          thinking_level_label: "High",
+          supports_thinking: true,
+        }),
+        getContextUsageForChat: async () => ({ tokens: 4_096, contextWindow: 128_000, percent: 3.2 }),
         applyControlCommand: async (_chatJid: string, command: { type: string; raw: string }) => {
           applyCalls += 1;
           expect(command.type).toBe("session_rotate");
@@ -624,7 +634,9 @@ describe("web agent message handler", () => {
       broadcastEvent: (event: string, payload: unknown) => {
         broadcasts.push({ event, payload });
       },
-      updateAgentStatus: () => {},
+      getAgentStatus: () => statusUpdates.at(-1) ?? null,
+      updateAgentStatus: (_chatJid: string, status: Record<string, any>) => { statusUpdates.push(status); },
+      setContextUsage: (_chatJid: string, usage: Record<string, any>) => { contextUsages.push(usage); },
       skipFailedOnModelSwitch: () => {},
       storeMessage: (_chatJid: string, content: string) => ({
         id: 654,
@@ -654,6 +666,19 @@ describe("web agent message handler", () => {
     expect(queuedFollowups).toHaveLength(0);
     expect(sentMessages).toHaveLength(1);
     expect(sentMessages[0]?.content).toContain("Archived previous session:");
+    expect(statusUpdates[0]).toMatchObject({
+      type: "intent",
+      intent_key: "session_rotation",
+      title: "Rotating session",
+      model: "github-copilot/gpt-5.4",
+    });
+    expect(statusUpdates.some((status) => status.type === "context_usage" && status.context_usage?.tokens === 4_096)).toBe(true);
+    expect(contextUsages).toContainEqual({ tokens: 4_096, contextWindow: 128_000, percent: 3.2 });
+    expect(broadcasts).toContainEqual(expect.objectContaining({
+      event: "model_changed",
+      payload: expect.objectContaining({ chat_jid: "web:default", model: "github-copilot/gpt-5.4" }),
+    }));
+    expect(statusUpdates.at(-1)).toMatchObject({ type: "done", title: "Completed /session-rotate" });
     expect(broadcasts.some((entry) => entry.event === "new_post")).toBe(true);
   });
 

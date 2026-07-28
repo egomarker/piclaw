@@ -146,6 +146,47 @@ describe("context-mode integration", () => {
     });
   });
 
+  test("reuses a successful semantic summary for identical tool output", async () => {
+    await withTempWorkspaceEnv("piclaw-context-mode-", compactionEnv({
+      PICLAW_TOOL_OUTPUT_STORE_BYTES: "8",
+      PICLAW_TOOL_OUTPUT_STORE_LINES: "2",
+      PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED: "1",
+    }), async () => {
+      const db = await importFresh<typeof import("../src/db.js")>("../src/db.js");
+      db.initDatabase();
+
+      const contextMode = await importFresh<any>("../extensions/integrations/context-mode.ts");
+      let summarizeCalls = 0;
+      contextMode.__setSemanticToolResultSummarizerForTests(async () => {
+        summarizeCalls += 1;
+        return "Summary:\n- Stable semantic facts\n\nKey facts:\n- exact\n\nWarnings/Errors:\n- none\n\nFollow-up cues:\n- inspect handle";
+      });
+
+      try {
+        const fake = createFakeExtensionApi({ allTools: [] });
+        contextMode.default(fake.api);
+        const toolResult = fake.handlers.find((entry) => entry.event === "tool_result")?.handler;
+        const event = {
+          toolName: "bash",
+          content: [{ type: "text", text: "same\nsemantic\noutput\n" }],
+          details: {},
+          input: { command: "printf same" },
+          isError: false,
+          toolCallId: "tool-sem-stable",
+          type: "tool_result",
+        };
+
+        const first = await toolResult?.(event, { model: { provider: "test", id: "model" } });
+        const second = await toolResult?.({ ...event, toolCallId: "tool-sem-stable-2" }, { model: { provider: "test", id: "model" } });
+
+        expect(second?.content?.[0]?.text).toBe(first?.content?.[0]?.text);
+        expect(summarizeCalls).toBe(1);
+      } finally {
+        contextMode.__setSemanticToolResultSummarizerForTests(null);
+      }
+    });
+  });
+
   test("skips semantic summarization when turn signal is already aborted", async () => {
     await withTempWorkspaceEnv("piclaw-context-mode-", compactionEnv({
       PICLAW_TOOL_OUTPUT_STORE_BYTES: "8",
@@ -526,8 +567,94 @@ describe("context-mode integration", () => {
         }],
       });
 
-      expect(result?.messages?.[0]?.content?.[0]?.text).toContain("Output stored as tool-output:");
-      expect(result?.messages?.[0]?.content?.[0]?.text).toContain("search_tool_output");
+      expect(result?.messages?.[0]?.content?.[0]?.text).toContain("Legacy tool output compacted for provider context");
+      expect(result?.messages?.[0]?.content?.[0]?.text).toContain("Preview:");
+      expect(result?.messages?.[0]?.content?.[0]?.text).not.toContain("tool-output:");
+    });
+  });
+
+  test("keeps repeated legacy provider-context compaction byte-identical without semantic model calls", async () => {
+    await withTempWorkspaceEnv("piclaw-context-mode-", compactionEnv({
+      PICLAW_TOOL_OUTPUT_STORE_BYTES: "8",
+      PICLAW_TOOL_OUTPUT_STORE_LINES: "2",
+      PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED: "1",
+    }), async () => {
+      const db = await importFresh<typeof import("../src/db.js")>("../src/db.js");
+      db.initDatabase();
+
+      const contextMode = await importFresh<any>("../extensions/integrations/context-mode.ts");
+      let summarizeCalls = 0;
+      contextMode.__setSemanticToolResultSummarizerForTests(async () => {
+        summarizeCalls += 1;
+        return `Summary:\n- unstable ${summarizeCalls}`;
+      });
+
+      try {
+        const fake = createFakeExtensionApi({ allTools: [] });
+        contextMode.default(fake.api);
+        const context = fake.handlers.find((entry) => entry.event === "context")?.handler;
+        const event = {
+          messages: [{
+            role: "toolResult",
+            toolName: "bash",
+            content: [{ type: "text", text: "stable\nlegacy\nprovider\ncontext\n" }],
+          }],
+        };
+
+        const first = await context?.(event, { model: { provider: "test", id: "model" } });
+        const second = await context?.(event, { model: { provider: "test", id: "model" } });
+
+        expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+        expect(first?.messages?.[0]?.content?.[0]?.text).toContain("Preview:");
+        expect(summarizeCalls).toBe(0);
+      } finally {
+        contextMode.__setSemanticToolResultSummarizerForTests(null);
+      }
+    });
+  });
+
+  test("keeps legacy provider-context compaction stable across session recreation", async () => {
+    await withTempWorkspaceEnv("piclaw-context-mode-", compactionEnv({
+      PICLAW_TOOL_OUTPUT_STORE_BYTES: "8",
+      PICLAW_TOOL_OUTPUT_STORE_LINES: "2",
+      PICLAW_TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED: "1",
+    }), async () => {
+      const db = await importFresh<typeof import("../src/db.js")>("../src/db.js");
+      db.initDatabase();
+      const event = {
+        messages: [{
+          role: "toolResult",
+          toolName: "bash",
+          content: [{ type: "text", text: "stable\nlegacy\nprovider\nrecreation\n" }],
+        }],
+      };
+
+      const runFreshProjection = async () => {
+        const contextMode = await importFresh<any>("../extensions/integrations/context-mode.ts");
+        let summarizeCalls = 0;
+        contextMode.__setSemanticToolResultSummarizerForTests(async () => {
+          summarizeCalls += 1;
+          return `Summary:\n- unstable ${summarizeCalls}`;
+        });
+        try {
+          const fake = createFakeExtensionApi({ allTools: [] });
+          contextMode.default(fake.api);
+          const context = fake.handlers.find((entry) => entry.event === "context")?.handler;
+          const result = await context?.(event, { model: { provider: "test", id: "model" } });
+          return { serialized: JSON.stringify(result), summarizeCalls };
+        } finally {
+          contextMode.__setSemanticToolResultSummarizerForTests(null);
+        }
+      };
+
+      const first = await runFreshProjection();
+      const second = await runFreshProjection();
+
+      expect(second.serialized).toBe(first.serialized);
+      expect(first.serialized).toContain("Legacy tool output compacted for provider context");
+      expect(first.serialized).not.toContain("tool-output:");
+      expect(first.summarizeCalls).toBe(0);
+      expect(second.summarizeCalls).toBe(0);
     });
   });
 
@@ -582,7 +709,9 @@ describe("context-mode integration", () => {
 
       const nestedText = result?.messages?.[0]?.content?.[0]?.content?.[0]?.text;
       expect(typeof nestedText).toBe("string");
-      expect(nestedText).toContain("Output stored as tool-output:");
+      expect(nestedText).toContain("Legacy tool output compacted for provider context");
+      expect(nestedText).toContain("Preview:");
+      expect(nestedText).not.toContain("tool-output:");
     });
   });
 

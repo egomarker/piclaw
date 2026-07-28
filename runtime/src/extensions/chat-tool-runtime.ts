@@ -197,6 +197,21 @@ function normalizeMode(mode: ChatRelayMode | undefined): ChatRelayMode {
   return mode === "queue" || mode === "steer" || mode === "auto" ? mode : "auto";
 }
 
+function readForwardedMessageRowId(responseBody: Record<string, unknown>): number | null {
+  if (Number.isInteger(responseBody.row_id) && Number(responseBody.row_id) > 0) return Number(responseBody.row_id);
+  const userMessage = responseBody.user_message;
+  if (userMessage && typeof userMessage === "object") {
+    const id = (userMessage as { id?: unknown }).id;
+    if (Number.isInteger(id) && Number(id) > 0) return Number(id);
+  }
+  return null;
+}
+
+function readForwardedCreated(responseBody: Record<string, unknown>): boolean | undefined {
+  if (typeof responseBody.created === "boolean") return responseBody.created;
+  return responseBody.user_message && typeof responseBody.user_message === "object" ? true : undefined;
+}
+
 export function createDirectChatToolRelayHandler(
   agentPool: ChatToolRelayAgentPool,
   web: DirectChatToolRelayWeb,
@@ -229,6 +244,7 @@ export function createDirectChatToolRelayHandler(
       "X-Piclaw-Source-Chat-Jid": source.chat_jid,
       "X-Piclaw-Source-Agent-Name": source.agent_name,
       "X-Piclaw-Reply-To-Chat-Jid": source.chat_jid,
+      "X-Piclaw-Persist-Steer": "1",
     });
     const forwardReq = new Request(
       `http://internal${pathname}?chat_jid=${encodeURIComponent(target.chat_jid)}`,
@@ -239,6 +255,7 @@ export function createDirectChatToolRelayHandler(
           content: buildForwardedContent(source, target, content),
           content_blocks: contentBlocks,
           mode: normalizeMode(request.mode),
+          persist_steer: true,
         }),
       },
     );
@@ -254,9 +271,13 @@ export function createDirectChatToolRelayHandler(
     }
 
     const responseBody = await forwardRes.json().catch(() => ({} as Record<string, unknown>));
+    const rowId = readForwardedMessageRowId(responseBody);
+    const created = readForwardedCreated(responseBody);
     return {
       status: "ok",
       ...responseBody,
+      ...(rowId ? { row_id: rowId } : {}),
+      ...(created !== undefined ? { created } : {}),
       source_chat_jid: source.chat_jid,
       source_agent_name: source.agent_name,
       source_agent_display_name: source.agent_display_name,

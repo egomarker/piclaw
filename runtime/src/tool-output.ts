@@ -19,7 +19,7 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { basename, dirname, join, resolve } from "path";
-import { DATA_DIR } from "./core/config.js";
+import { getDataDir } from "./core/config.js";
 import { createUuid } from "./utils/ids.js";
 import { createLogger, debugSuppressedError } from "./utils/logger.js";
 import {
@@ -41,7 +41,7 @@ import {
 
 /** Directory where tool output log files are stored on disk. */
 function getToolOutputDir(): string {
-  return join(resolve(process.env.PICLAW_DATA || DATA_DIR), "tool-output");
+  return join(getDataDir(), "tool-output");
 }
 const log = createLogger("tool-output");
 const DEFAULT_TOOL_OUTPUT_RETENTION_MS = DEFAULT_LOG_RETENTION_CAP_MS;

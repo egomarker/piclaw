@@ -145,6 +145,33 @@ export function handleAgentStatusRequest(req: Request, ctx: AgentStatusContext):
       ctx.recoverStaleInflightRun(chatJid, { hasActiveStatus: false });
       return ctx.json({ status: "idle", state: "idle", chat_jid: chatJid, data: null, extension_working: ctx.getExtensionWorkingState(chatJid), addon_api: getAddonApiHealthSnapshot() });
     }
+    // The status store retains terminal command events briefly so polling
+    // clients cannot miss completion between requests. Retained terminal
+    // payloads are observable history, not active work.
+    if (status.type === "done" || status.type === "error") {
+      const classifier = readTrimmedString(
+        status.classifier
+          ?? status.recovery_classifier
+          ?? status.recoveryClassifier
+          ?? status.failure_classifier,
+      ) || null;
+      return ctx.json({
+        status: "idle",
+        state: status.type === "done" ? "idle" : deriveAgentState(status),
+        chat_jid: chatJid,
+        provider: readTrimmedString(status.provider) || null,
+        model: readTrimmedString(status.model) || null,
+        classifier,
+        last_error: status.type === "error"
+          ? readTrimmedString(status.detail) || readTrimmedString(status.title) || null
+          : null,
+        recovery_strategy: readTrimmedString(status.recovery_strategy ?? status.recoveryStrategy ?? status.strategy) || null,
+        recovery_suppressed_reason: readTrimmedString(status.recovery_suppressed_reason ?? status.recoverySuppressedReason) || null,
+        data: status,
+        extension_working: ctx.getExtensionWorkingState(chatJid),
+        addon_api: getAddonApiHealthSnapshot(),
+      });
+    }
 
     const turnId = (status.turn_id || status.turnId) as string | undefined;
     let thought: { text: string; totalLines: number } | undefined;

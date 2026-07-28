@@ -21,16 +21,16 @@ import {
   readToolOutputFile,
   saveToolOutput,
 } from "../../src/extensions/context-mode-api.js";
+import { getToolOutputPresentationConfig } from "../../src/core/config.js";
 import { getRuntimeModelExecutor } from "../../src/extensions/model-execution-runtime.js";
 
-const DEFAULT_STORE_THRESHOLD_BYTES = parseInt(process.env.PICLAW_TOOL_OUTPUT_STORE_BYTES || "4096", 10);
-const DEFAULT_STORE_THRESHOLD_LINES = parseInt(process.env.PICLAW_TOOL_OUTPUT_STORE_LINES || "40", 10);
-const PREVIEW_LINES = parseInt(process.env.PICLAW_TOOL_OUTPUT_PREVIEW_LINES || "8", 10);
-const PREVIEW_LINE_CHARS = parseInt(process.env.PICLAW_TOOL_OUTPUT_PREVIEW_LINE_CHARS || "200", 10);
+const { storeBytes: DEFAULT_STORE_THRESHOLD_BYTES, storeLines: DEFAULT_STORE_THRESHOLD_LINES, previewLines: PREVIEW_LINES, previewLineChars: PREVIEW_LINE_CHARS } = getToolOutputPresentationConfig();
 const STORED_OUTPUT_CACHE_MAX = 512;
 
 type StoredOutputCacheEntry = {
   saved: ReturnType<typeof saveToolOutput>;
+  summary: string;
+  semantic: boolean;
 };
 
 const storedOutputByDigest = new Map<string, StoredOutputCacheEntry>();
@@ -74,6 +74,7 @@ export function __setSemanticToolResultSummarizerForTests(
   summarizer: SemanticSummarizer | null,
 ): void {
   semanticSummarizerOverride = summarizer;
+  storedOutputByDigest.clear();
 }
 
 function buildSemanticSummaryInput(text: string, maxChars: number): string {
@@ -323,9 +324,10 @@ function saveAndRememberStoredOutput(
   fullOutput: string,
   source: string,
   summary: string,
+  semantic: boolean,
 ): StoredOutputCacheEntry {
   const saved = saveToolOutput(fullOutput, { source, summary });
-  const entry: StoredOutputCacheEntry = { saved };
+  const entry: StoredOutputCacheEntry = { saved, summary, semantic };
   rememberStoredOutput(digest, entry);
   return entry;
 }
@@ -337,6 +339,8 @@ async function compactTextOutput(
     toolName?: unknown;
     source: string;
     extensionContext?: RuntimeExtensionContext;
+    /** Provider-context cleanup must be deterministic and must never invoke a model. */
+    allowSemanticSummary?: boolean;
   },
 ): Promise<{ summaryText: string; saved: ReturnType<typeof saveToolOutput> } | null> {
   const fullOutput = options.fullOutput ?? text;
@@ -348,23 +352,35 @@ async function compactTextOutput(
 
   const digest = computeOutputDigest(fullOutput, options.source);
   const cachedEntry = getCachedStoredOutput(digest);
+  const allowSemanticSummary = options.allowSemanticSummary !== false;
+  if (cachedEntry && (cachedEntry.semantic || !allowSemanticSummary)) {
+    return {
+      summaryText: buildStoredOutputSummary(cachedEntry.saved, cachedEntry.summary, { semantic: cachedEntry.semantic }),
+      saved: cachedEntry.saved,
+    };
+  }
 
   const preview = buildPreview(fullOutput, PREVIEW_LINES, PREVIEW_LINE_CHARS);
-  const semanticSummary = await summarizeToolOutputSemantically({
-    toolName: typeof options.toolName === "string" ? options.toolName : "unknown",
-    source: options.source,
-    fullOutput,
-    lineCount,
-    sizeBytes: Buffer.byteLength(fullOutput, "utf8"),
-  }, options.extensionContext);
+  const semanticSummary = allowSemanticSummary
+    ? await summarizeToolOutputSemantically({
+      toolName: typeof options.toolName === "string" ? options.toolName : "unknown",
+      source: options.source,
+      fullOutput,
+      lineCount,
+      sizeBytes: Buffer.byteLength(fullOutput, "utf8"),
+    }, options.extensionContext)
+    : null;
 
-  const summaryForDisplay = semanticSummary || preview;
-  const saved = cachedEntry?.saved
-    ?? saveAndRememberStoredOutput(digest, fullOutput, options.source, summaryForDisplay).saved;
+  const summaryForDisplay = semanticSummary || cachedEntry?.summary || preview;
+  const semantic = Boolean(semanticSummary) || Boolean(cachedEntry?.semantic);
+  const entry = cachedEntry
+    ? { ...cachedEntry, summary: summaryForDisplay, semantic }
+    : saveAndRememberStoredOutput(digest, fullOutput, options.source, summaryForDisplay, semantic);
+  rememberStoredOutput(digest, entry);
 
   return {
-    summaryText: buildStoredOutputSummary(saved, summaryForDisplay, { semantic: Boolean(semanticSummary) }),
-    saved,
+    summaryText: buildStoredOutputSummary(entry.saved, summaryForDisplay, { semantic }),
+    saved: entry.saved,
   };
 }
 
@@ -386,7 +402,7 @@ function resolveToolNameFromUnknown(record: unknown): string {
 async function compactLegacyToolResultContent(
   content: unknown,
   toolName: unknown,
-  extensionContext?: RuntimeExtensionContext,
+  _extensionContext?: RuntimeExtensionContext,
 ): Promise<{
   content: unknown;
   modified: boolean;
@@ -397,21 +413,24 @@ async function compactLegacyToolResultContent(
 
   const text = extractText(content);
   if (!text.trim()) return { content, modified: false };
+  const lineCount = text.replace(/\r\n/g, "\n").split("\n").length;
+  if (!shouldStoreOutput(text, lineCount, toolName)) return { content, modified: false };
 
-  try {
-    const compacted = await compactTextOutput(text, {
-      toolName,
-      source: resolveOutputSourceFromTool(toolName),
-      extensionContext,
-    });
-    if (!compacted) return { content, modified: false };
-    return {
-      content: [{ type: "text", text: compacted.summaryText }],
-      modified: true,
-    };
-  } catch {
-    return { content, modified: false };
-  }
+  // This hook runs before every provider request. It must be a pure,
+  // deterministic projection: model-generated summaries and random stored-output
+  // handles rewrite historical function_call_output items and destroy prompt-cache
+  // prefix reuse. New tool results are persisted by the tool_result hook instead.
+  const preview = buildPreview(text, PREVIEW_LINES, PREVIEW_LINE_CHARS);
+  return {
+    content: [{
+      type: "text",
+      text: [
+        `Legacy tool output compacted for provider context (${lineCount} lines, ${formatBytes(Buffer.byteLength(text, "utf8"))}).`,
+        `Preview:\n${preview}`,
+      ].join("\n\n"),
+    }],
+    modified: true,
+  };
 }
 
 async function compactNestedToolResultBlocks(

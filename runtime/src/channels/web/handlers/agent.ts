@@ -10,14 +10,10 @@
 
 import type { WebChannelLike } from "../core/web-channel-contracts.js";
 import {
-  getAgentRuntimeConfig,
   getIdentityConfig,
-  getPersistThinkingMaxChars,
   getRoutingConfig,
-  isPersistThinkingEnabled,
 } from "../../../core/config.js";
 import { parseControlCommand } from "../../../agent-control/index.js";
-import type { AgentControlCommand, AgentControlResult } from "../../../agent-control/index.js";
 import { isSlashCommandInvocation } from "../../../agent-pool/slash-command.js";
 import {
   normalizeAgentMessagePayload,
@@ -28,19 +24,11 @@ import { handleUiThemeCommand } from "../theming/ui-theme-commands.js";
 import { handleUiMetersCommand } from "../ui-meters-commands.js";
 import { getServerUiMetersConfig, setServerUiMetersConfig, setServerUiThemeConfig } from "../ui-state.js";
 import {
-  beginChatPreflight,
-  beginChatRun,
-  clearChatPreflight,
-  clearFailedRun,
-  endChatRun,
   getChatCursor,
-  getFailedRun,
   getInflightMessageId,
   getMessageRowIdById,
-  getMessagesSince,
   getDb,
   getRouterState,
-  promoteChatPreflightToInflight,
   rollbackChatRunWithError,
   rollbackInflightRun,
   setChatCursor,
@@ -48,9 +36,20 @@ import {
 import { detectChannel, formatMessages, formatOutbound } from "../../../router.js";
 import { createAgentProfileBuilder } from "../agent/agent-utils.js";
 import { resolveAvatarUrl } from "../media/avatar-service.js";
-import { createAgentEventEmitter, createStreamingEventHandler } from "../sse/agent-events.js";
 import { broadcastInteractionUpdated } from "../cards/interaction-service.js";
 import { storeAgentTurn } from "../messaging/agent-message-store.js";
+import { finalizeSuccessfulProcessChatRun, persistIntermediateProcessChatTurn } from "../runtime/process-chat-finalization-runtime.js";
+import { createProcessChatStreamingRuntime } from "../runtime/process-chat-streaming-runtime.js";
+import { runProcessChatPreflight } from "../runtime/process-chat-preflight-runtime.js";
+import {
+  MODEL_COMMAND_TYPES,
+  executeDeferredControlCommand,
+  isDeferredControlCommand,
+  materializeDeferredFollowups,
+  resolveAndBroadcastModelStateForCommand,
+  resumeFailedRunAfterModelSwitch,
+  selectProcessChatMessage,
+} from "../runtime/process-chat-control-runtime.js";
 import { resolveThreadId, resolveThreadRootId } from "../runtime/threading.js";
 import { resolveToolStatusHints } from "../../../tool-status-hints.js";
 import "../../../extensions/local-core-tool-status-hints.js";
@@ -58,23 +57,15 @@ import "../../../extensions/generic-tool-status-hints.js";
 import { createUuid } from "../../../utils/ids.js";
 import { createLogger, debugSuppressedError } from "../../../utils/logger.js";
 import type { AttachmentInfo } from "../../../agent-pool/attachments.js";
-import { cancelScheduledIdleAutoCompaction, isCompactionCancellationError, maybeAutoCompactSessionBeforePrompt } from "../../../agent-pool/compaction.js";
-import { checkPendingShutdown } from "../../../runtime/shutdown-registry.js";
+import { cancelScheduledIdleAutoCompaction } from "../../../agent-pool/compaction.js";
 import { DEFAULT_BASE_RETRY_MS, getRetryAtIso } from "../../../queue/retry-policy.js";
-import { storeThinkingContent } from "../../../db/messages.js";
-import { safeTruncateUtf16 } from "../../../utils/safe-truncate.js";
 import { formatProviderError } from "./provider-error-format.js";
-import {
-  beginTrackedPhase,
-  heartbeatTrackedPhase,
-  endTrackedPhase,
-} from "../../../runtime/progress-watchdog.js";
+import { endTrackedPhase } from "../../../runtime/progress-watchdog.js";
 import { getAddonRecoveryExcludedChatJidPrefixes } from "../../../addons/manifest-discovery.js";
 
 const log = createLogger("web.handlers.agent");
-const DEFAULT_PREPROMPT_COMPACTION_FOREGROUND_MS = 250;
 
-type BrowserObservabilityContext = {
+export type BrowserObservabilityContext = {
   userId?: string;
   sessionId?: string;
   clientId?: string;
@@ -104,25 +95,6 @@ function getBrowserObservabilityContext(req: Request): BrowserObservabilityConte
     ...(sessionId ? { sessionId } : {}),
     ...(clientId ? { clientId } : {}),
   };
-}
-
-function withObservabilityMetadata(details: Record<string, unknown>, turnId: string, browserContext?: BrowserObservabilityContext): Record<string, unknown> {
-  return {
-    ...details,
-    turnId,
-    ...(browserContext?.userId ? { userId: browserContext.userId } : {}),
-    ...(browserContext?.sessionId ? { sessionId: browserContext.sessionId } : {}),
-    ...(browserContext?.clientId ? { clientId: browserContext.clientId } : {}),
-  };
-}
-
-function getPrePromptCompactionForegroundMs(): number {
-  const parsed = Number.parseInt(String(process.env.PICLAW_PREPROMPT_COMPACTION_FOREGROUND_MS || "").trim(), 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_PREPROMPT_COMPACTION_FOREGROUND_MS;
-}
-
-function sleepMs(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function getRecoveryExcludedChatJidPrefixes(): string[] {
@@ -668,54 +640,6 @@ export function summarizeCommandStatusTitle(message: unknown, fallback = "Comman
   return collapsed || fallback;
 }
 
-const MODEL_COMMAND_TYPES = new Set(["model", "thinking", "cycle_model", "cycle_thinking"]);
-const DEFERRED_CONTROL_COMMAND_TYPES = new Set(["compact", ...MODEL_COMMAND_TYPES]);
-
-type ModelControlCommand = Extract<AgentControlCommand, { type: "model" | "thinking" | "cycle_model" | "cycle_thinking" }>;
-type DeferredControlCommand = Extract<AgentControlCommand, { type: "compact" | "model" | "thinking" | "cycle_model" | "cycle_thinking" }>;
-
-function isModelControlCommand(command: unknown): command is ModelControlCommand {
-  return Boolean(command && typeof command === "object" && MODEL_COMMAND_TYPES.has(String((command as { type?: unknown }).type || "")));
-}
-
-function isDeferredControlCommand(command: unknown): command is DeferredControlCommand {
-  return Boolean(command && typeof command === "object" && DEFERRED_CONTROL_COMMAND_TYPES.has(String((command as { type?: unknown }).type || "")));
-}
-
-async function resolveAndBroadcastModelStateForCommand(channel: WebChannelLike, chatJid: string, result: AgentControlResult): Promise<{ model: string | null; thinkingLevel: string | null; thinkingLevelLabel: string | null; supportsThinking: boolean | undefined }> {
-  let nextModel = typeof result.model_label === "string" ? result.model_label : null;
-  let thinkingLevel = typeof result.thinking_level === "string" ? result.thinking_level : null;
-  let thinkingLevelLabel = typeof result.thinking_level_label === "string" ? result.thinking_level_label : null;
-  let supportsThinking: boolean | undefined = undefined;
-
-  try {
-    const modelState = await channel.agentPool.getAvailableModels(chatJid);
-    if (!nextModel) nextModel = modelState.current ?? null;
-    if (thinkingLevel == null) thinkingLevel = modelState.thinking_level ?? null;
-    if (!thinkingLevelLabel) thinkingLevelLabel = modelState.thinking_level_label ?? thinkingLevel;
-    supportsThinking = modelState.supports_thinking;
-  } catch {
-    if (typeof channel.agentPool.getCurrentModelLabel === "function") {
-      nextModel = await channel.agentPool.getCurrentModelLabel(chatJid).catch(() => null);
-    }
-  }
-
-  const state = {
-    model: nextModel ?? null,
-    thinkingLevel: thinkingLevel ?? null,
-    thinkingLevelLabel: thinkingLevelLabel ?? thinkingLevel ?? null,
-    supportsThinking,
-  };
-  channel.broadcastEvent("model_changed", {
-    chat_jid: chatJid,
-    model: state.model,
-    thinking_level: state.thinkingLevel,
-    thinking_level_label: state.thinkingLevelLabel,
-    supports_thinking: state.supportsThinking,
-  });
-  return state;
-}
-
 function parseLeadingAgentMention(content: string): { agentName: string; remainder: string } | null {
   const match = content.match(/^\s*@([a-zA-Z0-9][a-zA-Z0-9_-]{0,31})(?:\s+([\s\S]*))?$/);
   if (!match) return null;
@@ -731,6 +655,10 @@ function fallbackAgentHandle(chatJid: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "") || "agent";
+}
+
+function shouldPersistSteerRequest(req: Request, payload: { persist_steer?: boolean } | undefined): boolean {
+  return payload?.persist_steer === true || req.headers.get("X-Piclaw-Persist-Steer") === "1";
 }
 
 /**
@@ -764,6 +692,7 @@ export async function handleAgentMessage(
   if (!hasPayload) return channel.json({ error: "Missing 'content' field" }, 400);
 
   const requestMode = normalized.mode ?? "auto";
+  const persistSteer = shouldPersistSteerRequest(req, parsed.payload);
   const mention = content.trim().length > 0 ? parseLeadingAgentMention(content) : null;
   const mentionTarget = mention
     ? (typeof (channel.agentPool as { findChatByAgentName?: (name: string) => { chat_jid: string; agent_name: string } | null }).findChatByAgentName === "function"
@@ -837,6 +766,7 @@ export async function handleAgentMessage(
         content_blocks: normalized.contentBlocks,
         link_previews: normalized.linkPreviews,
         mode: requestMode,
+        ...(persistSteer ? { persist_steer: true } : {}),
         screen_hint: normalized.screenHint,
       }),
     });
@@ -926,7 +856,7 @@ export async function handleAgentMessage(
     contentPreview: content.slice(0, 60),
   });
 
-  if (!command && !themeCommand && !metersCommand && !isSettingsCommand && isStreaming && requestMode === "steer") {
+  if (!persistSteer && !command && !themeCommand && !metersCommand && !isSettingsCommand && isStreaming && requestMode === "steer") {
     const steerResponse = await queueDeferredSteer(content, "compose");
     if (steerResponse) return steerResponse;
   }
@@ -1034,10 +964,8 @@ export async function handleAgentMessage(
     let modelState: { model: string | null; thinkingLevel: string | null; thinkingLevelLabel: string | null; supportsThinking: boolean | undefined } | null = null;
     if (result.status === "success") {
       modelState = await resolveAndBroadcastModelStateForCommand(channel, chatJid, result);
-      if (command.type === "model" || command.type === "cycle_model") {
-        if (channel.retryFailedOnModelSwitch(chatJid)) {
-          channel.resumeChat(chatJid);
-        }
+      if (command.type === "model" || command.type === "thinking" || command.type === "cycle_model" || command.type === "cycle_thinking") {
+        resumeFailedRunAfterModelSwitch(channel, chatJid, command);
       }
     }
 
@@ -1248,6 +1176,10 @@ export async function handleAgentMessage(
       return null;
     }
 
+    if (persistSteer && interaction.id) {
+      getDb().prepare("UPDATE messages SET is_steering_message = 1 WHERE rowid = ?").run(interaction.id);
+    }
+
     const inflightMessageId = getInflightMessageId(chatJid);
     const rootRowId = inflightMessageId ? getMessageRowIdById(chatJid, inflightMessageId) : null;
     if (rootRowId && rootRowId !== interaction.id) {
@@ -1288,6 +1220,10 @@ export async function handleAgentMessage(
     const commandTurnId = createUuid("turn");
     const commandTitle = content.trim().split(/\s+/, 1)[0] || "command";
     const isCompactCommand = command.type === "compact";
+    const isSessionRotateCommand = command.type === "session_rotate";
+    const commandModel = (isCompactCommand || isSessionRotateCommand) && typeof channel.agentPool.getCurrentModelLabel === "function"
+      ? await channel.agentPool.getCurrentModelLabel(chatJid).catch(() => null)
+      : null;
 
     if (isCompactCommand) {
       // Compaction gets the timer affordance (same as auto-compaction)
@@ -1300,6 +1236,19 @@ export async function handleAgentMessage(
         detail: "Manual compaction requested via /compact.",
         intent_key: "compaction",
         started_at: new Date().toISOString(),
+        model: commandModel,
+      });
+    } else if (isSessionRotateCommand) {
+      emitCommandStatus({
+        thread_id: interaction.timestamp,
+        agent_id: agentId,
+        turn_id: commandTurnId,
+        type: "intent",
+        title: "Rotating session",
+        detail: "Compacting context before archiving the current session and creating its successor.",
+        intent_key: "session_rotation",
+        started_at: new Date().toISOString(),
+        model: commandModel,
       });
     } else {
       emitCommandStatus({
@@ -1312,11 +1261,14 @@ export async function handleAgentMessage(
     }
 
     const result = await channel.agentPool.applyControlCommand(chatJid, command);
-    if (result.status === "success" && isCompactCommand) {
+    if (result.status === "success" && (isCompactCommand || isSessionRotateCommand)) {
       await publishCommandContextUsage(result, {
         threadId: interaction.timestamp,
         turnId: commandTurnId,
       });
+    }
+    if (result.status === "success" && isSessionRotateCommand) {
+      await resolveAndBroadcastModelStateForCommand(channel, chatJid, result);
     }
     const formatted = formatOutbound(result.message, "web");
     const isQueueCommand = command.type === "queue" || command.type === "queue_all";
@@ -1477,6 +1429,7 @@ export async function handleAgentMessage(
   }
 
   if (requestMode === "steer") {
+    if (persistSteer) broadcastNewPost();
     const steerResponse = await queueSteerMessage("compose");
     if (steerResponse) {
       return steerResponse;
@@ -1522,7 +1475,6 @@ export async function processChat(
   threadRootId?: number,
   browserObservability?: BrowserObservabilityContext,
 ): Promise<void> {
-  const MAX_MATERIALIZE_RETRIES = 5;
   const {
     prevCursor,
     dbCursor,
@@ -1541,248 +1493,55 @@ export async function processChat(
     });
   }
 
-  type DeferredControlExecutionMessage = {
-    rowId: number;
-    messageId?: string | null;
-    content: string;
-    timestamp: string;
-    threadId?: number | null;
-    queuedSource?: string;
-    queuedBy?: import("../runtime/followup-placeholders.js").QueuedFollowupItem["queuedBy"];
-  };
+  const selection = selectProcessChatMessage({
+    chatJid,
+    prevCursor,
+    threadRootId,
+  });
 
-  const executeDeferredControlCommand = async (
-    persistedCommand: DeferredControlCommand,
-    message: DeferredControlExecutionMessage,
-    effectiveThreadRootId?: number | null,
-  ): Promise<"continue" | "resumed"> => {
-    log.info("processChat executing deferred control command", {
-      operation: "process_chat.deferred_control_command",
-      chatJid,
-      cursor: getChatCursor(chatJid),
-      messageId: message.messageId ?? null,
-      rowId: message.rowId,
-      commandType: persistedCommand.type,
-      queuedSource: message.queuedSource ?? null,
-      queuedBy: message.queuedBy ?? null,
-      contentPreview: message.content.slice(0, 80),
-    });
-
-    const result = await channel.agentPool.applyControlCommand(chatJid, persistedCommand);
-    const formatted = formatOutbound(result.message, "web");
-    const commandThreadId = message.threadId ?? effectiveThreadRootId ?? message.rowId ?? null;
-
-    if (result.status === "success" && persistedCommand.type === "compact") {
-      let contextUsage = result.contextUsage;
-      if (contextUsage?.tokens === null || contextUsage?.tokens === undefined) {
-        const current = typeof channel.agentPool.getContextUsageForChat === "function"
-          ? await channel.agentPool.getContextUsageForChat(chatJid).catch(() => null)
-          : null;
-        if (current?.tokens !== null && current?.tokens !== undefined) {
-          contextUsage = {
-            tokens: current.tokens,
-            contextWindow: current.contextWindow,
-            percent: current.percent,
-            source: "agent_pool",
-            phase: "after_command",
-          };
-        }
-      }
-      if (contextUsage?.tokens !== null && contextUsage?.tokens !== undefined) {
-        const persistedUsage = {
-          tokens: contextUsage.tokens,
-          contextWindow: contextUsage.contextWindow,
-          percent: contextUsage.percent,
-        };
-        const statusPayload = {
-          chat_jid: chatJid,
-          thread_id: commandThreadId,
-          agent_id: agentId,
-          turn_id: createUuid("turn"),
-          type: "context_usage",
-          context_usage: {
-            ...persistedUsage,
-            estimated: contextUsage.estimated === true,
-            source: contextUsage.source ?? null,
-            phase: contextUsage.phase ?? null,
-          },
-        };
-        channel.setContextUsage(chatJid, persistedUsage);
-        channel.updateAgentStatus(chatJid, statusPayload);
-        channel.broadcastEvent("agent_status", statusPayload);
-      }
-    }
-
-    if (formatted || result.contentBlocks?.length) {
-      const sendOptions: Record<string, unknown> = { threadId: commandThreadId };
-      if (result.mediaIds?.length) sendOptions.mediaIds = result.mediaIds;
-      if (result.contentBlocks?.length) sendOptions.contentBlocks = result.contentBlocks;
-      await channel.sendMessage(chatJid, formatted || "", sendOptions);
-    }
-
-    if (result.status === "success" && isModelControlCommand(persistedCommand)) {
-      await resolveAndBroadcastModelStateForCommand(channel, chatJid, result);
-    }
-
-    setChatCursor(chatJid, message.timestamp);
-    channel.saveState?.();
-
-    if (result.status === "success" && (persistedCommand.type === "model" || persistedCommand.type === "cycle_model")) {
-      if (channel.retryFailedOnModelSwitch(chatJid)) {
-        channel.resumeChat(chatJid);
-        return "resumed";
-      }
-    }
-
-    const cursorNow = getChatCursor(chatJid);
-    const remainingPersisted = getMessagesSince(chatJid, cursorNow, getIdentityConfig().assistantName);
-    if (remainingPersisted.length > 0) {
-      channel.resumeChat(chatJid);
-      return "resumed";
-    }
-
-    return "continue";
-  };
-
-  const materializeNextDeferredFollowup = async (): Promise<boolean> => {
-    const nextQueued = channel.consumeQueuedFollowupItem(chatJid);
-    if (!nextQueued) return false;
-
-    const retries = nextQueued.materializeRetries ?? 0;
-
-    const queuedInteraction = channel.storeMessage(
-      chatJid,
-      nextQueued.queuedContent,
-      false,
-      nextQueued.mediaIds ?? [],
-      {
-        contentBlocks: Array.isArray(nextQueued.contentBlocks) ? nextQueued.contentBlocks : undefined,
-        linkPreviews: Array.isArray(nextQueued.linkPreviews) ? nextQueued.linkPreviews : undefined,
-        threadId: nextQueued.threadId ?? undefined,
-        screenHint: nextQueued.screenHint,
-      }
-    );
-
-    if (!queuedInteraction) {
-      if (retries >= MAX_MATERIALIZE_RETRIES) {
-        // Too many failures — drop the item to prevent infinite loops.
-        log.error("Dropping queued follow-up after repeated materialize failures", {
-          operation: "process_chat.materialize_followup_drop",
-          chatJid,
-          retries,
-          rowId: nextQueued.rowId,
-          queuedSource: nextQueued.source ?? null,
-          contentPreview: nextQueued.queuedContent?.slice(0, 80) ?? "",
-        });
-        channel.broadcastEvent("agent_followup_consumed", {
-          chat_jid: chatJid,
-          thread_id: nextQueued.threadId ?? null,
-          row_id: nextQueued.rowId,
-          content: nextQueued.queuedContent,
-          timestamp: nextQueued.queuedAt,
-          ...(nextQueued.source ? { source: nextQueued.source } : {}),
-        });
-        return false;
-      }
-      // Preserve order and increment retry counter.
-      const withRetry = { ...nextQueued, materializeRetries: retries + 1 };
-      channel.prependQueuedFollowupItem(chatJid, withRetry);
-      log.warn("Failed to materialize queued follow-up", {
-        operation: "process_chat.materialize_followup_retry",
-        chatJid,
-        attempt: retries + 1,
-        maxAttempts: MAX_MATERIALIZE_RETRIES,
-        rowId: nextQueued.rowId,
-        queuedSource: nextQueued.source ?? null,
-      });
-      return false;
-    }
-
-    channel.broadcastEvent("agent_followup_consumed", {
-      chat_jid: chatJid,
-      thread_id: nextQueued.threadId ?? null,
-      row_id: nextQueued.rowId,
-      content: nextQueued.queuedContent,
-      timestamp: nextQueued.queuedAt,
-      ...(nextQueued.source ? { source: nextQueued.source } : {}),
-    });
-    channel.broadcastEvent("new_post", queuedInteraction);
-
-    const queuedCommand = parseControlCommand(String(nextQueued.queuedContent || ""), getRoutingConfig().triggerPattern);
-    if (isDeferredControlCommand(queuedCommand)) {
-      const action = await executeDeferredControlCommand(
-        queuedCommand,
-        {
-          rowId: queuedInteraction.id,
-          content: nextQueued.queuedContent,
-          timestamp: queuedInteraction.timestamp,
-          threadId: queuedInteraction.data?.thread_id ?? queuedInteraction.id ?? null,
-          queuedSource: nextQueued.source,
-          queuedBy: nextQueued.queuedBy,
-        },
-        queuedInteraction.data?.thread_id ?? queuedInteraction.id ?? null,
-      );
-      if (action === "continue") {
-        await materializeNextDeferredFollowup();
-      }
-      return true;
-    }
-
-    // Resume using the newly materialized message row id as the frontier.
-    // If multiple queued follow-ups belong to the same thread root, reusing the
-    // stable thread id here would cause resume-task deduplication to collapse
-    // later hand-offs and stall the drain loop after one turn.
-    channel.resumeChat(chatJid, queuedInteraction.id);
-    return true;
-  };
-
-  const messages = getMessagesSince(chatJid, prevCursor, getIdentityConfig().assistantName);
-
-  if (messages.length === 0) {
+  if (selection.kind === "no_messages") {
     log.info("processChat found no pending messages", {
       operation: "process_chat.no_pending_messages",
       chatJid,
       cursor: prevCursor,
       threadRootId: threadRootId ?? null,
     });
-    await materializeNextDeferredFollowup();
+    await materializeDeferredFollowups({
+      channel,
+      chatJid,
+      agentId,
+    });
     return;
   }
 
-  // Process exactly one persisted user message per turn. Batching multiple
-  // user messages into one prompt causes cross-parented replies and makes
-  // queue/turn finalization ordering nondeterministic.
-  const currentMessage = messages[0];
-  if (!currentMessage) return;
-
-  const unresolvedFailedRun = getFailedRun(chatJid);
-  if (unresolvedFailedRun && unresolvedFailedRun.messageId === currentMessage.id) {
+  if (selection.kind === "stale_failed_run_cleared") {
     log.info("processChat clearing stale failed-run marker without replay", {
       operation: "process_chat.clear_failed_run_without_replay",
       chatJid,
       cursor: prevCursor,
-      failedPrevTs: unresolvedFailedRun.prevTs,
-      failedTs: unresolvedFailedRun.failedTs,
-      failedMessageId: unresolvedFailedRun.messageId,
-      pendingMessageCount: messages.length,
+      failedPrevTs: selection.failedRun.prevTs,
+      failedTs: selection.failedRun.failedTs,
+      failedMessageId: selection.failedRun.messageId,
+      pendingMessageCount: selection.pendingMessages.length,
     });
-    clearFailedRun(chatJid);
-    setChatCursor(chatJid, currentMessage.timestamp);
-    if (messages.length > 1) {
+    if (selection.shouldResume) {
       channel.resumeChat(chatJid);
     } else {
-      await materializeNextDeferredFollowup();
+      await materializeDeferredFollowups({
+        channel,
+        chatJid,
+        agentId,
+      });
     }
     return;
   }
 
-  // Derive thread root from the actual message being processed, NOT from
-  // the threadRootId parameter. The parameter comes from whichever
-  // handleAgentMessage enqueued this processChat, but cursor-ordered
-  // message selection may pick a DIFFERENT message. Using the parameter
-  // would cross-parent the response under the wrong thread.
-  const messageThreadId = currentMessage.thread_id ?? undefined;
-  const effectiveThreadRootId = messageThreadId ?? threadRootId;
+  const {
+    pendingMessages: messages,
+    currentMessage,
+    messageThreadId,
+    effectiveThreadRootId,
+  } = selection;
 
   log.info("processChat selected next pending message", {
     operation: "process_chat.select_message",
@@ -1798,9 +1557,12 @@ export async function processChat(
 
   const persistedCommand = parseControlCommand(String(currentMessage.content || ""), getRoutingConfig().triggerPattern);
   if (isDeferredControlCommand(persistedCommand)) {
-    const action = await executeDeferredControlCommand(
-      persistedCommand,
-      {
+    const action = await executeDeferredControlCommand({
+      channel,
+      chatJid,
+      agentId,
+      command: persistedCommand,
+      message: {
         rowId: getMessageRowIdById(chatJid, currentMessage.id ?? "") ?? 0,
         messageId: currentMessage.id,
         content: String(currentMessage.content || ""),
@@ -1808,9 +1570,13 @@ export async function processChat(
         threadId: currentMessage.thread_id ?? effectiveThreadRootId ?? null,
       },
       effectiveThreadRootId,
-    );
+    });
     if (action === "continue") {
-      await materializeNextDeferredFollowup();
+      await materializeDeferredFollowups({
+        channel,
+        chatJid,
+        agentId,
+      });
     }
     return;
   }
@@ -1821,426 +1587,26 @@ export async function processChat(
   const runStartedAt = new Date().toISOString();
   const threadId = lastMessage.timestamp;
 
-  const THOUGHT_PREVIEW_LINES = 8;
-  const DRAFT_PREVIEW_LINES = 8;
-  const PREVIEW_MAX_CHARS_PER_LINE = 160;
-
   const turnId = createUuid("turn");
-  const shouldPersistThinking = isPersistThinkingEnabled() && !chatJid.startsWith("dream:");
-  let pendingThinkingText = "";
-  let pendingThinkingLines = 0;
-  let pendingThinkingDurationMs = 0;
-  let currentModel: string | null = null;
-  const identity = getIdentityConfig();
-  const withAgentProfile = createAgentProfileBuilder(
-    chatJid,
-    identity.assistantName,
-    resolveAvatarUrl("agent", identity.assistantAvatar),
-    identity.userName || null,
-    resolveAvatarUrl("user", identity.userAvatar),
-    identity.userAvatarBackground || null
-  );
-  const emitter = createAgentEventEmitter(channel, withAgentProfile);
-  const trackedEmitter = {
-    ...emitter,
-    status: (payload: Record<string, unknown>) => {
-      const isToolStatus = payload?.type === "tool_call" || payload?.type === "tool_status";
-      const toolName = typeof payload?.tool_name === "string" ? payload.tool_name.trim() : "";
-      let nextPayload = payload;
-      if (isToolStatus && toolName) {
-        nextPayload = withResolvedToolStatusHints(chatJid, payload);
-      }
-      nextPayload = withAgentStatusProgressMetadata(nextPayload, channel.getAgentStatus(chatJid));
-      channel.updateAgentStatus(chatJid, nextPayload);
-      emitter.status(nextPayload);
-    },
-    modelChanged: (payload: Record<string, unknown>) => {
-      const nextModel = typeof payload?.model === "string" ? payload.model.trim() : "";
-      if (nextModel) currentModel = nextModel;
-      emitter.modelChanged(payload);
-    },
-  };
-
-  if (shouldPersistThinking) {
-    try {
-      const modelState = await channel.agentPool.getAvailableModels(chatJid);
-      currentModel = modelState.current ?? null;
-    } catch (err) {
-      debugSuppressedError(log, "Failed to read current model for thinking persistence.", err, { operation: "persist_thinking.init_model" });
-      currentModel = null;
-    }
-  }
-
-  const hasActiveClients = channel.sse.clients.size > 0;
-  const agentRuntimeConfig = getAgentRuntimeConfig();
-  const timeoutMs = hasActiveClients
-    ? agentRuntimeConfig.timeoutMs
-    : (agentRuntimeConfig.backgroundTimeoutMs > 0 ? agentRuntimeConfig.backgroundTimeoutMs : agentRuntimeConfig.timeoutMs);
-
+  const streamRuntime = await createProcessChatStreamingRuntime({
+    channel, chatJid, agentId, threadId, turnId, runStartedAt, sourceMessageId: lastMessage.id ?? null,
+    withResolvedToolStatusHints, withAgentStatusProgressMetadata,
+  });
+  const { emitter, trackedEmitter, streamingHandler: trackedStreamingHandler, clearCommittedDraft, timeoutMs } = streamRuntime;
+  const streamState = streamRuntime.state;
   let turnCount = 0;
   let hadIntermediateOutput = false;
   let persistedIntermediateOutput = false;
   let intermediatePersistFailed = false;
-  let lastRecoveryMeta: { attemptsUsed?: number; recovered?: boolean; exhausted?: boolean; lastClassifier?: string | null } | null = null;
-  let sawCompactionEvent = false;
-  let sawRecoveryEvent = false;
-  let lastCompactionErrorMessage: string | null = null;
-  let lastCompactionSuppressed = false;
-  let lastRecoveryOutcome: string | null = null;
+  const resolvedThreadRootId = resolveThreadRootId(channel, chatJid, currentMessage.id ?? "", effectiveThreadRootId);
 
-  const resolvedThreadRootId = resolveThreadRootId(
-    channel,
-    chatJid,
-    currentMessage.id ?? "",
-    effectiveThreadRootId
-  );
-
-  const liveThinkingLevelLabels = new Map<string, string>();
-  try {
-    const modelState = await channel.agentPool.getAvailableModels(chatJid);
-    modelState.available_thinking_levels.forEach((level, index) => {
-      liveThinkingLevelLabels.set(level, modelState.available_thinking_level_labels[index] ?? level);
-    });
-    if (modelState.thinking_level && modelState.thinking_level_label) {
-      liveThinkingLevelLabels.set(modelState.thinking_level, modelState.thinking_level_label);
-    }
-  } catch (err) {
-    debugSuppressedError(log, "Failed to prepare live thinking-level labels.", err, {
-      operation: "process_chat.init_thinking_labels",
-      chatJid,
-    });
-  }
-
-  const streamingHandler = createStreamingEventHandler({
-    emitter: trackedEmitter,
-    agentId,
-    threadId,
-    turnId,
-    formatThinkingLevel: (level) => liveThinkingLevelLabels.get(level) ?? level,
-    thoughtPreviewLines: THOUGHT_PREVIEW_LINES,
-    draftPreviewLines: DRAFT_PREVIEW_LINES,
-    previewMaxCharsPerLine: PREVIEW_MAX_CHARS_PER_LINE,
-    includeThoughtFull: () => channel.isPanelExpanded(turnId, "thought"),
-    includeDraftFull: () => channel.isPanelExpanded(turnId, "draft"),
-    onThoughtBuffer: (text, totalLines) => channel.updateThoughtBuffer(turnId, text, totalLines),
-    onThinkingComplete: (text, totalLines, durationMs) => {
-      const realLines = text ? text.split("\n").length : 0;
-      log.info("Thinking block complete", {
-        operation: "persist_thinking.block_complete",
-        chatJid,
-        chars: text?.length ?? 0,
-        softLines: totalLines,
-        realLines,
-        durationMs,
-        shouldPersist: shouldPersistThinking,
-      });
-      if (!shouldPersistThinking || !text) return;
-      pendingThinkingText = pendingThinkingText ? `${pendingThinkingText}\n\n---\n\n${text}` : text;
-      pendingThinkingLines += realLines;
-      pendingThinkingDurationMs += durationMs;
-    },
-    onDraftBuffer: (text, totalLines) => channel.updateDraftBuffer(turnId, text, totalLines),
+  const preflight = await runProcessChatPreflight({
+    channel, chatJid, agentId, message: { id: lastMessage.id, timestamp: lastMessage.timestamp }, prevCursor, effectiveThreadRootId: effectiveThreadRootId ?? null, turnId, runStartedAt, browserObservability,
+    streamingHandler: trackedStreamingHandler, compactionState: streamState,
+    enqueueResume: (root) => enqueueProcessChatAfterCompaction(channel, chatJid, agentId, lastMessage.id, root, browserObservability),
   });
-  const clearCommittedDraft = () => {
-    channel.updateDraftBuffer(turnId, "", 0);
-    trackedEmitter.draft({
-      thread_id: threadId,
-      agent_id: agentId,
-      turn_id: turnId,
-      text: "",
-      total_lines: 0,
-      kind: "draft",
-      mode: "replace",
-    });
-    if (channel.isPanelExpanded(turnId, "draft")) {
-      trackedEmitter.draftDelta({
-        thread_id: threadId,
-        agent_id: agentId,
-        turn_id: turnId,
-        delta: "",
-        reset: true,
-      });
-    }
-  };
-  const trackedStreamingHandler = (event: Record<string, unknown>) => {
-    const type = typeof event?.type === "string" ? event.type : "";
-    if (type === "message_update") {
-      heartbeatTrackedPhase(chatJid, "streaming", { eventType: type });
-    } else if (type === "tool_execution_start" || type === "tool_execution_update" || type === "tool_execution_end") {
-      heartbeatTrackedPhase(chatJid, "tool_execution", {
-        eventType: type,
-        toolName: event.toolName,
-      });
-    } else if (type === "compaction_start") {
-      heartbeatTrackedPhase(chatJid, "preprompt_compaction", { eventType: type });
-    } else if (type === "compaction_end") {
-      heartbeatTrackedPhase(chatJid, "prompt", { eventType: type });
-    } else if (type === "recovery_start" || type === "recovery_end") {
-      heartbeatTrackedPhase(chatJid, "recovery", { eventType: type });
-    }
-    if (type === "compaction_start" || type === "compaction_end") {
-      sawCompactionEvent = true;
-    }
-    if (type === "compaction_end") {
-      const errorMessage = typeof event.errorMessage === "string" ? event.errorMessage.trim() : "";
-      if (errorMessage) lastCompactionErrorMessage = errorMessage;
-    }
-    if (type === "compaction_suppressed") {
-      const errorMessage = typeof event.errorMessage === "string" ? event.errorMessage.trim() : "";
-      if (errorMessage) lastCompactionErrorMessage = errorMessage;
-      lastCompactionSuppressed = true;
-    }
-    if (type === "recovery_start" || type === "recovery_end") {
-      sawRecoveryEvent = true;
-    }
-    if (type === "recovery_start") {
-      // I6: a previous attempt's thinking is associated with the failed run.
-      // Reset the per-turn thinking buffer so only the successful attempt's
-      // reasoning ends up persisted alongside the eventual message. Without
-      // this, the stored thinking would concatenate failed-attempt reasoning
-      // with successful-attempt reasoning and inflate both the line count
-      // and duration. The structural correctness of pendingThinkingText is
-      // preserved by relying on the same accumulator that onThinkingComplete
-      // populates after each thinking_end block.
-      if (shouldPersistThinking && pendingThinkingText) {
-        log.info("Discarding thinking buffer at recovery_start", {
-          operation: "persist_thinking.discard_on_recovery",
-          chatJid,
-          discardedChars: pendingThinkingText.length,
-          discardedLines: pendingThinkingLines,
-          discardedDurationMs: pendingThinkingDurationMs,
-        });
-      }
-      pendingThinkingText = "";
-      pendingThinkingLines = 0;
-      pendingThinkingDurationMs = 0;
-    }
-    if (type === "recovery_end") {
-      lastRecoveryOutcome = typeof event.outcome === "string" ? event.outcome : null;
-    }
-    streamingHandler(event as any);
-  };
+  if (preflight === "deferred") return;
 
-  trackedEmitter.status({
-    thread_id: threadId,
-    agent_id: agentId,
-    type: "thinking",
-    title: "Thinking...",
-    turn_id: turnId,
-  });
-
-  const maybeEmergencyRotateAfterPrePromptCompaction = async (source: "foreground" | "background"): Promise<boolean> => {
-    const detail = lastCompactionErrorMessage?.trim();
-    if (!detail || isCompactionCancellationError(detail)) return false;
-    log.warn("Pre-prompt compaction failed or was suppressed; emergency-rotating session before prompt", withObservabilityMetadata({
-      operation: "process_chat.preprompt_compaction_emergency_rotate",
-      chatJid,
-      source,
-      suppressed: lastCompactionSuppressed,
-      errorMessage: detail,
-    }, turnId, browserObservability));
-    const result = await channel.agentPool.emergencyRotateSession(chatJid, detail);
-    if (result.status !== "success") {
-      log.warn("Emergency rotation after pre-prompt compaction failure failed", withObservabilityMetadata({
-        operation: "process_chat.preprompt_compaction_emergency_rotate_failed",
-        chatJid,
-        source,
-        reason: result.message,
-      }, turnId, browserObservability));
-      return false;
-    }
-    log.info("Emergency-rotated session after pre-prompt compaction failure", withObservabilityMetadata({
-      operation: "process_chat.preprompt_compaction_emergency_rotate_success",
-      chatJid,
-      source,
-      archivePath: result.archivePath ?? null,
-      newSessionFile: result.newSessionFile ?? null,
-      previousSize: result.previousSize ?? null,
-      nextSize: result.nextSize ?? null,
-    }, turnId, browserObservability));
-    return true;
-  };
-
-  if (typeof channel.agentPool.getSessionForIntrospection === "function") {
-    const session = await channel.agentPool.getSessionForIntrospection(chatJid);
-    beginTrackedPhase(chatJid, "preprompt_compaction", {
-      source: "web.process_chat.preflight",
-      messageId: lastMessage.id,
-    });
-    beginChatPreflight(chatJid, {
-      prevTs: prevCursor,
-      messageId: lastMessage.id,
-      startedAt: runStartedAt,
-    });
-    const compactionPromise = maybeAutoCompactSessionBeforePrompt(
-      session,
-      chatJid,
-      {
-        onInfo: (message, details) => log.info(message, withObservabilityMetadata(details || {}, turnId, browserObservability)),
-        onWarn: (message, details) => log.warn(message, withObservabilityMetadata(details || {}, turnId, browserObservability)),
-      },
-      trackedStreamingHandler,
-    );
-    let deferredForCompaction = false;
-    try {
-      const foregroundMs = getPrePromptCompactionForegroundMs();
-      const foregroundResult = await Promise.race([
-        compactionPromise.then(() => "done" as const),
-        sleepMs(foregroundMs).then(() => "defer" as const),
-      ]);
-      if (foregroundResult === "defer") {
-        deferredForCompaction = true;
-        log.info("Pre-prompt compaction continuing in background", withObservabilityMetadata({
-          operation: "process_chat.preprompt_compaction_deferred",
-          chatJid,
-          messageId: lastMessage.id,
-          foregroundMs,
-        }, turnId, browserObservability));
-        compactionPromise
-          .then(async () => {
-            if (await maybeEmergencyRotateAfterPrePromptCompaction("background")) {
-              clearChatPreflight(chatJid);
-              endTrackedPhase(chatJid);
-            }
-          })
-          .catch((error) => {
-            log.warn("Background pre-prompt compaction failed before chat resume", withObservabilityMetadata({
-              operation: "process_chat.preprompt_compaction_deferred_failed",
-              chatJid,
-              messageId: lastMessage.id,
-              err: error,
-            }, turnId, browserObservability));
-          })
-          .finally(() => {
-            enqueueProcessChatAfterCompaction(channel, chatJid, agentId, lastMessage.id, effectiveThreadRootId, browserObservability);
-          });
-        return;
-      }
-    } catch (error) {
-      clearChatPreflight(chatJid);
-      endTrackedPhase(chatJid);
-      throw error;
-    } finally {
-      if (!deferredForCompaction) {
-        await compactionPromise;
-      }
-    }
-
-    if (await maybeEmergencyRotateAfterPrePromptCompaction("foreground")) {
-      clearChatPreflight(chatJid);
-      endTrackedPhase(chatJid);
-      enqueueProcessChatAfterCompaction(channel, chatJid, agentId, lastMessage.id, effectiveThreadRootId, browserObservability);
-      return;
-    }
-
-    heartbeatTrackedPhase(chatJid, "prompt", { eventType: "preflight_promoted" });
-    promoteChatPreflightToInflight(chatJid, lastMessage.timestamp, {
-      prevTs: prevCursor,
-      messageId: lastMessage.id,
-      startedAt: runStartedAt,
-    });
-  } else {
-    beginChatRun(chatJid, lastMessage.timestamp, {
-      prevTs: prevCursor,
-      messageId: lastMessage.id,
-      startedAt: runStartedAt,
-    });
-  }
-
-  const getActiveRecoveryIntent = (): "compaction" | "recovery" | null => {
-    const status = channel.getAgentStatus(chatJid);
-    if (!status || typeof status !== "object") return null;
-    const intentKey = status.intent_key ?? status.intentKey;
-    if (status.type !== "intent") return null;
-    if (intentKey === "compaction" || intentKey === "recovery") return intentKey;
-    return null;
-  };
-  const normalizeAgentUsageForTiming = (usage: unknown): Record<string, unknown> | null => {
-    if (!usage || typeof usage !== "object") return null;
-    const record = usage as Record<string, unknown>;
-    const readNumber = (...keys: string[]) => {
-      for (const key of keys) {
-        const value = Number(record[key]);
-        if (Number.isFinite(value) && value >= 0) return value;
-      }
-      return 0;
-    };
-    const inputTokens = readNumber("input", "inputTokens", "promptTokens");
-    const outputTokens = readNumber("output", "outputTokens", "completionTokens");
-    const reasoningTokens = readNumber("reasoning", "reasoningTokens", "reasoning_tokens");
-    const cacheReadTokens = readNumber("cacheRead", "cacheReadTokens");
-    const cacheWriteTokens = readNumber("cacheWrite", "cacheWriteTokens");
-    const explicitTotal = readNumber("totalTokens", "total", "total_tokens");
-    const totalTokens = explicitTotal || inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens;
-    if (!totalTokens && !inputTokens && !outputTokens && !reasoningTokens && !cacheReadTokens && !cacheWriteTokens) return null;
-    const cost = record.cost && typeof record.cost === "object" ? record.cost as Record<string, unknown> : null;
-    const costTotal = cost ? Number(cost.total) : Number(record.costTotal ?? record.cost_total);
-    return {
-      input_tokens: inputTokens,
-      output_tokens: outputTokens,
-      reasoning_tokens: reasoningTokens,
-      cache_read_tokens: cacheReadTokens,
-      cache_write_tokens: cacheWriteTokens,
-      total_tokens: totalTokens,
-      ...(Number.isFinite(costTotal) && costTotal > 0 ? { cost_total: costTotal } : {}),
-    };
-  };
-
-  const buildAgentTimingBlock = (usage?: unknown) => {
-    const completedAt = new Date().toISOString();
-    const startedMs = Date.parse(runStartedAt);
-    const completedMs = Date.parse(completedAt);
-    const normalizedUsage = normalizeAgentUsageForTiming(usage);
-    return {
-      type: "agent_timing",
-      started_at: runStartedAt,
-      completed_at: completedAt,
-      duration_ms: Number.isFinite(startedMs) && Number.isFinite(completedMs)
-        ? Math.max(0, completedMs - startedMs)
-        : null,
-      turn_id: turnId,
-      source_message_id: lastMessage.id ?? null,
-      ...(normalizedUsage ? { usage: normalizedUsage } : {}),
-    };
-  };
-
-  const buildThinkingRefBlocks = (): Array<Record<string, unknown>> => (
-    shouldPersistThinking && pendingThinkingText
-      ? [{ type: "thinking_ref", lines: pendingThinkingLines, duration_ms: pendingThinkingDurationMs }]
-      : []
-  );
-  // Persist accumulated thinking text against a known message rowid (returned
-  // from storeAgentTurn). This replaces the previous content-LIKE rediscovery
-  // which was both fragile (failed on duplicate content / retries) and O(N)
-  // per turn (full table scan of messages_fts predicate). The rowid is the
-  // authoritative identifier returned by the message persistence layer.
-  const persistThinkingForRow = (messageRowId: number | null): void => {
-    if (!shouldPersistThinking || !pendingThinkingText) return;
-    if (!messageRowId || messageRowId <= 0) {
-      log.warn("Skipping thinking persistence — no message rowid available", {
-        operation: "persist_thinking.no_rowid",
-        chatJid,
-      });
-      return;
-    }
-    const maxChars = getPersistThinkingMaxChars();
-    const truncated = pendingThinkingText.length > maxChars;
-    const textToStore = truncated ? safeTruncateUtf16(pendingThinkingText, maxChars) : pendingThinkingText;
-    storeThinkingContent(String(messageRowId), textToStore, pendingThinkingLines, pendingThinkingDurationMs, currentModel ?? undefined, truncated);
-    log.info("Persisted thinking content", {
-      operation: "persist_thinking.persist",
-      chatJid,
-      messageRowid: messageRowId,
-      lines: pendingThinkingLines,
-      durationMs: pendingThinkingDurationMs,
-      chars: textToStore.length,
-      truncated,
-      model: currentModel,
-    });
-    pendingThinkingText = "";
-    pendingThinkingLines = 0;
-    pendingThinkingDurationMs = 0;
-  };
   const persistTerminalOutcome = (
     text: string,
     marker: Record<string, unknown> | null,
@@ -2258,12 +1624,12 @@ export async function processChat(
       skipPlaceholder: turnCount === 0,
       isTerminalAgentReply: true,
       extraContentBlocks: [
-        buildAgentTimingBlock(options.usage),
+        streamRuntime.buildAgentTimingBlock(options.usage),
         ...(marker ? [marker] : []),
         ...(Array.isArray(options.additionalBlocks) ? options.additionalBlocks : []),
-        ...buildThinkingRefBlocks(),
+        ...streamRuntime.buildThinkingRefBlocks(),
       ],
-      onMessageStored: persistThinkingForRow,
+      onMessageStored: streamRuntime.persistThinkingForRow,
     });
   };
   const persistVisibleFailureOutcome = (
@@ -2328,8 +1694,8 @@ export async function processChat(
       : reason === "rate-limit"
         ? buildErrorOutcomeMarker(detail || "rate limit", {
             draftRecovered: Boolean(draftText),
-            attemptsUsed: lastRecoveryMeta?.attemptsUsed,
-            classifier: lastRecoveryMeta?.lastClassifier ?? null,
+            attemptsUsed: streamState.lastRecoveryMeta?.attemptsUsed,
+            classifier: streamState.lastRecoveryMeta?.lastClassifier ?? null,
             ...options.markerOptions,
           })
         : reason === "empty-final"
@@ -2337,81 +1703,32 @@ export async function processChat(
               kind: "blank_final",
               label: "no reply",
               title: "No final reply produced",
-              detail: lastRecoveryMeta?.lastClassifier ? `Last recovery classifier: ${lastRecoveryMeta.lastClassifier}.` : undefined,
+              detail: streamState.lastRecoveryMeta?.lastClassifier ? `Last recovery classifier: ${streamState.lastRecoveryMeta.lastClassifier}.` : undefined,
               severity: "warning",
               draftRecovered: Boolean(draftText),
-              attemptsUsed: lastRecoveryMeta?.attemptsUsed,
-              classifier: lastRecoveryMeta?.lastClassifier ?? null,
+              attemptsUsed: streamState.lastRecoveryMeta?.attemptsUsed,
+              classifier: streamState.lastRecoveryMeta?.lastClassifier ?? null,
             })
           : buildErrorOutcomeMarker(detail || "Response ended with an error before finalization", {
               draftRecovered: Boolean(draftText),
-              attemptsUsed: lastRecoveryMeta?.attemptsUsed,
-              classifier: lastRecoveryMeta?.lastClassifier ?? null,
+              attemptsUsed: streamState.lastRecoveryMeta?.attemptsUsed,
+              classifier: streamState.lastRecoveryMeta?.lastClassifier ?? null,
               ...options.markerOptions,
             });
 
     return persistVisibleFailureOutcome(markerBase, reason === "timeout" ? detail : undefined, options);
   };
 
-  const finalizeSuccessfulRun = async () => {
-    endChatRun(chatJid);
-
-    const cursorAfterEnd = getChatCursor(chatJid);
-    const pendingSteerTimestamps = channel.consumePendingSteering(chatJid);
-
-    // Steering-only rows are already excluded from getMessagesSince(), so the
-    // chat cursor must stay anchored to the last processed persisted user
-    // message. Advancing the cursor to steer timestamps can skip normal user
-    // messages that were persisted before those steering rows.
-    const cursorAfterSteer = getChatCursor(chatJid);
-
-    channel.saveState();
-    const contextUsage = await channel.agentPool.getContextUsageForChat(chatJid);
-    channel.setContextUsage(chatJid, contextUsage
-      ? { tokens: contextUsage.tokens, contextWindow: contextUsage.contextWindow, percent: contextUsage.percent }
-      : null);
-    trackedEmitter.status({
-      thread_id: threadId,
-      agent_id: agentId,
-      type: "done",
-      turn_id: turnId,
-      context_usage: contextUsage
-        ? { tokens: contextUsage.tokens, contextWindow: contextUsage.contextWindow, percent: contextUsage.percent }
-        : null,
-      recovery: lastRecoveryMeta,
-    });
-
-    // If more persisted user messages already exist after the cursor, process
-    // them before consuming deferred queued items. This preserves one-message-
-    // per-turn ordering and prevents cross-thread batching.
-    const cursorNow = getChatCursor(chatJid);
-    const remainingPersisted = getMessagesSince(chatJid, cursorNow, getIdentityConfig().assistantName);
-
-    log.info("finalizeSuccessfulRun advanced cursor", {
-      operation: "process_chat.finalize_successful_run",
-      chatJid,
-      cursorBefore: prevCursor,
-      cursorAfterEnd,
-      pendingSteerCount: pendingSteerTimestamps.length,
-      pendingSteerTimestamps,
-      cursorAfterSteer,
-      cursorNow,
-      remainingCount: remainingPersisted.length,
-      remainingMessages: remainingPersisted.map(m => `${m.id}@${m.timestamp}`),
-    });
-
-    if (remainingPersisted.length > 0) {
-      channel.resumeChat(chatJid);
-      return;
-    }
-
-    // Start the next queued follow-up only after this turn has fully finalized.
-    await materializeNextDeferredFollowup();
-
-    // If the exit_process tool was called during this turn, trigger graceful
-    // shutdown now that the response has been persisted and broadcast.
-    checkPendingShutdown();
-  };
+  const finalizeSuccessfulRun = async () => finalizeSuccessfulProcessChatRun({
+    channel,
+    emitter: trackedEmitter,
+    chatJid,
+    agentId,
+    turnId,
+    threadId,
+    prevCursor,
+    recovery: streamState.lastRecoveryMeta,
+  });
 
   const output = await channel.agentPool.runAgent(prompt, chatJid, {
     timeoutMs,
@@ -2435,15 +1752,18 @@ export async function processChat(
       turnCount++;
       if (turn.text || turn.attachments.length > 0) {
         hadIntermediateOutput = true;
-        const stored = storeAgentTurn(channel, emitter, {
+        const stored = persistIntermediateProcessChatTurn({
+          channel,
+          emitter,
           chatJid,
           text: turn.text,
           attachments: turn.attachments as AttachmentInfo[],
           channelName,
           threadId: resolvedThreadRootId,
           skipPlaceholder: isFirstTurn,
-          extraContentBlocks: [buildAgentTimingBlock(turn.usage)],
-          onMessageStored: turn.followedByToolUse ? clearCommittedDraft : undefined,
+          timingBlock: streamRuntime.buildAgentTimingBlock(turn.usage),
+          followedByToolUse: turn.followedByToolUse,
+          clearCommittedDraft,
         });
         if (!stored) {
           intermediatePersistFailed = true;
@@ -2461,7 +1781,7 @@ export async function processChat(
     },
   });
 
-  lastRecoveryMeta = output.recovery || null;
+  streamState.lastRecoveryMeta = output.recovery || null;
 
   if (output.status === "tool_complete") {
     // Provider stopped cleanly after tool use with no closing text reply.
@@ -2598,11 +1918,11 @@ export async function processChat(
         skipPlaceholder: turnCount === 0,
         isTerminalAgentReply: true,
         extraContentBlocks: [
-          buildAgentTimingBlock(output.usage),
+          streamRuntime.buildAgentTimingBlock(output.usage),
           ...(buildRecoveryMarkerBlocks(output.recovery) ?? []),
-          ...buildThinkingRefBlocks(),
+          ...streamRuntime.buildThinkingRefBlocks(),
         ],
-        onMessageStored: persistThinkingForRow,
+        onMessageStored: streamRuntime.persistThinkingForRow,
       })
     : hasDraftFallback
       ? publishDraftFallback("empty-final")
@@ -2686,47 +2006,47 @@ export async function processChat(
     const preview = originalContent.length > 120
       ? originalContent.slice(0, 120) + "…"
       : originalContent;
-    const recoveryIntent = getActiveRecoveryIntent();
-    const recoveryLooksStalled = Boolean(lastRecoveryMeta?.exhausted)
-      || lastRecoveryOutcome === "exhausted"
-      || sawCompactionEvent
-      || sawRecoveryEvent
+    const recoveryIntent = streamRuntime.getActiveRecoveryIntent();
+    const recoveryLooksStalled = Boolean(streamState.lastRecoveryMeta?.exhausted)
+      || streamState.lastRecoveryOutcome === "exhausted"
+      || streamState.sawCompactionEvent
+      || streamState.sawRecoveryEvent
       || recoveryIntent !== null
-      || !!lastCompactionErrorMessage;
+      || !!streamState.lastCompactionErrorMessage;
 
     if (recoveryLooksStalled) {
-      const title = lastRecoveryMeta?.exhausted || lastRecoveryOutcome === "exhausted"
+      const title = streamState.lastRecoveryMeta?.exhausted || streamState.lastRecoveryOutcome === "exhausted"
         ? "Automatic recovery exhausted"
-        : lastCompactionErrorMessage
+        : streamState.lastCompactionErrorMessage
           ? "Context compaction failed"
           : recoveryIntent === "compaction"
             ? "Context compaction did not complete"
             : "Context recovery did not complete";
-      const detail = lastCompactionErrorMessage
-        ? lastCompactionErrorMessage
-        : lastRecoveryMeta?.lastClassifier
-          ? `Last recovery classifier: ${lastRecoveryMeta.lastClassifier}.`
+      const detail = streamState.lastCompactionErrorMessage
+        ? streamState.lastCompactionErrorMessage
+        : streamState.lastRecoveryMeta?.lastClassifier
+          ? `Last recovery classifier: ${streamState.lastRecoveryMeta.lastClassifier}.`
           : "The turn ended without a persisted reply while compaction or automatic recovery was in flight.";
 
       log.warn("Agent completed without output after compaction/recovery activity", {
         operation: "process_chat.no_output_recovery_stalled",
         chatJid,
         title,
-        sawCompactionEvent,
-        sawRecoveryEvent,
+        sawCompactionEvent: streamState.sawCompactionEvent,
+        sawRecoveryEvent: streamState.sawRecoveryEvent,
         recoveryIntent,
-        lastCompactionErrorMessage,
-        recovery: lastRecoveryMeta,
+        lastCompactionErrorMessage: streamState.lastCompactionErrorMessage,
+        recovery: streamState.lastRecoveryMeta,
       });
 
       const marker = buildTurnOutcomeMarker({
-        kind: lastCompactionErrorMessage ? "context" : "recovery",
-        label: lastCompactionErrorMessage ? "context" : "recovery",
+        kind: streamState.lastCompactionErrorMessage ? "context" : "recovery",
+        label: streamState.lastCompactionErrorMessage ? "context" : "recovery",
         title,
         detail,
         severity: "warning",
-        attemptsUsed: lastRecoveryMeta?.attemptsUsed,
-        classifier: lastRecoveryMeta?.lastClassifier ?? null,
+        attemptsUsed: streamState.lastRecoveryMeta?.attemptsUsed,
+        classifier: streamState.lastRecoveryMeta?.lastClassifier ?? null,
       });
       const persisted = persistVisibleFailureOutcome(marker);
       if (persisted) {
@@ -2764,7 +2084,7 @@ export async function processChat(
       hadIntermediateOutput,
       persistedIntermediateOutput,
       hadDraft,
-      recovery: lastRecoveryMeta,
+      recovery: streamState.lastRecoveryMeta,
     });
 
     const marker = buildTurnOutcomeMarker({
@@ -2773,8 +2093,8 @@ export async function processChat(
       title,
       detail: preview ? `${detail} Prompt: ${preview}` : detail,
       severity: "warning",
-      attemptsUsed: lastRecoveryMeta?.attemptsUsed,
-      classifier: lastRecoveryMeta?.lastClassifier ?? null,
+      attemptsUsed: streamState.lastRecoveryMeta?.attemptsUsed,
+      classifier: streamState.lastRecoveryMeta?.lastClassifier ?? null,
     });
     const persisted = persistVisibleFailureOutcome(marker);
     if (persisted) {

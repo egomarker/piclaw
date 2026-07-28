@@ -1,4 +1,4 @@
-import { readEnvFile } from "../core/env.js";
+import { readEnvFile, readMergedEnvValue } from "../core/env.js";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -10,6 +10,7 @@ const LOG_LEVEL_ORDER: Record<LogLevel, number> = {
   error: 40,
 };
 const envConfig = readEnvFile(["PICLAW_LOG_LEVEL", "LOG_LEVEL"]);
+let configuredFallback: LogLevel = DEFAULT_LOG_LEVEL;
 
 export function parseLogLevel(value: unknown, fallback: LogLevel = DEFAULT_LOG_LEVEL): LogLevel {
   if (typeof value !== "string") return fallback;
@@ -20,9 +21,13 @@ export function parseLogLevel(value: unknown, fallback: LogLevel = DEFAULT_LOG_L
   return fallback;
 }
 
-export function getConfiguredLogLevel(fallback: LogLevel = DEFAULT_LOG_LEVEL): LogLevel {
+export function setConfiguredLogLevelFallback(level: LogLevel): void {
+  configuredFallback = level;
+}
+
+export function getConfiguredLogLevel(fallback: LogLevel = configuredFallback): LogLevel {
   return parseLogLevel(
-    process.env.PICLAW_LOG_LEVEL ?? envConfig.PICLAW_LOG_LEVEL ?? process.env.LOG_LEVEL ?? envConfig.LOG_LEVEL,
+    readMergedEnvValue("PICLAW_LOG_LEVEL", envConfig) ?? readMergedEnvValue("LOG_LEVEL", envConfig),
     fallback,
   );
 }

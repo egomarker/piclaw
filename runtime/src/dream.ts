@@ -10,7 +10,7 @@ import { buildDreamPrompt } from "./agent-memory/dream-prompt.js";
 import { inspectDailyNoteSummaryBacklog, refreshDailyNotesFromMessages } from "./agent-memory/daily-notes.js";
 import { refreshAgentMemoryFromDailyNotes, type RefreshAgentMemoryResult } from "./agent-memory/refresh.js";
 import { AUTO_DREAM_DEFAULT_DAYS, MANUAL_DREAM_DEFAULT_DAYS } from "./dream-defaults.js";
-import { DATA_DIR, SESSIONS_DIR, WORKSPACE_DIR, getAgentRuntimeConfig } from "./core/config.js";
+import { DATA_DIR, SESSIONS_DIR, WORKSPACE_DIR, getDreamConfig } from "./core/config.js";
 import { getTaskById, createTask, getDb, updateTask } from "./db.js";
 import { deleteThinkingContentByChatJid, deleteThinkingContentByChatJidPattern } from "./db/thinking-cleanup.js";
 import { refreshWorkspaceIndex } from "./workspace-search.js";
@@ -21,7 +21,7 @@ import { createLogger, debugSuppressedError } from "./utils/logger.js";
 export const DREAM_TASK_ID = "builtin-dream-midnight";
 export const DREAM_TASK_KIND = "internal" as const;
 export const DREAM_TASK_PROMPT = "dream";
-export const DREAM_TASK_CRON = process.env.PICLAW_DREAM_CRON?.trim() || "0 1 * * *";
+export const DREAM_TASK_CRON = getDreamConfig().cron;
 
 export interface DreamRunResult {
   generated_at: string;
@@ -53,9 +53,6 @@ const DREAM_ALL_CHATS_SCOPE_ANCHOR = "*";
 const DREAM_CURRENT_STATE_PATH = resolve(DREAM_MEMORY_DIR, "current-state.md");
 const DREAM_RECENT_CONTEXT_PATH = resolve(DREAM_MEMORY_DIR, "recent-context.md");
 const DREAM_MEMORY_PATH = resolve(DREAM_MEMORY_DIR, "MEMORY.md");
-const DREAM_BACKUP_KEEP = Math.max(1, Number.parseInt(process.env.PICLAW_DREAM_BACKUP_KEEP || "10", 10) || 10);
-const DREAM_MODEL = process.env.PICLAW_DREAM_MODEL?.trim() || null;
-const DEFAULT_DREAM_AGENT_TIMEOUT_MS = 6 * 60 * 1000;
 const DREAM_ALLOWED_TOOL_NAMES = new Set([
   "read",
   "edit",
@@ -421,11 +418,7 @@ function releaseDreamLock(fd: number): void {
 }
 
 function getDreamAgentTimeoutMs(): number {
-  const configured = Number.parseInt(process.env.PICLAW_DREAM_AGENT_TIMEOUT_MS || "", 10);
-  if (Number.isFinite(configured) && configured > 0) return configured;
-  const backgroundTimeoutMs = getAgentRuntimeConfig().backgroundTimeoutMs;
-  if (Number.isFinite(backgroundTimeoutMs) && backgroundTimeoutMs > 0) return backgroundTimeoutMs;
-  return DEFAULT_DREAM_AGENT_TIMEOUT_MS;
+  return getDreamConfig().agentTimeoutMs;
 }
 
 async function refreshWorkspaceSearchIndex(): Promise<boolean> {
@@ -455,7 +448,7 @@ function addDreamBackupTree(entries: Zippable, sourceDir: string, archiveRoot: s
 
 function pruneOldDreamBackups(): void {
   const entries = readdirSync(DREAM_BACKUPS_DIR).sort().reverse();
-  for (const entry of entries.slice(DREAM_BACKUP_KEEP)) {
+  for (const entry of entries.slice(getDreamConfig().backupKeep)) {
     rmSync(join(DREAM_BACKUPS_DIR, entry), { recursive: true, force: true });
   }
 }
@@ -534,7 +527,7 @@ export async function runDreamAgentTurn(options: { chatJid: string; days?: numbe
   const dreamChatJid = buildDreamChatJid(chatJid, mode);
   const requestedDreamModel = typeof options.model === "string" && options.model.trim()
     ? options.model.trim()
-    : DREAM_MODEL;
+    : getDreamConfig().model || null;
   const dreamStartTime = Date.now();
   try {
     const lock = acquireDreamLock();
@@ -788,20 +781,21 @@ export function formatDreamSummary(result: DreamRunResult): string {
 
 export function ensureDreamTask(chatJid = "web:default") {
   const existing = getTaskById(DREAM_TASK_ID);
-  const nextRun = computeNextRun("cron", DREAM_TASK_CRON);
+  const dreamConfig = getDreamConfig();
+  const nextRun = computeNextRun("cron", dreamConfig.cron);
 
   if (!existing) {
     createTask({
       id: DREAM_TASK_ID,
       chat_jid: chatJid,
       prompt: DREAM_TASK_PROMPT,
-      model: DREAM_MODEL,
+      model: dreamConfig.model || null,
       task_kind: DREAM_TASK_KIND,
       command: null,
       cwd: null,
       timeout_sec: null,
       schedule_type: "cron",
-      schedule_value: DREAM_TASK_CRON,
+      schedule_value: dreamConfig.cron,
       next_run: nextRun,
       status: "active",
       created_at: new Date().toISOString(),
@@ -810,18 +804,18 @@ export function ensureDreamTask(chatJid = "web:default") {
   }
 
   const shouldRecomputeNextRun = existing.schedule_type !== "cron"
-    || existing.schedule_value !== DREAM_TASK_CRON
+    || existing.schedule_value !== dreamConfig.cron
     || !existing.next_run;
 
   updateTask(DREAM_TASK_ID, {
     prompt: DREAM_TASK_PROMPT,
-    model: DREAM_MODEL,
+    model: dreamConfig.model || null,
     task_kind: DREAM_TASK_KIND,
     command: null,
     cwd: null,
     timeout_sec: null,
     schedule_type: "cron",
-    schedule_value: DREAM_TASK_CRON,
+    schedule_value: dreamConfig.cron,
     next_run: shouldRecomputeNextRun ? nextRun : existing.next_run,
     status: "active",
   });

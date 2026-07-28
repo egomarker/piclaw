@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 import { EventEmitter } from "node:events";
 
-import "../../helpers.js";
+import { setEnv } from "../../helpers.js";
 import {
   parseDirectVncTargetReference,
   parseVncTargets,
@@ -120,6 +120,10 @@ describe("VncSessionService", () => {
 
   test("direct-target policy follows runtime config when no override is provided", async () => {
     const configModule = await import("../../../src/core/config.js");
+    const restoreEnv = setEnv({
+      PICLAW_WEB_VNC_ALLOW_DIRECT: undefined,
+      PICLAW_VNC_ALLOW_DIRECT: undefined,
+    });
     const previous = configModule.getWebRuntimeConfig().vncAllowDirect;
 
     try {
@@ -137,6 +141,7 @@ describe("VncSessionService", () => {
       });
     } finally {
       configModule.setWebVncAllowDirect(previous);
+      restoreEnv();
     }
   });
 });

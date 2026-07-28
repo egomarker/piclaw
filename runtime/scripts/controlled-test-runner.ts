@@ -8,7 +8,7 @@ import { findProjectPackageDir } from "./vendor-workflow.js";
 type RunnerOptions = {
   stageSize: number;
   sampleMs: number;
-  reportPath: string;
+  reportPath: string | null;
   useInMemoryDb: boolean;
   passthroughArgs: string[];
 };
@@ -64,6 +64,7 @@ function printUsage(): void {
     "  - runs stages sequentially in fresh Bun processes",
     "  - forces --max-concurrency=1 unless already supplied",
     "  - sets PICLAW_DB_IN_MEMORY=1 unless disabled",
+    "  - does not write a JSON report unless --report PATH is supplied",
   ].join("\n"));
 }
 
@@ -121,13 +122,10 @@ function parseArgs(argv = process.argv.slice(2)): RunnerOptions {
     passthroughArgs.push(arg);
   }
 
-  const packageDir = findProjectPackageDir(process.cwd()) || process.cwd();
-  const defaultReportPath = resolve(packageDir, "runtime/generated/controlled-test-report.json");
-
   return {
     stageSize,
     sampleMs,
-    reportPath: reportPath ? resolve(process.cwd(), reportPath) : defaultReportPath,
+    reportPath: reportPath ? resolve(process.cwd(), reportPath) : null,
     useInMemoryDb,
     passthroughArgs,
   };
@@ -179,7 +177,7 @@ function chunkFiles(files: string[], stageSize: number): StagePlan[] {
 
 function readProcEntries(): ProcEntry[] {
   const entries: ProcEntry[] = [];
-  let procDirs: string[] = [];
+  let procDirs: string[];
   try {
     procDirs = readdirSync("/proc");
   } catch {
@@ -391,14 +389,18 @@ async function main(): Promise<void> {
     stages: results,
   };
 
-  mkdirSync(dirname(options.reportPath), { recursive: true });
-  writeFileSync(options.reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  if (options.reportPath) {
+    mkdirSync(dirname(options.reportPath), { recursive: true });
+    writeFileSync(options.reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  }
 
   const peakCgroupLabel = report.max_peak_cgroup_memory_bytes === null
     ? "n/a"
     : `${Math.round(report.max_peak_cgroup_memory_bytes / (1024 * 1024))} MiB`;
   console.log(`\n[controlled-test] summary: exit=${report.exit_code} stages=${report.stages_completed}/${stages.length} total_elapsed=${Math.round(report.elapsed_ms / 1000)}s peak_rss=${Math.round(report.max_peak_process_tree_rss_kb / 1024)} MiB peak_cgroup=${peakCgroupLabel}`);
-  console.log(`[controlled-test] report=${relative(packageDir, options.reportPath) || options.reportPath}`);
+  console.log(options.reportPath
+    ? `[controlled-test] report=${relative(packageDir, options.reportPath) || options.reportPath}`
+    : "[controlled-test] report=disabled (pass --report PATH to write JSON)");
 
   process.exit(report.exit_code);
 }

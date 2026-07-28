@@ -62,9 +62,10 @@ test("imgcat builds SIXEL output", async () => {
   expect(output).toEndWith("\x1b\\\n");
 });
 
-test("Piclaw terminal sessions advertise the inline-image protocol supported by the xterm bundle", () => {
-  const source = readFileSync(join("/workspace/piclaw", "runtime/src/channels/web/terminal/terminal-session-service.ts"), "utf8");
+test("Piclaw terminal sessions advertise the configured inline-image protocol supported by the xterm bundle", () => {
+  const source = readFileSync(join(import.meta.dir, "../../src/channels/web/terminal/terminal-session-service.ts"), "utf8");
   expect(source).toContain('PICLAW_TERMINAL: "1"');
-  expect(source).toContain('PICLAW_TERMINAL_IMAGE_PROTOCOL: process.env.PICLAW_TERMINAL_IMAGE_PROTOCOL || "iterm2"');
-  expect(source).toContain('TERM_INLINE_IMAGE_PROTOCOL: process.env.TERM_INLINE_IMAGE_PROTOCOL || process.env.PICLAW_TERMINAL_IMAGE_PROTOCOL || "iterm2"');
+  expect(source).toContain("getWebRuntimeConfig().terminalImageProtocol");
+  expect(source).toContain("PICLAW_TERMINAL_IMAGE_PROTOCOL: terminalImageProtocol");
+  expect(source).toContain("TERM_INLINE_IMAGE_PROTOCOL: process.env.TERM_INLINE_IMAGE_PROTOCOL || terminalImageProtocol");
 });

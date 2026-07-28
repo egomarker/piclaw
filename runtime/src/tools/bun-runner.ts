@@ -14,7 +14,7 @@ import { existsSync, statSync } from "fs";
 import path from "path";
 import { StringDecoder } from "string_decoder";
 
-import { WORKSPACE_DIR } from "../core/config.js";
+import { WORKSPACE_DIR, getToolOutputPresentationConfig } from "../core/config.js";
 import { buildPreview, saveToolOutput } from "../tool-output.js";
 import { mergePiSessionEnv, type PiSessionEnvInput } from "../utils/pi-session-env.js";
 import { killProcessTree, registerProcess, unregisterProcess } from "../utils/process-tracker.js";
@@ -22,10 +22,7 @@ import { shouldDetachChildProcess } from "../utils/process-spawn.js";
 
 const DEFAULT_TIMEOUT_SEC = 120;
 const MAX_TIMEOUT_SEC = 3600;
-const STORE_THRESHOLD_BYTES = parseInt(process.env.PICLAW_TOOL_OUTPUT_STORE_BYTES || "4096", 10);
-const STORE_THRESHOLD_LINES = parseInt(process.env.PICLAW_TOOL_OUTPUT_STORE_LINES || "40", 10);
-const PREVIEW_LINES = parseInt(process.env.PICLAW_TOOL_OUTPUT_PREVIEW_LINES || "8", 10);
-const PREVIEW_LINE_CHARS = parseInt(process.env.PICLAW_TOOL_OUTPUT_PREVIEW_LINE_CHARS || "200", 10);
+const { storeBytes: STORE_THRESHOLD_BYTES, storeLines: STORE_THRESHOLD_LINES, previewLines: PREVIEW_LINES, previewLineChars: PREVIEW_LINE_CHARS } = getToolOutputPresentationConfig();
 
 export interface RunBunScriptParams {
   script: string;

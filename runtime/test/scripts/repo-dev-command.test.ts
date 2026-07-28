@@ -20,13 +20,15 @@ test("createRepoDevCommandPlan resolves repo-root binaries for build, lint, and 
   expect(typeof buildPlan.preRun).toBe("function");
   expect(typeof buildPlan.postRun).toBe("function");
 
-  expect(lintPlan.cwd).toBe("/workspace/piclaw/runtime");
+  expect(lintPlan.cwd).toBe("/workspace/piclaw");
   expect(lintPlan.binaryPath).toBe("/workspace/piclaw/node_modules/eslint/bin/eslint.js");
   expect(lintPlan.args).toEqual([
     "--config",
-    "/workspace/piclaw/runtime/eslint.config.js",
-    "src/**/*.ts",
-    "test/**/*.ts",
+    "/workspace/piclaw/eslint.config.js",
+    "runtime/src/**/*.ts",
+    "runtime/test/**/*.ts",
+    "runtime/scripts/**/*.ts",
+    "scripts/**/*.ts",
   ]);
 
   expect(typecheckPlan.cwd).toBe("/workspace/piclaw/runtime");

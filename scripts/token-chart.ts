@@ -162,7 +162,7 @@ function scanFile(filePath: string) {
 }
 
 function walk(dir: string) {
-  let entries: string[] = [];
+  let entries: string[];
   try {
     entries = readdirSync(dir);
   } catch {
@@ -246,7 +246,6 @@ const sumInput = dayKeys.reduce((acc, key) => acc + (inputs.get(key) || 0), 0);
 const sumOutput = dayKeys.reduce((acc, key) => acc + (outputs.get(key) || 0), 0);
 const sumCacheRead = dayKeys.reduce((acc, key) => acc + (cacheReads.get(key) || 0), 0);
 const sumCacheWrite = dayKeys.reduce((acc, key) => acc + (cacheWrites.get(key) || 0), 0);
-const sumCost = dayKeys.reduce((acc, key) => acc + (costs.get(key) || 0), 0);
 const cachedTotal = sumCacheRead + sumCacheWrite;
 const cachedPct = sumValue > 0 ? Math.round((cachedTotal / sumValue) * 1000) / 10 : 0;
 
@@ -254,18 +253,9 @@ const niceNumber = (value: number, round: boolean): number => {
   if (value === 0) return 0;
   const exponent = Math.floor(Math.log10(Math.abs(value)));
   const fraction = Math.abs(value) / Math.pow(10, exponent);
-  let niceFraction = 1;
-  if (round) {
-    if (fraction < 1.5) niceFraction = 1;
-    else if (fraction < 3) niceFraction = 2;
-    else if (fraction < 7) niceFraction = 5;
-    else niceFraction = 10;
-  } else {
-    if (fraction <= 1) niceFraction = 1;
-    else if (fraction <= 2) niceFraction = 2;
-    else if (fraction <= 5) niceFraction = 5;
-    else niceFraction = 10;
-  }
+  const niceFraction = round
+    ? (fraction < 1.5 ? 1 : fraction < 3 ? 2 : fraction < 7 ? 5 : 10)
+    : (fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10);
   return niceFraction * Math.pow(10, exponent);
 };
 

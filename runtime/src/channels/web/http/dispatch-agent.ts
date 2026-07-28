@@ -52,6 +52,7 @@ import {
   handleWebPushVapidPublicKey,
 } from "../push/web-push-routes.js";
 import { getThinkingContentForChat } from "../../../db/messages.js";
+import { readKeychainBootstrapKeyMaterial } from "../../../core/config.js";
 
 interface ExactAgentRoute {
   method: string;
@@ -667,15 +668,10 @@ const EXACT_AGENT_ROUTES: ExactAgentRoute[] = [
           if (!masterPassword) {
             return channel.json({ error: "Master password required.", needs_master_password: true }, 401);
           }
-          const configuredKey = process.env.PICLAW_KEYCHAIN_KEY || "";
-          const keyFile = process.env.PICLAW_KEYCHAIN_KEY_FILE;
-          let expectedKey = configuredKey;
-          if (!expectedKey && keyFile) {
-            try {
-              const { readFileSync } = await import("node:fs");
-              expectedKey = readFileSync(keyFile, "utf8").trim();
-            } catch (e) { void e; }
-          }
+          let expectedKey = "";
+          try {
+            expectedKey = readKeychainBootstrapKeyMaterial();
+          } catch (e) { void e; }
           if (!expectedKey) {
             return channel.json({ error: "Keychain master key not configured on server." }, 500);
           }

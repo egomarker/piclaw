@@ -285,9 +285,17 @@ export function handleAppSseEvent(
     getAgentStatus(targetChatJid)
       .then((response) => {
         if (activeChatJidRef.current !== targetChatJid) return;
-        if (!response || response.status !== 'active' || !response.data) return;
+        if (!response?.data) return;
 
         const payload = response.data;
+        if (payload.type === 'done' || payload.type === 'error') {
+          // A terminal event may have landed while SSE was disconnected. The
+          // connected handler already refreshes timeline/model state; refresh
+          // context explicitly so session rotation completion is fully applied.
+          void refreshContextUsage();
+          return;
+        }
+        if (response.status !== 'active') return;
         const activeTurn = readAgentTurnId(payload);
         if (activeTurn) setActiveTurn(activeTurn);
         setAgentStatus(payload);

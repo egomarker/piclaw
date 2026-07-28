@@ -1,6 +1,6 @@
 # Provider/model pricing reference
 
-_Reference tag: 2026-07-14_
+_Reference tag: 2026-07-25_
 
 This file records the sources and assumptions behind the token chart's **estimated API-equivalent** costs. The executable source of truth is `provider-model-pricing-reference.ts`.
 
@@ -10,10 +10,12 @@ This file records the sources and assumptions behind the token chart's **estimat
 2. The live OpenRouter `/api/v1/models` response for OpenRouter-specific routes.
 3. Explicitly labeled estimator fallbacks only when a provider does not publish a meter needed by local telemetry.
 
-Primary sources checked on 2026-07-14:
+Primary sources checked on 2026-07-14 and refreshed for Opus 5 / Kimi K3 on 2026-07-25:
 
 - [OpenAI API pricing](https://developers.openai.com/api/docs/pricing)
 - [Anthropic API pricing](https://docs.anthropic.com/en/docs/about-claude/pricing)
+- [Claude Opus 5 announcement](https://www.anthropic.com/news/claude-opus-5)
+- [Kimi K3 pricing](https://platform.kimi.ai/docs/pricing/chat-k3)
 - [Z.AI pricing](https://docs.z.ai/guides/overview/pricing)
 - [MiniMax PAYG pricing](https://platform.minimax.io/docs/guides/pricing-paygo)
 - [Azure Foundry Mistral pricing](https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/mistral-ai/)
@@ -29,7 +31,7 @@ Primary sources checked on 2026-07-14:
 - A cache value marked `†` is an estimator fallback, not a published provider cache tariff. Because local telemetry can report cache reads/writes outside ordinary input, the estimator explicitly charges those tokens at ordinary input price rather than silently treating them as free.
 - GPT-5.6 has a published cache-write price; GPT-5.5, GPT-5.4, and older OpenAI rows do not. GPT-5.5's `$5/MTok` cache-write value is therefore an estimator fallback, not an official cache-write tariff.
 - OpenAI rates are the standard `<=272K` input tier. Higher long-context rates are not modeled.
-- Anthropic cache-write values are the 5-minute TTL rates. One-hour writes are higher and are not represented by the single local cache-write field.
+- Anthropic cache-write values are the 5-minute TTL rates. One-hour writes are higher and are not represented by the single local cache-write field. Opus 5 Fast mode is represented separately because it is priced at 2x the standard Opus 5 base rate.
 - Claude Opus 4.6 (1M) currently uses the standard Opus row; context-related premiums or geo multipliers are not modeled.
 - Fire Pass coverage is account-specific. Fireworks fast/turbo routers use PAYG rates here; a subscription comparison may subtract covered usage separately.
 - OpenRouter rows represent credits consumed at the displayed token rates. They exclude OpenRouter's separate 5.5% credit-purchase fee ($0.80 minimum), which cannot be allocated reliably per model or request.
@@ -53,6 +55,10 @@ Sources: [Codex pricing](https://developers.openai.com/codex/pricing), [OpenAI P
 
 | Model key / route | Input | Output | Cache read | Cache write | Provenance / note |
 | --- | ---: | ---: | ---: | ---: | --- |
+| `claude-opus-5` | $5.00 | $25.00 | $0.50 | $6.25 | Anthropic standard; same base rates as Opus 4.8; 1h write is $10, not modeled in the single cache-write field |
+| `claude-opus-5-fast` | $10.00 | $50.00 | $1.00 | $12.50 | Anthropic Fast mode research preview; 1h write is $20, not modeled in the single cache-write field |
+| `anthropic/claude-opus-5` on OpenRouter | $5.00 | $25.00 | $0.50 | $6.25 | Live OpenRouter route; 1h cache-write route field is $10 |
+| `anthropic/claude-opus-5-fast` on OpenRouter | $10.00 | $50.00 | $1.00 | $12.50 | Live OpenRouter route; 1h cache-write route field is $20 |
 | `claude-opus-4.5` | $5.00 | $25.00 | $0.50 | $6.25 | Anthropic standard; 5m write |
 | `claude-opus-4.6` | $5.00 | $25.00 | $0.50 | $6.25 | Anthropic standard; 5m write |
 | `claude-opus-4.6-1m` | $5.00 | $25.00 | $0.50 | $6.25 | Standard row; long-context premium not modeled |
@@ -83,6 +89,8 @@ Sources: [Codex pricing](https://developers.openai.com/codex/pricing), [OpenAI P
 | `minimax/minimax-m2` on OpenRouter | $0.255 | $1.02 | $0.00 | $0.255† | Live OpenRouter route |
 | `minimax/minimax-m2.1` on OpenRouter | $0.30 | $1.20 | $0.03 | $0.30† | Live OpenRouter route |
 | `minimax/minimax-m1` on OpenRouter | $0.40 | $2.20 | $0.00 | $0.40† | Live OpenRouter historical row |
+| `kimi-k3` | $3.00 | $15.00 | $0.30 | $3.00† | Moonshot/Kimi first-party; published as cache-miss input, cache-hit input, and output; no separate cache-write tariff |
+| `moonshotai/kimi-k3` on OpenRouter | $3.00 | $15.00 | $0.30 | $3.00† | Live OpenRouter route; cache write is ordinary routed input fallback |
 | Fireworks `kimi-k2p6-{fast,turbo}` | $2.00 | $8.00 | $0.30 | $2.00† | PAYG; Fire Pass coverage not assumed |
 | `moonshotai/kimi-k2.6` on OpenRouter | $0.66 | $3.41 | $0.15 | $0.66† | Live OpenRouter route |
 | `kimi-k2.6` / `kimi-k2p6` | $0.95 | $4.00 | $0.16 | $0.95† | Moonshot/Fireworks standard |

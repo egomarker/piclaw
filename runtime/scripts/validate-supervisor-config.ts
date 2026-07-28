@@ -43,7 +43,6 @@ function parseIniFile(path: string): ParsedConfig {
 
   const sections = new Map<string, Map<string, string[]>>();
   let currentSection: Map<string, string[]> | null = null;
-  let currentSectionName = "";
   let lastKey: string | null = null;
 
   const lines = source.replace(/^\uFEFF/, "").split(/\r?\n/);
@@ -58,7 +57,7 @@ function parseIniFile(path: string): ParsedConfig {
 
     const sectionMatch = rawLine.match(/^\s*\[([^\[\]\r\n]+)\]\s*$/);
     if (sectionMatch) {
-      currentSectionName = sectionMatch[1]!.trim();
+      const currentSectionName = sectionMatch[1]!.trim();
       if (currentSectionName === "") {
         fail(`Invalid empty section name in ${path}:${index + 1}`);
       }

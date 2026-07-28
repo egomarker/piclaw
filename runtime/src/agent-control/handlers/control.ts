@@ -11,7 +11,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import { getCompactionRuntimeConfig, setCompactionRuntimeConfig } from "../../core/config.js";
+import { getAgentControlConfig, getCompactionRuntimeConfig, setCompactionRuntimeConfig } from "../../core/config.js";
 import type { AgentControlCommand, AgentControlResult } from "../agent-control-types.js";
 import { formatCompactNumber } from "../agent-control-helpers.js";
 import { createMedia, getChatCompactionBackoff } from "../../db.js";
@@ -35,7 +35,6 @@ import {
 } from "../../agent-pool/compaction.js";
 
 const log = createLogger("agent-control.control");
-const DEFAULT_ABORT_SETTLE_TIMEOUT_MS = 1000;
 let killTrackedProcessesForRestart = killTrackedProcesses;
 
 export function setKillTrackedProcessesForRestartForTests(fn: typeof killTrackedProcesses): () => void {
@@ -60,9 +59,7 @@ function scheduleProcessExit(): void {
 }
 
 function getAbortSettleTimeoutMs(): number {
-  const raw = Number(process.env.PICLAW_ABORT_SETTLE_TIMEOUT_MS);
-  if (!Number.isFinite(raw)) return DEFAULT_ABORT_SETTLE_TIMEOUT_MS;
-  return Math.max(0, Math.min(10_000, Math.round(raw)));
+  return getAgentControlConfig().abortSettleTimeoutMs;
 }
 
 async function waitForAbortToSettle(abortPromise: Promise<void>): Promise<"settled" | "timed_out"> {
@@ -256,17 +253,14 @@ function getActiveCompactionBackoffMessage(chatJid: string, now = Date.now()): s
   return `Compaction is in backoff for this chat until ${backoff.backoffUntil} after ${backoff.failureCount} failed attempt${backoff.failureCount === 1 ? "" : "s"}.${detail}`;
 }
 
-function shouldDisableExternalCompactionFailsafe(): boolean {
-  const raw = String(process.env.PICLAW_MANUAL_COMPACTION_EXTERNAL_FAILSAFE || "").trim().toLowerCase();
-  return raw === "0" || raw === "false" || process.env.NODE_ENV === "test";
-}
+const MANUAL_COMPACTION_FAILSAFE_GRACE_MS = 15_000;
 
 function startManualCompactionExternalFailsafe(chatJid: string): (() => void) | null {
-  if (shouldDisableExternalCompactionFailsafe()) return null;
+  if (process.env.NODE_ENV === "test") return null;
   const timeoutMs = getCompactionTimeoutMs();
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return null;
 
-  const graceMs = Math.max(1_000, Math.min(60_000, Number.parseInt(process.env.PICLAW_MANUAL_COMPACTION_FAILSAFE_GRACE_MS || "15000", 10) || 15_000));
+  const graceMs = MANUAL_COMPACTION_FAILSAFE_GRACE_MS;
   const delaySec = Math.max(1, Math.ceil((timeoutMs + graceMs) / 1000));
   const pid = process.pid;
   const marker = `/tmp/piclaw-manual-compact-${pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.watchdog`;

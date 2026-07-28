@@ -8,7 +8,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -51,6 +51,7 @@ function parseOptions(argv: string[]): Options {
       case "--help":
         console.log(usage());
         process.exit(0);
+        break;
       default:
         throw new Error(`Unknown argument: ${arg}`);
     }

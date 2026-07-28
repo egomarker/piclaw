@@ -63,6 +63,19 @@ describe("web agent status helpers", () => {
     });
   });
 
+  test("handleAgentStatusRequest exposes a brief done payload without reporting the agent active", async () => {
+    const req = new Request("https://example.com/agent/status?chat_jid=web:done");
+    const terminal = { type: "done", title: "Completed /session-rotate", turn_id: "turn-done" };
+    const res = handleAgentStatusRequest(req, createContext({ getAgentStatus: () => terminal }));
+
+    expect(await res.json()).toMatchObject({
+      status: "idle",
+      state: "idle",
+      chat_jid: "web:done",
+      data: terminal,
+    });
+  });
+
   test("handleAgentStatusRequest includes thought/draft buffers when available", async () => {
     const req = new Request("https://example.com/agent/status?chat_jid=web:custom");
     const res = handleAgentStatusRequest(
@@ -99,7 +112,7 @@ describe("web agent status helpers", () => {
     }));
 
     const body = await res.json();
-    expect(body.status).toBe("active");
+    expect(body.status).toBe("idle");
     expect(body.state).toBe("blocked_auth");
     expect(body.classifier).toBeNull();
   });

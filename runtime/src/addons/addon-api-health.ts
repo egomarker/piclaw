@@ -1,3 +1,4 @@
+import { getAddonsConfig } from "../core/config.js";
 import { createLogger } from "../utils/logger.js";
 
 const log = createLogger("addons.api-health");
@@ -19,7 +20,6 @@ export interface AddonApiHealthEntry {
   suppressedCount: number;
 }
 
-const DEFAULT_BACKOFF_MS = 60_000;
 const MAX_ENTRIES = 200;
 const entries = new Map<string, AddonApiHealthEntry>();
 
@@ -28,8 +28,7 @@ function nowIso(nowMs = Date.now()): string {
 }
 
 function backoffMs(): number {
-  const parsed = Number(process.env.PICLAW_ADDON_API_FAILURE_BACKOFF_MS || "");
-  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : DEFAULT_BACKOFF_MS;
+  return getAddonsConfig().apiFailureBackoffMs;
 }
 
 function keyFor(input: { addonId: string; action: string; chatJid?: string | null; method?: string; path?: string }): string {

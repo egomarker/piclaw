@@ -32,7 +32,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import { getPiclawAgentDir } from "../core/agent-dir.js";
-import { SESSIONS_DIR, WORKSPACE_DIR } from "../core/config.js";
+import { SESSIONS_DIR, getRemoteInteropConfig, getRuntimeRoot, getSessionPersistenceConfig, getWorkspaceDir } from "../core/config.js";
 import { buildChannelSystemPromptAppendix } from "../channels/formatting.js";
 import { detectChannel } from "../router.js";
 import { createBuiltinExtensionFactories } from "../extensions/index.js";
@@ -47,31 +47,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const AGENT_DIR = getPiclawAgentDir();
 const EMPTY_STRING_ARRAY: string[] = [];
 const BUNDLED_EXTENSION_PATHS_CACHE = new Map<string, string[]>();
-const SESSION_TOOL_RESULT_MAX_PERSIST_BYTES = parsePositiveInt(
-  process.env.PICLAW_SESSION_TOOL_RESULT_MAX_PERSIST_BYTES,
-  256 * 1024,
-);
-const SESSION_FILE_PRELOAD_SANITIZE_MIN_BYTES = parsePositiveInt(
-  process.env.PICLAW_SESSION_FILE_PRELOAD_SANITIZE_MIN_BYTES,
-  1024 * 1024,
-);
-const SESSION_TOOL_RESULT_PREVIEW_CHARS = parsePositiveInt(
-  process.env.PICLAW_SESSION_TOOL_RESULT_PREVIEW_CHARS,
-  4096,
-);
+const SESSION_PERSISTENCE_CONFIG = getSessionPersistenceConfig();
+const SESSION_TOOL_RESULT_MAX_PERSIST_BYTES = SESSION_PERSISTENCE_CONFIG.toolResultMaxPersistBytes;
+const SESSION_FILE_PRELOAD_SANITIZE_MIN_BYTES = SESSION_PERSISTENCE_CONFIG.filePreloadSanitizeMinBytes;
+const SESSION_TOOL_RESULT_PREVIEW_CHARS = SESSION_PERSISTENCE_CONFIG.toolResultPreviewChars;
 const CHANNEL_SYSTEM_PROMPT_APPENDIX_CACHE = new Map<string, string>();
 const APPEND_SYSTEM_PROMPT_OVERRIDE_CACHE = new Map<string, (base: string[]) => string[]>();
 let cachedExtensionNodeModulesDir: string | null | undefined;
 let ensuredExtensionNodeModulesLinkTarget: string | null | undefined;
-
-function parsePositiveInt(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(String(value || "").trim(), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function getWorkspaceDir(): string {
-  return process.env.PICLAW_WORKSPACE || WORKSPACE_DIR;
-}
 
 function ensureValidProcessCwd(): void {
   try {
@@ -98,12 +81,13 @@ type AgentSessionCreateOptions = {
  * node_modules so that jiti's fallback resolution finds packages like
  * @earendil-works/pi-ai and its public API entrypoints.
  */
-const EXTENSIONS_DIR = resolve(process.env.PICLAW_RUNTIME_ROOT || resolve(__dirname, "../.."), "extensions");
+const EXTENSIONS_DIR = resolve(getRuntimeRoot(resolve(__dirname, "../..")), "extensions");
 const log = createLogger("agent-pool.session");
 
 type OptionalBundledExtension = {
   path: string;
   envGate?: string;
+  enabled?: () => boolean;
   platforms?: NodeJS.Platform[];
   channels?: string[];
 };
@@ -120,7 +104,7 @@ const OPTIONAL_EXTENSIONS: OptionalBundledExtension[] = [
   // win-ui removed: now shipped as @rcarmo/piclaw-addon-win-ui
   // office-viewer-tool removed: now shipped as @rcarmo/piclaw-addon-office-viewer
   // office-tools-tool removed: now shipped as @rcarmo/piclaw-addon-office-tools
-  { path: resolve(EXTENSIONS_DIR, "integrations", "remote-pair", "index.ts"), envGate: "PICLAW_REMOTE_INTEROP_ENABLED" },
+  { path: resolve(EXTENSIONS_DIR, "integrations", "remote-pair", "index.ts"), enabled: () => getRemoteInteropConfig().enabled },
   { path: resolve(EXTENSIONS_DIR, "experimental", "m365", "index.ts"), envGate: "PICLAW_ENABLE_M365_EXPERIMENTAL" },
 ];
 
@@ -147,8 +131,8 @@ function getBundledExtensionEnvSignature(chatJid?: string): string {
     `channel=${channel}`,
     `workspace=${workspaceDir}`,
     `addonNodeModules=${getWorkspaceAddonNodeModulesFingerprint(workspaceDir)}`,
-    ...OPTIONAL_EXTENSIONS.map(({ envGate, platforms, channels }) => {
-      const envPart = envGate ? `${envGate}=${process.env[envGate] ? "1" : "0"}` : "always=1";
+    ...OPTIONAL_EXTENSIONS.map(({ envGate, enabled, platforms, channels }) => {
+      const envPart = envGate ? `${envGate}=${process.env[envGate] ? "1" : "0"}` : `enabled=${enabled ? (enabled() ? "1" : "0") : "1"}`;
       const platformPart = platforms?.length ? `platforms=${platforms.join(",")}` : "platforms=all";
       const channelPart = channels?.length ? `channels=${channels.join(",")}` : "channels=all";
       return `${envPart};${platformPart};${channelPart}`;
@@ -281,7 +265,7 @@ function getBundledExtensionPaths(chatJid?: string): string[] {
   const channel = chatJid ? detectChannel(chatJid) : undefined;
   const nodeModulesDir = getExtensionNodeModulesDir();
   const paths = OPTIONAL_EXTENSIONS
-    .filter(({ envGate }) => !envGate || !!process.env[envGate])
+    .filter(({ envGate, enabled }) => (!envGate || !!process.env[envGate]) && (!enabled || enabled()))
     .filter(({ platforms }) => !platforms || platforms.includes(process.platform))
     .filter(({ channels }) => !channels || !!channel && channels.includes(channel))
     .map(({ path }) => path);

@@ -6,7 +6,7 @@ import { existsSync } from "fs";
 import { resolve } from "path";
 
 import { ensureDreamTask, runDreamAgentTurn } from "../dream.js";
-import { WORKSPACE_DIR } from "../core/config.js";
+import { getWorkspaceDir } from "../core/config.js";
 import { AUTO_DREAM_DEFAULT_DAYS } from "../dream-defaults.js";
 import { startIpcWatcher, type IpcDeps } from "../ipc.js";
 import { detectChannel } from "../router.js";
@@ -35,7 +35,7 @@ export function getDreamQueueLane(chatJid: string): string {
 }
 
 export function getDreamBootstrapFiles(): string[] {
-  const workspaceRoot = resolve(process.env.PICLAW_WORKSPACE || WORKSPACE_DIR);
+  const workspaceRoot = getWorkspaceDir();
   return DREAM_BOOTSTRAP_RELATIVE_FILES.map((path) => resolve(workspaceRoot, path));
 }
 

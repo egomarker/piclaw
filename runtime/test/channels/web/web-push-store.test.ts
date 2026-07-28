@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+import { WEB_RUNTIME_CONFIG } from "../../../src/core/config.js";
 import {
   ensureStoredVapidKeys,
   getStoredVapidPublicKey,
@@ -121,8 +122,8 @@ describe("web push store", () => {
 
   test("caps the stored subscription list to the newest entries", () => {
     const baseDir = createTempPushDir();
-    const previousCap = process.env.PICLAW_WEB_PUSH_SUBSCRIPTION_CAP;
-    process.env.PICLAW_WEB_PUSH_SUBSCRIPTION_CAP = "2";
+    const previousCap = WEB_RUNTIME_CONFIG.pushSubscriptionCap;
+    WEB_RUNTIME_CONFIG.pushSubscriptionCap = 2;
 
     try {
       upsertStoredWebPushSubscription(createSubscription("https://push.example.test/device/1", "device-1"), {
@@ -143,8 +144,7 @@ describe("web push store", () => {
         "https://push.example.test/device/2",
       ]);
     } finally {
-      if (previousCap === undefined) delete process.env.PICLAW_WEB_PUSH_SUBSCRIPTION_CAP;
-      else process.env.PICLAW_WEB_PUSH_SUBSCRIPTION_CAP = previousCap;
+      WEB_RUNTIME_CONFIG.pushSubscriptionCap = previousCap;
     }
   });
 });

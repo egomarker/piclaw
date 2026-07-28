@@ -410,6 +410,215 @@ test("web channel relays peer messages into another active chat", async () => {
   expect(enqueuedKeys.some((key) => key.startsWith("chat:web:target:"))).toBe(true);
 });
 
+test("web channel persists peer-message steering rows when the target session is streaming", async () => {
+  const ws = createTempWorkspace("piclaw-web-channel-");
+  cleanupWorkspace = ws.cleanup;
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+
+  const db = await import("../../../src/db.js");
+  db.initDatabase();
+  db.getDb().exec("DELETE FROM message_media; DELETE FROM messages; DELETE FROM chats; DELETE FROM chat_cursors; DELETE FROM chat_branches;");
+  db.storeChatMetadata("web:source", new Date().toISOString(), "Source");
+  db.storeChatMetadata("web:target", new Date().toISOString(), "Target");
+
+  const activeChats = [
+    { chat_jid: "web:source", agent_name: "source", session_id: null, session_name: null, model: null, is_active: false, has_side_session: false },
+    { chat_jid: "web:target", agent_name: "target", session_id: null, session_name: null, model: null, is_active: true, has_side_session: false },
+  ];
+  const events: Array<{ type: string; data: any }> = [];
+  const queuedSteers: Array<{ chatJid: string; text: string; behavior: string }> = [];
+
+  const webMod = await import("../../../src/channels/web.js");
+  const web = new (webMod.WebChannel as any)({
+    queue: { enqueue: (_task: unknown, key: string) => events.push({ type: "queue", data: { key } }) },
+    agentPool: {
+      listActiveChats: () => activeChats,
+      findActiveChatByAgentName: (name: string) => activeChats.find((chat) => chat.agent_name === name) ?? null,
+      getAgentHandleForChat: (chatJid: string) => activeChats.find((chat) => chat.chat_jid === chatJid)?.agent_name ?? null,
+      isStreaming: (chatJid: string) => chatJid === "web:target",
+      isActive: (chatJid: string) => chatJid === "web:target",
+      queueStreamingMessage: async (chatJid: string, text: string, behavior: string) => {
+        queuedSteers.push({ chatJid, text, behavior });
+        return { queued: true };
+      },
+      getContextUsageForChat: async () => null,
+    },
+  });
+  web.broadcastEvent = (type: string, data: unknown) => {
+    events.push({ type, data });
+  };
+
+  const req = new Request("http://test/agent/peer-message", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      source_chat_jid: "web:source",
+      target_chat_jid: "web:target",
+      content: "Please adjust the active run.",
+      mode: "steer",
+    }),
+  });
+
+  const res = await (web as any).handleRequest(req);
+  expect(res.status).toBe(201);
+  const json = await res.json();
+  expect(json.status).toBe("ok");
+  expect(json.relayed).toBe(true);
+  expect(json.queued).toBe("steer");
+  expect(json.user_message?.data?.content).toContain("Please adjust the active run.");
+
+  expect(queuedSteers).toHaveLength(1);
+  expect(queuedSteers[0]).toEqual({
+    chatJid: "web:target",
+    text: "from: @source <jid:web:source>\n\nPlease adjust the active run.",
+    behavior: "steer",
+  });
+  expect(events.some((event) => event.type === "new_post" && event.data?.chat_jid === "web:target")).toBe(true);
+  expect(events.some((event) => event.type === "agent_steer_queued" && event.data?.chat_jid === "web:target")).toBe(true);
+
+  const timeline = db.getTimeline("web:target", 10);
+  expect(timeline).toHaveLength(1);
+  expect(timeline[0].data.content).toContain("from: @source <jid:web:source>");
+  expect(timeline[0].data.content).toContain("Please adjust the active run.");
+  expect(timeline[0].data.content_blocks?.[0]).toMatchObject({
+    type: "peer_message",
+    source_chat_jid: "web:source",
+    target_chat_jid: "web:target",
+    body: "Please adjust the active run.",
+  });
+  expect(db.getMessagesSince("web:target", "", "PiClaw")).toHaveLength(0);
+});
+
+test("web channel still processes persisted peer-message steer normally when the target is idle", async () => {
+  const ws = createTempWorkspace("piclaw-web-channel-");
+  cleanupWorkspace = ws.cleanup;
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+
+  const db = await import("../../../src/db.js");
+  db.initDatabase();
+  db.getDb().exec("DELETE FROM message_media; DELETE FROM messages; DELETE FROM chats; DELETE FROM chat_cursors; DELETE FROM chat_branches;");
+  db.storeChatMetadata("web:source", new Date().toISOString(), "Source");
+  db.storeChatMetadata("web:target", new Date().toISOString(), "Target");
+
+  const activeChats = [
+    { chat_jid: "web:source", agent_name: "source", session_id: null, session_name: null, model: null, is_active: false, has_side_session: false },
+    { chat_jid: "web:target", agent_name: "target", session_id: null, session_name: null, model: null, is_active: false, has_side_session: false },
+  ];
+  const enqueued: string[] = [];
+
+  const webMod = await import("../../../src/channels/web.js");
+  const web = new (webMod.WebChannel as any)({
+    queue: { enqueue: (_task: unknown, key: string) => enqueued.push(key) },
+    agentPool: {
+      listActiveChats: () => activeChats,
+      findActiveChatByAgentName: (name: string) => activeChats.find((chat) => chat.agent_name === name) ?? null,
+      getAgentHandleForChat: (chatJid: string) => activeChats.find((chat) => chat.chat_jid === chatJid)?.agent_name ?? null,
+      isStreaming: () => false,
+      isActive: () => false,
+      queueStreamingMessage: async () => ({ queued: false }),
+      getContextUsageForChat: async () => null,
+    },
+  });
+  web.broadcastEvent = () => {};
+
+  const res = await (web as any).handleRequest(new Request("http://test/agent/peer-message", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      source_chat_jid: "web:source",
+      target_chat_jid: "web:target",
+      content: "Please start normally.",
+      mode: "steer",
+    }),
+  }));
+
+  expect(res.status).toBe(201);
+  const json = await res.json();
+  expect(json.queued).toBeUndefined();
+  expect(enqueued.some((key) => key.startsWith("chat:web:target:"))).toBe(true);
+  const pending = db.getMessagesSince("web:target", "", "PiClaw");
+  expect(pending).toHaveLength(1);
+  expect(pending[0].content).toContain("Please start normally.");
+});
+
+test("direct chat tool relay persists steering rows when the target session is streaming", async () => {
+  const ws = createTempWorkspace("piclaw-web-channel-");
+  cleanupWorkspace = ws.cleanup;
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+
+  const db = await import("../../../src/db.js");
+  db.initDatabase();
+  db.getDb().exec("DELETE FROM message_media; DELETE FROM messages; DELETE FROM chats; DELETE FROM chat_cursors; DELETE FROM chat_branches;");
+  db.storeChatMetadata("web:source", new Date().toISOString(), "Source");
+  db.storeChatMetadata("web:target", new Date().toISOString(), "Target");
+
+  const knownChats = [
+    { branch_id: "branch-source", chat_jid: "web:source", root_chat_jid: "web:source", parent_branch_id: null, agent_name: "source" },
+    { branch_id: "branch-target", chat_jid: "web:target", root_chat_jid: "web:source", parent_branch_id: "branch-source", agent_name: "target" },
+  ];
+  const events: Array<{ type: string; data: any }> = [];
+  const queuedSteers: Array<{ chatJid: string; text: string; behavior: string }> = [];
+
+  const webMod = await import("../../../src/channels/web.js");
+  const agentPool = {
+    listActiveChats: () => knownChats,
+    listKnownChats: () => knownChats,
+    findChatByAgentName: (name: string) => knownChats.find((chat) => chat.agent_name === name) ?? null,
+    getAgentHandleForChat: (chatJid: string) => knownChats.find((chat) => chat.chat_jid === chatJid)?.agent_name ?? null,
+    isStreaming: (chatJid: string) => chatJid === "web:target",
+    isActive: (chatJid: string) => chatJid === "web:target",
+    queueStreamingMessage: async (chatJid: string, text: string, behavior: string) => {
+      queuedSteers.push({ chatJid, text, behavior });
+      return { queued: true };
+    },
+    getContextUsageForChat: async () => null,
+  };
+  const web = new (webMod.WebChannel as any)({
+    queue: { enqueue: (_task: unknown, key: string) => events.push({ type: "queue", data: { key } }) },
+    agentPool,
+  });
+  web.broadcastEvent = (type: string, data: unknown) => {
+    events.push({ type, data });
+  };
+
+  const { createDirectChatToolRelayHandler } = await import("../../../src/extensions/chat-tool-runtime.js");
+  const relay = createDirectChatToolRelayHandler(agentPool as any, {
+    handleAgentMessage: (req, pathname) => (web as any).handleAgentMessage(req, pathname),
+  }, {
+    getAgentDisplayName: () => "Smith",
+    getChatBranchByChatJid: (chatJid) => knownChats.find((chat) => chat.chat_jid === chatJid) ?? null,
+    getChatBranchByAgentName: (agentName) => knownChats.find((chat) => chat.agent_name === agentName) ?? null,
+  });
+
+  const result = await relay({
+    source_chat_jid: "web:source",
+    target_agent_name: "@target",
+    content: "Please adjust the active direct run.",
+    mode: "steer",
+  });
+
+  expect(result.queued).toBe("steer");
+  expect(result.relayed).toBe(true);
+  expect(result.created).toBe(true);
+  expect(result.row_id).toBeTruthy();
+  expect(queuedSteers).toHaveLength(1);
+  expect(queuedSteers[0].chatJid).toBe("web:target");
+  expect(queuedSteers[0].behavior).toBe("steer");
+  expect(events.some((event) => event.type === "new_post" && event.data?.chat_jid === "web:target")).toBe(true);
+
+  const timeline = db.getTimeline("web:target", 10);
+  expect(timeline).toHaveLength(1);
+  expect(timeline[0].data.content).toContain("Please adjust the active direct run.");
+  expect(timeline[0].data.content_blocks?.[0]).toMatchObject({
+    type: "peer_message",
+    relay: "chat_tool",
+    source_chat_jid: "web:source",
+    target_chat_jid: "web:target",
+    body: "Please adjust the active direct run.",
+  });
+  expect(db.getMessagesSince("web:target", "", "PiClaw")).toHaveLength(0);
+});
+
 test("web channel lists known chat branches for a root chat", async () => {
   const ws = createTempWorkspace("piclaw-web-channel-");
   cleanupWorkspace = ws.cleanup;

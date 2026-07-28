@@ -2,6 +2,7 @@
 import type { Message } from "@earendil-works/pi-ai";
 import type { FileOperations } from "@earendil-works/pi-coding-agent";
 import { checkPiclawCompactionBudget } from "../../agent-pool/compaction-trigger-context.js";
+import { getProgressiveCompactionConfig } from "../../core/config.js";
 import { getCompactionRequestOverheadTokens, getEffectiveContextWindow } from "../../utils/context-window-budget.js";
 import {
   BUDGET_SAFETY_MARGIN,
@@ -86,7 +87,7 @@ export function getProgressiveCompactionBudget(model: unknown): ProgressiveCompa
     promptBudgetChars,
     chunkBudgetChars,
     mergeBudgetChars,
-    forceProgressive: process.env.PICLAW_PROGRESSIVE_COMPACTION === "1",
+    forceProgressive: getProgressiveCompactionConfig(),
   };
 }
 

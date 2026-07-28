@@ -6,7 +6,6 @@
  */
 
 import { resolve, dirname } from "node:path";
-import { spawnSync } from "node:child_process";
 
 const ROOT = dirname(import.meta.dir);
 const LOG = "[postinstall]";

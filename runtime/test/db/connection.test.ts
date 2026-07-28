@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import "../helpers.js";
 
-import { getDb, initDatabase, isLikelyTestHarnessProcess, shouldBlockLiveDatabaseOpenInTests } from "../../src/db/connection.js";
+import { getDb, initDatabase, isLikelyTestHarnessProcess, setAllowLiveDbInTestsForTests, shouldBlockLiveDatabaseOpenInTests } from "../../src/db/connection.js";
 
 test("isLikelyTestHarnessProcess detects direct test argv values", () => {
   expect(isLikelyTestHarnessProcess(["bun", "test/channels/web/oobe-instance-state.test.ts"])).toBe(true);
@@ -29,6 +29,18 @@ test("shouldBlockLiveDatabaseOpenInTests refuses the canonical live db for test 
     workspaceDir: "/tmp/piclaw-test",
     argv: ["bun", "test/channels/web/oobe-instance-state.test.ts"],
   })).toBe(false);
+
+  const restore = setAllowLiveDbInTestsForTests(true);
+  try {
+    expect(shouldBlockLiveDatabaseOpenInTests({
+      useMemory: false,
+      nextPath: "/workspace/.piclaw/store/messages.db",
+      workspaceDir: "/workspace",
+      argv: ["bun", "test/channels/web/oobe-instance-state.test.ts"],
+    })).toBe(false);
+  } finally {
+    restore();
+  }
 });
 
 test("initDatabase reopens a stale cached sqlite handle", () => {

@@ -20,7 +20,7 @@ import Database from "bun:sqlite";
 import fs from "fs";
 import path from "path";
 
-import { STORE_DIR, WORKSPACE_DIR } from "../core/config.js";
+import { STORE_DIR, WORKSPACE_DIR, getRuntimeBootstrapPathOverrides } from "../core/config.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
 import { recompressExistingMedia } from "./media-recompress.js";
 
@@ -62,6 +62,17 @@ let dbPathCache: string | null = null;
 
 const CANONICAL_WORKSPACE_DIR = path.resolve("/workspace");
 const CANONICAL_LIVE_DB_PATH = path.join(CANONICAL_WORKSPACE_DIR, ".piclaw", "store", "messages.db");
+let allowLiveDbInTestsOverride = false;
+
+/** Explicit test-only safety bypass; returns a restore callback. */
+export function setAllowLiveDbInTestsForTests(allow: boolean): () => void {
+  if (process.env.PICLAW_DB_IN_MEMORY !== "1" && process.env.NODE_ENV !== "test") {
+    throw new Error("setAllowLiveDbInTestsForTests requires a test runtime");
+  }
+  const previous = allowLiveDbInTestsOverride;
+  allowLiveDbInTestsOverride = allow;
+  return () => { allowLiveDbInTestsOverride = previous; };
+}
 
 export function isLikelyTestHarnessProcess(argv: string[] = [...process.argv, ...(globalThis.Bun?.argv ?? [])]): boolean {
   return argv.some((value) => {
@@ -81,7 +92,7 @@ export function shouldBlockLiveDatabaseOpenInTests(options: {
     useMemory,
     nextPath,
     workspaceDir = WORKSPACE_DIR,
-    allowLiveDbInTests = process.env.PICLAW_ALLOW_LIVE_DB_IN_TESTS === "1" || process.env.PICLAW_ALLOW_LIVE_DB_IN_TESTS === "true",
+    allowLiveDbInTests = allowLiveDbInTestsOverride,
     argv,
   } = options;
 
@@ -875,21 +886,22 @@ function migrateChatCursors(database: Database): void {
  * Called by index.ts (the application entry point).
  */
 export function initDatabase(): void {
+  const pathOverrides = getRuntimeBootstrapPathOverrides();
   const useMemory =
     process.env.PICLAW_DB_IN_MEMORY === "1" ||
     process.env.PICLAW_DB_IN_MEMORY === "true" ||
-    process.env.PICLAW_STORE === ":memory:";
+    pathOverrides.store === ":memory:";
   const nextMode: "memory" | "file" = useMemory ? "memory" : "file";
   const nextPath = useMemory ? ":memory:" : path.join(STORE_DIR, "messages.db");
   const nextCacheKey = useMemory
-    ? `memory:${process.env.PICLAW_WORKSPACE ?? ""}:${process.env.PICLAW_STORE ?? ""}:${process.env.PICLAW_DATA ?? ""}`
+    ? `memory:${pathOverrides.workspace ?? ""}:${pathOverrides.store ?? ""}:${pathOverrides.data ?? ""}`
     : nextPath;
 
   if (shouldBlockLiveDatabaseOpenInTests({ useMemory, nextPath })) {
     throw new Error(
       `Refusing to open live database from a test process: ${nextPath}. ` +
       `Set PICLAW_DB_IN_MEMORY=1 or isolate PICLAW_WORKSPACE/PICLAW_STORE, ` +
-      `or override with PICLAW_ALLOW_LIVE_DB_IN_TESTS=1 if this is truly intentional.`
+      `or use the explicit test-only live DB override if this is truly intentional.`
     );
   }
 

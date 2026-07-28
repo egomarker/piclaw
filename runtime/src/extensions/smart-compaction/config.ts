@@ -5,6 +5,7 @@
  * ../smart-compaction.ts.
  */
 
+import { getSmartCompactionReasoningFallback } from "../../core/config.js";
 import { getUnknownModelContextWindow } from "../../utils/context-window-budget.js";
 
 // ---------------------------------------------------------------------------
@@ -51,8 +52,9 @@ export function parseCompactionReasoningEffort(value: unknown): CompactionReason
 }
 
 export function getConfiguredCompactionReasoningEffort(phase: CompactionReasoningPhase): CompactionReasoningEffort {
+  const domainFallback = getSmartCompactionReasoningFallback();
   return parseCompactionReasoningEffort(process.env[COMPACTION_REASONING_PHASE_ENV[phase]])
-    ?? parseCompactionReasoningEffort(process.env.PICLAW_SMART_COMPACTION_REASONING)
+    ?? parseCompactionReasoningEffort(domainFallback)
     ?? DEFAULT_COMPACTION_REASONING_BY_PHASE[phase];
 }
 

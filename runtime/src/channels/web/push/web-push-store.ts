@@ -6,7 +6,7 @@ import { createPublicKey, generateKeyPairSync } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-import { WORKSPACE_DIR } from "../../../core/config.js";
+import { WORKSPACE_DIR, getWebRuntimeConfig } from "../../../core/config.js";
 import { createLogger, debugSuppressedError } from "../../../utils/logger.js";
 
 const log = createLogger("web.push.store");
@@ -174,10 +174,8 @@ function writeStoredWebPushSubscriptions(entries: StoredWebPushSubscription[], b
 }
 
 function getMaxStoredWebPushSubscriptions(): number {
-  return Math.max(
-    1,
-    Number.parseInt(String(process.env.PICLAW_WEB_PUSH_SUBSCRIPTION_CAP || "32"), 10) || 32,
-  );
+  const configuredCap = Number(getWebRuntimeConfig().pushSubscriptionCap);
+  return Math.max(1, Number.isFinite(configuredCap) ? Math.trunc(configuredCap) : 32);
 }
 
 function capStoredWebPushSubscriptions(entries: StoredWebPushSubscription[]): StoredWebPushSubscription[] {

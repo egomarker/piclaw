@@ -1,5 +1,6 @@
 import { beforeEach, expect, test } from "bun:test";
 
+import { WEB_RUNTIME_CONFIG } from "../../../src/core/config.js";
 import { createWebSession, deleteExpiredWebSessions, getDb, initDatabase } from "../../../src/db.js";
 import { TerminalSessionService } from "../../../src/channels/web/terminal/terminal-session-service.js";
 
@@ -85,6 +86,39 @@ test("terminal session service refuses unauthenticated fallback when no per-clie
 
   const req = new Request("https://example.com/terminal/session");
   expect(service.resolveOwnerFromRequest(req, true)).toBeNull();
+});
+
+test("terminal session service passes the configured image protocol into spawned shells", () => {
+  const previousProtocol = WEB_RUNTIME_CONFIG.terminalImageProtocol;
+  const previousInlineProtocol = process.env.TERM_INLINE_IMAGE_PROTOCOL;
+  const spawnedEnvs: NodeJS.ProcessEnv[] = [];
+
+  try {
+    WEB_RUNTIME_CONFIG.terminalImageProtocol = "sixel";
+    delete process.env.TERM_INLINE_IMAGE_PROTOCOL;
+
+    const service = new TerminalSessionService({
+      spawnProcess: (_cwd, env) => {
+        spawnedEnvs.push({ ...env });
+        return new FakeProcess() as any;
+      },
+    });
+    const ws = {
+      data: { kind: "terminal", token: "terminal-config", userId: "user-config", handoffToken: null },
+      send: () => {},
+    } as any;
+
+    service.attachClient(ws);
+
+    expect(spawnedEnvs).toHaveLength(1);
+    expect(spawnedEnvs[0]?.PICLAW_TERMINAL).toBe("1");
+    expect(spawnedEnvs[0]?.PICLAW_TERMINAL_IMAGE_PROTOCOL).toBe("sixel");
+    expect(spawnedEnvs[0]?.TERM_INLINE_IMAGE_PROTOCOL).toBe("sixel");
+  } finally {
+    WEB_RUNTIME_CONFIG.terminalImageProtocol = previousProtocol;
+    if (previousInlineProtocol === undefined) delete process.env.TERM_INLINE_IMAGE_PROTOCOL;
+    else process.env.TERM_INLINE_IMAGE_PROTOCOL = previousInlineProtocol;
+  }
 });
 
 test("terminal session service spawns one shell per web session and relays IO", () => {

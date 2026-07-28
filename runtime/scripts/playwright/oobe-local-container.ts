@@ -176,7 +176,7 @@ async function captureFailureArtifacts(page: Page, options: {
   }
 
   let html = '';
-  let state: Record<string, unknown> = {};
+  let state: Record<string, unknown>;
   let bodyText = '';
   try {
     html = await page.content();

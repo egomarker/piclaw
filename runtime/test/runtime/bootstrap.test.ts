@@ -80,6 +80,17 @@ describe("runtime bootstrap", () => {
         events.push("create-senders");
         return senders;
       },
+      installAddonRuntimeInterop: (options) => {
+        events.push("install-addon-runtime-interop");
+        expect(options.queue).toBe(queue);
+        expect(options.web).toBe(web);
+        expect(options.state).toBe(state);
+        expect(options.agentPool).toBe(agentPool);
+        expect(options.sendMessage).toBe(senders.sendMessage);
+      },
+      ensureAddonRuntimeEntriesLoaded: async () => {
+        events.push("load-addon-runtime-entries");
+      },
       startRuntimeWorkers: (_queue, _agentPool, _web, runtimeSenders) => {
         events.push("start-workers");
         expect(runtimeSenders).toBe(senders);
@@ -111,6 +122,8 @@ describe("runtime bootstrap", () => {
       "create-shutdown",
       "register-shutdown-signals",
       "create-senders",
+      "install-addon-runtime-interop",
+      "load-addon-runtime-entries",
       "start-workers",
       "start-runtime-loop",
     ]);
@@ -140,6 +153,8 @@ describe("runtime bootstrap", () => {
       createShutdownHandler: () => async () => {},
       registerRuntimeShutdownSignals: () => {},
       createRuntimeSenders: () => ({ sendMessage: async () => {}, sendNudge: async () => {} }),
+      installAddonRuntimeInterop: () => {},
+      ensureAddonRuntimeEntriesLoaded: async () => {},
       startRuntimeWorkers: () => {},
       queueStartupResumePendingIpc: () => {},
       startRuntimeLoop: async () => {},
@@ -168,6 +183,8 @@ describe("runtime bootstrap", () => {
     expect(typeof deps.hydrateMcpCredentials).toBe("function");
     expect(typeof deps.clearMcpCredentials).toBe("function");
     expect(typeof deps.createAgentPool).toBe("function");
+    expect(typeof deps.installAddonRuntimeInterop).toBe("function");
+    expect(typeof deps.ensureAddonRuntimeEntriesLoaded).toBe("function");
     expect(typeof deps.startRuntimeLoop).toBe("function");
   });
 });

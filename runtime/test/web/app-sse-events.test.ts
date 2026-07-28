@@ -259,6 +259,24 @@ test('handleAppSseEvent restores active agent status on reconnect', async () => 
   });
 });
 
+test('handleAppSseEvent applies terminal status context after reconnect', async () => {
+  const state = createDeps();
+  let contextRefreshes = 0;
+  state.deps.getAgentStatus = async () => ({
+    status: 'idle',
+    data: { type: 'done', title: 'Completed /session-rotate', turn_id: 'turn-rotate' },
+  });
+  state.deps.refreshContextUsage = async () => {
+    contextRefreshes += 1;
+  };
+
+  handleAppSseEvent('connected', { app_asset_version: 'test' }, state.deps);
+  await Promise.resolve();
+
+  expect(contextRefreshes).toBe(1);
+  expect(state.getAgentStatusState()).toBeNull();
+});
+
 test('handleAppSseEvent drops preview updates until reconnect snapshot restore completes', async () => {
   const state = createDeps();
   const statusRequest = deferred<any>();
