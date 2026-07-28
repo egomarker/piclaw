@@ -43,6 +43,10 @@ import {
     readStoredPwaDisplayScalePercent,
 } from '../ui/pwa-display-scale.js';
 import { getRecentFiles } from '../ui/recent-files.js';
+import {
+    getWorkspaceRowActions,
+    subscribeWorkspaceRowActions,
+} from '../ui/workspace-row-actions.js';
 
 const isHiddenNode = (node) => {
     if (!node || !node.name) return false;
@@ -54,6 +58,18 @@ function hasOpenableWorkspaceTab(path) {
     const normalized = String(path || '').trim();
     if (!normalized || normalized.endsWith('/')) return false;
     return hasSpecializedWorkspaceTab(normalized, (context) => paneRegistry.resolve(context));
+}
+
+export function buildWorkspaceRowActionTarget(node, depth = 0) {
+    const path = String(node?.path || '').trim();
+    const name = String(node?.name || '').trim()
+        || (path === '.' ? 'workspace' : path.split('/').filter(Boolean).pop() || path);
+    return {
+        path,
+        name,
+        type: node?.type === 'dir' ? 'dir' : 'file',
+        depth: Math.max(0, Number.isFinite(Number(depth)) ? Math.trunc(Number(depth)) : 0),
+    };
 }
 
 // ── Tree data helpers ─────────────────────────────────────────────────────────
@@ -621,6 +637,7 @@ function isWorkspaceTouchDragHandleTarget(targetEl) {
 
 export function getWorkspaceTouchStartIntent(event, renamingPath = null) {
     const targetEl = getWorkspaceTouchEventTargetElement(event);
+    if (targetEl?.closest?.('.workspace-row-action, .workspace-folder-upload')) return null;
     const row = targetEl?.closest?.('.workspace-row');
     if (!row) return null;
     const type = row.dataset.type;
@@ -681,6 +698,7 @@ export function WorkspaceExplorer({
     const [pwaDisplayScalePercent, setPwaDisplayScalePercent] = useState(() => readStoredPwaDisplayScalePercent());
     const [pwaDisplayScaleDraft, setPwaDisplayScaleDraft] = useState(() => String(readStoredPwaDisplayScalePercent()));
     const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+    const [, setWorkspaceRowActionRevision] = useState(0);
     const refreshIntervalMs = Math.max(15000, (Number(workspaceClientSettings?.refreshIntervalSec) || 60) * 1000);
     const folderPreviewDepth = Math.max(0, Number(workspaceClientSettings?.folderPreviewDepth) || 0);
 
@@ -753,6 +771,9 @@ export function WorkspaceExplorer({
     }, []);
 
     useEffect(() => () => clearUploadProgressTimer(), [clearUploadProgressTimer]);
+    useEffect(() => subscribeWorkspaceRowActions(() => {
+        setWorkspaceRowActionRevision((revision) => revision + 1);
+    }), []);
 
     useEffect(() => {
         if (typeof window === 'undefined') return undefined;
@@ -1668,9 +1689,26 @@ export function WorkspaceExplorer({
 
     const isEditableKeyboardTarget = (targetEl) => {
         if (!targetEl) return false;
-        if (targetEl.closest?.('input, textarea, [contenteditable="true"]')) return true;
+        if (targetEl.closest?.('input, textarea, button, [contenteditable="true"]')) return true;
         return Boolean(targetEl.isContentEditable);
     };
+
+    const activateWorkspaceRowAction = useCallback((event, action, target) => {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        const openTab = (path, options = {}) => {
+            const normalizedPath = typeof path === 'string' ? path.trim() : '';
+            if (normalizedPath) onOpenEditorRef.current?.(normalizedPath, options);
+        };
+        try {
+            const result = action.onActivate({ ...target, openTab });
+            if (result && typeof result.then === 'function') {
+                result.catch((error) => console.warn(`[addon-web] workspace row action "${action.id}" failed:`, error));
+            }
+        } catch (error) {
+            console.warn(`[addon-web] workspace row action "${action.id}" failed:`, error);
+        }
+    }, []);
 
     // ── Double-click to rename selected workspace entry ────────────────────
     const handleTreeDblClick = useRef((e) => {
@@ -2566,6 +2604,8 @@ export function WorkspaceExplorer({
                             const childCount = Array.isArray(node.children) && node.children.length > 0
                                 ? node.children.length
                                 : (Number(node.child_count) || 0);
+                            const rowActionTarget = buildWorkspaceRowActionTarget(node, depth);
+                            const rowActions = isRenaming ? [] : getWorkspaceRowActions(rowActionTarget);
                             return html`
                                 <div
                                     key=${node.path}
@@ -2610,6 +2650,34 @@ export function WorkspaceExplorer({
                                         : html`<span class="workspace-label"><span class="workspace-label-text">${node.name}</span></span>`}
                                     ${isDir && !isOpen && childCount > 0 && html`
                                         <span class="workspace-count">${childCount}</span>
+                                    `}
+                                    ${rowActions.length > 0 && html`
+                                        <span class="workspace-row-actions">
+                                            ${rowActions.map((action) => {
+                                                let icon = action.icon;
+                                                try {
+                                                    if (typeof icon === 'function') icon = icon(rowActionTarget);
+                                                } catch (error) {
+                                                    console.warn(`[addon-web] workspace row action "${action.id}" icon failed:`, error);
+                                                    icon = null;
+                                                }
+                                                return html`
+                                                    <button
+                                                        key=${action.id}
+                                                        type="button"
+                                                        class="workspace-row-action"
+                                                        data-workspace-row-action=${action.id}
+                                                        title=${action.label}
+                                                        aria-label=${`${action.label} — ${rowActionTarget.name}`}
+                                                        onMouseDown=${(event) => event.stopPropagation()}
+                                                        onTouchStart=${(event) => event.stopPropagation()}
+                                                        onDblClick=${(event) => event.stopPropagation()}
+                                                        onKeyDown=${(event) => event.stopPropagation()}
+                                                        onClick=${(event) => activateWorkspaceRowAction(event, action, rowActionTarget)}
+                                                    >${icon ?? action.label.slice(0, 1)}</button>
+                                                `;
+                                            })}
+                                        </span>
                                     `}
                                     ${isDir && html`
                                         <button

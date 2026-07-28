@@ -191,6 +191,49 @@ The runtime lazily loads installed add-on extension entries on first config requ
 
 Panes self-register on import. The dialog discovers them via `getRegisteredSettingsPanes()` and merges them with built-in panes sorted by order.
 
+## Add-on Workspace Row Action API
+
+Installed browser entries can contribute small contextual actions to workspace file or folder rows without injecting DOM:
+
+```typescript
+const webApi = globalThis.__piclaw_web;
+
+webApi?.registerWorkspaceRowAction({
+  id: 'my-addon.open-repository',
+  label: 'Open repository',
+  order: 100,
+  canHandle(target) {
+    return target.type === 'dir';
+  },
+  icon(target) {
+    return '⑂'; // A Preact VNode from __piclawPreactHtm is also supported.
+  },
+  onActivate({ path, name, type, depth, openTab }) {
+    openTab(`piclaw://my-addon/${encodeURIComponent(path)}`, {
+      label: `Repository: ${name}`,
+      paneOverrideId: 'my-addon',
+    });
+  },
+});
+```
+
+`globalThis.__piclaw_registerWorkspaceRowAction` is available as a compatibility alias. Registration returns an unregister callback. Re-registering the same `id` replaces the previous definition; an older unregister callback will not remove the replacement.
+
+### WorkspaceRowActionDefinition
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Stable globally unique action ID |
+| `label` | string | yes | Tooltip and accessible label |
+| `icon` | VNode/string or `(target) => VNode/string` | no | Compact row icon; do not return raw HTML |
+| `order` | number | no | Ascending display order (default 500) |
+| `canHandle` | `(target) => boolean` | no | Synchronous file/folder matcher; omitted means all rows |
+| `onActivate` | `(context) => unknown \| Promise<unknown>` | yes | Runs when the user activates the action |
+
+Targets contain `path`, `name`, `type` (`"file"` or `"dir"`), and visible-tree `depth`. Activation contexts add `openTab(path, { label?, paneOverrideId? })`, which routes through Piclaw's normal tab and pane registry. Use path-stable internal URLs such as `piclaw://my-addon/<encoded-id>` to get normal tab reuse.
+
+The workspace explorer owns row layout, hover/focus visibility, accessibility, and click/touch isolation. Add-ons should keep matchers cheap and must not locate or mutate workspace rows directly.
+
 ## Add-on Management
 
 ### Backend Endpoints

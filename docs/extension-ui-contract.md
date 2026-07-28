@@ -2,18 +2,20 @@
 
 This document defines the supported extension UI surfaces in Piclaw's web app.
 
-Piclaw supports four extension UI surfaces:
+Piclaw supports five extension UI surfaces:
 
 1. **Pane extensions** are the first-class host for substantial tool or file UI.
-2. **Adaptive Cards and normal timeline messages** are preferred for structured conversation UI that belongs in chat history.
-3. **Add-on settings panes** use the direct backend add-on config API.
-4. **`extension_ui_*` events** remain a low-level compatibility bridge for lightweight browser-session integrations; they are not a full plugin UI framework.
+2. **Workspace row actions** let browser add-ons attach small contextual actions to file or folder rows.
+3. **Adaptive Cards and normal timeline messages** are preferred for structured conversation UI that belongs in chat history.
+4. **Add-on settings panes** use the direct backend add-on config API.
+5. **`extension_ui_*` events** remain a low-level compatibility bridge for lightweight browser-session integrations; they are not a full plugin UI framework.
 
 ## The supported surfaces
 
 | UI need | Preferred surface | Why |
 |---|---|---|
 | File editors, viewers, dashboards, tool panes, persistent chrome-adjacent UI | **Web pane extension** | First-class host model with tabs/dock lifecycle |
+| A compact action associated with a workspace file or folder | **Workspace row action** | Supported explorer affordance without DOM injection |
 | Structured chat decisions, approvals, forms, receipts | **Adaptive Cards / timeline messages** | Persisted, agent-owned, reconnect-safe, visible in history |
 | Add-on settings inside **Settings** | **Add-on web settings pane + direct backend config API** | Browser-side pane with explicit local config transport |
 | Lightweight web-only signals for an already-open browser session | **`extension_ui_*` bridge** | Minimal compatibility path for browser event consumers |
@@ -31,6 +33,30 @@ Piclaw already ships a first-class content host for substantial extension UI:
 If an extension needs a real surface with mounting, focus, resize, disposal, and routing, it should use a pane extension.
 
 See [web-pane-extensions.md](web-pane-extensions.md) for the pane contract.
+
+## Workspace explorer row actions
+
+Installed browser add-ons can register compact file/folder actions through:
+
+```typescript
+globalThis.__piclaw_web?.registerWorkspaceRowAction({
+  id: 'my-addon.open-tool',
+  label: 'Open in my tool',
+  order: 100,
+  canHandle: (target) => target.type === 'dir',
+  icon: () => '↗',
+  onActivate({ path, name, openTab }) {
+    openTab(`piclaw://my-tool/${encodeURIComponent(path)}`, {
+      label: `Tool: ${name}`,
+      paneOverrideId: 'my-tool',
+    });
+  },
+});
+```
+
+The host owns placement, hover/focus behavior, accessibility, and event isolation. Add-ons must not query workspace row DOM or append buttons themselves. Matchers and icon functions are synchronous and should be fast and side-effect free. The registration function returns an unregister callback.
+
+The activation context contains normalized `path`, `name`, `type`, and `depth`, plus an `openTab(path, options?)` host callback. Use a pane extension to render any substantial destination UI.
 
 ## Structured conversation UI: Adaptive Cards and timeline messages
 
@@ -108,6 +134,7 @@ Extension authors should treat the bridge as a **transport + lightweight afforda
 | Scenario | Recommended surface |
 |---|---|
 | Open a custom viewer/editor/tool | Pane extension |
+| Add a compact action to a workspace file/folder row | Workspace row action, usually opening a pane extension |
 | Need a long-lived panel or dock | Pane extension |
 | Need a structured yes/no/choice form in chat history | Adaptive Card |
 | Need a compact success/failure/result message in history | Normal timeline message or Adaptive Card receipt |
@@ -120,7 +147,7 @@ Extension authors should treat the bridge as a **transport + lightweight afforda
 Extension authors should **not** assume Piclaw currently provides:
 
 - a generic plugin modal framework
-- arbitrary shell slot mounting outside the pane host
+- arbitrary shell slot mounting outside the pane host or the explicit workspace row-action slot
 - guaranteed compose/editor insertion semantics from `extension_ui_editor_text`
 - a stable built-in renderer for `extension_ui_widget`
 - a durable/persisted history model for arbitrary `extension_ui_*` events
@@ -133,11 +160,13 @@ Use this decision order:
 
 1. **Should this live in history?**
    - Yes → timeline message / Adaptive Card.
-2. **Is this an add-on settings surface inside Settings?**
+2. **Is this a compact action attached to a workspace row?**
+   - Yes → workspace row action; open a pane for substantial UI.
+3. **Is this an add-on settings surface inside Settings?**
    - Yes → add-on web settings pane + direct backend config API.
-3. **Does this need a persistent mounted UI surface?**
+4. **Does this need a persistent mounted UI surface?**
    - Yes → pane extension.
-4. **Is this just a lightweight signal to an already-open browser session?**
+5. **Is this just a lightweight signal to an already-open browser session?**
    - Yes → `extension_ui_*` bridge.
 
 ## Related files
@@ -145,6 +174,8 @@ Use this decision order:
 - `runtime/src/channels/web/theming/ui-bridge.ts`
 - `runtime/src/channels/web/sse/sse.ts`
 - `runtime/web/src/ui/extension-ui-events.ts`
+- `runtime/web/src/ui/workspace-row-actions.ts`
+- `runtime/web/src/ui/addon-web-extensions.ts`
 - `runtime/web/src/app.ts`
 - `runtime/src/channels/web/handlers/addon-config-api.ts`
 - `runtime/src/channels/web/handlers/addons.ts`

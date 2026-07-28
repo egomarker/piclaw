@@ -226,6 +226,29 @@ import { markdownPreviewExtension } from './my-panes/markdown-preview.js';
 paneRegistry.register(markdownPreviewExtension);
 ```
 
+### Registering from an installed add-on
+
+A `pi.web.entries` browser module cannot import Piclaw's main web bundle. Register through the runtime-provided API instead:
+
+```typescript
+const webApi = globalThis.__piclaw_web;
+
+webApi?.registerPane({
+  id: 'my-tool',
+  label: 'My Tool',
+  capabilities: ['readonly'],
+  placement: 'tabs',
+  canHandle(context) {
+    return String(context?.path || '').startsWith('piclaw://my-tool/') ? 10_000 : false;
+  },
+  mount(container, context) {
+    return new MyToolPaneInstance(container, context);
+  },
+});
+```
+
+`registerWorkspacePane` is an alias of `registerPane`. The globals are installed before add-on web entries load. Add-ons may pair a path-routed pane with `registerWorkspaceRowAction`; the row action's `openTab(...)` callback uses the same normal pane resolution and tab-reuse flow. See [settings-and-addons.md](settings-and-addons.md#add-on-workspace-row-action-api).
+
 ## Creating a dock pane
 
 Dock panes appear in the persistent bottom panel (e.g., terminal). They are

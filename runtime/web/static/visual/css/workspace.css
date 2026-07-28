@@ -506,6 +506,51 @@
     text-overflow: ellipsis;
 }
 
+.workspace-row-actions {
+    flex-shrink: 0;
+    display: none;
+    align-items: center;
+    gap: 1px;
+}
+
+.workspace-row:hover .workspace-row-actions,
+.workspace-row.selected .workspace-row-actions,
+.workspace-row:focus-within .workspace-row-actions {
+    display: inline-flex;
+}
+
+.workspace-row-action {
+    width: calc(var(--workspace-folder-upload-icon-size) + 4px);
+    height: calc(var(--workspace-folder-upload-icon-size) + 4px);
+    padding: 1px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border: 0;
+    border-radius: 3px;
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font: inherit;
+    font-size: 10px;
+    line-height: 1;
+    opacity: 0.65;
+}
+
+.workspace-row-action svg {
+    width: var(--workspace-folder-upload-icon-size);
+    height: var(--workspace-folder-upload-icon-size);
+}
+
+.workspace-row-action:hover,
+.workspace-row-action:focus-visible {
+    background: var(--bg-hover);
+    color: var(--accent-color);
+    opacity: 1;
+    outline: none;
+}
+
 .workspace-folder-upload {
     flex-shrink: 0;
     margin-left: auto;

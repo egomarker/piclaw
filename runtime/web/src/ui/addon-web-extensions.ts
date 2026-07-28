@@ -1,5 +1,10 @@
 import { paneRegistry } from '../panes/index.js';
 import { registerSettingsPane, unregisterSettingsPane, notifySettingsPanesChanged } from '../components/settings/pane-registry.js';
+import {
+  registerWorkspaceRowAction as registerWorkspaceRowActionDefinition,
+  resetWorkspaceRowActionsForTests,
+  type WorkspaceRowActionDefinition,
+} from './workspace-row-actions.js';
 
 export interface AddonStandaloneTabUrlContext {
   hasPopOutTab?: boolean;
@@ -16,6 +21,7 @@ export interface AddonAttachmentPreviewDefinition {
 export interface AddonWebApiSurface {
   registerPane: (extension: any) => boolean;
   registerWorkspacePane: (extension: any) => boolean;
+  registerWorkspaceRowAction: (definition: WorkspaceRowActionDefinition) => () => void;
   registerSettingsPane: (definition: any) => () => void;
   registerStandaloneTabUrlResolver: (resolver: (path: string, context?: AddonStandaloneTabUrlContext) => string | null | undefined) => () => void;
   registerAttachmentPreview: (definition: AddonAttachmentPreviewDefinition) => () => void;
@@ -64,6 +70,10 @@ export function registerAddonWorkspacePane(extension: any): boolean {
 
 export function registerAddonPane(extension: any): boolean {
   return registerAddonWorkspacePane(extension);
+}
+
+export function registerAddonWorkspaceRowAction(definition: WorkspaceRowActionDefinition): () => void {
+  return registerWorkspaceRowActionDefinition(definition);
 }
 
 export function registerAddonSettingsPane(definition: any): () => void {
@@ -156,6 +166,7 @@ export function createAddonWebApi(runtimeWindow: (Window & typeof globalThis) | 
   return {
     registerPane: registerAddonPane,
     registerWorkspacePane: registerAddonWorkspacePane,
+    registerWorkspaceRowAction: registerAddonWorkspaceRowAction,
     registerSettingsPane: registerAddonSettingsPane,
     registerStandaloneTabUrlResolver: registerAddonStandaloneTabUrlResolver,
     registerAttachmentPreview: registerAddonAttachmentPreview,
@@ -169,6 +180,7 @@ export function installAddonWebApi(runtimeWindow: (Window & typeof globalThis) |
   (runtimeWindow as any).__piclaw_web = api;
   (runtimeWindow as any).__piclaw_registerPane = api.registerPane;
   (runtimeWindow as any).__piclaw_registerWorkspacePane = api.registerWorkspacePane;
+  (runtimeWindow as any).__piclaw_registerWorkspaceRowAction = api.registerWorkspaceRowAction;
   (runtimeWindow as any).__piclaw_registerSettingsPane = api.registerSettingsPane;
   (runtimeWindow as any).__piclaw_registerStandaloneTabUrlResolver = api.registerStandaloneTabUrlResolver;
   (runtimeWindow as any).__piclaw_registerAttachmentPreview = api.registerAttachmentPreview;
@@ -222,6 +234,7 @@ export function resetAddonWebRegistriesForTests(): void {
   notifySettingsPanesChanged();
   standaloneTabUrlResolvers.clear();
   attachmentPreviewDefinitions.clear();
+  resetWorkspaceRowActionsForTests();
   addonWebEntryLoadPromise = null;
   addonWebApiInstalled = false;
 }

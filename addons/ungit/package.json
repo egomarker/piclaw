@@ -1,0 +1,34 @@
+{
+  "name": "@egomarker/piclaw-addon-ungit",
+  "version": "0.1.0",
+  "description": "Open workspace folders as Ungit repositories in Piclaw tabs.",
+  "type": "module",
+  "main": "index.ts",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "piclaw",
+    "git",
+    "ungit"
+  ],
+  "piclaw": {
+    "type": "extension",
+    "compatibleVersions": ">=2.11.0",
+    "tags": [
+      "git",
+      "workspace",
+      "ungit"
+    ],
+    "vendorUrl": "https://github.com/FredrikNoren/ungit"
+  },
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ],
+    "web": {
+      "entries": [
+        "web/index.ts"
+      ]
+    }
+  }
+}
