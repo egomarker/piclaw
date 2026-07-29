@@ -1,11 +1,12 @@
 import { expect, test } from 'bun:test';
 
 import {
+  buildWorkspaceRowActionTarget,
   getWorkspaceTouchStartIntent,
   mergeWorkspaceTreeUpdates,
 } from '../../web/src/components/workspace-explorer.ts';
 
-function createRowTarget(options: { path?: string; type?: string; isDragHandle?: boolean } = {}) {
+function createRowTarget(options: { path?: string; type?: string; isDragHandle?: boolean; isRowAction?: boolean } = {}) {
   const row = {
     dataset: {
       path: options.path ?? '/workspace/demo.md',
@@ -16,6 +17,9 @@ function createRowTarget(options: { path?: string; type?: string; isDragHandle?:
     closest(selector: string) {
       if (selector === '.workspace-node-icon, .workspace-label-text') {
         return options.isDragHandle ? this : null;
+      }
+      if (selector === '.workspace-row-action, .workspace-folder-upload') {
+        return options.isRowAction ? this : null;
       }
       return selector === '.workspace-row' ? row : null;
     },
@@ -49,6 +53,30 @@ test('workspace touch start still enables drag mode from explicit drag handles',
   });
 
   expect(intent?.dragPath).toBe('/workspace/demo.md');
+});
+
+test('workspace touch start ignores add-on row actions', () => {
+  const intent = getWorkspaceTouchStartIntent({
+    target: createRowTarget({ path: '/workspace/repo', type: 'dir', isRowAction: true }),
+    touches: [{ clientX: 1, clientY: 2 }],
+  });
+
+  expect(intent).toBeNull();
+});
+
+test('workspace row action targets normalize tree metadata for add-ons', () => {
+  expect(buildWorkspaceRowActionTarget({ path: 'projects/demo', type: 'dir' }, 2)).toEqual({
+    path: 'projects/demo',
+    name: 'demo',
+    type: 'dir',
+    depth: 2,
+  });
+  expect(buildWorkspaceRowActionTarget({ path: '.', name: '', type: 'dir' }, -1)).toEqual({
+    path: '.',
+    name: 'workspace',
+    type: 'dir',
+    depth: 0,
+  });
 });
 
 test('workspace touch start ignores rows that are being renamed', () => {
