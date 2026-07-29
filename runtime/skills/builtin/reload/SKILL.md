@@ -21,7 +21,7 @@ Install the workspace build, then let the active service manager start a new pro
 2. Use `session_status` to check for other active sessions.
 3. If another session is working, report it and wait for approval. A restart interrupts that work.
 4. Finish all build, verification, and reporting work.
-5. Call `exit_process` with a concise, non-empty `reason` as the last tool action. It posts a visible restart notice to the active chat, then schedules graceful shutdown. Supervisor restarts supervised containers; other installs need their service manager to start the process again.
+5. Call `exit_process` with a concise, non-empty `reason` as the last tool action. It posts a visible restart notice to the active chat, then schedules graceful shutdown. Optionally include `resume_message` to show a labelled agent self-resume after startup and start a new inbound turn from it. Supervisor restarts supervised containers; other installs need their service manager to start the process again.
 
 `make restart` is an intentional no-op guard. It prevents an active agent turn from killing its own response.
 
@@ -53,5 +53,5 @@ cd /workspace/piclaw && make vendor
 ## Notes
 
 - `make local-install` is install-only.
-- `exit_process` requires a non-empty `reason`; it has no delay parameter.
+- `exit_process` requires a non-empty `reason`; optional `resume_message` must also be non-empty when supplied. It has no delay parameter.
 - Bun and Piclaw are installed globally under `/usr/local/lib/bun` in the container layout.
