@@ -25,6 +25,11 @@
     "extensions": [
       "index.ts"
     ],
+    "runtime": {
+      "entries": [
+        "runtime.ts"
+      ]
+    },
     "web": {
       "entries": [
         "web/index.ts"

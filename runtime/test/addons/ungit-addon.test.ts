@@ -4,6 +4,13 @@ import {
   createUngitProxyHandler,
   UNGIT_PROXY_PATH,
 } from "../../../addons/ungit/proxy.ts";
+import {
+  isUngitLive,
+  startUngitIfNeeded,
+  UNGIT_HEALTH_URL,
+  UNGIT_LAUNCH_CWD,
+  UNGIT_START_COMMAND,
+} from "../../../addons/ungit/service.ts";
 import { DEFAULT_UNGIT_CONFIG, normalizeUngitConfig } from "../../../addons/ungit/storage.ts";
 import { importFresh } from "../helpers.js";
 import {
@@ -13,6 +20,7 @@ import {
   normalizeUngitWebConfig,
   parseUngitTabPath,
   registerUngitAddon,
+  requestUngitHealth,
   resolveUngitRepositoryPath,
   resolveUngitZoomLayout,
   ungitPaneExtension,
@@ -51,6 +59,82 @@ function createFakeUngitPaneDom() {
   ownerDocument.head = ownerDocument.createElement("head");
   return { ownerDocument, container: ownerDocument.createElement("div") };
 }
+
+test("Ungit manifest declares its singleton startup runtime", async () => {
+  const manifest = await Bun.file(new URL("../../../addons/ungit/package.json", import.meta.url)).json();
+  expect(manifest?.pi?.runtime?.entries).toEqual(["runtime.ts"]);
+});
+
+test("Ungit health check recognizes only a successful JSON ping", async () => {
+  let requestedUrl = "";
+  expect(await isUngitLive(async (input) => {
+    requestedUrl = String(input);
+    return Response.json({});
+  })).toBe(true);
+  expect(requestedUrl).toBe(UNGIT_HEALTH_URL);
+  expect(await isUngitLive(async () => new Response("{}", { status: 503 }))).toBe(false);
+  expect(await isUngitLive(async () => new Response("not json", { status: 200 }))).toBe(false);
+});
+
+test("Ungit autostart skips a live service and otherwise launches the fixed loopback command", async () => {
+  let spawnCount = 0;
+  await startUngitIfNeeded({
+    fetchImpl: async () => Response.json({}),
+    ensureLaunchCwd: () => { throw new Error("live service must not prepare a launch directory"); },
+    spawnImpl: () => {
+      spawnCount += 1;
+      return {};
+    },
+  });
+  expect(spawnCount).toBe(0);
+
+  let launchedCommand: string[] = [];
+  let launchedOptions: Record<string, unknown> = {};
+  let unrefCalled = false;
+  let preparedCwd = "";
+  await startUngitIfNeeded({
+    fetchImpl: async () => new Response("{}", { status: 503 }),
+    ensureLaunchCwd: (cwd) => { preparedCwd = cwd; },
+    spawnImpl: (command, options) => {
+      spawnCount += 1;
+      launchedCommand = command;
+      launchedOptions = options;
+      return { pid: 123, unref: () => { unrefCalled = true; } };
+    },
+  });
+
+  expect(spawnCount).toBe(1);
+  expect(preparedCwd).toBe(UNGIT_LAUNCH_CWD);
+  expect(launchedCommand).toEqual([...UNGIT_START_COMMAND]);
+  expect(launchedOptions).toEqual({
+    cwd: "/workspace/.piclaw",
+    stdin: "ignore",
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  expect(unrefCalled).toBe(true);
+});
+
+test("Ungit web settings health request returns only the live boolean", async () => {
+  const previousFetch = globalThis.fetch;
+  let requestedUrl = "";
+  let requestedInit: RequestInit | undefined;
+  try {
+    globalThis.fetch = async (input, init) => {
+      requestedUrl = String(input);
+      requestedInit = init;
+      return Response.json({ live: true });
+    };
+    expect(await requestUngitHealth()).toBe(true);
+    expect(requestedUrl).toBe("/agent/addons/api/ungit/health");
+    expect(requestedInit).toMatchObject({ credentials: "same-origin" });
+
+    globalThis.fetch = async () => Response.json({ live: false });
+    expect(await requestUngitHealth()).toBe(false);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
 
 test("Ungit URLs select the repository path and hide the header by default", () => {
   expect(buildUngitUrl("projects/foo bar")).toBe(
@@ -174,10 +258,11 @@ test("Ungit registers a tab pane and directory row action without main-bundle im
   ]]);
 });
 
-test("Ungit registers a direct backend config API backed by extension KV storage", async () => {
+test("Ungit registers direct backend config and health APIs", async () => {
   const stored = new Map<string, unknown>();
-  let registration: { addonId: string; action: string; handlers: any } | null = null;
+  const registrations = new Map<string, { addonId: string; action: string; handlers: any }>();
   let routeRegistration: { prefix: string; handler: any; extensionPath: string } | null = null;
+  const previousFetch = globalThis.fetch;
   const previousRegisterRoute = (globalThis as any).__piclaw_registerRoute;
   (globalThis as any).__piclawRuntimeInterop = {
     getExtensionKvStore: () => ({
@@ -186,7 +271,7 @@ test("Ungit registers a direct backend config API backed by extension KV storage
     }),
   };
   (globalThis as any).__piclaw_registerAddonConfigApi = (addonId: string, action: string, handlers: any) => {
-    registration = { addonId, action, handlers };
+    registrations.set(action, { addonId, action, handlers });
     return "created";
   };
   (globalThis as any).__piclaw_registerRoute = (prefix: string, handler: any, extensionPath: string) => {
@@ -194,37 +279,43 @@ test("Ungit registers a direct backend config API backed by extension KV storage
     return "created";
   };
 
+  globalThis.fetch = async () => Response.json({});
   try {
     await importFresh("../../../addons/ungit/index.ts", import.meta.url);
+    const configRegistration = registrations.get("config");
+    const healthRegistration = registrations.get("health");
+    expect(configRegistration?.addonId).toBe("ungit");
+    expect(configRegistration?.action).toBe("config");
+    expect(healthRegistration?.addonId).toBe("ungit");
+    expect(await healthRegistration?.handlers.get()).toEqual({ live: true });
+    expect(routeRegistration?.prefix).toBe(UNGIT_PROXY_PATH);
+    expect(routeRegistration?.extensionPath).toEndWith("/addons/ungit");
+    expect(await configRegistration?.handlers.get()).toMatchObject(DEFAULT_UNGIT_CONFIG);
+
+    const saved = await configRegistration?.handlers.set({
+      baseUrl: "https://git.example.test/",
+      workspaceRoot: "/srv/workspace",
+      hideHeader: false,
+      proxyEnabled: false,
+      defaultZoomPercent: 80,
+    });
+    expect(saved).toMatchObject({
+      baseUrl: "https://git.example.test/",
+      workspaceRoot: "/srv/workspace",
+      hideHeader: false,
+      proxyEnabled: false,
+      defaultZoomPercent: 80,
+      restartRequired: false,
+    });
+    expect(stored.get("config")).toMatchObject({
+      workspaceRoot: "/srv/workspace",
+      defaultZoomPercent: 80,
+    });
   } finally {
+    globalThis.fetch = previousFetch;
     if (previousRegisterRoute === undefined) delete (globalThis as any).__piclaw_registerRoute;
     else (globalThis as any).__piclaw_registerRoute = previousRegisterRoute;
   }
-  expect(registration?.addonId).toBe("ungit");
-  expect(registration?.action).toBe("config");
-  expect(routeRegistration?.prefix).toBe(UNGIT_PROXY_PATH);
-  expect(routeRegistration?.extensionPath).toEndWith("/addons/ungit");
-  expect(await registration?.handlers.get()).toMatchObject(DEFAULT_UNGIT_CONFIG);
-
-  const saved = await registration?.handlers.set({
-    baseUrl: "https://git.example.test/",
-    workspaceRoot: "/srv/workspace",
-    hideHeader: false,
-    proxyEnabled: false,
-    defaultZoomPercent: 80,
-  });
-  expect(saved).toMatchObject({
-    baseUrl: "https://git.example.test/",
-    workspaceRoot: "/srv/workspace",
-    hideHeader: false,
-    proxyEnabled: false,
-    defaultZoomPercent: 80,
-    restartRequired: false,
-  });
-  expect(stored.get("config")).toMatchObject({
-    workspaceRoot: "/srv/workspace",
-    defaultZoomPercent: 80,
-  });
 });
 
 test("Ungit backend config normalization rejects unsafe URLs and keeps embedding defaults", () => {

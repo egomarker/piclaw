@@ -2,6 +2,7 @@
 
 const ADDON_ID = "ungit";
 const CONFIG_API = `/agent/addons/api/${ADDON_ID}/config`;
+const HEALTH_API = `/agent/addons/api/${ADDON_ID}/health`;
 const TAB_PREFIX = "piclaw://ungit/";
 const CONFIG_CHANGED_EVENT = "piclaw:ungit-config-changed";
 const STYLE_ID = "piclaw-ungit-pane-style";
@@ -148,6 +149,17 @@ export async function loadUngitWebConfig(force = false) {
 
 async function saveUngitWebConfig(config) {
   return requestUngitConfig({ method: "POST", body: normalizeUngitWebConfig(config) });
+}
+
+export async function requestUngitHealth() {
+  try {
+    const response = await fetch(HEALTH_API, { credentials: "same-origin" });
+    if (!response.ok) return false;
+    const payload = await response.json().catch(() => ({}));
+    return payload?.live === true;
+  } catch {
+    return false;
+  }
 }
 
 function injectStyles(ownerDocument = document) {
@@ -309,6 +321,7 @@ function UngitSettingsPane() {
   const [draft, setDraft] = useState(null);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
+  const [live, setLive] = useState(false);
 
   const load = useCallback(async () => {
     setMessage("");
@@ -321,6 +334,13 @@ function UngitSettingsPane() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    let active = true;
+    void requestUngitHealth().then((nextLive) => {
+      if (active) setLive(nextLive);
+    });
+    return () => { active = false; };
+  }, []);
 
   const save = useCallback(async () => {
     setSaving(true);
@@ -347,7 +367,10 @@ function UngitSettingsPane() {
 
   return html`
     <div style="padding:0.5rem 0;max-width:720px">
-      <h4 style="margin:0.4rem 0 0.7rem">Ungit workspace integration</h4>
+      <div style="display:flex;align-items:center;gap:8px;margin:0.4rem 0 0.7rem">
+        <h4 style="margin:0">Ungit workspace integration</h4>
+        ${live ? html`<span style="display:inline-flex;align-items:center;gap:5px;color:#16a34a;font-size:0.76rem;font-weight:600"><span aria-hidden="true">●</span> Live</span>` : null}
+      </div>
       <p style="margin:0 0 0.8rem;color:var(--text-secondary);font-size:0.8rem;line-height:1.45">
         Folder-row Git buttons open the selected directory in an iframe-backed Ungit tab.
       </p>

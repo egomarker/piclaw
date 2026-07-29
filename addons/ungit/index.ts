@@ -1,4 +1,5 @@
 import { registerUngitProxyRoute } from "./proxy.ts";
+import { isUngitLive } from "./service.ts";
 import { loadUngitConfig, saveUngitConfig, UNGIT_ADDON_ID } from "./storage.ts";
 
 type AddonConfigApiRegistrar = (
@@ -35,6 +36,9 @@ if (typeof registerAddonConfigApi === "function") {
       });
       return configResponse();
     },
+  }, import.meta.dir);
+  registerAddonConfigApi(UNGIT_ADDON_ID, "health", {
+    get: async () => ({ live: await isUngitLive() }),
   }, import.meta.dir);
 }
 
