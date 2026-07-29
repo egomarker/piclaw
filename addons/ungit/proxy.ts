@@ -49,6 +49,13 @@ function createUpstreamHeaders(request: Request): Headers {
 function createDownstreamHeaders(response: Response, pathname: string): Headers {
   const headers = new Headers(response.headers);
   removeHopByHopHeaders(headers);
+  // Bun fetch transparently decodes compressed upstream bodies but preserves the
+  // original encoding metadata. Forwarding those stale headers makes browsers try
+  // to decode the already-decoded body and reject assets such as socket.io.js.
+  if (headers.has("content-encoding")) {
+    headers.delete("content-encoding");
+    headers.delete("content-length");
+  }
   // Ungit's document response omits Content-Type. Without this fallback Bun serves
   // the proxied body as application/octet-stream, so browsers download it.
   if (pathname === `${UNGIT_PROXY_PATH}/` && !headers.has("content-type")) {

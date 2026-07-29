@@ -215,6 +215,29 @@ test("Ungit same-origin proxy supplies the document MIME type omitted by Ungit",
   expect(await response?.text()).toContain("<title>ungit</title>");
 });
 
+test("Ungit same-origin proxy strips stale compression metadata from decoded bodies", async () => {
+  const handler = createUngitProxyHandler({
+    fetchImpl: async () => new Response("window.io = {};", {
+      status: 200,
+      headers: {
+        "Content-Encoding": "gzip",
+        "Content-Length": "8",
+        "Content-Type": "application/javascript; charset=utf-8",
+      },
+    }),
+  });
+
+  const response = await handler(
+    new Request("https://piclaw.example.test/ungit/socket.io/socket.io.js"),
+    "/ungit/socket.io/socket.io.js",
+  );
+
+  expect(response?.headers.get("content-encoding")).toBeNull();
+  expect(response?.headers.get("content-length")).toBeNull();
+  expect(response?.headers.get("content-type")).toBe("application/javascript; charset=utf-8");
+  expect(await response?.text()).toBe("window.io = {};");
+});
+
 test("Ungit same-origin proxy leaves unrelated paths alone and rejects WebSocket upgrades", async () => {
   const handler = createUngitProxyHandler({
     fetchImpl: async () => new Response("unexpected"),
