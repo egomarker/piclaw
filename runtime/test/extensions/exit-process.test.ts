@@ -1,12 +1,17 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import "../helpers.js";
 import { withChatContext } from "../../src/core/chat-context.js";
+import { extensionKvClear, initDatabase } from "../../src/db.js";
 import { exitProcess } from "../../src/extensions/exit-process.js";
 import { setMessagesPostFn } from "../../src/extensions/messages-crud.js";
 import {
   checkPendingShutdown,
   isPendingShutdown,
 } from "../../src/runtime/shutdown-registry.js";
+import {
+  EXIT_PROCESS_HANDOFF_EXTENSION_ID,
+  listRestartHandoffs,
+} from "../../src/runtime/restart-handoff.js";
 import { createFakeExtensionApi } from "./fake-extension-api.js";
 
 type PostedMessage = {
@@ -29,8 +34,13 @@ function toolOrThrow(tool: any) {
 }
 
 describe("exit_process extension", () => {
+  beforeAll(() => {
+    initDatabase();
+  });
+
   afterEach(async () => {
     setMessagesPostFn(undefined);
+    extensionKvClear(EXIT_PROCESS_HANDOFF_EXTENSION_ID);
     if (!isPendingShutdown()) return;
 
     await new Promise<void>((resolve) => {
@@ -40,12 +50,15 @@ describe("exit_process extension", () => {
     delete (globalThis as { __PICLAW_EXIT_SCHEDULER__?: () => void }).__PICLAW_EXIT_SCHEDULER__;
   });
 
-  test("requires a non-empty reason in its schema", () => {
+  test("requires a non-empty reason and exposes an optional non-empty resume message", () => {
     const tool = getTool();
     expect(tool.parameters.required).toEqual(["reason"]);
     expect(tool.parameters.properties.reason.minLength).toBe(1);
     expect(tool.parameters.properties.reason.pattern).toBe("\\S");
+    expect(tool.parameters.properties.resume_message.minLength).toBe(1);
+    expect(tool.parameters.properties.resume_message.pattern).toBe("\\S");
     expect(tool.description).toContain("non-empty reason is required");
+    expect(tool.description).toContain("optional resume_message");
   });
 
   test("rejects missing or blank reasons without posting or scheduling shutdown", async () => {
@@ -67,6 +80,48 @@ describe("exit_process extension", () => {
     expect(postCalls).toBe(0);
   });
 
+  test("rejects a blank resume message without persisting, posting, or scheduling shutdown", async () => {
+    const tool = getTool();
+    let postCalls = 0;
+    setMessagesPostFn(() => {
+      postCalls += 1;
+      return 1;
+    });
+
+    const result = await withChatContext("web:exit-phase-2", "web", () => tool.execute("tool-exit", {
+      reason: "Load phase 2.",
+      resume_message: "  \n\t",
+    }));
+
+    expect(result.details.scheduled).toBe(false);
+    expect(result.details.error).toContain("resume_message");
+    expect(result.terminate).toBeUndefined();
+    expect(postCalls).toBe(0);
+    expect(listRestartHandoffs()).toEqual([]);
+    expect(isPendingShutdown()).toBe(false);
+  });
+
+  test("does not post or schedule shutdown when the durable handoff cannot be stored", async () => {
+    const tool = getTool();
+    let postCalls = 0;
+    setMessagesPostFn(() => {
+      postCalls += 1;
+      return 1;
+    });
+
+    const result = await withChatContext("web:exit-phase-2", "web", () => tool.execute("tool-exit", {
+      reason: "Load phase 2.",
+      resume_message: "x".repeat(70_000),
+    }));
+
+    expect(result.details.scheduled).toBe(false);
+    expect(result.details.error).toContain("persist the restart handoff");
+    expect(result.terminate).toBeUndefined();
+    expect(postCalls).toBe(0);
+    expect(listRestartHandoffs()).toEqual([]);
+    expect(isPendingShutdown()).toBe(false);
+  });
+
   test("does not schedule shutdown when the restart notice cannot be stored", async () => {
     const tool = getTool();
     setMessagesPostFn(() => null);
@@ -78,6 +133,7 @@ describe("exit_process extension", () => {
     expect(result.details.scheduled).toBe(false);
     expect(result.details.error).toContain("restart notice");
     expect(result.terminate).toBeUndefined();
+    expect(listRestartHandoffs()).toEqual([]);
     expect(isPendingShutdown()).toBe(false);
   });
 
@@ -100,7 +156,7 @@ describe("exit_process extension", () => {
     expect(isPendingShutdown()).toBe(false);
   });
 
-  test("posts an agent-owned restart notice before scheduling shutdown", async () => {
+  test("persists a ready handoff and posts an agent-owned restart notice before scheduling shutdown", async () => {
     const tool = getTool();
     const posted: PostedMessage[] = [];
     let pendingAtPost = true;
@@ -110,13 +166,14 @@ describe("exit_process extension", () => {
       return 4242;
     });
 
-    const result = await withChatContext("web:exit-phase-1", "web", () => tool.execute("tool-exit", {
-      reason: "  Load the verified phase 1 build.  ",
+    const result = await withChatContext("web:exit-phase-2", "web", () => tool.execute("tool-exit", {
+      reason: "  Load the verified phase 2 build.  ",
+      resume_message: "  Continue the deployment verification.  ",
     }));
 
     expect(posted).toEqual([{
-      chatJid: "web:exit-phase-1",
-      content: "Restarting now — Reason: Load the verified phase 1 build.",
+      chatJid: "web:exit-phase-2",
+      content: "Restarting now — Reason: Load the verified phase 2 build.",
       isBot: true,
       mediaIds: [],
       contentBlocks: undefined,
@@ -124,14 +181,29 @@ describe("exit_process extension", () => {
     expect(result.details).toMatchObject({
       tool: "exit_process",
       scheduled: true,
-      reason: "Load the verified phase 1 build.",
-      chat_jid: "web:exit-phase-1",
-      restart_message: "Restarting now — Reason: Load the verified phase 1 build.",
+      reason: "Load the verified phase 2 build.",
+      chat_jid: "web:exit-phase-2",
+      resume_message: "Continue the deployment verification.",
+      restart_message: "Restarting now — Reason: Load the verified phase 2 build.",
       restart_message_row_id: 4242,
       restart_message_broadcast: true,
     });
+    expect(typeof result.details.restart_id).toBe("string");
     expect(pendingAtPost).toBe(false);
     expect(result.terminate).toBe(true);
     expect(isPendingShutdown()).toBe(true);
+
+    expect(listRestartHandoffs()).toEqual([{
+      version: 1,
+      restartId: result.details.restart_id,
+      state: "ready",
+      chatJid: "web:exit-phase-2",
+      reason: "Load the verified phase 2 build.",
+      resumeMessage: "Continue the deployment verification.",
+      requestedAt: expect.any(String),
+      restartMessageRowId: 4242,
+      completionMessageRowId: null,
+      resumeMessageRowId: null,
+    }]);
   });
 });

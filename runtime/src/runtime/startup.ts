@@ -29,6 +29,7 @@ import { createLogger } from "../utils/logger.js";
 import { parseNonNegativeIntStrict } from "../utils/strict-int.js";
 import { patchConsoleTimestamps } from "./console-timestamps.js";
 import { startExternalProgressWatchdogMonitor } from "./progress-watchdog-supervisor.js";
+import { recoverPendingRestartHandoffs } from "./restart-handoff.js";
 import type { RuntimeState } from "./state.js";
 import { launchWorkspaceIndexProcess } from "../workspace-index-process.js";
 import { SystemMetricsSampler } from "../channels/web/agent/system-metrics.js";
@@ -492,7 +493,10 @@ function registerSessionControlHandler(agentPool: AgentPool, web: WebChannel): v
   });
 }
 
-export function runWebStartupRecoveryBootstrap(web: StartupRecoveryWebChannel): void {
+export function runWebStartupRecoveryBootstrap(
+  web: StartupRecoveryWebChannel,
+  recoverRestartHandoffs?: () => void,
+): void {
   const startedAt = new Date().toISOString();
   web.updateAgentStatus(STARTUP_STATUS_CHAT_JID, buildStartupAgentStatus({
     phase: "recovering_inflight",
@@ -502,6 +506,7 @@ export function runWebStartupRecoveryBootstrap(web: StartupRecoveryWebChannel): 
 
   try {
     web.recoverInflightRuns();
+    recoverRestartHandoffs?.();
     web.updateAgentStatus(STARTUP_STATUS_CHAT_JID, buildStartupAgentStatus({
       phase: "resuming_pending",
       detail: "Resuming pending chats and queued follow-ups.",
@@ -571,7 +576,9 @@ export async function startWebChannel(queue: AgentQueue, agentPool: AgentPool): 
 
   captureStartupMemorySnapshot(agentPool, { label: "post-web-start" });
   queueStartupSessionWarmup(agentPool, resolveStartupSessionWarmupOptions());
-  runWebStartupRecoveryBootstrap(web);
+  runWebStartupRecoveryBootstrap(web, () => {
+    recoverPendingRestartHandoffs(web);
+  });
 
   // Wire session_control separately from chat relay. This tool controls target
   // session runtime state (inspect/compact/abort/model/failed-run/wake).
