@@ -1,6 +1,19 @@
 export const UNGIT_PROXY_PATH = "/ungit";
 export const UNGIT_PROXY_UPSTREAM = "http://127.0.0.1:8448";
 
+const UNGIT_DOCUMENT_CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' https: http: data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self' data: blob:",
+  "frame-src 'self'",
+  "frame-ancestors 'self'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join("; ");
+
 const HOP_BY_HOP_HEADERS = [
   "connection",
   "keep-alive",
@@ -56,10 +69,13 @@ function createDownstreamHeaders(response: Response, pathname: string): Headers 
     headers.delete("content-encoding");
     headers.delete("content-length");
   }
-  // Ungit's document response omits Content-Type. Without this fallback Bun serves
-  // the proxied body as application/octet-stream, so browsers download it.
-  if (pathname === `${UNGIT_PROXY_PATH}/` && !headers.has("content-type")) {
-    headers.set("content-type", "text/html; charset=utf-8");
+  if (pathname === `${UNGIT_PROXY_PATH}/`) {
+    // Ungit's document response omits Content-Type. Without this fallback Bun serves
+    // the proxied body as application/octet-stream, so browsers download it.
+    if (!headers.has("content-type")) headers.set("content-type", "text/html; charset=utf-8");
+    // Knockout compiles Ungit's data bindings with Function(). Keep unsafe-eval
+    // scoped to the proxied Ungit document instead of weakening Piclaw globally.
+    headers.set("content-security-policy", UNGIT_DOCUMENT_CSP);
   }
   // Do not let the loopback service set cookies on Piclaw's authenticated origin.
   headers.delete("set-cookie");

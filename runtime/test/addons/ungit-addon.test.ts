@@ -198,7 +198,7 @@ test("Ungit same-origin proxy forwards HTTP without leaking Piclaw credentials",
   expect(await response?.text()).toBe("pong");
 });
 
-test("Ungit same-origin proxy supplies the document MIME type omitted by Ungit", async () => {
+test("Ungit same-origin proxy supplies the document headers required by Ungit", async () => {
   const handler = createUngitProxyHandler({
     fetchImpl: async () => new Response(
       new TextEncoder().encode("<!doctype html><title>ungit</title>"),
@@ -212,6 +212,10 @@ test("Ungit same-origin proxy supplies the document MIME type omitted by Ungit",
   );
 
   expect(response?.headers.get("content-type")).toBe("text/html; charset=utf-8");
+  expect(response?.headers.get("content-security-policy")).toContain(
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'",
+  );
+  expect(response?.headers.get("content-security-policy")).toContain("frame-ancestors 'self'");
   expect(await response?.text()).toContain("<title>ungit</title>");
 });
 
