@@ -14,6 +14,7 @@ import {
   registerUngitAddon,
   resolveUngitRepositoryPath,
   resolveUngitZoomLayout,
+  ungitPaneExtension,
   UNGIT_ZOOM_PERCENTAGES,
 } from "../../../addons/ungit/web/index.ts";
 
@@ -21,6 +22,34 @@ afterEach(() => {
   delete (globalThis as Record<string, unknown>).__piclawRuntimeInterop;
   delete (globalThis as Record<string, unknown>).__piclaw_registerAddonConfigApi;
 });
+
+function createFakeUngitPaneDom() {
+  const ownerDocument: any = {
+    defaultView: {
+      addEventListener() {}, removeEventListener() {}, open() {},
+      setTimeout() { return 1; }, clearTimeout() {},
+    },
+    getElementById() { return null; },
+  };
+  ownerDocument.createElement = (tagName: string) => ({
+    tagName,
+    ownerDocument,
+    children: [],
+    style: {},
+    id: "",
+    className: "",
+    value: "",
+    textContent: "",
+    src: "",
+    append(...children: any[]) { this.children.push(...children); },
+    appendChild(child: any) { this.children.push(child); return child; },
+    addEventListener() {},
+    setAttribute() {},
+    remove() {},
+  });
+  ownerDocument.head = ownerDocument.createElement("head");
+  return { ownerDocument, container: ownerDocument.createElement("div") };
+}
 
 test("Ungit URLs select the repository path and hide the header by default", () => {
   expect(buildUngitUrl("projects/foo bar")).toBe(
@@ -51,6 +80,28 @@ test("Ungit iframe zoom uses fixed choices and starts each tab at 60 percent", (
     viewportPercent: 125,
   });
   expect(resolveUngitZoomLayout(55).percent).toBe(60);
+});
+
+test("Ungit keeps the oversized zoomed iframe inside a clipped viewport", () => {
+  const { ownerDocument, container } = createFakeUngitPaneDom();
+  const pane: any = ungitPaneExtension.mount(container, { path: "invalid" });
+  const root = container.children[0];
+  const [viewport, _status, picker] = root.children;
+  const iframe = viewport.children[0];
+
+  expect(viewport.className).toBe("ungit-pane-frame-viewport");
+  expect(viewport.children).toEqual([iframe]);
+  expect(root.children).not.toContain(iframe);
+  expect(picker.value).toBe("60");
+  expect(iframe.style.transform).toBe("scale(0.6)");
+  expect(iframe.style.width).toBe(`${100 / 0.6}%`);
+
+  const injectedStyles = ownerDocument.head.children[0].textContent;
+  expect(injectedStyles).toContain(
+    ".ungit-pane-frame-viewport { position:absolute; inset:0; overflow:hidden; overflow:clip;",
+  );
+  expect(injectedStyles).toContain(".ungit-pane iframe { position:absolute; top:0; left:0;");
+  pane.dispose();
 });
 
 test("Ungit repository path mapping remains inside the configured workspace root", () => {

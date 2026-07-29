@@ -153,8 +153,9 @@ function injectStyles(ownerDocument = document) {
   const style = ownerDocument.createElement("style");
   style.id = STYLE_ID;
   style.textContent = `
-    .ungit-pane { position:relative; width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; background:var(--bg-primary,#111827); }
-    .ungit-pane iframe { display:block; width:100%; height:100%; border:0; background:#fff; transform-origin:top left; }
+    .ungit-pane { position:relative; flex:1 1 auto; width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; overflow:clip; background:var(--bg-primary,#111827); }
+    .ungit-pane-frame-viewport { position:absolute; inset:0; overflow:hidden; overflow:clip; contain:layout paint size; }
+    .ungit-pane iframe { position:absolute; top:0; left:0; display:block; width:100%; height:100%; border:0; background:#fff; transform-origin:top left; }
     .ungit-pane-status { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:24px; color:var(--text-secondary,#94a3b8); font:13px/1.5 var(--font-family-ui,system-ui,sans-serif); text-align:center; pointer-events:none; z-index:2; }
     .ungit-pane-zoom { position:absolute; top:7px; right:44px; z-index:3; height:28px; min-width:68px; padding:0 6px; border:1px solid color-mix(in srgb,var(--border-color,#334155) 80%,transparent); border-radius:6px; background:color-mix(in srgb,var(--bg-primary,#111827) 88%,transparent); color:var(--text-secondary,#94a3b8); font:12px/1 var(--font-family-ui,system-ui,sans-serif); cursor:pointer; opacity:.42; }
     .ungit-pane-open-external { position:absolute; top:7px; right:9px; z-index:3; width:28px; height:28px; display:flex; align-items:center; justify-content:center; padding:0; border:1px solid color-mix(in srgb,var(--border-color,#334155) 80%,transparent); border-radius:6px; background:color-mix(in srgb,var(--bg-primary,#111827) 88%,transparent); color:var(--text-secondary,#94a3b8); cursor:pointer; opacity:.34; }
@@ -180,6 +181,8 @@ class UngitPaneInstance {
     this.status = this.ownerDocument.createElement("div");
     this.status.className = "ungit-pane-status";
     this.status.textContent = "Opening Ungit…";
+    this.frameViewport = this.ownerDocument.createElement("div");
+    this.frameViewport.className = "ungit-pane-frame-viewport";
     this.iframe = this.ownerDocument.createElement("iframe");
     this.iframe.title = `Ungit — ${this.workspacePath || "workspace"}`;
     this.iframe.setAttribute("allow", "clipboard-read; clipboard-write");
@@ -214,7 +217,8 @@ class UngitPaneInstance {
     this.iframe.addEventListener("error", () => {
       if (!this.disposed) this.status.textContent = "Unable to load Ungit. Use the ↗ button to open it directly.";
     });
-    this.root.append(this.iframe, this.status, this.zoomPicker, this.openExternal);
+    this.frameViewport.appendChild(this.iframe);
+    this.root.append(this.frameViewport, this.status, this.zoomPicker, this.openExternal);
     container.appendChild(this.root);
     this.configChangeListener = () => void this.load(true);
     this.ownerWindow.addEventListener(CONFIG_CHANGED_EVENT, this.configChangeListener);
