@@ -15,9 +15,11 @@
 
 import { Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { getChatJid } from "../core/chat-context.js";
 import { markPendingShutdown } from "../runtime/shutdown-registry.js";
 import { createLogger } from "../utils/logger.js";
 import { killTrackedProcesses } from "../utils/process-tracker.js";
+import { postMessagesToolMessage } from "./messages-crud.js";
 import { getActiveSessionCount } from "./session-status.js";
 
 const log = createLogger("extensions.exit-process");
@@ -28,19 +30,40 @@ const RESTART_HINT = IS_SUPERVISED
   : "The process will exit; restart it manually or via your service manager.";
 
 const ExitProcessSchema = Type.Object({
-  reason: Type.Optional(Type.String({ description: "Human-readable reason for the exit (logged, not required)." })),
+  reason: Type.String({
+    minLength: 1,
+    pattern: "\\S",
+    description: "Required human-readable reason for the exit. It will be shown in the chat before shutdown.",
+  }),
 });
 
 type ExitProcessParams = {
-  reason?: string;
+  reason: string;
 };
 
 const HINT = [
   "## Process exit",
   "Use exit_process to gracefully terminate the running piclaw process after your current turn completes.",
+  "A non-empty reason is required and will be posted to the active chat before shutdown is scheduled.",
   `${RESTART_HINT} Call this as the LAST tool in a turn after deploying new code.`,
   "Do NOT call exit_process in the middle of a multi-step turn — only when you are done and ready to restart.",
 ].join("\n");
+
+function buildFailure(reason: string | null, message: string): AgentToolResult<Record<string, unknown>> {
+  return {
+    content: [{ type: "text", text: message }],
+    details: {
+      tool: "exit_process",
+      scheduled: false,
+      reason,
+      error: message,
+    },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
 
 export const exitProcess: ExtensionFactory = (pi: ExtensionAPI) => {
   pi.on("before_agent_start", async (event) => ({
@@ -50,34 +73,80 @@ export const exitProcess: ExtensionFactory = (pi: ExtensionAPI) => {
   pi.registerTool({
     name: "exit_process",
     label: "exit_process",
-    description: `Gracefully terminate piclaw (drain queue, persist sessions, stop services). ${RESTART_HINT} Call as the LAST tool in a turn after deploying new code.`,
-    promptSnippet: `exit_process: gracefully terminate piclaw. ${RESTART_HINT} Call LAST in a turn.`,
+    description: `Gracefully terminate piclaw (drain queue, persist sessions, stop services). A non-empty reason is required and posted to the active chat first. ${RESTART_HINT} Call as the LAST tool in a turn after deploying new code.`,
+    promptSnippet: `exit_process: gracefully terminate piclaw after posting a visible restart notice. Requires a non-empty reason. ${RESTART_HINT} Call LAST in a turn.`,
     parameters: ExitProcessSchema,
     async execute(_toolCallId, params: ExitProcessParams) {
-      const reason = params.reason?.trim() || "Agent-initiated restart";
+      const reason = typeof params.reason === "string" ? params.reason.trim() : "";
+      if (!reason) {
+        return buildFailure(null, "A non-empty reason is required; shutdown was not scheduled.");
+      }
 
-      // Warn if other sessions are actively working
-      const otherActive = getActiveSessionCount();
+      const chatJid = getChatJid("");
+      if (!chatJid) {
+        return buildFailure(reason, "Cannot determine the active chat; shutdown was not scheduled.");
+      }
+
+      const restartMessage = `Restarting now — Reason: ${reason}`;
+      let postResult: AgentToolResult<Record<string, unknown>>;
+      try {
+        postResult = postMessagesToolMessage({
+          action: "post",
+          type: "agent",
+          chat_jid: chatJid,
+          content: restartMessage,
+        }, chatJid);
+      } catch (error) {
+        log.error("Failed to post restart notice", {
+          operation: "exit_process.post_notice",
+          chatJid,
+          reason,
+          err: error,
+        });
+        return buildFailure(reason, "Failed to post the restart notice; shutdown was not scheduled.");
+      }
+
+      const postDetails = isRecord(postResult.details) ? postResult.details : {};
+      if (postDetails.posted !== 1) {
+        log.warn("Restart notice was not stored", {
+          operation: "exit_process.post_notice",
+          chatJid,
+          reason,
+          postDetails,
+        });
+        return buildFailure(reason, "Failed to store the restart notice; shutdown was not scheduled.");
+      }
+
+      // Warn if other sessions are actively working.
+      const otherActive = getActiveSessionCount(chatJid);
       const activeWarning = otherActive > 0
         ? ` \u26a0\ufe0f ${otherActive} other session(s) currently active — their work will be interrupted.`
         : "";
 
-      log.info("Killing tracked subprocesses and marking pending shutdown", { reason, otherActiveSessions: otherActive });
+      log.info("Restart notice posted; killing tracked subprocesses and marking pending shutdown", {
+        reason,
+        chatJid,
+        restartMessageRowId: postDetails.row_id,
+        otherActiveSessions: otherActive,
+      });
       const killed = killTrackedProcesses();
 
-      // Mark the shutdown as pending. The actual exit happens after
-      // finalizeSuccessfulRun persists the agent's response to the DB
-      // and broadcasts it to connected clients.
+      // Mark the shutdown only after the agent-owned notice is stored. The
+      // actual exit happens after finalization has flushed timeline events.
       markPendingShutdown(reason);
 
       return {
-        content: [{ type: "text", text: `Graceful shutdown scheduled.${activeWarning} ${killed} subprocess${killed === 1 ? "" : 'es'} killed. ${RESTART_HINT} Reason: ${reason}` }],
+        content: [{ type: "text", text: `Restart notice posted. Graceful shutdown scheduled.${activeWarning} ${killed} subprocess${killed === 1 ? "" : "es"} killed. ${RESTART_HINT} Reason: ${reason}` }],
         details: {
           tool: "exit_process",
           scheduled: true,
           killed_subprocesses: killed,
           other_active_sessions: otherActive,
           reason,
+          chat_jid: chatJid,
+          restart_message: restartMessage,
+          restart_message_row_id: postDetails.row_id,
+          restart_message_broadcast: postDetails.broadcast === true,
         },
         terminate: true,
       } satisfies AgentToolResult<Record<string, unknown>>;
