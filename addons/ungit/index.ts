@@ -1,3 +1,4 @@
+import { registerUngitProxyRoute } from "./proxy.ts";
 import { loadUngitConfig, saveUngitConfig, UNGIT_ADDON_ID } from "./storage.ts";
 
 type AddonConfigApiRegistrar = (
@@ -17,6 +18,8 @@ function configResponse() {
   };
 }
 
+registerUngitProxyRoute(import.meta.dir);
+
 const registerAddonConfigApi = (globalThis as Record<string, unknown>).__piclaw_registerAddonConfigApi as AddonConfigApiRegistrar | undefined;
 if (typeof registerAddonConfigApi === "function") {
   registerAddonConfigApi(UNGIT_ADDON_ID, "config", {
@@ -27,6 +30,7 @@ if (typeof registerAddonConfigApi === "function") {
         ...(typeof body.baseUrl === "string" ? { baseUrl: body.baseUrl } : {}),
         ...(typeof body.workspaceRoot === "string" ? { workspaceRoot: body.workspaceRoot } : {}),
         ...(typeof body.hideHeader === "boolean" ? { hideHeader: body.hideHeader } : {}),
+        ...(typeof body.proxyEnabled === "boolean" ? { proxyEnabled: body.proxyEnabled } : {}),
       });
       return configResponse();
     },

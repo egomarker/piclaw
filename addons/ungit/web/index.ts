@@ -5,11 +5,14 @@ const CONFIG_API = `/agent/addons/api/${ADDON_ID}/config`;
 const TAB_PREFIX = "piclaw://ungit/";
 const CONFIG_CHANGED_EVENT = "piclaw:ungit-config-changed";
 const STYLE_ID = "piclaw-ungit-pane-style";
+const SAME_ORIGIN_PROXY_URL = "/ungit/";
+const RELATIVE_URL_ORIGIN = "http://piclaw.invalid";
 
 export const DEFAULT_UNGIT_WEB_CONFIG = Object.freeze({
   baseUrl: "http://127.0.0.1:8448/",
   workspaceRoot: "/workspace",
   hideHeader: true,
+  proxyEnabled: true,
 });
 
 const preactHtm = globalThis.__piclawPreactHtm || globalThis.__piclawPreact || null;
@@ -42,6 +45,7 @@ export function normalizeUngitWebConfig(value = {}) {
       ? value.workspaceRoot.trim()
       : DEFAULT_UNGIT_WEB_CONFIG.workspaceRoot,
     hideHeader: value?.hideHeader !== false,
+    proxyEnabled: value?.proxyEnabled !== false,
   };
 }
 
@@ -78,11 +82,11 @@ export function encodeUngitPath(value) {
 export function buildUngitUrl(workspacePath, options = DEFAULT_UNGIT_WEB_CONFIG) {
   const config = normalizeUngitWebConfig(options);
   const repositoryPath = resolveUngitRepositoryPath(workspacePath, config.workspaceRoot);
-  const url = new URL(config.baseUrl);
+  const url = new URL(config.proxyEnabled ? SAME_ORIGIN_PROXY_URL : config.baseUrl, RELATIVE_URL_ORIGIN);
   if (config.hideHeader) url.searchParams.set("noheader", "true");
   else url.searchParams.delete("noheader");
   url.hash = `/repository?path=${encodeUngitPath(repositoryPath)}`;
-  return url.href;
+  return config.proxyEnabled ? `${url.pathname}${url.search}${url.hash}` : url.href;
 }
 
 export function buildUngitTabPath(workspacePath) {
@@ -307,10 +311,17 @@ function UngitSettingsPane() {
       <p style="margin:0 0 0.8rem;color:var(--text-secondary);font-size:0.8rem;line-height:1.45">
         Folder-row Git buttons open the selected directory in an iframe-backed Ungit tab.
       </p>
+      <label style=${{ ...rowStyle, alignItems: "flex-start" }}>
+        <span style=${labelStyle}>Connection</span>
+        <span style="font-size:0.82rem;line-height:1.45"><input type="checkbox" checked=${draft.proxyEnabled}
+          onChange=${(event) => setDraft({ ...draft, proxyEnabled: event.target.checked })} disabled=${saving} /> Use the same-origin proxy at <code>/ungit/</code>
+          <br /><small style="color:var(--text-secondary)">Expects Ungit on 127.0.0.1:8448 with <code>--rootPath=/ungit</code>.</small>
+        </span>
+      </label>
       <label style=${rowStyle}>
-        <span style=${labelStyle}>Ungit URL</span>
+        <span style=${labelStyle}>Direct Ungit URL</span>
         <input style=${inputStyle} type="url" value=${draft.baseUrl} placeholder="http://127.0.0.1:8448/"
-          onInput=${(event) => setDraft({ ...draft, baseUrl: event.target.value })} disabled=${saving} />
+          onInput=${(event) => setDraft({ ...draft, baseUrl: event.target.value })} disabled=${saving || draft.proxyEnabled} />
       </label>
       <label style=${rowStyle}>
         <span style=${labelStyle}>Workspace root</span>
@@ -323,10 +334,10 @@ function UngitSettingsPane() {
           onChange=${(event) => setDraft({ ...draft, hideHeader: event.target.checked })} disabled=${saving} /> Hide the Ungit header</span>
       </label>
       <div style="margin:0.2rem 0 0.8rem 140px;color:var(--text-secondary);font-size:0.74rem;line-height:1.4">
-        The workspace root is the path visible to the Ungit process. Preview: <code style="word-break:break-all">${previewUrl}</code>
+        The direct URL is used only when the proxy is disabled. The workspace root is the path visible to the Ungit process. Preview: <code style="word-break:break-all">${previewUrl}</code>
       </div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <button onClick=${save} disabled=${saving || !draft.baseUrl.trim() || !draft.workspaceRoot.trim()}>${saving ? "Saving…" : "Save"}</button>
+        <button onClick=${save} disabled=${saving || (!draft.proxyEnabled && !draft.baseUrl.trim()) || !draft.workspaceRoot.trim()}>${saving ? "Saving…" : "Save"}</button>
         <button onClick=${load} disabled=${saving}>Reset draft</button>
         ${previewUrl ? html`<a href=${previewUrl} target="_blank" rel="noreferrer">Open workspace in Ungit ↗</a>` : null}
       </div>

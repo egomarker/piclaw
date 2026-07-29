@@ -4,12 +4,14 @@ export interface UngitConfig {
   baseUrl: string;
   workspaceRoot: string;
   hideHeader: boolean;
+  proxyEnabled: boolean;
 }
 
 export const DEFAULT_UNGIT_CONFIG: UngitConfig = {
   baseUrl: "http://127.0.0.1:8448/",
   workspaceRoot: "/workspace",
   hideHeader: true,
+  proxyEnabled: true,
 };
 
 type ExtensionKvStore = {
@@ -49,6 +51,7 @@ export function normalizeUngitConfig(value: Partial<UngitConfig> | null | undefi
     baseUrl: normalizeBaseUrl(value?.baseUrl),
     workspaceRoot: normalizeWorkspaceRoot(value?.workspaceRoot),
     hideHeader: value?.hideHeader !== false,
+    proxyEnabled: value?.proxyEnabled !== false,
   };
 }
 
