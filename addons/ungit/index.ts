@@ -1,5 +1,5 @@
 import { registerUngitProxyRoute } from "./proxy.ts";
-import { isUngitLive } from "./service.ts";
+import { isUngitLive, startUngitIfNeeded, stopUngit } from "./service.ts";
 import { loadUngitConfig, saveUngitConfig, UNGIT_ADDON_ID } from "./storage.ts";
 
 type AddonConfigApiRegistrar = (
@@ -39,6 +39,13 @@ if (typeof registerAddonConfigApi === "function") {
   }, import.meta.dir);
   registerAddonConfigApi(UNGIT_ADDON_ID, "health", {
     get: async () => ({ live: await isUngitLive() }),
+    set: async (payload) => {
+      const body = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+      if (body.action === "start") await startUngitIfNeeded();
+      else if (body.action === "stop") stopUngit();
+      else throw new Error("Ungit health action must be start or stop.");
+      return { live: await isUngitLive() };
+    },
   }, import.meta.dir);
 }
 

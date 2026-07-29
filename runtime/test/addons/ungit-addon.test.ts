@@ -7,6 +7,7 @@ import {
 import {
   isUngitLive,
   startUngitIfNeeded,
+  stopUngit,
   UNGIT_HEALTH_URL,
   UNGIT_LAUNCH_CWD,
   UNGIT_START_COMMAND,
@@ -20,6 +21,7 @@ import {
   normalizeUngitWebConfig,
   parseUngitTabPath,
   registerUngitAddon,
+  requestUngitAction,
   requestUngitHealth,
   resolveUngitRepositoryPath,
   resolveUngitZoomLayout,
@@ -115,6 +117,19 @@ test("Ungit autostart skips a live service and otherwise launches the fixed loop
   expect(unrefCalled).toBe(true);
 });
 
+test("Ungit stop finds matching PIDs and terminates them", () => {
+  const killed: Array<{ pid: number; signal: string }> = [];
+  expect(stopUngit({
+    findPids: () => [101, 102, 103],
+    killImpl: (pid, signal) => { killed.push({ pid, signal }); },
+  })).toBe(3);
+  expect(killed).toEqual([
+    { pid: 101, signal: "SIGTERM" },
+    { pid: 102, signal: "SIGTERM" },
+    { pid: 103, signal: "SIGTERM" },
+  ]);
+});
+
 test("Ungit web settings health request returns only the live boolean", async () => {
   const previousFetch = globalThis.fetch;
   let requestedUrl = "";
@@ -131,6 +146,29 @@ test("Ungit web settings health request returns only the live boolean", async ()
 
     globalThis.fetch = async () => Response.json({ live: false });
     expect(await requestUngitHealth()).toBe(false);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("Ungit web settings sends a start or stop action", async () => {
+  const previousFetch = globalThis.fetch;
+  let requestedUrl = "";
+  let requestedInit: RequestInit | undefined;
+  try {
+    globalThis.fetch = async (input, init) => {
+      requestedUrl = String(input);
+      requestedInit = init;
+      return Response.json({ live: false });
+    };
+    expect(await requestUngitAction("stop")).toEqual({ live: false });
+    expect(requestedUrl).toBe("/agent/addons/api/ungit/health");
+    expect(requestedInit).toMatchObject({
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "stop" }),
+    });
   } finally {
     globalThis.fetch = previousFetch;
   }
@@ -288,6 +326,8 @@ test("Ungit registers direct backend config and health APIs", async () => {
     expect(configRegistration?.action).toBe("config");
     expect(healthRegistration?.addonId).toBe("ungit");
     expect(await healthRegistration?.handlers.get()).toEqual({ live: true });
+    expect(await healthRegistration?.handlers.set({ action: "start" })).toEqual({ live: true });
+    await expect(healthRegistration?.handlers.set({ action: "invalid" })).rejects.toThrow("must be start or stop");
     expect(routeRegistration?.prefix).toBe(UNGIT_PROXY_PATH);
     expect(routeRegistration?.extensionPath).toEndWith("/addons/ungit");
     expect(await configRegistration?.handlers.get()).toMatchObject(DEFAULT_UNGIT_CONFIG);

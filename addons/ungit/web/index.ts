@@ -162,6 +162,18 @@ export async function requestUngitHealth() {
   }
 }
 
+export async function requestUngitAction(action) {
+  const response = await fetch(HEALTH_API, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.error || `Unable to ${action} Ungit (HTTP ${response.status}).`);
+  return payload;
+}
+
 function injectStyles(ownerDocument = document) {
   if (!ownerDocument?.head || ownerDocument.getElementById(STYLE_ID)) return;
   const style = ownerDocument.createElement("style");
@@ -322,6 +334,7 @@ function UngitSettingsPane() {
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [live, setLive] = useState(false);
+  const [serviceBusy, setServiceBusy] = useState(false);
 
   const load = useCallback(async () => {
     setMessage("");
@@ -341,6 +354,21 @@ function UngitSettingsPane() {
     });
     return () => { active = false; };
   }, []);
+
+  const toggleService = useCallback(async () => {
+    const action = live ? "stop" : "start";
+    setServiceBusy(true);
+    setMessage("");
+    try {
+      await requestUngitAction(action);
+      await new Promise((resolve) => setTimeout(resolve, action === "start" ? 1_500 : 400));
+      setLive(await requestUngitHealth());
+    } catch (error) {
+      setMessage(String(error?.message || error));
+    } finally {
+      setServiceBusy(false);
+    }
+  }, [live]);
 
   const save = useCallback(async () => {
     setSaving(true);
@@ -370,6 +398,7 @@ function UngitSettingsPane() {
       <div style="display:flex;align-items:center;gap:8px;margin:0.4rem 0 0.7rem">
         <h4 style="margin:0">Ungit workspace integration</h4>
         ${live ? html`<span style="display:inline-flex;align-items:center;gap:5px;color:#16a34a;font-size:0.76rem;font-weight:600"><span aria-hidden="true">●</span> Live</span>` : null}
+        <button style="margin-left:auto" onClick=${toggleService} disabled=${serviceBusy || saving}>${serviceBusy ? (live ? "Stopping…" : "Starting…") : (live ? "Stop Ungit" : "Start Ungit")}</button>
       </div>
       <p style="margin:0 0 0.8rem;color:var(--text-secondary);font-size:0.8rem;line-height:1.45">
         Folder-row Git buttons open the selected directory in an iframe-backed Ungit tab.

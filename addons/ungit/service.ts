@@ -13,6 +13,7 @@ export const UNGIT_START_COMMAND = Object.freeze([
 ]);
 
 const HEALTH_TIMEOUT_MS = 1_500;
+const UNGIT_PROCESS_PATTERN = "ungit.*--ungitBindIp=127[.]0[.]0[.]1.*--port=8448.*--rootPath=/ungit";
 
 type FetchImplementation = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 type SpawnedProcess = { pid?: number; unref?: () => void };
@@ -41,6 +42,39 @@ export async function isUngitLive(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export function findUngitPids(): number[] {
+  try {
+    const result = Bun.spawnSync(["pgrep", "-f", UNGIT_PROCESS_PATTERN], {
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    const output = new TextDecoder().decode(result.stdout).trim();
+    if (!output) return [];
+    return [...new Set(output.split(/\s+/).map(Number).filter((pid) => Number.isInteger(pid) && pid > 1))];
+  } catch {
+    return [];
+  }
+}
+
+export function stopUngit(options: {
+  findPids?: () => number[];
+  killImpl?: (pid: number, signal: "SIGTERM") => void;
+} = {}): number {
+  const pids = (options.findPids ?? findUngitPids)();
+  const killImpl = options.killImpl ?? ((pid, signal) => { process.kill(pid, signal); });
+  let killed = 0;
+  for (const pid of pids) {
+    try {
+      killImpl(pid, "SIGTERM");
+      killed += 1;
+    } catch {
+      // A parent may already have stopped its child.
+    }
+  }
+  if (killed > 0) console.info(`[ungit] stopped process${killed === 1 ? "" : "es"}: ${pids.join(", ")}`);
+  return killed;
 }
 
 export async function startUngitIfNeeded(options: {
