@@ -301,6 +301,42 @@ test("runtime add-on messaging API validates lifecycle, data dirs, and transport
   resetAddonRuntimeContributionsForTests();
 });
 
+test("runtime entry discovery accepts Bun file dependency symlinks without allowing unrelated escapes", async () => {
+  await withTempWorkspaceEnv("piclaw-addon-runtime-file-link-", {}, async (workspace) => {
+    const sourceDir = join(workspace.base, "linked-addon-source");
+    const sourceRuntimeDir = join(sourceDir, "runtime");
+    const addonDir = join(
+      workspace.workspace,
+      ".pi",
+      "extensions",
+      "node_modules",
+      "@egomarker",
+      "piclaw-addon-linked",
+    );
+    const addonRuntimeDir = join(addonDir, "runtime");
+    const outsideFile = join(workspace.base, "outside.ts");
+
+    mkdirSync(sourceRuntimeDir, { recursive: true });
+    mkdirSync(addonRuntimeDir, { recursive: true });
+    writeFileSync(join(sourceDir, "package.json"), JSON.stringify({
+      name: "@egomarker/piclaw-addon-linked",
+      type: "module",
+      pi: { runtime: { entries: ["runtime/index.ts", "outside.ts"], load: "startup" } },
+    }));
+    writeFileSync(join(sourceRuntimeDir, "index.ts"), "export {};\n");
+    writeFileSync(outsideFile, "throw new Error('must not load');\n");
+    symlinkSync(join(sourceDir, "package.json"), join(addonDir, "package.json"));
+    symlinkSync(join(sourceRuntimeDir, "index.ts"), join(addonRuntimeDir, "index.ts"));
+    symlinkSync(outsideFile, join(addonDir, "outside.ts"));
+
+    expect(getInstalledAddonRuntimeEntries(workspace.workspace)).toEqual([{
+      packageName: "@egomarker/piclaw-addon-linked",
+      path: join(addonRuntimeDir, "index.ts"),
+      load: "startup",
+    }]);
+  });
+});
+
 test("runtime entry discovery rejects traversal and symlink escapes", async () => {
   await withTempWorkspaceEnv("piclaw-addon-runtime-escape-", {}, async (workspace) => {
     const addonDir = join(workspace.workspace, ".pi", "extensions", "node_modules", "piclaw-addon-escape");
