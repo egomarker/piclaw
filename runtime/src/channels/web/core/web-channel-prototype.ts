@@ -716,11 +716,6 @@ export function installWebChannelPrototype(
         } = {},
       ): InteractionRow | null => service.storeMessage(chatJid, content, isBot, mediaIds, options)),
     },
-    handleRemote: {
-      configurable: true,
-      writable: true,
-      value: withHttpSurface(async (service, req: Request) => await service.handleRemote(req)),
-    },
     serveStatic: {
       configurable: true,
       writable: true,

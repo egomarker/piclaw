@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import '../helpers.js';
@@ -40,6 +40,9 @@ test('saveGeneralSettings persists and applies general settings immediately', as
       composeUploadLimitMb: 24,
       workspaceUploadLimitMb: 256,
       toolUseBudget: 23,
+      automaticRecoveryEnabled: false,
+      automaticRecoveryMaxAttempts: 4,
+      automaticRecoveryTotalBudgetMs: 120000,
       uiTheme: 'dracula',
       uiTint: '#7c3aed',
       outputPad: 12,
@@ -56,6 +59,9 @@ test('saveGeneralSettings persists and applies general settings immediately', as
       composeUploadLimitMb: 24,
       workspaceUploadLimitMb: 256,
       toolUseBudget: 23,
+      automaticRecoveryEnabled: false,
+      automaticRecoveryMaxAttempts: 4,
+      automaticRecoveryTotalBudgetMs: 120000,
       uiTheme: 'dracula',
       uiTint: '#7c3aed',
       outputPad: 12,
@@ -92,6 +98,11 @@ test('saveGeneralSettings persists and applies general settings immediately', as
           autoRotate: false,
           maxSizeMb: 48,
         },
+        recovery: {
+          automaticRecoveryEnabled: false,
+          automaticRecoveryMaxAttempts: 4,
+          automaticRecoveryTotalBudgetMs: 120000,
+        },
       },
       ui: {
         theme: 'dracula',
@@ -120,6 +131,44 @@ test('saveGeneralSettings persists and applies general settings immediately', as
     ]) {
       expect(process.env[name], name).toBeUndefined();
     }
+  });
+});
+
+test('getGeneralSettingsData exposes recovery defaults without writing configuration', async () => {
+  await withTempWorkspaceEnv('piclaw-general-settings-recovery-read-', {
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: undefined,
+    PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: undefined,
+    PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: undefined,
+  }, async (workspace) => {
+    const handler = await importFresh<typeof import('../../src/channels/web/handlers/general-settings.js')>(
+      '../src/channels/web/handlers/general-settings.js',
+    );
+    const configPath = join(workspace.workspace, '.piclaw', 'config.json');
+    expect(existsSync(configPath)).toBe(false);
+    expect(handler.getGeneralSettingsData()).toMatchObject({
+      automaticRecoveryEnabled: true,
+      automaticRecoveryMaxAttempts: 0,
+      automaticRecoveryTotalBudgetMs: 360000,
+    });
+    expect(existsSync(configPath)).toBe(false);
+  });
+});
+
+test('saveGeneralSettings rejects invalid recovery bounds without persisting them', async () => {
+  await withTempWorkspaceEnv('piclaw-general-settings-recovery-invalid-', {}, async (workspace) => {
+    const handler = await importFresh<typeof import('../../src/channels/web/handlers/general-settings.js')>(
+      '../src/channels/web/handlers/general-settings.js',
+    );
+    const configPath = join(workspace.workspace, '.piclaw', 'config.json');
+    await expect(handler.saveGeneralSettings({ automaticRecoveryMaxAttempts: -1 }))
+      .rejects.toThrow('non-negative integer');
+    await expect(handler.saveGeneralSettings({ automaticRecoveryMaxAttempts: 1.5 }))
+      .rejects.toThrow('non-negative integer');
+    await expect(handler.saveGeneralSettings({ automaticRecoveryTotalBudgetMs: 0 }))
+      .rejects.toThrow('positive integer');
+    await expect(handler.saveGeneralSettings({ automaticRecoveryTotalBudgetMs: 1000.5 }))
+      .rejects.toThrow('positive integer');
+    expect(existsSync(configPath)).toBe(false);
   });
 });
 

@@ -191,12 +191,6 @@ describe("web channel http surface service", () => {
           return response("sse");
         },
       },
-      remoteInterop: {
-        handleRequest: async (req: Request) => {
-          calls.push(`remote:${req.method}`);
-          return response("remote");
-        },
-      },
       responses: {
         serveStatic: async (relPath: string) => {
           calls.push(`static:${relPath}`);
@@ -263,7 +257,6 @@ describe("web channel http surface service", () => {
     expect(await (await service.handleAgentBranchPurge(postReq)).text()).toBe("branch-purge");
     expect(await (await service.handleAgentBranchRestore(postReq)).text()).toBe("branch-restore");
     expect(await (await service.handleAgentRespond(postReq)).text()).toBe("respond");
-    expect(await (await service.handleRemote(getReq)).text()).toBe("remote");
     expect(await (await service.serveStatic("index.html")).text()).toBe("static");
     expect(await (await service.serveDocsStatic("guide.md")).text()).toBe("docs");
     expect(service.json({ ok: true }, 209)).toBe(jsonResponse);
@@ -310,7 +303,6 @@ describe("web channel http surface service", () => {
       "branch-purge:POST",
       "branch-restore:POST",
       "respond:POST",
-      "remote:GET",
       "static:index.html",
       "docs:guide.md",
       "json:209",
@@ -329,7 +321,6 @@ describe("web channel http surface service", () => {
       serverLifecycleGateway: {} as never,
       terminalVncHttpService: {} as never,
       sessionBroadcast: {} as never,
-      remoteInterop: {} as never,
       responses: {} as never,
     };
 

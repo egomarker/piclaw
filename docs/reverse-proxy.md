@@ -93,7 +93,7 @@ PICLAW_TRUST_PROXY=1
 
 If you run inside the standard container, keep the container/web binding consistent with your deployment model. The tunnel connects to piclaw over an internal hop while the browser uses the public HTTPS hostname.
 
-Piclaw remembers the browser origin from forwarded headers on authenticated web requests. That remembered origin is used for generated web links and remote-pair callback URLs when `PICLAW_WEB_EXTERNAL_URL` is unset, so public proxy access and LAN access can coexist without pinning the instance to one hostname.
+Piclaw remembers the browser origin from forwarded headers on authenticated web requests. That remembered origin is used for generated web links when `PICLAW_WEB_EXTERNAL_URL` is unset, so public proxy access and LAN access can coexist without pinning the instance to one hostname.
 
 ### `cloudflared` config example
 

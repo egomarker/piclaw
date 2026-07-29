@@ -62,6 +62,16 @@ test("general settings keeps unsaved browser-local avatar previews direct", () =
   expect(resolveAvatarPreview("avatar.png", "unknown")).toBe("");
 });
 
+test("general settings renders advanced recovery controls with exact millisecond budget", () => {
+  const source = readFileSync(join(runtimeRoot, "web/src/components/settings/general.ts"), "utf8");
+  expect(source).toContain("settings.general.agentRecovery");
+  expect(source).toContain("automaticRecoveryEnabled");
+  expect(source).toContain("automaticRecoveryMaxAttempts");
+  expect(source).toContain("automaticRecoveryTotalBudgetMs");
+  expect(source).toContain("settings.general.recoveryTotalBudgetHint");
+  expect(source).toContain("step=${1000}");
+});
+
 test("general settings passes explicit avatar kinds to both identity fields", () => {
   const source = readFileSync(join(runtimeRoot, "web/src/components/settings/general.ts"), "utf8");
   expect(source).toContain('<${AvatarField} kind="user" value=${userAvatar}');

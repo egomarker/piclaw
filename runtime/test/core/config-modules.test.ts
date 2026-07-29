@@ -39,7 +39,6 @@ import {
   getDreamConfig,
   getProgressWatchdogConfig,
   getRecoveryPolicyConfig,
-  getRemoteInteropConfig,
   getSessionPoolConfig,
   getSessionStorageConfig,
 } from "../../src/core/config-runtime.js";
@@ -182,7 +181,6 @@ test("config runtime module preserves grouped session and recovery contracts", (
   expect(getCompactionRuntimeConfig().backoffMaxMs).toBeGreaterThanOrEqual(getCompactionRuntimeConfig().backoffBaseMs);
   expect(getProgressWatchdogConfig().timeoutMs).toBeGreaterThanOrEqual(0);
   expect(getRecoveryPolicyConfig().automaticRecoveryTotalBudgetMs).toBeGreaterThan(0);
-  expect(typeof getRemoteInteropConfig().enabled).toBe("boolean");
 });
 
 test("identity and integration modules preserve grouped facade contracts", () => {

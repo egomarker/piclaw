@@ -56,7 +56,6 @@ import { TerminalSessionService } from "./web/terminal/terminal-session-service.
 import type { TerminalSocketData } from "./web/terminal/terminal-session-service.js";
 import { VncSessionService } from "./web/vnc/vnc-session-service.js";
 import type { VncSocketData } from "./web/vnc/vnc-session-service.js";
-import type { RemoteInteropService } from "../remote/service.js";
 import type { WebMessageProcessingStorageService } from "./web/messaging/message-processing-storage-service.js";
 import type { WebChannelRuntimeFollowupFacadeService } from "./web/runtime/runtime-followup-facade-service.js";
 import { initializeWebChannelConstructor } from "./web/core/web-channel-constructor-factory.js";
@@ -144,7 +143,6 @@ export class WebChannel implements WebChannelLike {
 
   queue!: AgentQueue;
   agentPool!: AgentPool;
-  remoteInterop!: RemoteInteropService;
   responses = new ResponseService();
   requestRouter!: RequestRouterService;
   endpointContexts!: WebChannelEndpointContexts;

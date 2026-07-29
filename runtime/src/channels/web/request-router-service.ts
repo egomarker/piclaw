@@ -43,6 +43,7 @@ import "./http/video-viewer-route.js";
 import "./http/pdf-viewer-route.js";
 import "./http/html-viewer-route.js";
 import { handleExtensionRoutes } from "./http/extension-routes.js";
+import { handleExternalAddonRoutes } from "../../addons/external-routes.js";
 import { enforceRequestGuards } from "./http/request-guards.js";
 import { getRouteFlags } from "./http/route-flags.js";
 import { withSecurityHeaders } from "./http/security.js";
@@ -118,15 +119,9 @@ export class RequestRouterService {
     const url = new URL(req.url);
     const pathname = url.pathname;
 
-    if (pathname.startsWith("/api/remote/")) {
-      try {
-        return await this.channel.handleRemote(req);
-      } catch {
-        return new Response(JSON.stringify({ error: "Internal server error." }), {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
+    if (pathname.startsWith("/api/addons/")) {
+      const response = await handleExternalAddonRoutes(req, pathname);
+      return response ?? this.channel.json({ error: "Not found" }, 404);
     }
 
     const widgetStateResponse = await handleWidgetStateRoutes(this.channel, req, pathname);

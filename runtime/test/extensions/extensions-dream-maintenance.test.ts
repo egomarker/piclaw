@@ -52,12 +52,16 @@ function createFakeApi() {
 }
 
 describe("dream maintenance extension", () => {
+  let previousDbInMemory: string | undefined;
+
   beforeEach(() => {
+    previousDbInMemory = process.env.PICLAW_DB_IN_MEMORY;
     process.env.PICLAW_DB_IN_MEMORY = "1";
   });
 
   afterEach(() => {
-    delete process.env.PICLAW_DB_IN_MEMORY;
+    if (previousDbInMemory === undefined) delete process.env.PICLAW_DB_IN_MEMORY;
+    else process.env.PICLAW_DB_IN_MEMORY = previousDbInMemory;
   });
 
   test("registers /dream", async () => {

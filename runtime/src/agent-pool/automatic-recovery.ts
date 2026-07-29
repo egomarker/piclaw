@@ -71,7 +71,7 @@ export interface RecoveryDecision {
 }
 
 const DEFAULT_MAX_ATTEMPTS = 3;
-const DEFAULT_TOTAL_BUDGET_MS = 30_000;
+const DEFAULT_TOTAL_BUDGET_MS = 360_000;
 const DEFAULT_RETRY_BASE_DELAY_MS = 2_000;
 const DEFAULT_RETRY_MAX_DELAY_MS = 60_000;
 

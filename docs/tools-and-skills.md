@@ -548,7 +548,6 @@ Each skill keeps its script alongside its `SKILL.md` for portability. Current se
 | `visual-artifact-generator` | Generate polished self-contained HTML pages, diagrams, data tables, diff reviews, slide decks, and draw.io files using Piclaw vendored libraries. See [visual-artifact-generator.md](visual-artifact-generator.md). |
 | `situate-daily-notes` | Situation report and Obsidian-style daily summary notes |
 | `timeline-cleanup` | Delete low-value timeline messages by keyword patterns |
-| `remote-peer` | Send signed prompts to paired remote piclaw instances (see [cross-instance-ipc.md](cross-instance-ipc.md)) |
 
 > **Addon-provided skills** (from [piclaw-addons](https://github.com/rcarmo/piclaw-addons), available when the addons package is installed):
 >
@@ -556,6 +555,7 @@ Each skill keeps its script alongside its `SKILL.md` for portability. Current se
 > |-------|-------------|
 > | `proxmox-guest-compare-chart` | Compare two Proxmox guests and render SVG/CSV outputs |
 > | `portainer-container-compare-chart` | Compare two Portainer containers and render SVG/CSV outputs |
+> | `remote-peer` | Pair Piclaw instances and exchange signed messages/mediated work through the [Remote Peer add-on](https://rcarmo.github.io/piclaw-addons/addons/remote-peer/) |
 
 `kanban-management` is now archived and retains historical references only. Active project operations use GitHub Issues + GitHub Projects.
 

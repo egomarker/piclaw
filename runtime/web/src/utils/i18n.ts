@@ -380,6 +380,15 @@ type MessageKey =
   | 'settings.general.workspaceUpload'
   | 'settings.general.workspaceUploadAria'
   | 'settings.general.workspaceUploadHint'
+  | 'settings.general.agentRecovery'
+  | 'settings.general.automaticRecovery'
+  | 'settings.general.automaticRecoveryHint'
+  | 'settings.general.recoveryMaxAttempts'
+  | 'settings.general.recoveryMaxAttemptsAria'
+  | 'settings.general.recoveryMaxAttemptsHint'
+  | 'settings.general.recoveryTotalBudget'
+  | 'settings.general.recoveryTotalBudgetAria'
+  | 'settings.general.recoveryTotalBudgetHint'
   | 'settings.general.authentication'
   | 'settings.general.widgetToken'
   | 'settings.general.token'
@@ -1003,6 +1012,15 @@ const EN: Record<MessageKey, string> = {
   'settings.general.workspaceUpload': 'Workspace upload (MB)',
   'settings.general.workspaceUploadAria': 'workspace upload limit',
   'settings.general.workspaceUploadHint': 'defaults to 256 MB; chunked uploads allow up to 1 GB',
+  'settings.general.agentRecovery': 'Advanced · Agent recovery',
+  'settings.general.automaticRecovery': 'Automatic recovery',
+  'settings.general.automaticRecoveryHint': 'Retry recoverable failed turns automatically.',
+  'settings.general.recoveryMaxAttempts': 'Maximum attempts',
+  'settings.general.recoveryMaxAttemptsAria': 'automatic recovery maximum attempts',
+  'settings.general.recoveryMaxAttemptsHint': '0 inherits the normal retry limit.',
+  'settings.general.recoveryTotalBudget': 'Total budget (ms)',
+  'settings.general.recoveryTotalBudgetAria': 'automatic recovery total budget in milliseconds',
+  'settings.general.recoveryTotalBudgetHint': 'Caps all automatic recovery work for one turn.',
   'settings.general.authentication': 'Authentication',
   'settings.general.widgetToken': 'Widget bearer token',
   'settings.general.token': 'Token',
@@ -1625,6 +1643,15 @@ const ZH_CN: Partial<Record<MessageKey, string>> = {
   'settings.general.workspaceUpload': '工作区上传（MB）',
   'settings.general.workspaceUploadAria': '工作区上传限制',
   'settings.general.workspaceUploadHint': '默认为 256 MB；分块上传最多允许 1 GB',
+  'settings.general.agentRecovery': '高级 · 代理恢复',
+  'settings.general.automaticRecovery': '自动恢复',
+  'settings.general.automaticRecoveryHint': '自动重试可恢复的失败回合。',
+  'settings.general.recoveryMaxAttempts': '最大尝试次数',
+  'settings.general.recoveryMaxAttemptsAria': '自动恢复最大尝试次数',
+  'settings.general.recoveryMaxAttemptsHint': '0 表示继承常规重试限制。',
+  'settings.general.recoveryTotalBudget': '总预算（毫秒）',
+  'settings.general.recoveryTotalBudgetAria': '自动恢复总预算（毫秒）',
+  'settings.general.recoveryTotalBudgetHint': '限制单个回合的所有自动恢复工作。',
   'settings.general.authentication': '身份验证',
   'settings.general.widgetToken': '小部件 bearer 令牌',
   'settings.general.token': '令牌',
@@ -2247,6 +2274,15 @@ const JA: Partial<Record<MessageKey, string>> = {
   'settings.general.workspaceUpload': 'ワークスペースアップロード（MB）',
   'settings.general.workspaceUploadAria': 'ワークスペースアップロード上限',
   'settings.general.workspaceUploadHint': 'デフォルトは 256 MB。チャンクアップロードは最大 1 GB まで許可',
+  'settings.general.agentRecovery': '詳細 · エージェント復旧',
+  'settings.general.automaticRecovery': '自動復旧',
+  'settings.general.automaticRecoveryHint': '復旧可能な失敗ターンを自動的に再試行します。',
+  'settings.general.recoveryMaxAttempts': '最大試行回数',
+  'settings.general.recoveryMaxAttemptsAria': '自動復旧の最大試行回数',
+  'settings.general.recoveryMaxAttemptsHint': '0 は通常の再試行上限を継承します。',
+  'settings.general.recoveryTotalBudget': '合計予算（ミリ秒）',
+  'settings.general.recoveryTotalBudgetAria': '自動復旧の合計予算（ミリ秒）',
+  'settings.general.recoveryTotalBudgetHint': '1 ターンのすべての自動復旧処理を制限します。',
   'settings.general.authentication': '認証',
   'settings.general.widgetToken': 'ウィジェット bearer トークン',
   'settings.general.token': 'トークン',

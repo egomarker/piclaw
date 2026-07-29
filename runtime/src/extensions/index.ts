@@ -94,7 +94,6 @@ export function createBuiltinExtensionFactories(options?: {
     envTools,
     exitProcess,
     imageProcessing,
-    // remotePair moved to extensions/integrations/remote-pair/ (lazy, env-gated)
     sessionStatus,
     providerRequestSanitizer,
     providerResponseDiagnostics,

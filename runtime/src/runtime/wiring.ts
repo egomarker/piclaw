@@ -14,11 +14,10 @@ import type { SendMessageOptions as WebSendMessageOptions } from "../channels/we
 import { startSchedulerLoop, type SchedulerDeps } from "../task-scheduler.js";
 import { createUuid } from "../utils/ids.js";
 import { createLogger } from "../utils/logger.js";
-import { executeApprovedProposal, rejectProposal } from "../remote/service-operations.js";
 import {
   buildAttachmentContentBlocks,
   getChannelTransport,
-  type RuntimeSendMessageOptions,
+  type RuntimeSendMessageOptions as ChannelSendMessageOptions,
 } from "./channel-transport-registry.js";
 
 const log = createLogger("runtime.wiring");
@@ -43,6 +42,9 @@ export function workspaceNeedsDreamBootstrap(): boolean {
   return getDreamBootstrapFiles().some((path) => !existsSync(path));
 }
 
+/** Optional sendMessage options accepted by runtime dispatch. */
+export type RuntimeSendMessageOptions = ChannelSendMessageOptions;
+
 /** Minimal sender contract exposed to runtime worker wiring. */
 export interface RuntimeSenders {
   sendMessage: (jid: string, text: string, options?: RuntimeSendMessageOptions) => Promise<void>;
@@ -56,8 +58,6 @@ export interface RuntimeWebWorkerChannel {
   resumePendingChats: (chatJid?: string) => void;
   broadcastEvent?(eventType: string, data: unknown): void;
 }
-
-/** Optional non-web channel capability for runtime worker startup. */
 
 /** Optional Pushover-channel capability required by runtime worker startup. */
 export interface RuntimePushoverWorkerChannel {
@@ -199,19 +199,6 @@ export function startRuntimeWorkers(
           await senders.sendMessage(chatJid, result.result, { forceRoot: true, source: "dream" });
         }
       }, getDreamQueueLane(chatJid));
-    },
-    executeProposal: async (proposalId) => {
-      const taskId = `proposal:${proposalId}`;
-      queue.enqueueTask(taskId, async () => {
-        await executeApprovedProposal(proposalId, agentPool, async (text) => {
-          await senders.sendMessage("web:default", text, { forceRoot: true, source: "remote-proposal" });
-        });
-      });
-    },
-    rejectProposal: async (proposalId, reason) => {
-      await rejectProposal(proposalId, reason, async (text) => {
-        await senders.sendMessage("web:default", text, { forceRoot: true, source: "remote-proposal" });
-      });
     },
   });
 

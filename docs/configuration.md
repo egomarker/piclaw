@@ -338,8 +338,8 @@ For the packaged Azure managed-identity/static-key path and its additional token
 | `PICLAW_SESSION_AUTO_ROTATE` | `1` | Automatically rotate oversized session files before the next prompt |
 | `PICLAW_TURN_MAX_TOOL_EXECUTIONS` | `64` | Authoritative per-turn completed tool-execution budget. Settings persists `domains.agent.toolUseMessageBudget`; values are clamped to `8..512`. Legacy `PICLAW_TURN_MAX_TOOL_USE_MESSAGES` and `PICLAW_MID_TURN_TOOL_EXECUTION_HARD_CEILING` are lower-priority compatibility aliases. |
 | `PICLAW_SMART_COMPACTION_METHOD` | `selective` | Smart-compaction local processing method: `selective` or `pipelined` |
-| `PICLAW_REMOTE_COMPACTION_ENABLED` | `0` | Opt in to provider-native compaction before the selected local method |
-| `PICLAW_REMOTE_COMPACTION_TIMEOUT_MS` | `300000` | Provider-native compaction request deadline before deterministic local fallback; aligned with Codex's long-running compact endpoint |
+| `domains.compaction.remoteCompactionEnabled` | `false` | Opt in to provider-native compaction before the selected local method (JSON config) |
+| `domains.compaction.remoteCompactionTimeoutMs` | `300000` | Provider-native compaction request deadline before deterministic local fallback (JSON config) |
 | `PICLAW_WHATSAPP_PHONE` | _(empty)_ | Alias for `WHATSAPP_PHONE` |
 | `PICLAW_TOOL_OUTPUT_RETENTION_MS` | `2592000000` (30 days) | Milliseconds to retain stored tool outputs (preferred; overrides `_DAYS`; values are capped at 30 days) |
 | `PICLAW_TOOL_OUTPUT_RETENTION_DAYS` | _(legacy)_ | Days to retain stored tool outputs (deprecated; use `_MS`) |
@@ -425,8 +425,8 @@ Support is capability-gated by exact provider, API, and endpoint metadata. Picla
 Enable the feature in either web settings frontend under **Compaction → Provider-native compaction**, by environment variable, or in `.piclaw/config.json`:
 
 ```bash
-PICLAW_REMOTE_COMPACTION_ENABLED=1
-PICLAW_REMOTE_COMPACTION_TIMEOUT_MS=300000
+# In .piclaw/config.json:
+# { "domains": { "compaction": { "remoteCompactionEnabled": true, "remoteCompactionTimeoutMs": 300000 } } }
 ```
 
 ```json
@@ -940,16 +940,6 @@ Notes:
   conflicting mapping.
 - Changing `PUID` / `PGID` requires restarting/recreating the container.
 
-## Cross-instance interop
+## Remote Peer add-on
 
-Optional settings for multi-instance communication. See [cross-instance-ipc.md](cross-instance-ipc.md) for details.
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `PICLAW_REMOTE_INTEROP_ENABLED` | `0` | Enable cross-instance interop endpoints |
-| `PICLAW_REMOTE_INTEROP_ALLOW_HTTP` | `0` | Allow `http://` callback URLs (not just `https://`) |
-| `PICLAW_REMOTE_INTEROP_ALLOW_PRIVATE_NETWORK` | `0` | Skip **all** SSRF protections on callback URLs — private/loopback IP checks, blocked-hostname checks, and DNS re-resolution. Only for Docker/LAN dev environments. |
-| `PICLAW_REMOTE_SHORT_CIRCUIT_ENABLED` | `0` | Enable short-circuit execution mode |
-| `PICLAW_REMOTE_INSTANCE_NAME` | _(empty)_ | Display name for this instance in interop metadata |
-| `PICLAW_REMOTE_INTEROP_DECISION_MODEL` | _(empty)_ | Model label for interop mediation (metadata only) |
-| `PICLAW_WEB_EXTERNAL_URL` | _(empty)_ | Public base URL used as callback origin during pairing (e.g. `https://mybox.example.com`). Falls back to `http://localhost:<port>` if unset — real deployments should always set this. |
+Cross-instance identity, pairing, messaging, and mediated work are configured by the installable [Remote Peer add-on](https://rcarmo.github.io/piclaw-addons/addons/remote-peer/). Core has no peer-specific settings or peer-owned state.

@@ -5,6 +5,10 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createTempWorkspace, importFresh, setEnv } from "../helpers.js";
 import { withChatContext } from "../../src/core/chat-context.js";
+import {
+  registerChatTransport,
+  resetChatTransportRegistryForTests,
+} from "../../src/extensions/chat-transport-registry.js";
 
 let restoreEnv: (() => void) | null = null;
 
@@ -61,6 +65,7 @@ describe("chat tool extension", () => {
   });
 
   afterEach(async () => {
+    resetChatTransportRegistryForTests();
     try {
       const module = await importFresh<typeof import("../src/extensions/chat-tool.js")>("../src/extensions/chat-tool.js");
       module.setChatToolRelayFn(undefined);
@@ -151,6 +156,98 @@ describe("chat tool extension", () => {
     }]);
   });
 
+  test("relays a local target_address through the built-in local transport", async () => {
+    const { tool, chatToolModule } = await getTool();
+    const calls: Array<Record<string, unknown>> = [];
+    chatToolModule.setChatToolRelayFn(async (request) => {
+      calls.push(request as Record<string, unknown>);
+      return {
+        status: "ok",
+        source_chat_jid: request.source_chat_jid,
+        target_chat_jid: "web:target",
+        target_agent_name: "research",
+      };
+    });
+
+    const result = await withChatContext(chatJid, "web", () => tool.execute("x", {
+      target_address: "@research",
+      content: "hello",
+      mode: "auto",
+    }));
+
+    expect(calls).toEqual([{
+      source_chat_jid: chatJid,
+      target_agent_name: "research",
+      content: "hello",
+      mode: "auto",
+    }]);
+    expect(result.details).toMatchObject({
+      relayed: true,
+      transport: "local",
+      target_address: "@research",
+      target_agent_name: "research",
+    });
+  });
+
+  test("dispatches one-hop bang addresses with transport metadata", async () => {
+    const { tool } = await getTool();
+    const calls: Array<Record<string, unknown>> = [];
+    registerChatTransport({
+      id: "remote-peer",
+      kind: "bang",
+      async send(request) {
+        calls.push(request as unknown as Record<string, unknown>);
+        return {
+          status: "queued",
+          relayed: true,
+          source_chat_jid: request.source_chat_jid,
+          target_address: request.address.raw,
+          peer_instance_id: "peer-1",
+        };
+      },
+    });
+
+    const result = await withChatContext(chatJid, "web", () => tool.execute("x", {
+      target_address: "lab!inbox",
+      content: "  hello remote  ",
+      mode: "queue",
+      idempotency_key: " idem-1 ",
+      in_reply_to: " msg-1 ",
+    }));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      source_chat_jid: chatJid,
+      address: { kind: "bang", raw: "lab!inbox", peer: "lab", target: "inbox" },
+      content: "hello remote",
+      mode: "queue",
+      idempotency_key: "idem-1",
+      in_reply_to: "msg-1",
+    });
+    expect(result.details).toMatchObject({
+      relayed: true,
+      transport: "remote-peer",
+      target_address: "lab!inbox",
+      peer_instance_id: "peer-1",
+    });
+    expect(result.content[0].text).toContain("lab!inbox");
+  });
+
+  test("reports malformed and unavailable bang transports", async () => {
+    const { tool } = await getTool();
+    const multiHop = await withChatContext(chatJid, "web", () => tool.execute("x", {
+      target_address: "a!b!inbox",
+      content: "hello",
+    }));
+    expect(multiHop.details.error).toContain("one hop only");
+
+    const unavailable = await withChatContext(chatJid, "web", () => tool.execute("x", {
+      target_address: "lab!inbox",
+      content: "hello",
+    }));
+    expect(unavailable.details.error).toContain("No chat transport is registered");
+  });
+
   test("rejects ambiguous target selectors", async () => {
     const { tool, chatToolModule } = await getTool();
     chatToolModule.setChatToolRelayFn(async () => {
@@ -165,5 +262,12 @@ describe("chat tool extension", () => {
 
     expect(result.details.relayed).toBe(false);
     expect(result.details.error).toContain("Provide only one target selector");
+
+    const addressResult = await withChatContext(chatJid, "web", () => tool.execute("x", {
+      target_address: "@research",
+      target_agent_name: "research",
+      content: "Hello",
+    }));
+    expect(addressResult.details.error).toContain("Provide only one target selector");
   });
 });

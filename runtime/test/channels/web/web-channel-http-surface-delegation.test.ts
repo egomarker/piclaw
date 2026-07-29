@@ -86,12 +86,6 @@ describe("web channel http surface delegation", () => {
           return response("sse");
         },
       },
-      remoteInterop: {
-        handleRequest: async (_req: Request) => {
-          calls.push("remote");
-          return response("remote");
-        },
-      },
       responses: {
         serveStatic: async (relPath: string) => {
           calls.push(`static:${relPath}`);
@@ -135,7 +129,6 @@ describe("web channel http surface delegation", () => {
     expect(await (await WebChannel.prototype.handleTerminalHandoff.call(stub, postReq)).text()).toBe("terminal-handoff");
     expect(await WebChannel.prototype.handleVncSession.call(stub, getReq).text()).toBe("vnc");
     expect(await (await WebChannel.prototype.handleVncHandoff.call(stub, postReq)).text()).toBe("handoff");
-    expect(await (await WebChannel.prototype.handleRemote.call(stub, getReq)).text()).toBe("remote");
     expect(await (await WebChannel.prototype.serveStatic.call(stub, "index.html")).text()).toBe("static");
     expect(await (await WebChannel.prototype.serveDocsStatic.call(stub, "guide.md")).text()).toBe("docs");
     expect((await WebChannel.prototype.json.call(stub, { ok: true }, 201).text())).toBe("json");
@@ -159,7 +152,6 @@ describe("web channel http surface delegation", () => {
       "terminal-handoff",
       "vnc",
       "handoff",
-      "remote",
       "static:index.html",
       "docs:guide.md",
       "json:201",

@@ -6,10 +6,13 @@ import {
   STARTUP_STATUS_CHAT_JID,
   STARTUP_STATUS_TURN_ID,
   buildStartupAgentStatus,
+  initializeWebAddonMessagingRuntime,
   queueStartupSessionWarmup,
   resolveStartupSessionWarmupOptions,
   runWebStartupRecoveryBootstrap,
 } from "../../src/runtime/startup.js";
+import { getChatTransport } from "../../src/extensions/chat-transport-registry.js";
+import { resetAddonRuntimeContributionsForTests } from "../../src/addons/runtime-contributions.js";
 
 const TEST_SHELL = process.env.SHELL || "bash";
 const RUNTIME_DIR = join(import.meta.dir, "../..");
@@ -84,6 +87,65 @@ describe("runtime startup helpers", () => {
       });
       expect(run.exitCode, run.stderr.toString() || run.stdout.toString()).toBe(0);
     } finally {
+      ws.cleanup();
+    }
+  });
+
+  test("initializeWebAddonMessagingRuntime wires handlers before startup entry imports", async () => {
+    const ws = createTempWorkspace("piclaw-startup-messaging-");
+    const restoreEnv = setEnv({
+      PICLAW_WORKSPACE: ws.workspace,
+      PICLAW_STORE: ws.store,
+      PICLAW_DATA: ws.data,
+    });
+    resetAddonRuntimeContributionsForTests();
+    try {
+      const addonDir = join(ws.workspace, ".pi", "extensions", "node_modules", "piclaw-addon-startup-messaging");
+      mkdirSync(addonDir, { recursive: true });
+      writeFileSync(join(addonDir, "package.json"), JSON.stringify({
+        name: "piclaw-addon-startup-messaging",
+        type: "module",
+        pi: { runtime: { entries: ["runtime.ts"], load: "startup" } },
+      }));
+      writeFileSync(join(addonDir, "runtime.ts"), `
+const api = globalThis.__piclaw_runtime;
+globalThis.__piclaw_startup_messaging_agents = await api.messaging.listAdvertisableAgents();
+api.messaging.registerChatTransport({
+  id: "startup-messaging",
+  kind: "bang",
+  async send(request) { return { status: "ok", source_chat_jid: request.source_chat_jid }; },
+});
+export {};
+`);
+
+      const enqueued: unknown[] = [];
+      await initializeWebAddonMessagingRuntime({
+        listKnownChats: () => [{ chat_jid: "web:research", agent_name: "research", is_active: true }],
+        findChatByAgentName: (name: string) => name === "research" ? { chat_jid: "web:research", agent_name: "research" } : null,
+      } as any, {
+        enqueueAgentMessage: async (request: unknown) => {
+          enqueued.push(request);
+          return { status: "ok", chat_jid: "web:research", row_id: 1, thread_id: 1, created: true };
+        },
+      } as any);
+
+      expect((globalThis as any).__piclaw_startup_messaging_agents).toEqual([{ agent_name: "research", active: true }]);
+      expect(getChatTransport("bang")?.id).toBe("startup-messaging");
+      const runtimeApi = (globalThis as any).__piclaw_runtime;
+      await runtimeApi.messaging.deliverPeerMessage({
+        target_agent_name: "research",
+        content: "hello",
+        source: {
+          peer_instance_id: "peerInstance_1234567890",
+          peer_fingerprint: "abc123-def456-ghi789",
+          message_id: "rmsg_1",
+        },
+      });
+      expect(enqueued).toHaveLength(1);
+    } finally {
+      delete (globalThis as any).__piclaw_startup_messaging_agents;
+      resetAddonRuntimeContributionsForTests();
+      restoreEnv();
       ws.cleanup();
     }
   });

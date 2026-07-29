@@ -417,6 +417,11 @@ describe("SSE client cap", () => {
 // ── CSRF origin checks ──
 import { RequestRouterService } from "../../../src/channels/web/request-router-service.js";
 import { getWebOrigin, rememberWebOrigin } from "../../../src/channels/web/auth/request-origin.js";
+import {
+  registerExternalAddonRoute,
+  resetExternalAddonRoutesForTests,
+  withExternalAddonRegistrationContext,
+} from "../../../src/addons/external-routes.js";
 
 describe("CSRF origin checks", () => {
   class StubChannel {
@@ -451,6 +456,12 @@ describe("CSRF origin checks", () => {
       });
     }
   }
+
+  test("removed core remote routes return normal not-found", async () => {
+    const router = new RequestRouterService(new StubChannel() as any);
+    const response = await router.handle(new Request("http://localhost/api/remote/ping"));
+    expect(response.status).toBe(404);
+  });
 
   test("blocks mismatched Origin/Host", async () => {
     const router = new RequestRouterService(new StubChannel() as any);
@@ -680,6 +691,89 @@ describe("CSRF origin checks", () => {
     const res = await router.handle(req);
     expect(res.status).toBe(401);
     expect(reached).toBe(false);
+  });
+
+  test("external add-on routes bypass browser auth and CSRF but retain response security metadata", async () => {
+    resetExternalAddonRoutesForTests();
+    try {
+      await withExternalAddonRegistrationContext({
+        packageName: "@rcarmo/piclaw-addon-remote-peer",
+        entryPath: "/addons/remote-peer/runtime.ts",
+      }, async () => {
+        registerExternalAddonRoute({
+          addonId: "remote-peer",
+          prefix: "/api/addons/remote-peer/v1",
+          methods: ["POST"],
+          maxBodyBytes: 1024,
+          handler: async (req) => new Response(await req.text(), { status: 202 }),
+        });
+      });
+
+      class AuthChannel extends StubChannel {
+        authGateway = {
+          isAuthEnabled: () => true,
+          isInternalSecretEnabled: () => false,
+          verifyInternalSecret: () => false,
+          isAuthenticated: () => false,
+        };
+      }
+      const router = new RequestRouterService(new AuthChannel() as any);
+      const response = await router.handle(new Request("https://example.com/api/addons/remote-peer/v1/message", {
+        method: "POST",
+        headers: {
+          Origin: "https://evil.example",
+          Host: "example.com",
+          "Content-Type": "application/json",
+        },
+        body: "hello",
+      }));
+
+      expect(response.status).toBe(202);
+      expect(await response.text()).toBe("hello");
+      expect(response.headers.get("x-request-id")).toMatch(/^req-/);
+      expect(response.headers.get("Content-Security-Policy")).toContain("default-src 'self'");
+      expect(response.headers.get("Strict-Transport-Security")).toContain("max-age=31536000");
+    } finally {
+      resetExternalAddonRoutesForTests();
+    }
+  });
+
+  test("unknown reserved external add-on paths return 404 without browser auth redirects", async () => {
+    resetExternalAddonRoutesForTests();
+    class AuthChannel extends StubChannel {
+      authGateway = {
+        isAuthEnabled: () => true,
+        isInternalSecretEnabled: () => false,
+        verifyInternalSecret: () => false,
+        isAuthenticated: () => false,
+      };
+    }
+    const router = new RequestRouterService(new AuthChannel() as any);
+    const response = await router.handle(new Request("http://localhost/api/addons/missing/v1", {
+      method: "GET",
+      headers: { Host: "localhost" },
+    }));
+    expect(response.status).toBe(404);
+    expect(response.headers.get("location")).toBeNull();
+    expect(await response.json()).toEqual({ error: "Not found" });
+  });
+
+  test("ordinary extension routes remain browser-authenticated", async () => {
+    class AuthChannel extends StubChannel {
+      authGateway = {
+        isAuthEnabled: () => true,
+        isInternalSecretEnabled: () => false,
+        verifyInternalSecret: () => false,
+        isAuthenticated: () => false,
+      };
+    }
+    const router = new RequestRouterService(new AuthChannel() as any);
+    const response = await router.handle(new Request("http://localhost/editor-vendor/missing.js", {
+      method: "GET",
+      headers: { Host: "localhost" },
+    }));
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/login");
   });
 
   test("auth-gates /agent/peer-message before route dispatch", async () => {

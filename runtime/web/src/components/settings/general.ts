@@ -50,6 +50,9 @@ function normalizeGeneralSettings(data: Record<string, any> = {}) {
         assistantAvatar: data.assistantAvatar || '',
         composeUploadLimitMb: data.composeUploadLimitMb ?? 32,
         workspaceUploadLimitMb: data.workspaceUploadLimitMb ?? 256,
+        automaticRecoveryEnabled: data.automaticRecoveryEnabled ?? true,
+        automaticRecoveryMaxAttempts: data.automaticRecoveryMaxAttempts ?? 0,
+        automaticRecoveryTotalBudgetMs: data.automaticRecoveryTotalBudgetMs ?? 360000,
     };
 }
 
@@ -97,6 +100,9 @@ export function GeneralSection({ settingsData, setStatus, mergeSettingsData }) {
     const [assistantAvatar, setAssistantAvatar] = useState('');
     const [composeUploadLimitMb, setComposeUploadLimitMb] = useState(32);
     const [workspaceUploadLimitMb, setWorkspaceUploadLimitMb] = useState(256);
+    const [automaticRecoveryEnabled, setAutomaticRecoveryEnabled] = useState(true);
+    const [automaticRecoveryMaxAttempts, setAutomaticRecoveryMaxAttempts] = useState(0);
+    const [automaticRecoveryTotalBudgetMs, setAutomaticRecoveryTotalBudgetMs] = useState(360000);
     const [widgetToken, setWidgetToken] = useState('');
     const [widgetTokenRevealed, setWidgetTokenRevealed] = useState(false);
     const [widgetTokenCopied, setWidgetTokenCopied] = useState(false);
@@ -120,6 +126,9 @@ export function GeneralSection({ settingsData, setStatus, mergeSettingsData }) {
         setAssistantAvatar(next.assistantAvatar);
         setComposeUploadLimitMb(next.composeUploadLimitMb);
         setWorkspaceUploadLimitMb(next.workspaceUploadLimitMb);
+        setAutomaticRecoveryEnabled(next.automaticRecoveryEnabled);
+        setAutomaticRecoveryMaxAttempts(next.automaticRecoveryMaxAttempts);
+        setAutomaticRecoveryTotalBudgetMs(next.automaticRecoveryTotalBudgetMs);
         setWidgetToken(data?.widgetToken || '');
         savedSnapshotRef.current = JSON.stringify(next);
     }, []);
@@ -139,9 +148,11 @@ export function GeneralSection({ settingsData, setStatus, mergeSettingsData }) {
     const currentSnapshot = useMemo(() => JSON.stringify(normalizeGeneralSettings({
         userName, userAvatar, assistantName, assistantAvatar,
         composeUploadLimitMb, workspaceUploadLimitMb,
+        automaticRecoveryEnabled, automaticRecoveryMaxAttempts, automaticRecoveryTotalBudgetMs,
     })), [
         userName, userAvatar, assistantName, assistantAvatar,
         composeUploadLimitMb, workspaceUploadLimitMb,
+        automaticRecoveryEnabled, automaticRecoveryMaxAttempts, automaticRecoveryTotalBudgetMs,
     ]);
 
     useEffect(() => {
@@ -294,6 +305,42 @@ export function GeneralSection({ settingsData, setStatus, mergeSettingsData }) {
                     onChange=${setWorkspaceUploadLimitMb}
                 />
                 <span class="settings-hint" style="margin:0">${t('settings.general.workspaceUploadHint')}</span>
+            </div>
+
+            <h3 style="margin-top:20px">${t('settings.general.agentRecovery')}</h3>
+            <div class="settings-row">
+                <label>${t('settings.general.automaticRecovery')}</label>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <input type="checkbox" checked=${automaticRecoveryEnabled}
+                        onChange=${e => setAutomaticRecoveryEnabled(Boolean(e.target.checked))} />
+                    <span class="settings-hint" style="margin:0">${t('settings.general.automaticRecoveryHint')}</span>
+                </div>
+            </div>
+            <div class="settings-row">
+                <label>${t('settings.general.recoveryMaxAttempts')}</label>
+                <${NumberStepper}
+                    label=${t('settings.general.recoveryMaxAttemptsAria')}
+                    value=${automaticRecoveryMaxAttempts}
+                    min=${0}
+                    step=${1}
+                    fallback=${0}
+                    width="90px"
+                    onChange=${setAutomaticRecoveryMaxAttempts}
+                />
+                <span class="settings-hint" style="margin:0">${t('settings.general.recoveryMaxAttemptsHint')}</span>
+            </div>
+            <div class="settings-row">
+                <label>${t('settings.general.recoveryTotalBudget')}</label>
+                <${NumberStepper}
+                    label=${t('settings.general.recoveryTotalBudgetAria')}
+                    value=${automaticRecoveryTotalBudgetMs}
+                    min=${1}
+                    step=${1000}
+                    fallback=${360000}
+                    width="110px"
+                    onChange=${setAutomaticRecoveryTotalBudgetMs}
+                />
+                <span class="settings-hint" style="margin:0">${t('settings.general.recoveryTotalBudgetHint')}</span>
             </div>
 
             <h3 style="margin-top:20px">${t('settings.general.authentication')}</h3>

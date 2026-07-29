@@ -9,8 +9,6 @@ test('saveCompactionSettings persists and applies compaction settings immediatel
   await withTempWorkspaceEnv('piclaw-compaction-settings-', {
     PICLAW_AUTO_COMPACTION_ENABLED: '',
     PICLAW_SMART_COMPACTION_METHOD: '',
-    PICLAW_REMOTE_COMPACTION_ENABLED: undefined,
-    PICLAW_REMOTE_COMPACTION_TIMEOUT_MS: undefined,
     PICLAW_COMPACTION_TIMEOUT_MS: '',
     PICLAW_COMPACTION_BACKOFF_BASE_MS: '',
     PICLAW_COMPACTION_BACKOFF_MAX_MS: '',
@@ -81,8 +79,6 @@ test('saveCompactionSettings persists and applies compaction settings immediatel
     });
     expect(process.env.PICLAW_AUTO_COMPACTION_ENABLED).toBeUndefined();
     expect(process.env.PICLAW_SMART_COMPACTION_METHOD).toBe('');
-    expect(process.env.PICLAW_REMOTE_COMPACTION_ENABLED).toBeUndefined();
-    expect(process.env.PICLAW_REMOTE_COMPACTION_TIMEOUT_MS).toBeUndefined();
     expect(process.env.PICLAW_COMPACTION_TIMEOUT_MS).toBe('');
     expect(process.env.PICLAW_COMPACTION_BACKOFF_BASE_MS).toBe('');
     expect(process.env.PICLAW_COMPACTION_BACKOFF_MAX_MS).toBe('');
@@ -95,10 +91,6 @@ test('saveCompactionSettings persists and applies compaction settings immediatel
     const persisted = JSON.parse(readFileSync(join(workspace.workspace, '.piclaw', 'config.json'), 'utf8'));
     expect(persisted).toMatchObject({
       domains: {
-        remote: {
-          remoteCompactionEnabled: true,
-          remoteCompactionTimeoutMs: 45000,
-        },
         tools: {
           toolResultCompactionEnabled: false,
           toolResultCompactionTools: ['bash', 'exec_batch'],
@@ -110,6 +102,8 @@ test('saveCompactionSettings persists and applies compaction settings immediatel
         compaction: {
           autoCompactionEnabled: false,
           smartCompactionMethod: 'pipelined',
+          remoteCompactionEnabled: true,
+          remoteCompactionTimeoutMs: 45000,
           timeoutMs: 240000,
           backoffBaseMs: 720000,
           backoffMaxMs: 10800000,

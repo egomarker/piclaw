@@ -120,11 +120,6 @@ describe("core config", () => {
         web: { passkeyMode: "passkey-only", sessionTtl: 99, totpWindow: 3, internalSecret: "cfg-secret", terminalEnabled: true, vncAllowDirect: false, trustProxy: true },
         debugCardSubmissions: true,
         tools: { additionalDefaultTools: ["search_workspace", "introspect_sql"], workspaceSearchRoots: ["notes", ".pi/skills", "docs"] },
-        remoteInteropEnabled: true,
-        remoteInteropAllowHttp: true,
-        remoteInteropShortCircuitEnabled: true,
-        remoteInstanceName: "relay",
-        remoteInteropDecisionModel: "openai/gpt-4o",
       });
       writeFileSync(join(workspace.workspace, ".env"), [
         "PICLAW_LOG_LEVEL=debug",
@@ -132,7 +127,7 @@ describe("core config", () => {
       ].join("\n"), "utf8");
       const snapshot = loadConfigInSubprocess(workspace, [
         "WORKSPACE_DIR", "STORE_DIR", "DATA_DIR",
-        "call:getIdentityConfig", "call:getLoggingConfig", "call:getWebRuntimeConfig", "call:getToolActivationConfig", "call:getWorkspaceSearchConfig", "call:getRemoteInteropConfig",
+        "call:getIdentityConfig", "call:getLoggingConfig", "call:getWebRuntimeConfig", "call:getToolActivationConfig", "call:getWorkspaceSearchConfig",
       ], {
         env: {
           PICLAW_ASSISTANT_NAME: "Env Assistant",
@@ -145,12 +140,6 @@ describe("core config", () => {
           PICLAW_WEB_COMPOSE_UPLOAD_LIMIT_MB: undefined,
           PICLAW_WEB_WORKSPACE_UPLOAD_LIMIT_MB: undefined,
           PICLAW_TRUST_PROXY: "0",
-          PICLAW_REMOTE_INTEROP_ENABLED: undefined,
-          PICLAW_REMOTE_INTEROP_ALLOW_HTTP: undefined,
-          PICLAW_REMOTE_INTEROP_ALLOW_PRIVATE_NETWORK: undefined,
-          PICLAW_REMOTE_SHORT_CIRCUIT_ENABLED: undefined,
-          PICLAW_REMOTE_INSTANCE_NAME: undefined,
-          PICLAW_REMOTE_INTEROP_DECISION_MODEL: undefined,
         },
       });
       expect(snapshot.WORKSPACE_DIR).toBe(workspace.workspace);
@@ -161,7 +150,6 @@ describe("core config", () => {
       expect(snapshot["call:getWebRuntimeConfig"]).toMatchObject({ passkeyMode: "totp-only", sessionTtl: 99, totpWindow: 3, internalSecret: "cfg-secret", terminalEnabled: false, vncAllowDirect: false, vncTargetsRaw: "", debugCardSubmissions: true, trustProxy: false, composeUploadLimitMb: 32, workspaceUploadLimitMb: 256 });
       expect(snapshot["call:getToolActivationConfig"]).toEqual({ additionalDefaultTools: ["search_workspace", "introspect_sql"] });
       expect(snapshot["call:getWorkspaceSearchConfig"]).toEqual({ roots: ["notes", ".pi/skills", "docs"], extraExtensions: [] });
-      expect(snapshot["call:getRemoteInteropConfig"]).toEqual({ enabled: true, allowHttp: true, allowPrivateNetwork: false, shortCircuitEnabled: true, instanceName: "relay", decisionModel: "openai/gpt-4o" });
     } finally {
       workspace.cleanup();
     }
@@ -1171,32 +1159,15 @@ describe("core config", () => {
     });
   });
 
-  test("remote domain preserves security defaults, precedence, and env immutability", () => {
-    const workspace = createTempWorkspace("piclaw-domain-config-remote-");
-    const envKeys = [
-      "PICLAW_REMOTE_INTEROP_ENABLED", "PICLAW_REMOTE_INTEROP_ALLOW_HTTP", "PICLAW_REMOTE_INTEROP_ALLOW_PRIVATE_NETWORK",
-      "PICLAW_REMOTE_SHORT_CIRCUIT_ENABLED", "PICLAW_REMOTE_INSTANCE_NAME", "PICLAW_REMOTE_INTEROP_DECISION_MODEL",
-      "PICLAW_REMOTE_COMPACTION_ENABLED", "PICLAW_REMOTE_COMPACTION_TIMEOUT_MS",
-    ];
+  test("provider-native compaction settings persist in the compaction domain without compatibility env", () => {
+    const workspace = createTempWorkspace("piclaw-domain-config-provider-compaction-");
     try {
-      writeWorkspaceConfig(workspace.workspace, { domains: { remote: {
-        enabled: false, allowHttp: false, allowPrivateNetwork: false, shortCircuitEnabled: false,
-        instanceName: "persisted", decisionModel: "persisted/model", remoteCompactionEnabled: false, remoteCompactionTimeoutMs: 300000,
+      writeWorkspaceConfig(workspace.workspace, { domains: { compaction: {
+        remoteCompactionEnabled: true,
+        remoteCompactionTimeoutMs: 45000,
       } } });
-      writeFileSync(join(workspace.workspace, ".env"), [
-        "PICLAW_REMOTE_INTEROP_ENABLED=1", "PICLAW_REMOTE_INTEROP_ALLOW_HTTP=1", "PICLAW_REMOTE_INTEROP_ALLOW_PRIVATE_NETWORK=0",
-        "PICLAW_REMOTE_SHORT_CIRCUIT_ENABLED=true", "PICLAW_REMOTE_INSTANCE_NAME=dotenv", "PICLAW_REMOTE_INTEROP_DECISION_MODEL=dotenv/model",
-        "PICLAW_REMOTE_COMPACTION_ENABLED=1", "PICLAW_REMOTE_COMPACTION_TIMEOUT_MS=45000",
-      ].join("\n"), "utf8");
-      const names = ["call:getRemoteInteropConfig", "call:getCompactionRuntimeConfig", "same:getRemoteInteropConfig:REMOTE_INTEROP_CONFIG", ...envKeys.map((key) => `env-unchanged:${key}`)];
-      const { snapshot, stderr } = runConfigSubprocess(workspace, names, { noEnvFile: true, env: {
-        ...Object.fromEntries(envKeys.map((key) => [key, undefined])),
-        PICLAW_REMOTE_INSTANCE_NAME: "process",
-      } });
-      expect(snapshot["call:getRemoteInteropConfig"]).toEqual({ enabled: true, allowHttp: true, allowPrivateNetwork: false, shortCircuitEnabled: true, instanceName: "process", decisionModel: "dotenv/model" });
+      const snapshot = runConfigSubprocess(workspace, ["call:getCompactionRuntimeConfig"]).snapshot;
       expect(snapshot["call:getCompactionRuntimeConfig"]).toMatchObject({ remoteCompactionEnabled: true, remoteCompactionTimeoutMs: 45000 });
-      expect(snapshot["same:getRemoteInteropConfig:REMOTE_INTEROP_CONFIG"]).toBe(true);
-      for (const key of envKeys) { expect(snapshot[`env-unchanged:${key}`]).toBe(true); expectCompatWarningOnce(stderr, key); }
     } finally { workspace.cleanup(); }
   });
 

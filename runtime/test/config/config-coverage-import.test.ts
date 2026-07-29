@@ -87,9 +87,6 @@ test("plain import covers config module init branches with isolated argv and env
         "LOGGING_CONFIG",
         "call:getLoggingConfig",
         "same:getLoggingConfig:LOGGING_CONFIG",
-        "REMOTE_INTEROP_CONFIG",
-        "call:getRemoteInteropConfig",
-        "same:getRemoteInteropConfig:REMOTE_INTEROP_CONFIG",
         "TOOL_OUTPUT_CONFIG",
         "call:getToolOutputConfig",
         "call:getToolUseBudget",
@@ -117,12 +114,6 @@ test("plain import covers config module init branches with isolated argv and env
           PICLAW_VNC_TARGETS: undefined,
           PICLAW_WEB_COMPOSE_UPLOAD_LIMIT_MB: undefined,
           PICLAW_WEB_WORKSPACE_UPLOAD_LIMIT_MB: undefined,
-          PICLAW_REMOTE_INTEROP_ENABLED: "1",
-          PICLAW_REMOTE_INTEROP_ALLOW_HTTP: "0",
-          PICLAW_REMOTE_INTEROP_ALLOW_PRIVATE_NETWORK: undefined,
-          PICLAW_REMOTE_SHORT_CIRCUIT_ENABLED: "1",
-          PICLAW_REMOTE_INSTANCE_NAME: "remote-c",
-          PICLAW_REMOTE_INTEROP_DECISION_MODEL: "decision-model-c",
           PICLAW_TOOL_OUTPUT_RETENTION_MS: "14400000",
           PICLAW_TOOL_OUTPUT_CLEANUP_INTERVAL_MS: "60000",
           PICLAW_TURN_MAX_TOOL_EXECUTIONS: "96",
@@ -182,8 +173,6 @@ test("plain import covers config module init branches with isolated argv and env
     expect(snapshot["same:getRuntimeTimingConfig:RUNTIME_TIMING_CONFIG"]).toBe(true);
     expect(snapshot.LOGGING_CONFIG).toEqual({ level: "info" });
     expect(snapshot["same:getLoggingConfig:LOGGING_CONFIG"]).toBe(true);
-    expect(snapshot.REMOTE_INTEROP_CONFIG).toEqual({ enabled: true, allowHttp: false, allowPrivateNetwork: false, shortCircuitEnabled: true, instanceName: "remote-c", decisionModel: "decision-model-c" });
-    expect(snapshot["same:getRemoteInteropConfig:REMOTE_INTEROP_CONFIG"]).toBe(true);
     expect(snapshot.TOOL_OUTPUT_CONFIG).toEqual({ retentionMs: 14400000, cleanupIntervalMs: 60000 });
     expect(snapshot["same:getToolOutputConfig:TOOL_OUTPUT_CONFIG"]).toBe(true);
     expect(snapshot["call:getToolUseBudget"]).toBe(96);

@@ -32,7 +32,11 @@ import { startExternalProgressWatchdogMonitor } from "./progress-watchdog-superv
 import type { RuntimeState } from "./state.js";
 import { launchWorkspaceIndexProcess } from "../workspace-index-process.js";
 import { SystemMetricsSampler } from "../channels/web/agent/system-metrics.js";
-import { installAddonRuntimeApi, setAddonAgentMessageEnqueuer } from "../addons/runtime-contributions.js";
+import {
+  initializeStartupAddonRuntime,
+  installAddonRuntimeApi,
+} from "../addons/runtime-contributions.js";
+import { createAddonMessagingRuntimeHandlers } from "../addons/runtime-messaging.js";
 // import { registerLazyViewerRoutes } from "../channels/web/http/lazy-viewer-routes.js"; // removed: office-viewer is now @rcarmo/piclaw-addon-office-viewer
 
 const log = createLogger("runtime.startup");
@@ -518,6 +522,20 @@ export function runWebStartupRecoveryBootstrap(web: StartupRecoveryWebChannel): 
   }
 }
 
+export async function initializeWebAddonMessagingRuntime(
+  agentPool: Pick<AgentPool, "listKnownChats" | "findChatByAgentName">,
+  web: Pick<WebChannel, "enqueueAgentMessage">,
+): Promise<void> {
+  await initializeStartupAddonRuntime({
+    agentMessageEnqueuer: (request) => web.enqueueAgentMessage(request),
+    messagingHandlers: createAddonMessagingRuntimeHandlers({
+      listKnownChats: () => agentPool.listKnownChats(),
+      findChatByAgentName: (agentName) => agentPool.findChatByAgentName(agentName),
+      enqueueAgentMessage: (request) => web.enqueueAgentMessage(request),
+    }),
+  });
+}
+
 /** Start web channel and run immediate crash-recovery bootstrap. */
 export async function startWebChannel(queue: AgentQueue, agentPool: AgentPool): Promise<WebChannel> {
   const web = new WebChannel({ queue, agentPool });
@@ -526,15 +544,10 @@ export async function startWebChannel(queue: AgentQueue, agentPool: AgentPool): 
   // Do not freeze extension routes here: workspace/add-on extension factories
   // register their HTTP routes during the first session resource reload.
   // createSessionInDir() freezes the registry after that initial load pass.
-  captureStartupMemorySnapshot(agentPool, { label: "post-web-start" });
-  queueStartupSessionWarmup(agentPool, resolveStartupSessionWarmupOptions());
-  runWebStartupRecoveryBootstrap(web);
 
   // Wire the first-class add-on runtime API to the web channel's in-process
   // message storage/queue/run path. Add-ons should use this instead of
   // synthesizing authenticated localhost HTTP requests to /agent/:id/message.
-  setAddonAgentMessageEnqueuer((request) => web.enqueueAgentMessage(request));
-
   // Wire the messages tool post action to use the web channel for broadcast.
   setMessagesPostFn((chatJid, content, isBot, mediaIds, contentBlocks) => {
     const interaction = web.storeMessage(chatJid, content, isBot, mediaIds, {
@@ -550,6 +563,15 @@ export async function startWebChannel(queue: AgentQueue, agentPool: AgentPool): 
   // chat context, so sender and destination identities are resolved and checked
   // locally before delivery to avoid spoofing.
   setChatToolRelayFn(createDirectChatToolRelayHandler(agentPool, web));
+
+  // Startup runtime entries may register chat transports and other process-wide
+  // services. Wire the complete ABI before importing them, and load them before
+  // warmups/recovery can resume chats that use those transports.
+  await initializeWebAddonMessagingRuntime(agentPool, web);
+
+  captureStartupMemorySnapshot(agentPool, { label: "post-web-start" });
+  queueStartupSessionWarmup(agentPool, resolveStartupSessionWarmupOptions());
+  runWebStartupRecoveryBootstrap(web);
 
   // Wire session_control separately from chat relay. This tool controls target
   // session runtime state (inspect/compact/abort/model/failed-run/wake).

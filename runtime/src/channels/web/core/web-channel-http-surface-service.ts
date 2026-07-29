@@ -1,4 +1,3 @@
-import type { RemoteInteropService } from "../../../remote/service.js";
 import type { WebAgentControlPlaneService } from "../agent/agent-control-plane-service.js";
 import type { WebChannelEndpointFacadeService } from "../endpoints/channel-endpoint-facade-service.js";
 import type { ResponseService } from "../http/response-service.js";
@@ -80,7 +79,6 @@ export interface WebChannelHttpSurfaceChannel {
     "handleTerminalSession" | "handleTerminalHandoff" | "handleVncSession" | "handleVncHandoff"
   >;
   sessionBroadcast: Pick<WebSessionBroadcastService, "handleSse">;
-  remoteInterop: Pick<RemoteInteropService, "handleRequest">;
   responses: WebChannelHttpSurfaceResponses;
 }
 
@@ -309,10 +307,6 @@ export class WebChannelHttpSurfaceService {
 
   async handleAgentRespond(req: Request): Promise<Response> {
     return await this.channel.endpointFacade.handleAgentRespond(req);
-  }
-
-  async handleRemote(req: Request): Promise<Response> {
-    return this.channel.remoteInterop.handleRequest(req);
   }
 
   async serveStatic(relPath: string, req?: Request): Promise<Response> {

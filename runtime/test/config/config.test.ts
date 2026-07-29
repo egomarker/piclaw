@@ -85,11 +85,7 @@ test("compaction runtime settings survive a fresh process restart", () => {
     });
 
     const restarted = loadConfigInSubprocess(ws, ["call:getCompactionRuntimeConfig"], {
-      env: {
-        PICLAW_SMART_COMPACTION_METHOD: undefined,
-        PICLAW_REMOTE_COMPACTION_ENABLED: undefined,
-        PICLAW_REMOTE_COMPACTION_TIMEOUT_MS: undefined,
-      },
+      env: { PICLAW_SMART_COMPACTION_METHOD: undefined },
     });
     expect(restarted["call:getCompactionRuntimeConfig"]).toMatchObject({
       smartCompactionMethod: "pipelined",
@@ -155,13 +151,14 @@ test("loads Piclaw-owned auto-compaction enable state without honoring poisoned 
   }
 });
 
-test("loads remote compaction settings from .env", () => {
-  const ws = createTempWorkspace("piclaw-compaction-dotenv-");
+test("loads provider-native compaction settings from the compaction domain", () => {
+  const ws = createTempWorkspace("piclaw-compaction-config-");
   try {
+    writeWorkspaceConfig(ws.workspace, {
+      domains: { compaction: { remoteCompactionEnabled: true, remoteCompactionTimeoutMs: 300000 } },
+    });
     writeFileSync(join(ws.workspace, ".env"), [
       "PICLAW_SMART_COMPACTION_METHOD=pipelined",
-      "PICLAW_REMOTE_COMPACTION_ENABLED=1",
-      "PICLAW_REMOTE_COMPACTION_TIMEOUT_MS=300000",
       "PICLAW_COMPACTION_TIMEOUT_MS=600000",
       "PICLAW_COMPACTION_BACKOFF_BASE_MS=120000",
       "PICLAW_COMPACTION_BACKOFF_MAX_MS=600000",
@@ -172,8 +169,6 @@ test("loads remote compaction settings from .env", () => {
     const snapshot = loadConfigInSubprocess(ws, ["call:getCompactionRuntimeConfig"], {
       env: {
         PICLAW_SMART_COMPACTION_METHOD: undefined,
-        PICLAW_REMOTE_COMPACTION_ENABLED: undefined,
-        PICLAW_REMOTE_COMPACTION_TIMEOUT_MS: undefined,
         PICLAW_COMPACTION_TIMEOUT_MS: undefined,
         PICLAW_COMPACTION_BACKOFF_BASE_MS: undefined,
         PICLAW_COMPACTION_BACKOFF_MAX_MS: undefined,
@@ -833,67 +828,6 @@ test("legacy top-level web terminal and VNC config keys still map into web runti
     expect(snapshot.WEB_RUNTIME_CONFIG.terminalEnabled).toBe(false);
     expect(snapshot.WEB_RUNTIME_CONFIG.vncAllowDirect).toBe(false);
     expect(snapshot.WEB_RUNTIME_CONFIG.vncTargetsRaw).toBe('[{"id":"lab","host":"10.0.0.10","port":5901}]');
-  } finally {
-    ws.cleanup();
-  }
-});
-
-test("remote interop env flags and metadata load into the typed remote config object", () => {
-  const ws = createTempWorkspace("piclaw-config-");
-
-  try {
-    const snapshot = loadConfigInSubprocess(ws, ["REMOTE_INTEROP_CONFIG"], {
-      env: {
-        PICLAW_REMOTE_INTEROP_ENABLED: "1",
-        PICLAW_REMOTE_INTEROP_ALLOW_HTTP: "true",
-        PICLAW_REMOTE_SHORT_CIRCUIT_ENABLED: "1",
-        PICLAW_REMOTE_INSTANCE_NAME: "remote-a",
-        PICLAW_REMOTE_INTEROP_DECISION_MODEL: "decision-model-a",
-      },
-    });
-
-    expect(snapshot.REMOTE_INTEROP_CONFIG).toEqual({
-      enabled: true,
-      allowHttp: true,
-      allowPrivateNetwork: false,
-      shortCircuitEnabled: true,
-      instanceName: "remote-a",
-      decisionModel: "decision-model-a",
-    });
-  } finally {
-    ws.cleanup();
-  }
-});
-
-test("typed remote interop config getter returns the frozen shared object", () => {
-  const ws = createTempWorkspace("piclaw-config-");
-  try {
-    const snapshot = loadConfigInSubprocess(ws, [
-      "REMOTE_INTEROP_CONFIG",
-      "call:getRemoteInteropConfig",
-      "same:getRemoteInteropConfig:REMOTE_INTEROP_CONFIG",
-      "frozen:REMOTE_INTEROP_CONFIG",
-    ], {
-      env: {
-        PICLAW_REMOTE_INTEROP_ENABLED: "1",
-        PICLAW_REMOTE_INTEROP_ALLOW_HTTP: "0",
-        PICLAW_REMOTE_INTEROP_ALLOW_PRIVATE_NETWORK: undefined,
-        PICLAW_REMOTE_SHORT_CIRCUIT_ENABLED: "1",
-        PICLAW_REMOTE_INSTANCE_NAME: "remote-b",
-        PICLAW_REMOTE_INTEROP_DECISION_MODEL: "decision-model-b",
-      },
-    });
-    expect(snapshot["same:getRemoteInteropConfig:REMOTE_INTEROP_CONFIG"]).toBe(true);
-    expect(snapshot["frozen:REMOTE_INTEROP_CONFIG"]).toBe(true);
-    expect(snapshot.REMOTE_INTEROP_CONFIG).toEqual({
-      enabled: true,
-      allowHttp: false,
-      allowPrivateNetwork: false,
-      shortCircuitEnabled: true,
-      instanceName: "remote-b",
-      decisionModel: "decision-model-b",
-    });
-    expect(snapshot["call:getRemoteInteropConfig"]).toEqual(snapshot.REMOTE_INTEROP_CONFIG);
   } finally {
     ws.cleanup();
   }

@@ -382,93 +382,6 @@ function createSchema(database: Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_task_run_logs ON task_run_logs(task_id, run_at);
 
-    -- Remote interop peer registry.
-    CREATE TABLE IF NOT EXISTS remote_peers (
-      instance_id TEXT PRIMARY KEY,
-      public_key TEXT NOT NULL,
-      display_name TEXT,
-      status TEXT NOT NULL,
-      mode TEXT NOT NULL DEFAULT 'mediated',
-      profile TEXT NOT NULL DEFAULT 'restricted',
-      trust_epoch INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      last_seen_at TEXT,
-      blocked_reason TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_remote_peers_status ON remote_peers(status);
-
-    -- Pending inbound pairing requests.
-    CREATE TABLE IF NOT EXISTS remote_pair_requests (
-      id TEXT PRIMARY KEY,
-      instance_id TEXT NOT NULL,
-      public_key TEXT NOT NULL,
-      display_name TEXT,
-      callback_url TEXT,
-      protocol_version TEXT,
-      nonce TEXT,
-      expires_at TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      source_ip TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_remote_pair_requests_instance ON remote_pair_requests(instance_id);
-    CREATE INDEX IF NOT EXISTS idx_remote_pair_requests_status ON remote_pair_requests(status);
-
-    -- Remote request ledger (proposals, executes).
-    CREATE TABLE IF NOT EXISTS remote_requests (
-      id TEXT PRIMARY KEY,
-      peer_instance_id TEXT NOT NULL,
-      request_type TEXT NOT NULL,
-      status TEXT NOT NULL,
-      prompt TEXT,
-      created_at TEXT NOT NULL,
-      decision TEXT,
-      remote_mode TEXT,
-      error TEXT,
-      result TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_remote_requests_peer ON remote_requests(peer_instance_id, created_at);
-
-    -- Remote audit logs for interop requests.
-    CREATE TABLE IF NOT EXISTS remote_audit_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      peer_instance_id TEXT,
-      endpoint TEXT NOT NULL,
-      decision TEXT,
-      status TEXT,
-      error TEXT,
-      created_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_remote_audit_created_at ON remote_audit_logs(created_at);
-
-    -- Received result callbacks (requesting side) for mediated proposals.
-    CREATE TABLE IF NOT EXISTS remote_result_callbacks (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      negotiation_id TEXT NOT NULL,
-      peer_instance_id TEXT NOT NULL,
-      decision TEXT NOT NULL,
-      result TEXT,
-      reason TEXT,
-      received_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_remote_result_callbacks_neg ON remote_result_callbacks(negotiation_id);
-
-    -- Pending outbound pairing requests (initiator side).
-    CREATE TABLE IF NOT EXISTS remote_pair_outbound_requests (
-      id TEXT PRIMARY KEY,
-      instance_id TEXT NOT NULL,
-      public_key TEXT NOT NULL,
-      fingerprint TEXT NOT NULL,
-      base_url TEXT NOT NULL,
-      nonce TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      expires_at TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_remote_pair_outbound_instance ON remote_pair_outbound_requests(instance_id);
-    CREATE INDEX IF NOT EXISTS idx_remote_pair_outbound_status ON remote_pair_outbound_requests(status);
-
     -- Simple key-value store for the router's per-chat cursor positions.
     CREATE TABLE IF NOT EXISTS router_state (
       key TEXT PRIMARY KEY,
@@ -981,8 +894,7 @@ export function initDatabase(): void {
   ensureChatCursorColumns(db);
   migrateChatCursors(db);
   dropChatBranchDisplayName(db);
-  ensureRemotePeerBaseUrl(db);
-  ensureOutboundPairRequestsTable(db);
+  dropObsoleteRemoteInteropSchema(db);
   ensureMediaCompression(db);
   ensureThinkingContentDuration(db);
   if (!useMemory) {
@@ -1045,25 +957,28 @@ function ensureIncrementalAutoVacuum(database: Database): void {
   }
 }
 
-/**
- * Idempotent migration: ensure the outbound pair requests table exists.
- * Needed for instances that were initialised before this table was added.
- */
-function ensureOutboundPairRequestsTable(database: Database): void {
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS remote_pair_outbound_requests (
-      id TEXT PRIMARY KEY,
-      instance_id TEXT NOT NULL,
-      public_key TEXT NOT NULL,
-      fingerprint TEXT NOT NULL,
-      base_url TEXT NOT NULL,
-      nonce TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      expires_at TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    )`);
-  database.exec(`CREATE INDEX IF NOT EXISTS idx_remote_pair_outbound_instance ON remote_pair_outbound_requests(instance_id)`);
-  database.exec(`CREATE INDEX IF NOT EXISTS idx_remote_pair_outbound_status ON remote_pair_outbound_requests(status)`);
+const REMOTE_INTEROP_CLEANUP_MIGRATION = "drop-core-remote-interop-v1";
+
+/** Drop obsolete core-owned remote interop state once, transactionally. */
+export function dropObsoleteRemoteInteropSchema(database: Database): void {
+  database.exec(`CREATE TABLE IF NOT EXISTS core_schema_migrations (
+    name TEXT PRIMARY KEY,
+    applied_at TEXT NOT NULL
+  )`);
+  const applied = database.prepare("SELECT 1 FROM core_schema_migrations WHERE name = ?").get(REMOTE_INTEROP_CLEANUP_MIGRATION);
+  if (applied) return;
+  database.transaction(() => {
+    for (const table of [
+      "remote_result_callbacks",
+      "remote_requests",
+      "remote_pair_outbound_requests",
+      "remote_pair_requests",
+      "remote_audit_logs",
+      "remote_peers",
+    ]) database.exec(`DROP TABLE IF EXISTS ${table}`);
+    database.prepare("INSERT INTO core_schema_migrations (name, applied_at) VALUES (?, ?)")
+      .run(REMOTE_INTEROP_CLEANUP_MIGRATION, new Date().toISOString());
+  }).immediate();
 }
 
 /**
@@ -1094,20 +1009,6 @@ function ensureMediaCompression(database: Database): void {
   }
 
   database.exec("PRAGMA user_version = 2;");
-}
-
-/**
- * Add nullable base_url column to remote_peers if it doesn't already exist.
- * Required for bidirectional pairing and /unpair routing.
- */
-function ensureRemotePeerBaseUrl(database: Database): void {
-  const cols = database.prepare("PRAGMA table_info(remote_peers)").all() as Array<{ name: string }>;
-  if (cols.some((c) => c.name === "base_url")) return;
-  try {
-    database.exec("ALTER TABLE remote_peers ADD COLUMN base_url TEXT");
-  } catch (err) {
-    debugSuppressedError(log, "remote_peers base_url column may already exist.", err, {});
-  }
 }
 
 /**

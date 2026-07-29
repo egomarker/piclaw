@@ -32,7 +32,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import { getPiclawAgentDir } from "../core/agent-dir.js";
-import { SESSIONS_DIR, getRemoteInteropConfig, getRuntimeRoot, getSessionPersistenceConfig, getWorkspaceDir } from "../core/config.js";
+import { SESSIONS_DIR, getRuntimeRoot, getSessionPersistenceConfig, getWorkspaceDir } from "../core/config.js";
 import { buildChannelSystemPromptAppendix } from "../channels/formatting.js";
 import { detectChannel } from "../router.js";
 import { createBuiltinExtensionFactories } from "../extensions/index.js";
@@ -104,7 +104,6 @@ const OPTIONAL_EXTENSIONS: OptionalBundledExtension[] = [
   // win-ui removed: now shipped as @rcarmo/piclaw-addon-win-ui
   // office-viewer-tool removed: now shipped as @rcarmo/piclaw-addon-office-viewer
   // office-tools-tool removed: now shipped as @rcarmo/piclaw-addon-office-tools
-  { path: resolve(EXTENSIONS_DIR, "integrations", "remote-pair", "index.ts"), enabled: () => getRemoteInteropConfig().enabled },
   { path: resolve(EXTENSIONS_DIR, "experimental", "m365", "index.ts"), envGate: "PICLAW_ENABLE_M365_EXPERIMENTAL" },
 ];
 

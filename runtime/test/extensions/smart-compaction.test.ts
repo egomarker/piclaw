@@ -381,7 +381,6 @@ describe("smart-compaction", () => {
     // Method selection is mutable process state. Keep default-method tests
     // isolated from earlier parametrized or cross-file cases.
     delete process.env.PICLAW_SMART_COMPACTION_METHOD;
-    delete process.env.PICLAW_REMOTE_COMPACTION_ENABLED;
     setCompactionRuntimeConfigForTests({ smartCompactionMethod: "selective", remoteCompactionEnabled: false, remoteCompactionTimeoutMs: 60_000 });
     clearRemoteCompactionBackoffForTests();
     // Capture the registered handler

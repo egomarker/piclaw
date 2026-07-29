@@ -134,7 +134,6 @@ export interface WebChannelLike
   /** General endpoint handlers. */
   serveStatic(relPath: string, req?: Request): Promise<Response>;
   serveDocsStatic(relPath: string): Promise<Response>;
-  handleRemote(req: Request): Promise<Response>;
   handleManifest(req: Request): Promise<Response>;
   handleAvatar(kind: "agent" | "user", req: Request): Promise<Response>;
   handleSse(req: Request): Response;

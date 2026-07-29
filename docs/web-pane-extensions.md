@@ -139,6 +139,7 @@ interface WebPaneExtension {
   icon?: string;                     // Icon identifier or SVG
   capabilities: PaneCapability[];    // What this pane can do
   placement: PanePlacement;          // "tabs" or "dock"
+  retainOnTabSwitch?: boolean;       // Keep an inactive tabs pane mounted
 
   // For tabs panes: can this pane handle the given context?
   // Return false to decline, true for default priority (0),
@@ -315,6 +316,16 @@ materially different from the normal tab-opening path.
 4. User edits → pane calls `onDirtyChange(true)` → tab shows dirty dot
 5. User saves → pane calls `onSaveRequest(content)` → host writes file
 6. Tab closed → host calls `instance.dispose()` → pane cleans up
+
+Tabs panes are disposed and remounted on tab switches by default. A pane that
+must preserve a live browser/session surface may set `retainOnTabSwitch: true`.
+The host then keeps one mounted instance per open tab, hides inactive hosts,
+and calls `resize()` and `focus()` when a retained tab becomes active again.
+Retained instances are still disposed when their tab closes or the application
+tears down.
+
+Use retention only when remounting is materially disruptive: each retained tab
+continues to own its DOM, listeners, and other resources while it remains open.
 
 ## Manual test notes
 

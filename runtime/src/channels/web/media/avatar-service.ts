@@ -15,7 +15,7 @@ import { fileURLToPath } from "url";
 import { WORKSPACE_DIR } from "../../../core/config.js";
 import { getMediaById } from "../../../db/media.js";
 import { createLogger, debugSuppressedError } from "../../../utils/logger.js";
-import { validateCallbackUrl } from "../../../remote/ssrf.js";
+import { validatePublicHttpUrl } from "./url-safety.js";
 import { contentTypeForPath } from "../workspace/file-utils.js";
 
 const log = createLogger("web.avatar");
@@ -148,25 +148,24 @@ async function readRemoteAvatarBytes(response: Response): Promise<Uint8Array | n
 }
 
 async function isRemoteAvatarUrlAllowed(source: string): Promise<boolean> {
-  const check = await validateCallbackUrl(source, undefined, { allowHttp: true, allowPrivateNetwork: false });
-  return Boolean(check.ok && check.url);
+  return Boolean(await validatePublicHttpUrl(source));
 }
 
 async function loadRemoteAvatar(source: string): Promise<{ data: Uint8Array; contentType: string } | null> {
   try {
     let current = source;
     for (let redirects = 0; redirects <= REMOTE_AVATAR_MAX_REDIRECTS; redirects += 1) {
-      const urlCheck = await validateCallbackUrl(current, undefined, { allowHttp: true, allowPrivateNetwork: false });
-      if (!urlCheck.ok || !urlCheck.url) return null;
+      const safeUrl = await validatePublicHttpUrl(current);
+      if (!safeUrl) return null;
 
-      const response = await fetch(urlCheck.url.href, {
+      const response = await fetch(safeUrl.href, {
         redirect: "manual",
         signal: AbortSignal.timeout(REMOTE_AVATAR_TIMEOUT_MS),
       });
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         const location = response.headers.get("location");
         if (!location) return null;
-        current = new URL(location, urlCheck.url).href;
+        current = new URL(location, safeUrl).href;
         continue;
       }
       if (!response.ok) return null;

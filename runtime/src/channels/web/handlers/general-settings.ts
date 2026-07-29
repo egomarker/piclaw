@@ -11,6 +11,7 @@ import {
   getIdentityConfig,
   getOrCreateWebWidgetToken,
   getSessionStorageConfig,
+  getRecoveryPolicyConfig,
   getToolUseBudget,
   getWebRuntimeConfig,
   getSearchMatchMode,
@@ -18,6 +19,7 @@ import {
   setAssistantAvatar,
   setAssistantName,
   setSessionStorageConfig,
+  setAutomaticRecoveryPolicyConfig,
   setToolUseBudget,
   getToolOutputStoreThreshold,
   setToolOutputStoreThreshold,
@@ -62,6 +64,9 @@ export interface GeneralSettingsData {
   sessionIsolation: "none" | "summary" | "full";
   searchMatchMode: "or" | "and";
   scopedModelsOnly: boolean;
+  automaticRecoveryEnabled: boolean;
+  automaticRecoveryMaxAttempts: number;
+  automaticRecoveryTotalBudgetMs: number;
   uiTheme: string;
   uiTint: string | null;
   outputPad: number;
@@ -85,6 +90,9 @@ export interface GeneralSettingsInput {
   sessionIsolation?: unknown;
   searchMatchMode?: unknown;
   scopedModelsOnly?: unknown;
+  automaticRecoveryEnabled?: unknown;
+  automaticRecoveryMaxAttempts?: unknown;
+  automaticRecoveryTotalBudgetMs?: unknown;
   uiTheme?: unknown;
   uiTint?: unknown;
   outputPad?: unknown;
@@ -182,6 +190,7 @@ export function getGeneralSettingsData(): GeneralSettingsData {
   const identity = getIdentityConfig();
   const session = getSessionStorageConfig();
   const web = getWebRuntimeConfig();
+  const recovery = getRecoveryPolicyConfig();
   const uiTheme = getServerUiThemeConfig();
   const uiOutput = getServerUiOutputConfig();
   return {
@@ -203,6 +212,9 @@ export function getGeneralSettingsData(): GeneralSettingsData {
     sessionIsolation: getSessionIsolationLevel(),
     searchMatchMode: getSearchMatchMode(),
     scopedModelsOnly: getScopedModelsOnly(),
+    automaticRecoveryEnabled: recovery.automaticRecoveryEnabled,
+    automaticRecoveryMaxAttempts: recovery.automaticRecoveryMaxAttempts,
+    automaticRecoveryTotalBudgetMs: recovery.automaticRecoveryTotalBudgetMs,
     uiTheme: uiTheme.theme,
     uiTint: uiTheme.tint,
     outputPad: uiOutput.outputPad,
@@ -304,6 +316,21 @@ export async function saveGeneralSettings(input: GeneralSettingsInput): Promise<
   if (nextScopedModelsOnly !== undefined) {
     setScopedModelsOnly(nextScopedModelsOnly);
   }
+
+  const recoveryPatch: Parameters<typeof setAutomaticRecoveryPolicyConfig>[0] = {};
+  const nextAutomaticRecoveryEnabled = normalizeOptionalBoolean(input.automaticRecoveryEnabled);
+  if (nextAutomaticRecoveryEnabled !== undefined) recoveryPatch.automaticRecoveryEnabled = nextAutomaticRecoveryEnabled;
+  if (input.automaticRecoveryMaxAttempts !== undefined) {
+    const value = Number(input.automaticRecoveryMaxAttempts);
+    if (!Number.isInteger(value) || value < 0) throw new Error("automaticRecoveryMaxAttempts must be a non-negative integer");
+    recoveryPatch.automaticRecoveryMaxAttempts = value;
+  }
+  if (input.automaticRecoveryTotalBudgetMs !== undefined) {
+    const value = Number(input.automaticRecoveryTotalBudgetMs);
+    if (!Number.isInteger(value) || value < 1) throw new Error("automaticRecoveryTotalBudgetMs must be a positive integer");
+    recoveryPatch.automaticRecoveryTotalBudgetMs = value;
+  }
+  if (Object.keys(recoveryPatch).length > 0) setAutomaticRecoveryPolicyConfig(recoveryPatch);
 
   const nextUiTheme = typeof input.uiTheme === "string" ? input.uiTheme.trim().toLowerCase() : undefined;
   const nextUiTint = input.uiTint === undefined

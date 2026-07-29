@@ -2,7 +2,16 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import type { RuntimeInboundMessageOptions } from "../../src/runtime/addon-interop.js";
 import { importFresh, withTempWorkspaceEnv } from "../helpers.js";
+
+type TestRuntimeInterop = {
+  postMessage?: (
+    chatJid: string,
+    content: string,
+    options?: RuntimeInboundMessageOptions,
+  ) => Promise<{ messageId: string; rowId: number | null }>;
+};
 
 afterEach(() => {
   delete (globalThis as Record<string, unknown>).__piclawRuntimeInterop;
@@ -52,7 +61,7 @@ test("installAddonRuntimeInterop self-threads inbound non-bot messages without a
       sendMessage: async () => {},
     });
 
-    const runtimeInterop = (globalThis as { __piclawRuntimeInterop?: { postMessage?: Function } }).__piclawRuntimeInterop;
+    const runtimeInterop = (globalThis as { __piclawRuntimeInterop?: TestRuntimeInterop }).__piclawRuntimeInterop;
     expect(typeof runtimeInterop?.postMessage).toBe("function");
 
     const result = await runtimeInterop?.postMessage?.("telegram:123", "hello from telegram", {
@@ -103,7 +112,7 @@ test("installAddonRuntimeInterop fast-paths inbound /steer while the chat is str
       },
     });
 
-    const runtimeInterop = (globalThis as { __piclawRuntimeInterop?: { postMessage?: Function } }).__piclawRuntimeInterop;
+    const runtimeInterop = (globalThis as { __piclawRuntimeInterop?: TestRuntimeInterop }).__piclawRuntimeInterop;
     const result = await runtimeInterop?.postMessage?.("telegram:123", "/steer focus on pricing", {
       source: "telegram",
       messageId: "telegram:123:2",
@@ -159,7 +168,7 @@ test("installAddonRuntimeInterop fast-paths inbound /abort while the chat is act
       },
     });
 
-    const runtimeInterop = (globalThis as { __piclawRuntimeInterop?: { postMessage?: Function } }).__piclawRuntimeInterop;
+    const runtimeInterop = (globalThis as { __piclawRuntimeInterop?: TestRuntimeInterop }).__piclawRuntimeInterop;
     const result = await runtimeInterop?.postMessage?.("telegram:123", "/abort", {
       source: "telegram",
       messageId: "telegram:123:3",
@@ -226,7 +235,7 @@ test("installAddonRuntimeInterop queues inbound /abort when the chat is idle", a
       },
     });
 
-    const runtimeInterop = (globalThis as { __piclawRuntimeInterop?: { postMessage?: Function } }).__piclawRuntimeInterop;
+    const runtimeInterop = (globalThis as { __piclawRuntimeInterop?: TestRuntimeInterop }).__piclawRuntimeInterop;
     const result = await runtimeInterop?.postMessage?.("telegram:123", "/abort", {
       source: "telegram",
       messageId: "telegram:123:4",
@@ -279,7 +288,7 @@ test("installAddonRuntimeInterop silently drops disallowed fast-path /steer comm
       },
     });
 
-    const runtimeInterop = (globalThis as { __piclawRuntimeInterop?: { postMessage?: Function } }).__piclawRuntimeInterop;
+    const runtimeInterop = (globalThis as { __piclawRuntimeInterop?: TestRuntimeInterop }).__piclawRuntimeInterop;
     const result = await runtimeInterop?.postMessage?.("telegram:123", "/steer focus on pricing", {
       source: "telegram",
       messageId: "telegram:123:3",

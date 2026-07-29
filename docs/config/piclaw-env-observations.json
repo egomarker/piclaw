@@ -51,7 +51,7 @@
   },
   "current": {
     "production": {
-      "referencedNames": 179,
+      "referencedNames": 171,
       "directReaderNames": 7,
       "directReaderOccurrences": 14,
       "helperReaderNames": 10,
@@ -60,7 +60,7 @@
       "semanticReaderOccurrences": 24
     },
     "runtimeSrc": {
-      "referencedNames": 177,
+      "referencedNames": 169,
       "directReaderNames": 7,
       "directReaderOccurrences": 14,
       "helperReaderNames": 10,
@@ -69,7 +69,7 @@
       "semanticReaderOccurrences": 24
     },
     "extensions": {
-      "referencedNames": 5,
+      "referencedNames": 4,
       "directReaderNames": 0,
       "directReaderOccurrences": 0,
       "helperReaderNames": 0,
@@ -87,7 +87,7 @@
       "semanticReaderOccurrences": 67
     },
     "docsDeploy": {
-      "referencedNames": 129,
+      "referencedNames": 121,
       "directReaderNames": 16,
       "directReaderOccurrences": 32,
       "helperReaderNames": 0,
@@ -1164,6 +1164,7 @@
           "helperReaders": 0,
           "semanticReaders": 3,
           "files": [
+            "docs/addon-runtime-api.md",
             "docs/azure/README.md",
             "docs/configuration.md",
             "skel/.pi/skills/graphite-power-chart/graphite-power-chart.ts",
@@ -3637,308 +3638,6 @@
           "semanticReaders": 0,
           "files": [
             "skel/.pi/skills/reload/restart-piclaw.sh"
-          ],
-          "readerFiles": []
-        }
-      }
-    },
-    {
-      "name": "PICLAW_REMOTE_COMPACTION_ENABLED",
-      "scopes": {
-        "docsDeploy": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "docs/configuration.md"
-          ],
-          "readerFiles": []
-        },
-        "production": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "runtime/src/core/config-runtime.ts",
-            "runtime/src/core/config-sources.ts"
-          ],
-          "readerFiles": []
-        },
-        "runtimeSrc": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "runtime/src/core/config-runtime.ts",
-            "runtime/src/core/config-sources.ts"
-          ],
-          "readerFiles": []
-        }
-      }
-    },
-    {
-      "name": "PICLAW_REMOTE_COMPACTION_TIMEOUT_MS",
-      "scopes": {
-        "docsDeploy": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "docs/configuration.md"
-          ],
-          "readerFiles": []
-        },
-        "production": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "runtime/src/core/config-runtime.ts",
-            "runtime/src/core/config-sources.ts"
-          ],
-          "readerFiles": []
-        },
-        "runtimeSrc": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "runtime/src/core/config-runtime.ts",
-            "runtime/src/core/config-sources.ts"
-          ],
-          "readerFiles": []
-        }
-      }
-    },
-    {
-      "name": "PICLAW_REMOTE_INSTANCE_NAME",
-      "scopes": {
-        "docsDeploy": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "docs/configuration.md",
-            "docs/cross-instance-ipc.md"
-          ],
-          "readerFiles": []
-        },
-        "production": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "runtime/src/core/config-runtime.ts",
-            "runtime/src/core/config-sources.ts"
-          ],
-          "readerFiles": []
-        },
-        "runtimeSrc": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "runtime/src/core/config-runtime.ts",
-            "runtime/src/core/config-sources.ts"
-          ],
-          "readerFiles": []
-        }
-      }
-    },
-    {
-      "name": "PICLAW_REMOTE_INTEROP_ALLOW_HTTP",
-      "scopes": {
-        "docsDeploy": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "docs/configuration.md",
-            "docs/cross-instance-ipc.md"
-          ],
-          "readerFiles": []
-        },
-        "production": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "runtime/src/core/config-runtime.ts",
-            "runtime/src/core/config-sources.ts"
-          ],
-          "readerFiles": []
-        },
-        "runtimeSrc": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "runtime/src/core/config-runtime.ts",
-            "runtime/src/core/config-sources.ts"
-          ],
-          "readerFiles": []
-        }
-      }
-    },
-    {
-      "name": "PICLAW_REMOTE_INTEROP_ALLOW_PRIVATE_NETWORK",
-      "scopes": {
-        "docsDeploy": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "docs/configuration.md",
-            "docs/cross-instance-ipc.md"
-          ],
-          "readerFiles": []
-        },
-        "production": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "runtime/src/core/config-runtime.ts",
-            "runtime/src/core/config-sources.ts"
-          ],
-          "readerFiles": []
-        },
-        "runtimeSrc": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "runtime/src/core/config-runtime.ts",
-            "runtime/src/core/config-sources.ts"
-          ],
-          "readerFiles": []
-        }
-      }
-    },
-    {
-      "name": "PICLAW_REMOTE_INTEROP_DECISION_MODEL",
-      "scopes": {
-        "docsDeploy": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "docs/configuration.md",
-            "docs/cross-instance-ipc.md"
-          ],
-          "readerFiles": []
-        },
-        "production": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "runtime/src/core/config-runtime.ts",
-            "runtime/src/core/config-sources.ts"
-          ],
-          "readerFiles": []
-        },
-        "runtimeSrc": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "runtime/src/core/config-runtime.ts",
-            "runtime/src/core/config-sources.ts"
-          ],
-          "readerFiles": []
-        }
-      }
-    },
-    {
-      "name": "PICLAW_REMOTE_INTEROP_ENABLED",
-      "scopes": {
-        "docsDeploy": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "docs/configuration.md",
-            "docs/cross-instance-ipc.md"
-          ],
-          "readerFiles": []
-        },
-        "production": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "runtime/src/core/config-runtime.ts",
-            "runtime/src/core/config-sources.ts"
-          ],
-          "readerFiles": []
-        },
-        "runtimeSrc": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "runtime/src/core/config-runtime.ts",
-            "runtime/src/core/config-sources.ts"
-          ],
-          "readerFiles": []
-        }
-      }
-    },
-    {
-      "name": "PICLAW_REMOTE_SHORT_CIRCUIT_ENABLED",
-      "scopes": {
-        "docsDeploy": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "docs/configuration.md",
-            "docs/cross-instance-ipc.md"
-          ],
-          "readerFiles": []
-        },
-        "production": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "runtime/src/core/config-runtime.ts",
-            "runtime/src/core/config-sources.ts"
-          ],
-          "readerFiles": []
-        },
-        "runtimeSrc": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "runtime/src/core/config-runtime.ts",
-            "runtime/src/core/config-sources.ts"
           ],
           "readerFiles": []
         }
@@ -6526,25 +6225,12 @@
           "helperReaders": 1,
           "semanticReaders": 1,
           "files": [
-            "runtime/extensions/integrations/remote-pair/index.ts",
-            "runtime/src/agent-control/handlers/remote.ts",
             "runtime/src/core/config-network-bootstrap.ts",
-            "runtime/src/core/config-sources.ts",
-            "runtime/src/remote/service.ts"
+            "runtime/src/core/config-sources.ts"
           ],
           "readerFiles": [
             "runtime/src/core/config-network-bootstrap.ts"
           ]
-        },
-        "extensions": {
-          "referenced": true,
-          "directReaders": 0,
-          "helperReaders": 0,
-          "semanticReaders": 0,
-          "files": [
-            "runtime/extensions/integrations/remote-pair/index.ts"
-          ],
-          "readerFiles": []
         },
         "runtimeSrc": {
           "referenced": true,
@@ -6552,10 +6238,8 @@
           "helperReaders": 1,
           "semanticReaders": 1,
           "files": [
-            "runtime/src/agent-control/handlers/remote.ts",
             "runtime/src/core/config-network-bootstrap.ts",
-            "runtime/src/core/config-sources.ts",
-            "runtime/src/remote/service.ts"
+            "runtime/src/core/config-sources.ts"
           ],
           "readerFiles": [
             "runtime/src/core/config-network-bootstrap.ts"

@@ -6,7 +6,6 @@ import {
   getWebServerConfig,
 } from "../../../core/config.js";
 import { getChatCursor, getDb, replaceMessageContent } from "../../../db.js";
-import { RemoteInteropService } from "../../../remote/service.js";
 import { handlePost as handlePostRequest } from "../handlers/posts.js";
 import { handleAgentMessage as handleAgentMessageRequest } from "../handlers/agent.js";
 import {
@@ -135,7 +134,6 @@ export interface WebChannelConstructorFactoryOptions extends WebChannelConstruct
 
 export interface WebChannelConstructorFactoryResult {
   sessionBroadcast: WebSessionBroadcastService;
-  remoteInterop: RemoteInteropService;
   runtimeState: WebChannelRuntimeStateService;
   interactionBroadcaster: InteractionBroadcaster;
   authGateway: WebAuthGateway;
@@ -156,7 +154,6 @@ export interface WebChannelConstructorFactoryDeps {
   getIdentityConfig(): ReturnType<typeof getIdentityConfig>;
   getChatCursor(chatJid: string): string;
   createSessionBroadcast(agentPool: AgentPool): WebSessionBroadcastService;
-  createRemoteInterop(agentPool: AgentPool): RemoteInteropService;
   createRuntimeState(
     callbacks: WebChannelRuntimeStateCallbacks,
     options: WebChannelRuntimeStateOptions,
@@ -216,7 +213,6 @@ const defaultDeps: WebChannelConstructorFactoryDeps = {
   getIdentityConfig,
   getChatCursor,
   createSessionBroadcast: (agentPool) => new WebSessionBroadcastService(agentPool),
-  createRemoteInterop: (agentPool) => new RemoteInteropService(agentPool),
   createRuntimeState: (callbacks, options) => new WebChannelRuntimeStateService(callbacks, options),
   createIdentitySnapshot: (identity) => createWebChannelIdentitySnapshot(identity),
   createInteractionBroadcaster,
@@ -277,16 +273,6 @@ export function createWebChannelConstructorFactory(
   deps: WebChannelConstructorFactoryDeps = defaultDeps,
 ): WebChannelConstructorFactoryResult {
   const sessionBroadcast = deps.createSessionBroadcast(channel.agentPool);
-  let remoteInteropInstance: RemoteInteropService | null = null;
-  const getRemoteInterop = (): RemoteInteropService => {
-    remoteInteropInstance ??= deps.createRemoteInterop(channel.agentPool);
-    return remoteInteropInstance;
-  };
-  const remoteInterop: RemoteInteropService = {
-    async handleRequest(req: Request): Promise<Response> {
-      return await getRemoteInterop().handleRequest(req);
-    },
-  } as RemoteInteropService;
   const runtimeState = deps.createRuntimeState(
     {
       getAssistantName: () => deps.getIdentityConfig().assistantName,
@@ -468,7 +454,6 @@ export function createWebChannelConstructorFactory(
 
   return {
     sessionBroadcast,
-    remoteInterop,
     runtimeState,
     interactionBroadcaster,
     authGateway,
