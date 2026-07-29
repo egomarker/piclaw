@@ -46,9 +46,14 @@ function createUpstreamHeaders(request: Request): Headers {
   return headers;
 }
 
-function createDownstreamHeaders(response: Response): Headers {
+function createDownstreamHeaders(response: Response, pathname: string): Headers {
   const headers = new Headers(response.headers);
   removeHopByHopHeaders(headers);
+  // Ungit's document response omits Content-Type. Without this fallback Bun serves
+  // the proxied body as application/octet-stream, so browsers download it.
+  if (pathname === `${UNGIT_PROXY_PATH}/` && !headers.has("content-type")) {
+    headers.set("content-type", "text/html; charset=utf-8");
+  }
   // Do not let the loopback service set cookies on Piclaw's authenticated origin.
   headers.delete("set-cookie");
   return headers;
@@ -60,7 +65,6 @@ function isProxyPath(pathname: string): boolean {
 
 function rewriteUpstreamLocation(
   headers: Headers,
-  incomingUrl: URL,
   upstreamUrl: URL,
 ): void {
   const location = headers.get("location");
@@ -68,7 +72,9 @@ function rewriteUpstreamLocation(
   try {
     const resolved = new URL(location, upstreamUrl);
     if (resolved.origin !== upstreamUrl.origin) return;
-    headers.set("location", `${incomingUrl.origin}${resolved.pathname}${resolved.search}${resolved.hash}`);
+    // Keep loopback redirects root-relative so an HTTPS ingress cannot be
+    // accidentally downgraded by Piclaw's internal HTTP request origin.
+    headers.set("location", `${resolved.pathname}${resolved.search}${resolved.hash}`);
   } catch {
     // Preserve malformed or non-URL Location values exactly as Ungit returned them.
   }
@@ -78,7 +84,7 @@ export function createUngitProxyHandler(options: UngitProxyOptions = {}): Extens
   const upstreamOrigin = new URL(options.upstreamUrl || UNGIT_PROXY_UPSTREAM);
   const fetchImpl = options.fetchImpl || globalThis.fetch;
 
-  return async (request) => {
+  return (request) => {
     const incomingUrl = new URL(request.url);
     if (!isProxyPath(incomingUrl.pathname)) return null;
 
@@ -92,38 +98,40 @@ export function createUngitProxyHandler(options: UngitProxyOptions = {}): Extens
       });
     }
 
-    const targetUrl = new URL(upstreamOrigin.href);
-    targetUrl.pathname = incomingUrl.pathname;
-    targetUrl.search = incomingUrl.search;
-    targetUrl.hash = "";
+    return (async () => {
+      const targetUrl = new URL(upstreamOrigin.href);
+      targetUrl.pathname = incomingUrl.pathname;
+      targetUrl.search = incomingUrl.search;
+      targetUrl.hash = "";
 
-    try {
-      const method = request.method.toUpperCase();
-      const body = method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer();
-      const upstreamResponse = await fetchImpl(targetUrl, {
-        method,
-        headers: createUpstreamHeaders(request),
-        body,
-        redirect: "manual",
-        signal: request.signal,
-      });
-      const headers = createDownstreamHeaders(upstreamResponse);
-      rewriteUpstreamLocation(headers, incomingUrl, targetUrl);
-      return new Response(upstreamResponse.body, {
-        status: upstreamResponse.status,
-        statusText: upstreamResponse.statusText,
-        headers,
-      });
-    } catch (error) {
-      console.warn("[ungit] same-origin proxy could not reach the loopback Ungit service", error);
-      return new Response("Unable to reach Ungit on 127.0.0.1:8448.", {
-        status: 502,
-        headers: {
-          "Cache-Control": "no-store",
-          "Content-Type": "text/plain; charset=utf-8",
-        },
-      });
-    }
+      try {
+        const method = request.method.toUpperCase();
+        const body = method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer();
+        const upstreamResponse = await fetchImpl(targetUrl, {
+          method,
+          headers: createUpstreamHeaders(request),
+          body,
+          redirect: "manual",
+          signal: request.signal,
+        });
+        const headers = createDownstreamHeaders(upstreamResponse, incomingUrl.pathname);
+        rewriteUpstreamLocation(headers, targetUrl);
+        return new Response(upstreamResponse.body, {
+          status: upstreamResponse.status,
+          statusText: upstreamResponse.statusText,
+          headers,
+        });
+      } catch (error) {
+        console.warn("[ungit] same-origin proxy could not reach the loopback Ungit service", error);
+        return new Response("Unable to reach Ungit on 127.0.0.1:8448.", {
+          status: 502,
+          headers: {
+            "Cache-Control": "no-store",
+            "Content-Type": "text/plain; charset=utf-8",
+          },
+        });
+      }
+    })();
   };
 }
 

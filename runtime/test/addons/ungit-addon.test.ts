@@ -192,10 +192,27 @@ test("Ungit same-origin proxy forwards HTTP without leaking Piclaw credentials",
   expect(forwardedHeaders.get("content-type")).toBe("application/json");
   expect(await new Response(forwardedInit?.body).json()).toEqual({ ping: true });
   expect(response?.status).toBe(200);
-  expect(response?.headers.get("location")).toBe("https://piclaw.example.test/ungit/next");
+  expect(response?.headers.get("location")).toBe("/ungit/next");
   expect(response?.headers.get("set-cookie")).toBeNull();
   expect(response?.headers.get("x-ungit")).toBe("yes");
   expect(await response?.text()).toBe("pong");
+});
+
+test("Ungit same-origin proxy supplies the document MIME type omitted by Ungit", async () => {
+  const handler = createUngitProxyHandler({
+    fetchImpl: async () => new Response(
+      new TextEncoder().encode("<!doctype html><title>ungit</title>"),
+      { status: 200 },
+    ),
+  });
+
+  const response = await handler(
+    new Request("https://piclaw.example.test/ungit/?noheader=true"),
+    "/ungit/",
+  );
+
+  expect(response?.headers.get("content-type")).toBe("text/html; charset=utf-8");
+  expect(await response?.text()).toContain("<title>ungit</title>");
 });
 
 test("Ungit same-origin proxy leaves unrelated paths alone and rejects WebSocket upgrades", async () => {
