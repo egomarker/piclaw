@@ -10,6 +10,7 @@ import {
   buildUngitTabPath,
   buildUngitUrl,
   DEFAULT_UNGIT_ZOOM_PERCENT,
+  normalizeUngitWebConfig,
   parseUngitTabPath,
   registerUngitAddon,
   resolveUngitRepositoryPath,
@@ -80,28 +81,41 @@ test("Ungit iframe zoom uses fixed choices and starts each tab at 60 percent", (
     viewportPercent: 125,
   });
   expect(resolveUngitZoomLayout(55).percent).toBe(60);
+  expect(normalizeUngitWebConfig({ defaultZoomPercent: 80 }).defaultZoomPercent).toBe(80);
+  expect(normalizeUngitWebConfig({ defaultZoomPercent: 55 }).defaultZoomPercent).toBe(60);
 });
 
-test("Ungit keeps the oversized zoomed iframe inside a clipped viewport", () => {
+test("Ungit applies configured default zoom inside a clipped viewport", async () => {
+  const previousFetch = globalThis.fetch;
   const { ownerDocument, container } = createFakeUngitPaneDom();
-  const pane: any = ungitPaneExtension.mount(container, { path: "invalid" });
-  const root = container.children[0];
-  const [viewport, _status, picker] = root.children;
-  const iframe = viewport.children[0];
+  globalThis.fetch = async () => Response.json({
+    ok: true,
+    config: { workspaceRoot: "/workspace", defaultZoomPercent: 80 },
+  });
+  const pane: any = ungitPaneExtension.mount(container, { path: buildUngitTabPath("piclaw") });
 
-  expect(viewport.className).toBe("ungit-pane-frame-viewport");
-  expect(viewport.children).toEqual([iframe]);
-  expect(root.children).not.toContain(iframe);
-  expect(picker.value).toBe("60");
-  expect(iframe.style.transform).toBe("scale(0.6)");
-  expect(iframe.style.width).toBe(`${100 / 0.6}%`);
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const root = container.children[0];
+    const [viewport, _status, picker] = root.children;
+    const iframe = viewport.children[0];
 
-  const injectedStyles = ownerDocument.head.children[0].textContent;
-  expect(injectedStyles).toContain(
-    ".ungit-pane-frame-viewport { position:absolute; inset:0; overflow:hidden; overflow:clip;",
-  );
-  expect(injectedStyles).toContain(".ungit-pane iframe { position:absolute; top:0; left:0;");
-  pane.dispose();
+    expect(viewport.className).toBe("ungit-pane-frame-viewport");
+    expect(viewport.children).toEqual([iframe]);
+    expect(root.children).not.toContain(iframe);
+    expect(picker.value).toBe("80");
+    expect(iframe.style.transform).toBe("scale(0.8)");
+    expect(iframe.style.width).toBe("125%");
+
+    const injectedStyles = ownerDocument.head.children[0].textContent;
+    expect(injectedStyles).toContain(
+      ".ungit-pane-frame-viewport { position:absolute; inset:0; overflow:hidden; overflow:clip;",
+    );
+    expect(injectedStyles).toContain(".ungit-pane iframe { position:absolute; top:0; left:0;");
+  } finally {
+    pane.dispose();
+    globalThis.fetch = previousFetch;
+  }
 });
 
 test("Ungit repository path mapping remains inside the configured workspace root", () => {
@@ -197,15 +211,20 @@ test("Ungit registers a direct backend config API backed by extension KV storage
     workspaceRoot: "/srv/workspace",
     hideHeader: false,
     proxyEnabled: false,
+    defaultZoomPercent: 80,
   });
   expect(saved).toMatchObject({
     baseUrl: "https://git.example.test/",
     workspaceRoot: "/srv/workspace",
     hideHeader: false,
     proxyEnabled: false,
+    defaultZoomPercent: 80,
     restartRequired: false,
   });
-  expect(stored.get("config")).toMatchObject({ workspaceRoot: "/srv/workspace" });
+  expect(stored.get("config")).toMatchObject({
+    workspaceRoot: "/srv/workspace",
+    defaultZoomPercent: 80,
+  });
 });
 
 test("Ungit backend config normalization rejects unsafe URLs and keeps embedding defaults", () => {
@@ -215,16 +234,20 @@ test("Ungit backend config normalization rejects unsafe URLs and keeps embedding
     hideHeader: undefined,
   })).toEqual(DEFAULT_UNGIT_CONFIG);
 
+  expect(normalizeUngitConfig({ defaultZoomPercent: 55 }).defaultZoomPercent).toBe(60);
+
   expect(normalizeUngitConfig({
     baseUrl: "https://git.example.test/ungit#old-route",
     workspaceRoot: "/srv/repos",
     hideHeader: false,
     proxyEnabled: false,
+    defaultZoomPercent: 80,
   })).toEqual({
     baseUrl: "https://git.example.test/ungit",
     workspaceRoot: "/srv/repos",
     hideHeader: false,
     proxyEnabled: false,
+    defaultZoomPercent: 80,
   });
 });
 

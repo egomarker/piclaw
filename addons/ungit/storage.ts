@@ -5,6 +5,7 @@ export interface UngitConfig {
   workspaceRoot: string;
   hideHeader: boolean;
   proxyEnabled: boolean;
+  defaultZoomPercent: number;
 }
 
 export const DEFAULT_UNGIT_CONFIG: UngitConfig = {
@@ -12,7 +13,10 @@ export const DEFAULT_UNGIT_CONFIG: UngitConfig = {
   workspaceRoot: "/workspace",
   hideHeader: true,
   proxyEnabled: true,
+  defaultZoomPercent: 60,
 };
+
+const ALLOWED_ZOOM_PERCENTAGES = new Set([30, 40, 50, 60, 70, 80, 90, 100]);
 
 type ExtensionKvStore = {
   get<T = unknown>(extensionId: string, key: string, scope?: string, scopeKey?: string): T | null;
@@ -46,12 +50,18 @@ function normalizeWorkspaceRoot(value: unknown): string {
   return input;
 }
 
+function normalizeDefaultZoomPercent(value: unknown): number {
+  const percent = Number(value);
+  return ALLOWED_ZOOM_PERCENTAGES.has(percent) ? percent : DEFAULT_UNGIT_CONFIG.defaultZoomPercent;
+}
+
 export function normalizeUngitConfig(value: Partial<UngitConfig> | null | undefined): UngitConfig {
   return {
     baseUrl: normalizeBaseUrl(value?.baseUrl),
     workspaceRoot: normalizeWorkspaceRoot(value?.workspaceRoot),
     hideHeader: value?.hideHeader !== false,
     proxyEnabled: value?.proxyEnabled !== false,
+    defaultZoomPercent: normalizeDefaultZoomPercent(value?.defaultZoomPercent),
   };
 }
 

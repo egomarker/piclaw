@@ -25,6 +25,7 @@ export const DEFAULT_UNGIT_WEB_CONFIG = Object.freeze({
   workspaceRoot: "/workspace",
   hideHeader: true,
   proxyEnabled: true,
+  defaultZoomPercent: DEFAULT_UNGIT_ZOOM_PERCENT,
 });
 
 const preactHtm = globalThis.__piclawPreactHtm || globalThis.__piclawPreact || null;
@@ -58,6 +59,7 @@ export function normalizeUngitWebConfig(value = {}) {
       : DEFAULT_UNGIT_WEB_CONFIG.workspaceRoot,
     hideHeader: value?.hideHeader !== false,
     proxyEnabled: value?.proxyEnabled !== false,
+    defaultZoomPercent: resolveUngitZoomLayout(value?.defaultZoomPercent).percent,
   };
 }
 
@@ -242,6 +244,7 @@ class UngitPaneInstance {
     this.status.textContent = "Opening Ungit…";
     const config = await loadUngitWebConfig(forceConfig);
     if (this.disposed) return;
+    this.applyZoom(config.defaultZoomPercent);
     this.frameUrl = buildUngitUrl(this.workspacePath, config);
     this.iframe.src = this.frameUrl;
     if (this.loadTimer) this.ownerWindow.clearTimeout(this.loadTimer);
@@ -364,6 +367,13 @@ function UngitSettingsPane() {
         <span style=${labelStyle}>Workspace root</span>
         <input style=${inputStyle} value=${draft.workspaceRoot} placeholder="/workspace"
           onInput=${(event) => setDraft({ ...draft, workspaceRoot: event.target.value })} disabled=${saving} />
+      </label>
+      <label style=${rowStyle}>
+        <span style=${labelStyle}>Default zoom</span>
+        <select style=${inputStyle} value=${draft.defaultZoomPercent}
+          onChange=${(event) => setDraft({ ...draft, defaultZoomPercent: resolveUngitZoomLayout(event.target.value).percent })} disabled=${saving}>
+          ${UNGIT_ZOOM_PERCENTAGES.map((percent) => html`<option value=${percent}>${percent}%</option>`)}
+        </select>
       </label>
       <label style=${{ ...rowStyle, alignItems: "flex-start" }}>
         <span style=${labelStyle}>Embedded layout</span>

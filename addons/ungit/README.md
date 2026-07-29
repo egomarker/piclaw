@@ -36,6 +36,7 @@ Open **Settings → Ungit** to configure:
 - **Use the same-origin proxy** — enabled by default; embeds `/ungit/` while forwarding HTTP requests to `127.0.0.1:8448`
 - **Direct Ungit URL** — used only when the same-origin proxy is disabled
 - **Workspace root** — the workspace path visible to Ungit, defaults to `/workspace`
+- **Default zoom** — initial iframe zoom for each Ungit tab, defaults to `60%`; the per-tab picker can override it
 - **Hide the Ungit header** — enabled by default for embedded tabs
 
 Configuration is stored in Piclaw's extension KV store and applies without a restart. Open Ungit tabs reload after saving. The proxy target is deliberately fixed to loopback rather than using the configurable direct URL, so the route cannot become an arbitrary authenticated forward proxy. Piclaw authentication cookies and authorization headers are not forwarded to Ungit.

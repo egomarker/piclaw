@@ -31,6 +31,7 @@ if (typeof registerAddonConfigApi === "function") {
         ...(typeof body.workspaceRoot === "string" ? { workspaceRoot: body.workspaceRoot } : {}),
         ...(typeof body.hideHeader === "boolean" ? { hideHeader: body.hideHeader } : {}),
         ...(typeof body.proxyEnabled === "boolean" ? { proxyEnabled: body.proxyEnabled } : {}),
+        ...(typeof body.defaultZoomPercent === "number" ? { defaultZoomPercent: body.defaultZoomPercent } : {}),
       });
       return configResponse();
     },
