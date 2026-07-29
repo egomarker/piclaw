@@ -9,9 +9,12 @@ import { importFresh } from "../helpers.js";
 import {
   buildUngitTabPath,
   buildUngitUrl,
+  DEFAULT_UNGIT_ZOOM_PERCENT,
   parseUngitTabPath,
   registerUngitAddon,
   resolveUngitRepositoryPath,
+  resolveUngitZoomLayout,
+  UNGIT_ZOOM_PERCENTAGES,
 } from "../../../addons/ungit/web/index.ts";
 
 afterEach(() => {
@@ -31,6 +34,23 @@ test("Ungit URLs select the repository path and hide the header by default", () 
   })).toBe(
     "https://git.example.test/ungit?theme=dark#/repository?path=/srv/piclaw%20data",
   );
+});
+
+test("Ungit iframe zoom uses fixed choices and starts each tab at 60 percent", () => {
+  expect([...UNGIT_ZOOM_PERCENTAGES]).toEqual([30, 40, 50, 60, 70, 80, 90, 100]);
+  expect(DEFAULT_UNGIT_ZOOM_PERCENT).toBe(60);
+
+  const initial = resolveUngitZoomLayout();
+  expect(initial.percent).toBe(60);
+  expect(initial.scale).toBe(0.6);
+  expect(initial.viewportPercent).toBeCloseTo(166.67, 2);
+
+  expect(resolveUngitZoomLayout("80")).toEqual({
+    percent: 80,
+    scale: 0.8,
+    viewportPercent: 125,
+  });
+  expect(resolveUngitZoomLayout(55).percent).toBe(60);
 });
 
 test("Ungit repository path mapping remains inside the configured workspace root", () => {

@@ -8,6 +8,18 @@ const STYLE_ID = "piclaw-ungit-pane-style";
 const SAME_ORIGIN_PROXY_URL = "/ungit/";
 const RELATIVE_URL_ORIGIN = "http://piclaw.invalid";
 
+export const UNGIT_ZOOM_PERCENTAGES = Object.freeze([30, 40, 50, 60, 70, 80, 90, 100]);
+export const DEFAULT_UNGIT_ZOOM_PERCENT = 60;
+
+export function resolveUngitZoomLayout(value = DEFAULT_UNGIT_ZOOM_PERCENT) {
+  const requestedPercent = Number(value);
+  const percent = UNGIT_ZOOM_PERCENTAGES.includes(requestedPercent)
+    ? requestedPercent
+    : DEFAULT_UNGIT_ZOOM_PERCENT;
+  const scale = percent / 100;
+  return { percent, scale, viewportPercent: 100 / scale };
+}
+
 export const DEFAULT_UNGIT_WEB_CONFIG = Object.freeze({
   baseUrl: "http://127.0.0.1:8448/",
   workspaceRoot: "/workspace",
@@ -142,10 +154,11 @@ function injectStyles(ownerDocument = document) {
   style.id = STYLE_ID;
   style.textContent = `
     .ungit-pane { position:relative; width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; background:var(--bg-primary,#111827); }
-    .ungit-pane iframe { display:block; width:100%; height:100%; border:0; background:#fff; }
+    .ungit-pane iframe { display:block; width:100%; height:100%; border:0; background:#fff; transform-origin:top left; }
     .ungit-pane-status { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:24px; color:var(--text-secondary,#94a3b8); font:13px/1.5 var(--font-family-ui,system-ui,sans-serif); text-align:center; pointer-events:none; z-index:2; }
+    .ungit-pane-zoom { position:absolute; top:7px; right:44px; z-index:3; height:28px; min-width:68px; padding:0 6px; border:1px solid color-mix(in srgb,var(--border-color,#334155) 80%,transparent); border-radius:6px; background:color-mix(in srgb,var(--bg-primary,#111827) 88%,transparent); color:var(--text-secondary,#94a3b8); font:12px/1 var(--font-family-ui,system-ui,sans-serif); cursor:pointer; opacity:.42; }
     .ungit-pane-open-external { position:absolute; top:7px; right:9px; z-index:3; width:28px; height:28px; display:flex; align-items:center; justify-content:center; padding:0; border:1px solid color-mix(in srgb,var(--border-color,#334155) 80%,transparent); border-radius:6px; background:color-mix(in srgb,var(--bg-primary,#111827) 88%,transparent); color:var(--text-secondary,#94a3b8); cursor:pointer; opacity:.34; }
-    .ungit-pane:hover .ungit-pane-open-external, .ungit-pane-open-external:focus-visible { opacity:1; color:var(--accent-color,#3b82f6); }
+    .ungit-pane:hover .ungit-pane-zoom, .ungit-pane-zoom:focus-visible, .ungit-pane:hover .ungit-pane-open-external, .ungit-pane-open-external:focus-visible { opacity:1; color:var(--accent-color,#3b82f6); }
     .ungit-pane-open-external svg { width:15px; height:15px; }
   `;
   ownerDocument.head.appendChild(style);
@@ -171,6 +184,18 @@ class UngitPaneInstance {
     this.iframe.title = `Ungit — ${this.workspacePath || "workspace"}`;
     this.iframe.setAttribute("allow", "clipboard-read; clipboard-write");
     this.iframe.setAttribute("referrerpolicy", "no-referrer");
+    this.zoomPicker = this.ownerDocument.createElement("select");
+    this.zoomPicker.className = "ungit-pane-zoom";
+    this.zoomPicker.title = "Ungit zoom";
+    this.zoomPicker.setAttribute("aria-label", "Ungit zoom");
+    for (const percent of UNGIT_ZOOM_PERCENTAGES) {
+      const option = this.ownerDocument.createElement("option");
+      option.value = String(percent);
+      option.textContent = `${percent}%`;
+      this.zoomPicker.appendChild(option);
+    }
+    this.zoomPicker.addEventListener("change", () => this.applyZoom(this.zoomPicker.value));
+    this.applyZoom(DEFAULT_UNGIT_ZOOM_PERCENT);
     this.openExternal = this.ownerDocument.createElement("button");
     this.openExternal.type = "button";
     this.openExternal.className = "ungit-pane-open-external";
@@ -189,11 +214,19 @@ class UngitPaneInstance {
     this.iframe.addEventListener("error", () => {
       if (!this.disposed) this.status.textContent = "Unable to load Ungit. Use the ↗ button to open it directly.";
     });
-    this.root.append(this.iframe, this.status, this.openExternal);
+    this.root.append(this.iframe, this.status, this.zoomPicker, this.openExternal);
     container.appendChild(this.root);
     this.configChangeListener = () => void this.load(true);
     this.ownerWindow.addEventListener(CONFIG_CHANGED_EVENT, this.configChangeListener);
     void this.load();
+  }
+
+  applyZoom(value) {
+    const layout = resolveUngitZoomLayout(value);
+    this.zoomPicker.value = String(layout.percent);
+    this.iframe.style.width = `${layout.viewportPercent}%`;
+    this.iframe.style.height = `${layout.viewportPercent}%`;
+    this.iframe.style.transform = `scale(${layout.scale})`;
   }
 
   async load(forceConfig = false) {
