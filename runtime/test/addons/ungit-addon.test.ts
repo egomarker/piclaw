@@ -67,6 +67,10 @@ test("Ungit manifest declares its singleton startup runtime", async () => {
   expect(manifest?.pi?.runtime?.entries).toEqual(["runtime.ts"]);
 });
 
+test("Ungit pane opts into retention across tab switches", () => {
+  expect(ungitPaneExtension.retainOnTabSwitch).toBe(true);
+});
+
 test("Ungit health check recognizes only a successful JSON ping", async () => {
   let requestedUrl = "";
   expect(await isUngitLive(async (input) => {

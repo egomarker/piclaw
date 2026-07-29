@@ -305,6 +305,7 @@ export const ungitPaneExtension = {
   icon: "git-branch",
   capabilities: ["git"],
   placement: "tabs",
+  retainOnTabSwitch: true,
   canHandle(context) {
     return parseUngitTabPath(context?.path) ? 10_000 : false;
   },
