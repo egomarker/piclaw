@@ -133,7 +133,7 @@ describe("restart handoff recovery", () => {
     const messages = getChatMessages(chatJid);
     expect(messages).toHaveLength(2);
     expect(messages[0]).toMatchObject({
-      content: "Restart completed",
+      content: "Restart completed.",
       is_bot_message: 1,
     });
     expect(messages[1]).toMatchObject({
@@ -179,7 +179,7 @@ describe("restart handoff recovery", () => {
     expect(summary.turnsResumed).toBe(0);
     expect(events.map((event) => event.kind)).toEqual(["store", "broadcast"]);
     expect(getChatMessages(chatJid).map((message) => message.content)).toEqual([
-      "Restart completed",
+      "Restart completed.",
     ]);
     expect(listRestartHandoffs()).toEqual([]);
   });
