@@ -13,7 +13,7 @@ const log = createLogger("runtime.restart-handoff");
 
 export const EXIT_PROCESS_HANDOFF_EXTENSION_ID = "exit-process";
 export const EXIT_PROCESS_HANDOFF_KEY_PREFIX = "restart-handoff:";
-export const RESTART_COMPLETION_MESSAGE_PREFIX = "Restart completed — Reason: ";
+export const RESTART_COMPLETION_MESSAGE = "Restart completed";
 export const RESTART_CONTINUATION_LABEL = "Agent self-resume";
 
 export type RestartHandoffState =
@@ -228,7 +228,7 @@ function storeCompletionMessage(
 
   const interaction = web.storeMessage(
     handoff.chatJid,
-    `${RESTART_COMPLETION_MESSAGE_PREFIX}${handoff.reason}`,
+    RESTART_COMPLETION_MESSAGE,
     true,
     [],
     { contentBlocks: [buildRestartMarker(handoff.restartId, "completion")] },
