@@ -17,6 +17,26 @@ const XTERM_CSS_ID = "piclaw-terminal-xterm-css";
 const TERMINAL_FONT_FAMILY = 'FiraCode Nerd Font Mono, JetBrainsMono Nerd Font Mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace';
 const TERMINAL_HEARTBEAT_MS = 25_000;
 const TERMINAL_RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 5_000, 10_000];
+const TERMINAL_RESIZE_SETTLE_MS = 180;
+
+export function isTerminalHostMeasurable(...elements) {
+  let measuredElementCount = 0;
+  for (const element of elements) {
+    if (!element) continue;
+    measuredElementCount += 1;
+    try {
+      const rect = typeof element.getBoundingClientRect === "function"
+        ? element.getBoundingClientRect()
+        : null;
+      const width = Number(rect?.width ?? element.clientWidth ?? 0);
+      const height = Number(rect?.height ?? element.clientHeight ?? 0);
+      if (!(width > 0 && height > 0)) return false;
+    } catch {
+      return false;
+    }
+  }
+  return measuredElementCount > 0;
+}
 const KITTY_APC_START = "\x1b_G";
 const KITTY_APC_START_ALT = "\x9fG";
 const KITTY_APC_END = "\x1b\\";
@@ -611,6 +631,8 @@ class TerminalPaneInstance {
     this.ownerWindow = this.ownerDocument.defaultView || window;
     this.disposed = false;
     this.resizeFrame = 0;
+    this.resizeSettleTimer = 0;
+    this.needsVisibleResize = false;
     this.resizeObserver = null;
     this.themeObserver = null;
     this.themeChangeListener = null;
@@ -895,6 +917,13 @@ class TerminalPaneInstance {
 
   scheduleResize(force = false) {
     if (this.disposed) return;
+    if (!force) {
+      if (this.resizeSettleTimer) this.ownerWindow.clearTimeout(this.resizeSettleTimer);
+      this.resizeSettleTimer = this.ownerWindow.setTimeout(() => {
+        this.resizeSettleTimer = 0;
+        if (!this.disposed) this.scheduleResize(true);
+      }, TERMINAL_RESIZE_SETTLE_MS);
+    }
     if (this.resizeFrame) this.ownerWindow.cancelAnimationFrame(this.resizeFrame);
     this.resizeFrame = this.ownerWindow.requestAnimationFrame(() => {
       this.resizeFrame = 0;
@@ -910,10 +939,25 @@ class TerminalPaneInstance {
     }
   }
 
-  resize(_force = false) {
+  resize(force = false) {
     if (!this.terminal) return;
+    if (!isTerminalHostMeasurable(this.container, this.root, this.body, this.host)) {
+      this.needsVisibleResize = true;
+      return;
+    }
+
+    const refreshAfterFit = force || this.needsVisibleResize;
+    this.needsVisibleResize = false;
     try { this.fitAddon?.fit?.(); } catch (error) { console.debug("[terminal-pane] fit failed", error); }
     this.sendResize();
+    if (refreshAfterFit) {
+      try {
+        const lastRow = Math.max(0, Number(this.terminal.rows || 1) - 1);
+        this.terminal.refresh?.(0, lastRow);
+      } catch (error) {
+        console.debug("[terminal-pane] refresh after resize failed", error);
+      }
+    }
   }
 
   sendResize() {
@@ -1139,6 +1183,8 @@ class TerminalPaneInstance {
     if (this.disposed) return;
     this.disposed = true;
     if (this.resizeFrame) this.ownerWindow.cancelAnimationFrame(this.resizeFrame);
+    if (this.resizeSettleTimer) this.ownerWindow.clearTimeout(this.resizeSettleTimer);
+    this.resizeSettleTimer = 0;
     this.manualSocketClose = true;
     this.clearHeartbeat();
     this.clearReconnectTimer();
@@ -1180,6 +1226,7 @@ export const terminalTabPaneExtension = {
   icon: "terminal",
   capabilities: ["terminal"],
   placement: "tabs",
+  retainOnTabSwitch: true,
   canHandle(context) {
     return context?.path === TERMINAL_TAB_PATH ? 10_000 : false;
   },

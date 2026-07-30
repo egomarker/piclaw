@@ -2,8 +2,32 @@ import { expect, mock, test } from 'bun:test';
 
 import {
   buildMainAppPaneCompositionResult,
+  resolveMainPaneSurfaceVisibility,
   runMainAppZenToggle,
 } from '../../web/src/ui/app-main-pane-composition.js';
+
+test('Mobile exposes the pane surface only when a pane or popout is active', () => {
+  expect(resolveMainPaneSurfaceVisibility({
+    uiMode: 'mobile',
+    panePopoutMode: false,
+    mobileChatActive: true,
+  })).toBe(false);
+  expect(resolveMainPaneSurfaceVisibility({
+    uiMode: 'mobile',
+    panePopoutMode: false,
+    mobileChatActive: false,
+  })).toBe(true);
+  expect(resolveMainPaneSurfaceVisibility({
+    uiMode: 'mobile',
+    panePopoutMode: true,
+    mobileChatActive: true,
+  })).toBe(true);
+  expect(resolveMainPaneSurfaceVisibility({
+    uiMode: 'classic',
+    panePopoutMode: false,
+    mobileChatActive: true,
+  })).toBe(true);
+});
 
 test('Mobile Zen switches to Chat on entry and leaves Chat selected on exit', () => {
   const calls: string[] = [];

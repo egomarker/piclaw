@@ -2,6 +2,14 @@ import { useCallback, useRef } from '../vendor/preact-htm.js';
 import { useEditorState } from './use-editor-state.js';
 import { usePaneRuntimeOrchestration } from './app-pane-runtime-orchestration.js';
 
+export function resolveMainPaneSurfaceVisibility(options: {
+  uiMode?: 'classic' | 'mobile';
+  panePopoutMode: boolean;
+  mobileChatActive: boolean;
+}): boolean {
+  return options.panePopoutMode || options.uiMode !== 'mobile' || !options.mobileChatActive;
+}
+
 export function runMainAppZenToggle(options: {
   uiMode?: 'classic' | 'mobile';
   zenMode: boolean;
@@ -49,6 +57,11 @@ export function useMainAppPaneComposition(options: {
     panePopoutLabel: options.panePopoutLabel,
     chatOnlyMode: options.chatOnlyMode,
     editorOpen: editorState.editorOpen,
+    paneSurfaceVisible: resolveMainPaneSurfaceVisibility({
+      uiMode: options.uiMode,
+      panePopoutMode: options.panePopoutMode,
+      mobileChatActive: editorState.mobileChatActive,
+    }),
     tabStripTabs: editorState.tabStripTabs,
     tabStripActiveId: editorState.tabStripActiveId,
     previewTabs: editorState.previewTabs,

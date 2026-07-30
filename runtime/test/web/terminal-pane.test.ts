@@ -12,6 +12,7 @@ import {
     createKittyGraphicsState,
     getOrCreateAnonymousTerminalClientToken,
     isCoreTerminalRenderer,
+    isTerminalHostMeasurable,
     terminalPaneExtension,
     terminalTabPaneExtension,
     translateKittyGraphicsOutput,
@@ -292,6 +293,18 @@ test('core terminal renderer is the xterm implementation, not the optional Ghost
     expect(isCoreTerminalRenderer()).toBe(true);
     expect(terminalPaneExtension.label).toBe('Terminal');
     expect(terminalTabPaneExtension.label).toBe('Terminal');
+    expect(terminalTabPaneExtension.retainOnTabSwitch).toBe(true);
+});
+
+test('terminal skips fitting while any required host box is hidden', () => {
+    const box = (width: number, height: number) => ({
+        getBoundingClientRect: () => ({ width, height }),
+    });
+
+    expect(isTerminalHostMeasurable(box(800, 600), box(800, 560))).toBe(true);
+    expect(isTerminalHostMeasurable(box(800, 600), box(0, 0))).toBe(false);
+    expect(isTerminalHostMeasurable({ clientWidth: 800, clientHeight: 600 })).toBe(true);
+    expect(isTerminalHostMeasurable()).toBe(false);
 });
 
 test('terminal uses native xterm scrollbars but keeps the right gutter theme-colored', () => {
