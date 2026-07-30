@@ -25,6 +25,7 @@ test('Mobile adds a permanent leftmost Chat tab only when pane tabs exist', () =
   expect(mobileTabs.map((item) => item.id)).toEqual([MOBILE_CHAT_TAB_ID, 'one', 'two']);
   expect(mobileTabs[0]).toMatchObject({
     label: 'Chat',
+    path: 'Chat',
     closable: false,
     contextMenu: false,
   });

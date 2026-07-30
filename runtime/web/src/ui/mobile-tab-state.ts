@@ -11,7 +11,7 @@ export interface MobileTabState extends TabState {
 export const MOBILE_CHAT_TAB: Readonly<MobileTabState> = Object.freeze({
   id: MOBILE_CHAT_TAB_ID,
   label: 'Chat',
-  path: MOBILE_CHAT_TAB_ID,
+  path: 'Chat',
   dirty: false,
   pinned: false,
   closable: false,

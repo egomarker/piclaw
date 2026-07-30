@@ -57,6 +57,7 @@ export function useMainAppPaneComposition(options: {
     terminalTabPath: options.terminalTabPath,
     vncTabPrefix: options.vncTabPrefix,
     openEditor: editorState.openEditor,
+    activateEditorTab: editorState.handleTabActivate,
     closeEditor: editorState.closeEditor,
     getWorkspaceFile: options.getWorkspaceFile,
   });
