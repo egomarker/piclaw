@@ -15,6 +15,15 @@
     justify-content: stretch;
 }
 
+/*
+ * Classic caps Chat at --chat-max-width when its explorer is collapsed and no
+ * pane is open. Keep the Mobile Chat surface stretched across its grid track.
+ */
+.app-shell.mobile-interface.workspace-collapsed:not(.editor-open):not(.chat-only):not(.pane-popout) > .container {
+    width: 100%;
+    justify-self: stretch;
+}
+
 /* Keep the existing explorer as an independent left rail. */
 .app-shell.mobile-interface > .workspace-sidebar {
     grid-column: 1;
