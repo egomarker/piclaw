@@ -299,6 +299,26 @@ test("modulate action adjusts brightness and saturation", async () => {
   ws2.cleanup();
 });
 
+test("sharpen action accepts a sigma with Sharp 0.35", async () => {
+  const ws2 = createTempWorkspace("piclaw-imgproc-sharpen-");
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws2.workspace });
+
+  await createTestImage(ws2.workspace, "soft.png", { width: 50, height: 50 });
+
+  const { imageProcessing } = await import("../../src/extensions/image-processing.js");
+  const fake = makeFakeApi();
+  imageProcessing(fake.api as any);
+
+  const tool = fake.tools.get("image_process");
+  const result = await tool.execute("t-sharpen", {
+    action: "sharpen",
+    input: join(ws2.workspace, "soft.png"),
+    sigma: 1.5,
+  });
+  expect(result.details.action).toBe("sharpen");
+  ws2.cleanup();
+});
+
 test("normalize action applies auto-level", async () => {
   const ws2 = createTempWorkspace("piclaw-imgproc-norm-");
   restoreEnv = setEnv({ PICLAW_WORKSPACE: ws2.workspace });

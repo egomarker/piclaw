@@ -379,9 +379,11 @@ export {};
       resumePendingChats: () => {
         events.push({ kind: "resume" });
       },
+    }, () => {
+      events.push({ kind: "handoff" });
     });
 
-    expect(events).toHaveLength(4);
+    expect(events).toHaveLength(5);
     expect(events[0]).toMatchObject({
       kind: "status",
       chatJid: STARTUP_STATUS_CHAT_JID,
@@ -393,7 +395,8 @@ export {};
       },
     });
     expect(events[1]).toEqual({ kind: "recover" });
-    expect(events[2]).toMatchObject({
+    expect(events[2]).toEqual({ kind: "handoff" });
+    expect(events[3]).toMatchObject({
       kind: "status",
       chatJid: STARTUP_STATUS_CHAT_JID,
       status: {
@@ -403,7 +406,7 @@ export {};
         turn_id: STARTUP_STATUS_TURN_ID,
       },
     });
-    expect(events[3]).toMatchObject({
+    expect(events[4]).toMatchObject({
       kind: "status",
       chatJid: STARTUP_STATUS_CHAT_JID,
       status: {
@@ -415,7 +418,7 @@ export {};
     });
 
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(events[4]).toEqual({ kind: "resume" });
+    expect(events[5]).toEqual({ kind: "resume" });
   });
 
   test("queueStartupSessionWarmup is disabled by default", () => {

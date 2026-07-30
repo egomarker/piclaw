@@ -220,6 +220,38 @@ export function getPeerMessageDisplayContent(content, contentBlocks) {
     return stripped || original;
 }
 
+export function getSelfContinuationMeta(contentBlocks) {
+    if (!Array.isArray(contentBlocks)) return null;
+    const block = contentBlocks.find((candidate) => (
+        candidate
+        && typeof candidate === 'object'
+        && candidate.type === 'self_continuation'
+        && candidate.source === 'exit_process'
+    ));
+    if (!block) return null;
+    const restartId = typeof block.restart_id === 'string' ? block.restart_id.trim() : '';
+    if (!restartId) return null;
+    const handoff = getRestartHandoffMeta(contentBlocks);
+    if (!handoff || handoff.phase !== 'resume' || handoff.restartId !== restartId) return null;
+    return { block, restartId };
+}
+
+export function getRestartHandoffMeta(contentBlocks) {
+    if (!Array.isArray(contentBlocks)) return null;
+    const block = contentBlocks.find((candidate) => (
+        candidate
+        && typeof candidate === 'object'
+        && candidate.type === 'restart_handoff'
+        && candidate.source === 'exit_process'
+    ));
+    if (!block) return null;
+    const restartId = typeof block.restart_id === 'string' ? block.restart_id.trim() : '';
+    const phase = typeof block.phase === 'string' ? block.phase.trim() : '';
+    if (!restartId || !['notice', 'completion', 'resume'].includes(phase)) return null;
+    const reason = typeof block.reason === 'string' ? block.reason.trim() : '';
+    return { block, restartId, phase, reason };
+}
+
 const RECOVERY_CLASSIFIER_LABELS = {
     context_recover: 'context limit exceeded',
     rate_limit: 'rate limit hit',
@@ -1240,18 +1272,24 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
     const blocks = data.content_blocks || [];
     const mediaIds = data.media_ids || [];
     const peerMessageMeta = getPeerMessageMeta(blocks);
+    const selfContinuationMeta = getSelfContinuationMeta(blocks);
+    const restartHandoffMeta = getRestartHandoffMeta(blocks);
     const isAgent = data.type === 'agent_response';
     const resolvedUserName = userName || 'You';
     const isPeerAgentMessage = Boolean(!isAgent && peerMessageMeta?.sourceAgentName);
-    const displayName = isPeerAgentMessage
-        ? peerMessageMeta.sourceAgentDisplayName
-        : isAgent ? (agentName || DEFAULT_AGENT_NAME) : resolvedUserName;
+    const isSelfContinuation = Boolean(!isAgent && selfContinuationMeta);
+    const displayName = !isAgent && selfContinuationMeta
+        ? t('post.agentSelfResume')
+        : isPeerAgentMessage
+            ? peerMessageMeta.sourceAgentDisplayName
+            : isAgent ? (agentName || DEFAULT_AGENT_NAME) : resolvedUserName;
     const searchChatAgentName = typeof post.chat_agent_name === 'string' ? post.chat_agent_name.trim() : '';
     const showSearchChatAgentTag = Boolean(isAgent && highlightQuery && searchChatAgentName && searchChatAgentName !== displayName);
 
-    // Get avatar info based on the name.
-    // Peer agent messages (cross-session relay) use the agent avatar.
-    const avatarInfo = (isAgent || isPeerAgentMessage)
+    // Agent-authored inbound messages (peer relay and restart self-resume) use
+    // the agent avatar while retaining user-message semantics for turn routing.
+    const isAgentAuthoredInbound = isPeerAgentMessage || isSelfContinuation;
+    const avatarInfo = (isAgent || isAgentAuthoredInbound)
         ? getAvatarInfo(isPeerAgentMessage ? peerMessageMeta.sourceAgentDisplayName : agentName, agentAvatarUrl, true)
         : getAvatarInfo(resolvedUserName, userAvatarUrl);
     const normalizedUserBackground = typeof userAvatarBackground === 'string'
@@ -1261,7 +1299,7 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
         && (normalizedUserBackground === 'clear' || normalizedUserBackground === 'transparent');
     // Keep agent avatars with transparent background when an image is set,
     // matching user avatar behavior when background is cleared.
-    const clearAgentBackground = (isAgent || isPeerAgentMessage) && Boolean(avatarInfo.image);
+    const clearAgentBackground = (isAgent || isAgentAuthoredInbound) && Boolean(avatarInfo.image);
     const avatarStyle = `background-color: ${(clearUserBackground || clearAgentBackground) ? 'transparent' : avatarInfo.color}`;
 
     const contentMeta = data.content_meta;
@@ -1282,6 +1320,11 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
     // Keep original message text even when link previews are available.
     let displayContent = getDisplayContent(data.content, data.link_previews);
     displayContent = getPeerMessageDisplayContent(displayContent, blocks);
+    if (restartHandoffMeta?.phase === 'notice' && restartHandoffMeta.reason) {
+        displayContent = t('post.restartNotice', { reason: restartHandoffMeta.reason });
+    } else if (restartHandoffMeta?.phase === 'completion') {
+        displayContent = t('post.restartCompleted');
+    }
     const { content: cleanedContent, fileRefs } = extractFileRefs(displayContent);
     const { content: cleanedWithFolderRefs, folderRefs } = extractFolderRefs(cleanedContent);
     const { content: cleanedWithMsgRefs, messageRefs } = extractMessageRefs(cleanedWithFolderRefs);
@@ -1683,8 +1726,8 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
     }, [cardBlocksKey, post.id]);
 
     return html`
-        <div id=${`post-${post.id}`} class="post ${isAgent ? 'agent-post' : ''} ${isThreadReply ? 'thread-reply' : ''} ${isThreadPrev ? 'thread-prev' : ''} ${isThreadNext ? 'thread-next' : ''} ${isRemoving ? 'removing' : ''}" onClick=${onClick}>
-            <div class="post-avatar ${(isAgent || isPeerAgentMessage) ? 'agent-avatar' : ''} ${avatarInfo.image ? 'has-image' : ''}" style=${avatarStyle}>
+        <div id=${`post-${post.id}`} class="post ${isAgent ? 'agent-post' : ''} ${isSelfContinuation ? 'self-continuation-post' : ''} ${isThreadReply ? 'thread-reply' : ''} ${isThreadPrev ? 'thread-prev' : ''} ${isThreadNext ? 'thread-next' : ''} ${isRemoving ? 'removing' : ''}" onClick=${onClick}>
+            <div class="post-avatar ${(isAgent || isAgentAuthoredInbound) ? 'agent-avatar' : ''} ${avatarInfo.image ? 'has-image' : ''}" style=${avatarStyle}>
                 ${avatarInfo.image ? html`<img src=${avatarInfo.image} alt=${displayName} />` : avatarInfo.letter}
             </div>
             <div class="post-body">

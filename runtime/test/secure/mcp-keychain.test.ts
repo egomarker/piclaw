@@ -77,6 +77,57 @@ describe("MCP keychain credential hydration", () => {
     ).rejects.toThrow("must set a valid bearerTokenEnv");
   });
 
+  test("validates supported adapter environment references after keychain hydration", async () => {
+    process.env.PICLAW_MCP_EXISTING = "existing";
+    touched.add("PICLAW_MCP_EXISTING");
+    touched.add("PICLAW_MCP_TOKEN");
+    const entries = await hydrateMcpKeychainCredentials(
+      workspace({
+        mcpServers: {
+          local: {
+            command: "bun",
+            args: ["server.ts", "$PLAIN_VAR"],
+            cwd: "${PICLAW_MCP_EXISTING}",
+            env: {
+              FROM_BRACES: "${PICLAW_MCP_TOKEN}",
+              FROM_ENV_PREFIX: "$env:PICLAW_MCP_EXISTING",
+              FROM_ADAPTER_FORM: "{env:PICLAW_MCP_EXISTING}",
+              PLAIN_LITERAL: "$PLAIN_VAR",
+              ESCAPED_COMMAND: "!!${PICLAW_MCP_EXISTING}",
+              COMMAND_SECRET: "!printf '$SHELL_OWNS_THIS'",
+            },
+            bearerTokenKeychain: "memento/example",
+            bearerTokenEnv: "PICLAW_MCP_TOKEN",
+          },
+        },
+      }),
+      resolveEntry,
+    );
+    expect(process.env.PICLAW_MCP_TOKEN).toBe("secret-value");
+    clearHydratedMcpCredentials(entries);
+  });
+
+  test("fails closed for unresolved stdio, header, URL, and token references and clears hydrated secrets", async () => {
+    touched.add("PICLAW_MCP_TOKEN");
+    await expect(
+      hydrateMcpKeychainCredentials(
+        workspace({
+          mcpServers: {
+            local: {
+              url: "https://example.test/${PICLAW_MCP_MISSING_URL}",
+              env: { TOKEN: "$env:PICLAW_MCP_MISSING_ENV" },
+              headers: { Authorization: "Bearer {env:PICLAW_MCP_MISSING_HEADER}" },
+              bearerTokenKeychain: "memento/example",
+              bearerTokenEnv: "PICLAW_MCP_TOKEN",
+            },
+          },
+        }),
+        resolveEntry,
+      ),
+    ).rejects.toThrow("references missing environment variable");
+    expect(process.env.PICLAW_MCP_TOKEN).toBeUndefined();
+  });
+
   test("does not overwrite an existing environment variable", async () => {
     process.env.PICLAW_MCP_TOKEN = "existing";
     touched.add("PICLAW_MCP_TOKEN");

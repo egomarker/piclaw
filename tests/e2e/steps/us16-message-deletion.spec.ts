@@ -183,11 +183,14 @@ test.describe('US-16: Cascading Thread Deletion', () => {
     const deleteBtn = parentPost.locator('.post-delete-btn, [aria-label="Delete message"]');
     if (await deleteBtn.isVisible()) {
       await deleteBtn.click();
-      await page.waitForTimeout(1000);
 
-      const postsAfter = await getVisiblePostIds(page);
-      expect(postsAfter).not.toContain(String(parentId));
-      expect(postsAfter).not.toContain(String(replyId));
+      await expect.poll(async () => {
+        const postIds = await getVisiblePostIds(page);
+        return {
+          parentVisible: postIds.includes(String(parentId)),
+          replyVisible: postIds.includes(String(replyId)),
+        };
+      }, { timeout: 5000 }).toEqual({ parentVisible: false, replyVisible: false });
     }
   });
 

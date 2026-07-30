@@ -91,6 +91,32 @@ test("AgentTurnCoordinator trusts finalized message_end text over streamed draft
   expect(tracker.getFinalText()).toBe("final replacement");
 });
 
+test("AgentTurnCoordinator preserves raw provider stop reasons for diagnostics", () => {
+  const coordinator = new AgentTurnCoordinator({
+    takeAttachments: () => [],
+    touchSession: () => {},
+    recordMessageUsage: () => {},
+  });
+  const tracker = coordinator.createTracker("web:default");
+
+  tracker.handleMessageUpdate({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      stopReason: "error",
+      rawStopReason: "content_filter_vendor_x",
+      errorMessage: "Provider stopped with an unmapped terminal reason",
+      content: [],
+    },
+  } as any);
+
+  expect(tracker.getLastAssistantState()).toEqual(expect.objectContaining({
+    stopReason: "error",
+    rawStopReason: "content_filter_vendor_x",
+  }));
+  expect(tracker.getError()?.errorMessage).toContain("unmapped terminal reason");
+});
+
 test("AgentTurnCoordinator discards commentary-only text without exposing hidden thinking", () => {
   const discarded: Array<{ reason: string }> = [];
   const coordinator = new AgentTurnCoordinator({
