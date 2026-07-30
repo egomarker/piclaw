@@ -8,7 +8,7 @@ import {
 import { storeWebMessage } from "../../src/channels/web/messaging/message-store.js";
 import {
   EXIT_PROCESS_HANDOFF_EXTENSION_ID,
-  RESTART_CONTINUATION_LABEL,
+  RESTART_CONTINUATION_SCREEN_HINT,
   listRestartHandoffs,
   markRestartHandoffReady,
   prepareRestartHandoff,
@@ -138,7 +138,7 @@ describe("restart handoff recovery", () => {
     });
     expect(messages[1]).toMatchObject({
       content: "Continue the most recent task after recovery.",
-      screen_hint: RESTART_CONTINUATION_LABEL,
+      screen_hint: RESTART_CONTINUATION_SCREEN_HINT,
       is_bot_message: 0,
     });
 
@@ -150,12 +150,11 @@ describe("restart handoff recovery", () => {
       restart_id: handoff.restartId,
       phase: "completion",
     }));
-    expect(resumeBlocks).toContainEqual(expect.objectContaining({
+    expect(resumeBlocks).toContainEqual({
       type: "self_continuation",
       source: "exit_process",
       restart_id: handoff.restartId,
-      label: RESTART_CONTINUATION_LABEL,
-    }));
+    });
     expect(listRestartHandoffs()).toEqual([]);
 
     const repeated = recoverPendingRestartHandoffs(createRecoveryWeb(events));

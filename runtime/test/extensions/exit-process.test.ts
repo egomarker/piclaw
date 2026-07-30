@@ -176,7 +176,13 @@ describe("exit_process extension", () => {
       content: "Restarting now — Reason: Load the verified phase 2 build.",
       isBot: true,
       mediaIds: [],
-      contentBlocks: undefined,
+      contentBlocks: [{
+        type: "restart_handoff",
+        source: "exit_process",
+        restart_id: expect.any(String),
+        phase: "notice",
+        reason: "Load the verified phase 2 build.",
+      }],
     }]);
     expect(result.details).toMatchObject({
       tool: "exit_process",
@@ -189,6 +195,7 @@ describe("exit_process extension", () => {
       restart_message_broadcast: true,
     });
     expect(typeof result.details.restart_id).toBe("string");
+    expect(posted[0]?.contentBlocks?.[0]).toMatchObject({ restart_id: result.details.restart_id });
     expect(pendingAtPost).toBe(false);
     expect(result.terminate).toBe(true);
     expect(isPendingShutdown()).toBe(true);

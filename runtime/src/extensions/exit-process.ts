@@ -17,6 +17,7 @@ import { Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { getChatJid } from "../core/chat-context.js";
 import {
+  buildRestartHandoffMarker,
   deleteRestartHandoff,
   markRestartHandoffReady,
   prepareRestartHandoff,
@@ -146,6 +147,7 @@ export const exitProcess: ExtensionFactory = (pi: ExtensionAPI) => {
           type: "agent",
           chat_jid: chatJid,
           content: restartMessage,
+          content_blocks: [buildRestartHandoffMarker(handoff.restartId, "notice", { reason })],
         }, chatJid);
       } catch (error) {
         discardHandoff();

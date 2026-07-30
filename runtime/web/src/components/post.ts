@@ -231,10 +231,23 @@ export function getSelfContinuationMeta(contentBlocks) {
     if (!block) return null;
     const restartId = typeof block.restart_id === 'string' ? block.restart_id.trim() : '';
     if (!restartId) return null;
-    const label = typeof block.label === 'string' && block.label.trim()
-        ? block.label.trim()
-        : 'Agent self-resume';
-    return { block, restartId, label };
+    return { block, restartId };
+}
+
+export function getRestartHandoffMeta(contentBlocks) {
+    if (!Array.isArray(contentBlocks)) return null;
+    const block = contentBlocks.find((candidate) => (
+        candidate
+        && typeof candidate === 'object'
+        && candidate.type === 'restart_handoff'
+        && candidate.source === 'exit_process'
+    ));
+    if (!block) return null;
+    const restartId = typeof block.restart_id === 'string' ? block.restart_id.trim() : '';
+    const phase = typeof block.phase === 'string' ? block.phase.trim() : '';
+    if (!restartId || !['notice', 'completion', 'resume'].includes(phase)) return null;
+    const reason = typeof block.reason === 'string' ? block.reason.trim() : '';
+    return { block, restartId, phase, reason };
 }
 
 const RECOVERY_CLASSIFIER_LABELS = {
@@ -1258,12 +1271,13 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
     const mediaIds = data.media_ids || [];
     const peerMessageMeta = getPeerMessageMeta(blocks);
     const selfContinuationMeta = getSelfContinuationMeta(blocks);
+    const restartHandoffMeta = getRestartHandoffMeta(blocks);
     const isAgent = data.type === 'agent_response';
     const resolvedUserName = userName || 'You';
     const isPeerAgentMessage = Boolean(!isAgent && peerMessageMeta?.sourceAgentName);
     const isSelfContinuation = Boolean(!isAgent && selfContinuationMeta);
     const displayName = !isAgent && selfContinuationMeta
-        ? selfContinuationMeta.label
+        ? t('post.agentSelfResume')
         : isPeerAgentMessage
             ? peerMessageMeta.sourceAgentDisplayName
             : isAgent ? (agentName || DEFAULT_AGENT_NAME) : resolvedUserName;
@@ -1304,6 +1318,11 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
     // Keep original message text even when link previews are available.
     let displayContent = getDisplayContent(data.content, data.link_previews);
     displayContent = getPeerMessageDisplayContent(displayContent, blocks);
+    if (restartHandoffMeta?.phase === 'notice' && restartHandoffMeta.reason) {
+        displayContent = t('post.restartNotice', { reason: restartHandoffMeta.reason });
+    } else if (restartHandoffMeta?.phase === 'completion') {
+        displayContent = t('post.restartCompleted');
+    }
     const { content: cleanedContent, fileRefs } = extractFileRefs(displayContent);
     const { content: cleanedWithFolderRefs, folderRefs } = extractFolderRefs(cleanedContent);
     const { content: cleanedWithMsgRefs, messageRefs } = extractMessageRefs(cleanedWithFolderRefs);

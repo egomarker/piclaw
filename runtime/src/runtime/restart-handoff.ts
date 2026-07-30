@@ -14,7 +14,9 @@ const log = createLogger("runtime.restart-handoff");
 export const EXIT_PROCESS_HANDOFF_EXTENSION_ID = "exit-process";
 export const EXIT_PROCESS_HANDOFF_KEY_PREFIX = "restart-handoff:";
 export const RESTART_COMPLETION_MESSAGE = "Restart completed.";
-export const RESTART_CONTINUATION_LABEL = "Agent self-resume";
+export const RESTART_CONTINUATION_SCREEN_HINT = "self-resume";
+
+export type RestartHandoffMessagePhase = "notice" | "completion" | "resume";
 
 export type RestartHandoffState =
   | "preparing"
@@ -173,12 +175,18 @@ export function listRestartHandoffs(): RestartHandoff[] {
   return handoffs.sort((a, b) => a.requestedAt.localeCompare(b.requestedAt));
 }
 
-function buildRestartMarker(restartId: string, phase: "completion" | "resume"): Record<string, unknown> {
+export function buildRestartHandoffMarker(
+  restartId: string,
+  phase: RestartHandoffMessagePhase,
+  options: { reason?: string } = {},
+): Record<string, unknown> {
+  const reason = typeof options.reason === "string" ? options.reason.trim() : "";
   return {
     type: "restart_handoff",
     source: "exit_process",
     restart_id: restartId,
     phase,
+    ...(phase === "notice" && reason ? { reason } : {}),
   };
 }
 
@@ -231,7 +239,7 @@ function storeCompletionMessage(
     RESTART_COMPLETION_MESSAGE,
     true,
     [],
-    { contentBlocks: [buildRestartMarker(handoff.restartId, "completion")] },
+    { contentBlocks: [buildRestartHandoffMarker(handoff.restartId, "completion")] },
   );
   if (!interaction?.id) throw new Error("Failed to store the restart completion message.");
   web.broadcastEvent("agent_response", interaction);
@@ -252,15 +260,14 @@ function storeResumeMessage(
     [],
     {
       contentBlocks: [
-        buildRestartMarker(handoff.restartId, "resume"),
+        buildRestartHandoffMarker(handoff.restartId, "resume"),
         {
           type: "self_continuation",
           source: "exit_process",
           restart_id: handoff.restartId,
-          label: RESTART_CONTINUATION_LABEL,
         },
       ],
-      screenHint: RESTART_CONTINUATION_LABEL,
+      screenHint: RESTART_CONTINUATION_SCREEN_HINT,
     },
   );
   if (!interaction?.id) throw new Error("Failed to store the restart continuation message.");

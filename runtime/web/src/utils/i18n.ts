@@ -160,6 +160,9 @@ type MessageKey =
   | 'post.cancel'
   | 'post.addNote'
   | 'post.addNotePlaceholder'
+  | 'post.restartNotice'
+  | 'post.restartCompleted'
+  | 'post.agentSelfResume'
   | 'tab.close'
   | 'tab.closeOthers'
   | 'tab.closeAll'
@@ -800,6 +803,9 @@ const EN: Record<MessageKey, string> = {
   'post.cancel': 'Cancel',
   'post.addNote': 'Add note',
   'post.addNotePlaceholder': 'Add a note…',
+  'post.restartNotice': 'Restarting now — Reason: {reason}',
+  'post.restartCompleted': 'Restart completed.',
+  'post.agentSelfResume': 'Agent self-resume',
   'tab.close': 'Close',
   'tab.closeOthers': 'Close Others',
   'tab.closeAll': 'Close All',
@@ -1435,6 +1441,9 @@ const ZH_CN: Partial<Record<MessageKey, string>> = {
   'post.cancel': '取消',
   'post.addNote': '添加备注',
   'post.addNotePlaceholder': '添加备注…',
+  'post.restartNotice': '正在重启 — 原因：{reason}',
+  'post.restartCompleted': '重启完成。',
+  'post.agentSelfResume': '代理自行恢复',
   'tab.close': '关闭',
   'tab.closeOthers': '关闭其他',
   'tab.closeAll': '全部关闭',
@@ -2070,6 +2079,9 @@ const JA: Partial<Record<MessageKey, string>> = {
   'post.cancel': 'キャンセル',
   'post.addNote': 'メモを追加',
   'post.addNotePlaceholder': 'メモを追加…',
+  'post.restartNotice': '再起動中 — 理由：{reason}',
+  'post.restartCompleted': '再起動が完了しました。',
+  'post.agentSelfResume': 'エージェントの自己再開',
   'tab.close': '閉じる',
   'tab.closeOthers': '他を閉じる',
   'tab.closeAll': 'すべて閉じる',
