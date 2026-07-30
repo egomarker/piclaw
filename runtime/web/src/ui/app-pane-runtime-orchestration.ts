@@ -44,6 +44,7 @@ interface UsePaneRuntimeOrchestrationOptions {
   panePopoutLabel: string;
   chatOnlyMode: boolean;
   editorOpen: boolean;
+  paneSurfaceVisible?: boolean;
   tabStripTabs: any[];
   tabStripActiveId: string | null;
   previewTabs: Set<string>;
@@ -92,6 +93,25 @@ export function removeSourcePaneAfterDetachClaim(options: {
     return;
   }
   options.closeTab?.(panePath);
+}
+
+export function scheduleVisiblePaneReactivation(options: {
+  visible: boolean;
+  instance: any;
+  getCurrentInstance: () => any;
+  requestFrame?: (callback: () => void) => number;
+  cancelFrame?: (handle: number) => void;
+}): () => void {
+  if (!options.visible || !options.instance) return () => {};
+  const requestFrame = options.requestFrame ?? ((callback) => requestAnimationFrame(callback));
+  const cancelFrame = options.cancelFrame ?? ((handle) => cancelAnimationFrame(handle));
+  const instance = options.instance;
+  const frame = requestFrame(() => {
+    if (options.getCurrentInstance() !== instance) return;
+    instance.resize?.();
+    instance.focus?.();
+  });
+  return () => cancelFrame(frame);
 }
 
 export function activateReattachedPane(options: {
@@ -357,6 +377,7 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
     panePopoutLabel,
     chatOnlyMode,
     editorOpen,
+    paneSurfaceVisible = true,
     tabStripTabs,
     tabStripActiveId,
     previewTabs,
@@ -1013,6 +1034,12 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
       paneWindowId: detachState.paneWindowId,
     }, window.location.origin);
   }, [panePopoutMode]);
+
+  useEffect(() => scheduleVisiblePaneReactivation({
+    visible: paneSurfaceVisible,
+    instance: editorInstanceRef.current,
+    getCurrentInstance: () => editorInstanceRef.current,
+  }), [paneSurfaceVisible]);
 
   useEffect(() => {
     const openPaths = new Set(
