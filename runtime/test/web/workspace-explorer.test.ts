@@ -71,6 +71,21 @@ test('workspace move confirmation describes file and folder destinations', () =>
   );
 });
 
+test('workspace move confirmation supports localized labels and root copy', () => {
+  const messages: Record<string, string> = {
+    'workspace.moveConfirm': 'MOVER {entry} {name}: {source} -> {target}',
+    'workspace.root': 'RAIZ',
+    'workspace.file': 'FICHEIRO',
+    'workspace.folder': 'PASTA',
+  };
+  const translate = (key: string, values: Record<string, string> = {}) => Object.entries(values)
+    .reduce((text, [name, value]) => text.replace(`{${name}}`, value), messages[key] || key);
+
+  expect(buildWorkspaceMoveConfirmationMessage('projects/demo', '.', 'dir', translate)).toBe(
+    'MOVER PASTA demo: "projects" -> RAIZ',
+  );
+});
+
 test('workspace move confirmation respects cancel and confirm responses', () => {
   const prompts: string[] = [];
   const cancel = confirmWorkspaceEntryMove('notes/report.md', 'archive', 'file', (message: string) => {
