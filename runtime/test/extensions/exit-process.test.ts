@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import "../helpers.js";
 import { withChatContext } from "../../src/core/chat-context.js";
 import { extensionKvClear, initDatabase } from "../../src/db.js";
@@ -13,7 +13,11 @@ import {
   listRestartHandoffs,
 } from "../../src/runtime/restart-handoff.js";
 import { createFakeExtensionApi } from "./fake-extension-api.js";
-import { removeSession, updateSessionStreaming } from "../../src/extensions/session-status.js";
+import {
+  clearSessionStatusForTests,
+  removeSession,
+  updateSessionStreaming,
+} from "../../src/extensions/session-status.js";
 
 type PostedMessage = {
   chatJid: string;
@@ -37,6 +41,10 @@ function toolOrThrow(tool: any) {
 describe("exit_process extension", () => {
   beforeAll(() => {
     initDatabase();
+  });
+
+  beforeEach(() => {
+    clearSessionStatusForTests();
   });
 
   afterEach(async () => {

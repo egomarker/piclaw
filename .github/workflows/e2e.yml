@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  models: read
 
 jobs:
   e2e:
@@ -83,15 +82,11 @@ jobs:
         run: bunx playwright install chromium
         working-directory: tests/e2e
 
-      - name: Configure LLM provider (GitHub Models)
-        run: bun run setup/configure-github-models.ts
+      - name: Configure deterministic E2E LLM provider
+        run: bun run setup/configure-test-instance.ts
         working-directory: tests/e2e
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Start PiClaw instance
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Generate a test internal secret
           export PICLAW_INTERNAL_SECRET=$(openssl rand -hex 16)

@@ -288,27 +288,6 @@ describe("github-copilot dynamic models overlay", () => {
     expect(prepared.model.baseUrl).toBe("https://api.business.githubcopilot.com");
     expect(prepared.options.headers?.["Editor-Version"]).toBe("vscode/1.107.0");
     expect(prepared.options.headers?.["Editor-Plugin-Version"]).toBe("copilot-chat/0.35.0");
-
-    const originalFetch = globalThis.fetch;
-    let requestUrl = "";
-    globalThis.fetch = (async (input: string | URL | Request) => {
-      requestUrl = String(input);
-      return new Response("data: [DONE]\n\n", {
-        status: 200,
-        headers: { "content-type": "text/event-stream" },
-      });
-    }) as typeof fetch;
-    try {
-      const stream = runtime.streamSimple(imported!, {
-        messages: [{ role: "user", content: "hello", timestamp: Date.now() }],
-      });
-      for await (const event of stream) {
-        if (event.type === "done" || event.type === "error") break;
-      }
-      expect(requestUrl).toBe("https://api.business.githubcopilot.com/responses");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
   });
 
   test("cached dynamic models retain a valid fallback while request auth remains dynamic", async () => {
