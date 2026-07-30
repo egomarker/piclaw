@@ -23,6 +23,7 @@ export interface PromptAttemptFinalizationInput {
   finalUsage: unknown;
   lastAssistantState: {
     stopReason?: string | null;
+    rawStopReason?: string | null;
     errorMessage?: string | null;
     hadTextContent?: boolean;
     hadThinkingContent?: boolean;
@@ -110,6 +111,11 @@ export function finalizePromptAttemptOutput(input: PromptAttemptFinalizationInpu
     output = { status: "error", result: null, error: input.promptThrownError };
   } else if (input.turnError) {
     output = { status: "error", result: null, error: input.turnError.errorMessage };
+  } else if (input.lastAssistantState?.stopReason === "pending") {
+    const rawDetail = input.lastAssistantState.rawStopReason
+      ? ` (provider reason: ${input.lastAssistantState.rawStopReason})`
+      : "";
+    output = { status: "error", result: null, error: `Provider response remained pending and did not reach a terminal stop${rawDetail}.` };
   } else if (input.latentStateError) {
     output = { status: "error", result: null, error: input.latentStateError };
   } else if (input.lastAssistantState?.stopReason === "length" || isLengthStopFailure(input.lastAssistantState?.errorMessage)) {

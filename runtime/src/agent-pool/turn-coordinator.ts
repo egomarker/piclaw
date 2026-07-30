@@ -42,6 +42,7 @@ export interface AgentTurnError {
 /** Aggregated assistant-turn tracking state for a single prompt run. */
 export interface AgentTerminalAssistantState {
   stopReason: string | null;
+  rawStopReason: string | null;
   errorMessage: string | null;
   hadTextContent: boolean;
   hadToolCallContent: boolean;
@@ -260,6 +261,7 @@ export class AgentTurnCoordinator {
           role?: string;
           content?: unknown;
           stopReason?: string;
+          rawStopReason?: string;
           errorMessage?: string;
           usage?: Usage;
         } | undefined;
@@ -279,6 +281,7 @@ export class AgentTurnCoordinator {
           const hadThinkingContent = contentBlocks.some((block: any) => block?.type === "thinking" && typeof block?.thinking === "string" && block.thinking.trim().length > 0);
           lastAssistantState = {
             stopReason: typeof message.stopReason === "string" && message.stopReason.trim() ? message.stopReason : null,
+            rawStopReason: typeof message.rawStopReason === "string" && message.rawStopReason.trim() ? message.rawStopReason.trim() : null,
             errorMessage: typeof message.errorMessage === "string" && message.errorMessage.trim() ? message.errorMessage.trim() : null,
             hadTextContent,
             hadToolCallContent,
@@ -302,6 +305,7 @@ export class AgentTurnCoordinator {
             operation: "turn_coordinator.message_end",
             chatJid,
             stopReason: message.stopReason ?? null,
+            rawStopReason: message.rawStopReason ?? null,
             extractedTextLength: extracted.text.length,
             phase: extracted.phase,
             hasCommentary: extracted.hasCommentary,
