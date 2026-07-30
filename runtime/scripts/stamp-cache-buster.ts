@@ -16,7 +16,10 @@ import { createHash } from "crypto";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 
-const INDEX = resolve(import.meta.dir, "../web/static/classic/index.html");
+const INDEXES = [
+  resolve(import.meta.dir, "../web/static/classic/index.html"),
+  resolve(import.meta.dir, "../web/static/mobile/index.html"),
+];
 const CLASSIC_DIST = resolve(import.meta.dir, "../web/static/classic/dist");
 const COMMON_DIST = resolve(import.meta.dir, "../web/static/common/dist");
 
@@ -46,16 +49,8 @@ function computeBundleContentHash(): string {
 
 const stamp = computeBundleContentHash();
 
-const original = readFileSync(INDEX, "utf-8");
-let html = original;
-
-// 1. Stamp ?v= tokens on static bundle references.
-//    Match both numeric stamps (?v=1234567890) and the build-time placeholder.
-html = html.replace(/\?v=(?:[\da-f]+|__APP_ASSET_VERSION__)/g, `?v=${stamp}`);
-
-// 2. Stamp the vendor importmap URL so browser caches bust on content changes.
-//    Use the vendor bundle's sha256 prefix from the metadata file when available,
-//    fall back to the build timestamp.
+// Use the vendor bundle's sha256 prefix from the metadata file when available,
+// falling back to the app bundle stamp.
 const VENDOR_META = resolve(import.meta.dir, "../extensions/viewers/editor/vendor/codemirror.meta.json");
 let vendorStamp = stamp;
 try {
@@ -66,14 +61,22 @@ try {
 } catch (e) {
   console.warn(`[cache-buster] failed to read vendor metadata: ${e instanceof Error ? e.message : e}`);
 }
-html = html.replace(
-  /(\/editor-vendor\/codemirror\.js)(\?v=[^"]*)?/g,
-  `$1?v=${vendorStamp}`,
-);
 
-if (html !== original) {
-  writeFileSync(INDEX, html, "utf-8");
-  console.log(`[cache-buster] stamped index.html → v=${stamp}, vendor=${vendorStamp}`);
-} else {
-  console.log(`[cache-buster] no tokens changed in index.html`);
+for (const indexPath of INDEXES) {
+  const original = readFileSync(indexPath, "utf-8");
+  let html = original;
+
+  // Stamp static bundle references and the shared CodeMirror import map.
+  html = html.replace(/\?v=(?:[\da-f]+|__APP_ASSET_VERSION__)/g, `?v=${stamp}`);
+  html = html.replace(
+    /(\/editor-vendor\/codemirror\.js)(\?v=[^"]*)?/g,
+    `$1?v=${vendorStamp}`,
+  );
+
+  if (html !== original) {
+    writeFileSync(indexPath, html, "utf-8");
+    console.log(`[cache-buster] stamped ${indexPath} → v=${stamp}, vendor=${vendorStamp}`);
+  } else {
+    console.log(`[cache-buster] no tokens changed in ${indexPath}`);
+  }
 }

@@ -1211,7 +1211,7 @@ describe("core config", () => {
             userAvatarBackground: "#123456",
           },
           web: {
-            uiMode: "visual",
+            uiMode: "mobile",
             idleTimeout: 123,
             persistThinking: true,
             persistThinkingMaxChars: 4321,
@@ -1276,7 +1276,7 @@ describe("core config", () => {
       });
       expect(snapshot["call:getWebServerConfig"]).toMatchObject({ idleTimeout: 123 });
       expect(snapshot["call:getWebRuntimeConfig"]).toMatchObject({
-        uiMode: "visual",
+        uiMode: "mobile",
         totpWindow: 7,
         sessionTtl: 86400,
         passkeyMode: "passkey-only",

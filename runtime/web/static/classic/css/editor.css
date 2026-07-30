@@ -1298,6 +1298,12 @@
     margin-top: var(--spacing-sm);
 }
 
+/* Semantic grouping for shells that switch Chat as a single surface. */
+.chat-surface-main,
+.chat-surface-footer {
+    display: contents;
+}
+
 .container {
     width: 100%;
     max-width: 800px;

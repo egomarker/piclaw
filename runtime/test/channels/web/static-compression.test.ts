@@ -7,6 +7,15 @@ function notFound(): Response {
   return new Response("not found", { status: 404 });
 }
 
+test("serveStatic renders the Mobile shell marker", async () => {
+  const response = await serveStatic("mobile/index.html", notFound);
+
+  expect(response.status).toBe(200);
+  expect(response.headers.get("Content-Type")).toContain("text/html");
+  expect(response.headers.get("Cache-Control")).toContain("no-cache");
+  expect(await response.text()).toContain('data-piclaw-ui="mobile"');
+});
+
 test("serveStatic gzip-compresses compressible assets when requested", async () => {
   const req = new Request("https://example.test/static/classic/dist/app.bundle.css", {
     headers: { "Accept-Encoding": "gzip" },

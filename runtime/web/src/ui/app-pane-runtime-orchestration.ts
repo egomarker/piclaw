@@ -52,6 +52,7 @@ interface UsePaneRuntimeOrchestrationOptions {
   terminalTabPath: string;
   vncTabPrefix: string;
   openEditor: (path: string, options?: Record<string, unknown>) => void;
+  activateEditorTab?: (path: string) => void;
   closeEditor: () => void;
   getWorkspaceFile: (path: string, maxBytes: number, mode: string) => Promise<any>;
 }
@@ -91,6 +92,24 @@ export function removeSourcePaneAfterDetachClaim(options: {
     return;
   }
   options.closeTab?.(panePath);
+}
+
+export function activateReattachedPane(options: {
+  panePath: string;
+  hasOpenTab: boolean;
+  activateEditorTab?: (path: string) => void;
+  activateStoredTab: (path: string) => void;
+  openEditor: (path: string) => void;
+}): void {
+  if (!options.hasOpenTab) {
+    options.openEditor(options.panePath);
+    return;
+  }
+  if (options.activateEditorTab) {
+    options.activateEditorTab(options.panePath);
+    return;
+  }
+  options.activateStoredTab(options.panePath);
 }
 
 interface DetachedPaneState {
@@ -346,6 +365,7 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
     terminalTabPath,
     vncTabPrefix,
     openEditor,
+    activateEditorTab,
     closeEditor,
     getWorkspaceFile,
   } = options;
@@ -474,12 +494,13 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
     } else if (normalizedPath === terminalTabPath && wasDetachedTab) {
       openEditor(normalizedPath, { label: 'Terminal' });
     } else {
-      const activeTab = tabStore.get(normalizedPath);
-      if (activeTab) {
-        tabStore.activate(normalizedPath);
-      } else {
-        openEditor(normalizedPath);
-      }
+      activateReattachedPane({
+        panePath: normalizedPath,
+        hasOpenTab: Boolean(tabStore.get(normalizedPath)),
+        activateEditorTab,
+        activateStoredTab: (path) => tabStore.activate(path),
+        openEditor,
+      });
     }
 
     if (options.closeDetachedWindow !== false && handle && typeof handle.close === 'function') {
@@ -487,7 +508,7 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
     }
 
     return true;
-  }, [clearDetachedPane, openEditor, setDockVisible, terminalTabPath]);
+  }, [activateEditorTab, clearDetachedPane, openEditor, setDockVisible, terminalTabPath]);
 
   const flushDeferredPaneCloseRecoveries = useCallback(() => {
     if (panePopoutMode) return;

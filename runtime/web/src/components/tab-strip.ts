@@ -21,7 +21,7 @@ import { canTabEditSource, getTabEditSourceLabel } from '../ui/tab-source-editor
  * TabStrip — horizontal tab bar for open editor files.
  *
  * @param {Object} props
- * @param {import('../panes/tab-store.js').TabState[]} props.tabs
+ * @param {(import('../panes/tab-store.js').TabState & { closable?: boolean, contextMenu?: boolean })[]} props.tabs
  * @param {string|null} props.activeId
  * @param {(id: string) => void} props.onActivate
  * @param {(id: string) => void} props.onClose
@@ -44,6 +44,14 @@ const OFFICE_EXTENSIONS = /\.(docx?|xlsx?|pptx?|odt|ods|odp|rtf)$/i;
 const CSV_EXTENSIONS = /\.(csv|tsv)$/i;
 const PDF_EXTENSIONS = /\.pdf$/i;
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|bmp|ico|svg)$/i;
+
+export function isTabClosable(tab) {
+    return Boolean(tab) && tab.closable !== false;
+}
+
+export function hasTabContextMenu(tab) {
+    return Boolean(tab) && tab.contextMenu !== false;
+}
 
 export function getStandaloneTabUrl(path, { hasPopOutTab = false } = {}) {
     const normalizedPath = typeof path === 'string' ? path.trim() : '';
@@ -109,8 +117,11 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
                 // Only intercept if an editor pane is focused
                 const editorPane = document.querySelector('.editor-pane');
                 if (editorPane && editorPane.contains(document.activeElement)) {
-                    e.preventDefault();
-                    if (activeId) onClose?.(activeId);
+                    const activeTab = tabs.find((tab) => tab.id === activeId);
+                    if (isTabClosable(activeTab)) {
+                        e.preventDefault();
+                        onClose?.(activeId);
+                    }
                 }
             }
         };
@@ -118,20 +129,20 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
         return () => document.removeEventListener('keydown', onKeyDown);
     }, [tabs, activeId, onActivate, onClose]);
 
-    const handleTabMouseDown = useCallback((e, id) => {
+    const handleTabMouseDown = useCallback((e, tab) => {
         // Skip if the press landed on the close button — let close handle it.
         if (e.target?.closest?.('.tab-close')) return;
         // Activate on press instead of waiting for click. Some embedded panes
         // and touch/pointer paths can swallow the synthetic click, but the
         // tab should still come to the front as soon as the primary press lands.
         if (e.button === 0) {
-            onActivate?.(id);
+            onActivate?.(tab.id);
             return;
         }
         // Middle-click closes immediately so the tab never becomes active.
-        if (e.button === 1) {
+        if (e.button === 1 && isTabClosable(tab)) {
             e.preventDefault();
-            onClose?.(id);
+            onClose?.(tab.id);
         }
     }, [onActivate, onClose]);
 
@@ -143,9 +154,10 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
         }
     }, [onActivate]);
 
-    const handleContextMenu = useCallback((e, id) => {
+    const handleContextMenu = useCallback((e, tab) => {
         e.preventDefault();
-        setContextMenu({ id, x: e.clientX, y: e.clientY });
+        if (!hasTabContextMenu(tab)) return;
+        setContextMenu({ id: tab.id, x: e.clientX, y: e.clientY });
     }, []);
 
     const handleClosePointerDown = useCallback((e) => {
@@ -216,13 +228,13 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
             ${tabs.map(tab => html`
                 <div
                     key=${tab.id}
-                    class=${`tab-item${tab.id === activeId ? ' active' : ''}${tab.dirty ? ' dirty' : ''}${tab.pinned ? ' pinned' : ''}`}
+                    class=${`tab-item${tab.id === activeId ? ' active' : ''}${tab.dirty ? ' dirty' : ''}${tab.pinned ? ' pinned' : ''}${isTabClosable(tab) ? '' : ' non-closable'}`}
                     role="tab"
                     aria-selected=${tab.id === activeId}
                     title=${tab.path}
-                    onMouseDown=${(e) => handleTabMouseDown(e, tab.id)}
+                    onMouseDown=${(e) => handleTabMouseDown(e, tab)}
                     onClick=${(e) => handleTabClick(e, tab.id)}
-                    onContextMenu=${(e) => handleContextMenu(e, tab.id)}
+                    onContextMenu=${(e) => handleContextMenu(e, tab)}
                 >
                     ${tab.pinned && html`
                         <span class="tab-pin-icon" aria-label=${t('tab.pinned')}>
@@ -235,23 +247,25 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
                     ${detachedTabs instanceof Map && detachedTabs.has(tab.id) && html`
                         <span class="tab-detached-badge" aria-label=${t('tab.detached')} title=${t('tab.openSeparateWindow')}>↗</span>
                     `}
-                    <button
-                        type="button"
-                        class="tab-close"
-                        onPointerDown=${handleClosePointerDown}
-                        onMouseDown=${handleClosePointerDown}
-                        onClick=${(e) => handleCloseClick(e, tab.id)}
-                        title=${tab.dirty ? 'Unsaved changes' : 'Close'}
-                        aria-label=${tab.dirty ? 'Unsaved changes' : `Close ${tab.label}`}
-                    >
-                        ${tab.dirty
-                            ? html`<span class="tab-dirty-dot" aria-hidden="true"></span>`
-                            : html`<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" focusable="false" style=${{ pointerEvents: 'none' }}>
-                                <line x1="4" y1="4" x2="12" y2="12" style=${{ pointerEvents: 'none' }}/>
-                                <line x1="12" y1="4" x2="4" y2="12" style=${{ pointerEvents: 'none' }}/>
-                            </svg>`
-                        }
-                    </button>
+                    ${isTabClosable(tab) && html`
+                        <button
+                            type="button"
+                            class="tab-close"
+                            onPointerDown=${handleClosePointerDown}
+                            onMouseDown=${handleClosePointerDown}
+                            onClick=${(e) => handleCloseClick(e, tab.id)}
+                            title=${tab.dirty ? 'Unsaved changes' : 'Close'}
+                            aria-label=${tab.dirty ? 'Unsaved changes' : `Close ${tab.label}`}
+                        >
+                            ${tab.dirty
+                                ? html`<span class="tab-dirty-dot" aria-hidden="true"></span>`
+                                : html`<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" focusable="false" style=${{ pointerEvents: 'none' }}>
+                                    <line x1="4" y1="4" x2="12" y2="12" style=${{ pointerEvents: 'none' }}/>
+                                    <line x1="12" y1="4" x2="4" y2="12" style=${{ pointerEvents: 'none' }}/>
+                                </svg>`
+                            }
+                        </button>
+                    `}
                 </div>
             `)}
             ${onToggleDock && html`

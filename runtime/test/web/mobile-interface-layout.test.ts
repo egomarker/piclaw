@@ -1,0 +1,34 @@
+import { expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const appCss = readFileSync(join(import.meta.dir, '../../web/src/styles/app.css'), 'utf8');
+const classicEditorCss = readFileSync(join(import.meta.dir, '../../web/static/classic/css/editor.css'), 'utf8');
+const mobileCss = readFileSync(join(import.meta.dir, '../../web/static/mobile/css/mobile-interface.css'), 'utf8');
+
+test('authenticated styles load the isolated Mobile layout last', () => {
+  expect(appCss.trimEnd().endsWith('@import "../../static/mobile/css/mobile-interface.css";')).toBe(true);
+  expect(mobileCss).not.toMatch(/^\.app-shell(?!\.mobile-interface)/m);
+});
+
+test('Mobile hides Chat chrome without suppressing global dialogs and widgets', () => {
+  expect(classicEditorCss).toMatch(/\.chat-surface-main,\s*\n\.chat-surface-footer \{\s*\n\s*display: contents;/);
+  expect(mobileCss).toContain('.app-shell.mobile-interface.mobile-pane-active > .container > .chat-surface-main');
+  expect(mobileCss).toContain('> :not(.chat-surface-main):not(.chat-surface-footer)');
+  expect(mobileCss).toContain('pointer-events: auto');
+});
+
+test('Mobile CSS overlays continuously mounted Chat, pane, preview, and dock rows', () => {
+  expect(mobileCss).toContain('grid-template-rows: auto minmax(0, 1fr) auto auto auto auto');
+  expect(mobileCss).toContain('.app-shell.mobile-interface.mobile-pane-active > .container');
+  expect(mobileCss).toContain('.app-shell.mobile-interface.mobile-chat-active > .editor-pane-container > .editor-pane-host');
+  expect(mobileCss).toContain('> .editor-pane-container > .dock-panel');
+  expect(mobileCss).toContain('grid-row: 6');
+});
+
+test('Mobile Zen is Chat-only and the phone strip reserves the menu hit target', () => {
+  expect(mobileCss).toContain('.app-shell.mobile-interface.zen-mode > .container');
+  expect(mobileCss).toContain('display: flex !important');
+  expect(mobileCss).toContain('.app-shell.mobile-interface.zen-mode > .editor-pane-container > .tab-strip');
+  expect(mobileCss).toContain('padding-left: max(44px');
+});

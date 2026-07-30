@@ -25,6 +25,7 @@ import {
     getCurrentAppAssetVersion,
     getRenameBranchFormLock,
     readAppLocationModes,
+    readAppUiMode,
 } from './ui/app-shell-state.js';
 import {
     getPanePopoutDocumentTitle,
@@ -65,6 +66,7 @@ import {
 import { installPwaDisplayScaleSync } from './ui/pwa-display-scale.js';
 
 const CURRENT_APP_ASSET_VERSION = getCurrentAppAssetVersion();
+const APP_UI_MODE = readAppUiMode();
 const resolveRegisteredPane = (context) => paneRegistry.resolve(context);
 
 installPwaDisplayScaleSync();
@@ -167,6 +169,7 @@ function MainApp({ locationParams, navigate }) {
         panePopoutPath,
         panePopoutLabel,
         chatOnlyMode,
+        uiMode: APP_UI_MODE,
         terminalTabPath: TERMINAL_TAB_PATH,
         vncTabPrefix: VNC_TAB_PREFIX,
         getWorkspaceFile,
@@ -597,7 +600,7 @@ function MainApp({ locationParams, navigate }) {
         };
     }, [branchPaneActions.handlePopOutPane, currentChatJid, interaction.composeReferenceActions.showIntentToast, pane.editorState.openEditor]);
 
-    return renderResolvedAppShell(composeRenderedMainAppOptions({
+    const renderedShellOptions = composeRenderedMainAppOptions({
         routeState: {
             branchLoaderMode,
             panePopoutMode,
@@ -645,7 +648,12 @@ function MainApp({ locationParams, navigate }) {
             isIOSDevice,
             terminalTabPath: TERMINAL_TAB_PATH,
         },
-    }));
+    });
+
+    return renderResolvedAppShell({
+        ...renderedShellOptions,
+        uiMode: APP_UI_MODE,
+    });
 }
 
 function App() {

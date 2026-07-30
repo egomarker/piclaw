@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import {
+  activateReattachedPane,
   buildPanePopoutReattachRequestMessage,
   canRecoverDetachedPaneInForeground,
   consumePanePopoutReattachRequestMessage,
@@ -340,6 +341,34 @@ test('shouldRetainPaneDetachState keeps detached ownership even after the source
     hasPendingDetachedDockPane: false,
     hasDetachedDockPane: false,
   })).toBe(false);
+});
+
+test('activateReattachedPane uses the shell activation adapter for an existing Mobile tab', () => {
+  const calls: string[] = [];
+  const common = {
+    panePath: '/workspace/foo.widget',
+    activateStoredTab: () => calls.push('store'),
+    openEditor: () => calls.push('open'),
+  };
+
+  activateReattachedPane({
+    ...common,
+    hasOpenTab: true,
+    activateEditorTab: () => calls.push('surface'),
+  });
+  expect(calls).toEqual(['surface']);
+
+  calls.length = 0;
+  activateReattachedPane({ ...common, hasOpenTab: true });
+  expect(calls).toEqual(['store']);
+
+  calls.length = 0;
+  activateReattachedPane({
+    ...common,
+    hasOpenTab: false,
+    activateEditorTab: () => calls.push('surface'),
+  });
+  expect(calls).toEqual(['open']);
 });
 
 test('removeSourcePaneAfterDetachClaim closes terminal tabs but hides detached dock panes', () => {

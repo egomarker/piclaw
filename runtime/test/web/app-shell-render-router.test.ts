@@ -30,6 +30,31 @@ test('renderResolvedAppShell routes to branch-loader renderer when branch loader
   expect(calls).toEqual(['branch']);
 });
 
+test('renderResolvedAppShell uses the Mobile renderer only for the Mobile main shell', () => {
+  const calls: string[] = [];
+  const result = renderResolvedAppShell({
+    branchLoaderMode: false,
+    panePopoutMode: false,
+    uiMode: 'mobile',
+    branchLoaderState: null,
+    panePopoutOptions: {},
+    mainShellOptions: { mobile: true },
+    renderers: {
+      renderMainShell: () => {
+        calls.push('main');
+        return 'main';
+      },
+      renderMobileShell: (options) => {
+        calls.push((options as any).mobile ? 'mobile' : 'wrong-options');
+        return 'mobile';
+      },
+    },
+  });
+
+  expect(result).toBe('mobile');
+  expect(calls).toEqual(['mobile']);
+});
+
 test('renderResolvedAppShell falls back to main shell renderer for default mode', () => {
   const calls: string[] = [];
   const result = renderResolvedAppShell({
