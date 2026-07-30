@@ -27,7 +27,7 @@
       "repository": "https://github.com/Stuk/jszip.git"
     },
     "@fontsource-variable/inter": {
-      "version": "5.2.8",
+      "version": "5.3.0",
       "license": "OFL-1.1",
       "repository": "git+https://github.com/fontsource/font-files.git"
     }
