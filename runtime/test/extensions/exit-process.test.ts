@@ -13,6 +13,7 @@ import {
   listRestartHandoffs,
 } from "../../src/runtime/restart-handoff.js";
 import { createFakeExtensionApi } from "./fake-extension-api.js";
+import { removeSession, updateSessionStreaming } from "../../src/extensions/session-status.js";
 
 type PostedMessage = {
   chatJid: string;
@@ -99,6 +100,30 @@ describe("exit_process extension", () => {
     expect(postCalls).toBe(0);
     expect(listRestartHandoffs()).toEqual([]);
     expect(isPendingShutdown()).toBe(false);
+  });
+
+  test("refuses shutdown while another session is active", async () => {
+    const tool = getTool();
+    let postCalls = 0;
+    setMessagesPostFn(() => {
+      postCalls += 1;
+      return 1;
+    });
+    updateSessionStreaming("web:other-active", true);
+    try {
+      const result = await withChatContext("web:exit-phase-2", "web", () => tool.execute("tool-exit", {
+        reason: "Load phase 2.",
+        resume_message: "Continue after restart.",
+      }));
+      expect(result.details.scheduled).toBe(false);
+      expect(result.details.error).toContain("other session(s) are active");
+      expect(result.terminate).toBeUndefined();
+      expect(postCalls).toBe(0);
+      expect(listRestartHandoffs()).toEqual([]);
+      expect(isPendingShutdown()).toBe(false);
+    } finally {
+      removeSession("web:other-active");
+    }
   });
 
   test("does not post or schedule shutdown when the durable handoff cannot be stored", async () => {
