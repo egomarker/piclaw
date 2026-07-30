@@ -322,7 +322,7 @@ async function executeImageProcess(
 
     case "sharpen": {
       const sigma = params.sigma ?? 1;
-      pipeline = pipeline.sharpen(sigma);
+      pipeline = pipeline.sharpen({ sigma });
       break;
     }
 
