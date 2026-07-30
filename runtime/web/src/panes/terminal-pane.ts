@@ -281,7 +281,7 @@ function injectStyles(ownerDocument = document) {
         background: transparent !important;
       }
       .terminal-pane-xterm .xterm-viewport {
-        scrollbar-color: color-mix(in srgb, var(--terminal-foreground, var(--text-secondary, #8b949e)) 36%, transparent) var(--terminal-background, var(--bg-primary, #0d1117));
+        scrollbar-color: color-mix(in srgb, var(--terminal-foreground, var(--text-secondary, #8b949e)) 22%, var(--terminal-background, var(--bg-primary, #0d1117))) var(--terminal-background, var(--bg-primary, #0d1117));
         scrollbar-width: thin;
       }
       .terminal-pane-xterm .xterm-viewport::-webkit-scrollbar {
@@ -294,8 +294,12 @@ function injectStyles(ownerDocument = document) {
         background: var(--terminal-background, var(--bg-primary, #0d1117));
       }
       .terminal-pane-xterm .xterm-viewport::-webkit-scrollbar-thumb {
-        background: color-mix(in srgb, var(--terminal-foreground, var(--text-secondary, #8b949e)) 36%, transparent);
+        background: color-mix(in srgb, var(--terminal-foreground, var(--text-secondary, #8b949e)) 22%, var(--terminal-background, var(--bg-primary, #0d1117)));
         border: 0;
+        border-radius: 999px;
+      }
+      .terminal-pane-xterm .xterm-viewport::-webkit-scrollbar-thumb:hover {
+        background: color-mix(in srgb, var(--terminal-foreground, var(--text-secondary, #8b949e)) 38%, var(--terminal-background, var(--bg-primary, #0d1117)));
       }
       .terminal-pane-xterm .xterm-decoration-overview-ruler {
         background: var(--terminal-background, var(--bg-primary, #0d1117));
