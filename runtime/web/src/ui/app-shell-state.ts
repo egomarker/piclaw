@@ -25,8 +25,14 @@ interface ScriptLike {
 
 /** Minimal document shape needed for app shell helper tests and runtime use. */
 export interface DocumentLike {
+  documentElement?: {
+    dataset?: Record<string, string | undefined>;
+  } | null;
   querySelectorAll?(selector: string): ArrayLike<ScriptLike> | null | undefined;
 }
+
+/** Classic-bundle shell variant selected by the authenticated HTML entry point. */
+export type AppUiMode = 'classic' | 'mobile';
 
 /** Minimal location param reader used by the shell boot parser. */
 export interface LocationParamsLike {
@@ -87,6 +93,13 @@ export interface ReadAppLocationModesOptions {
 /** Optional override for the window-global rename form lock carrier. */
 export interface RenameBranchFormLockOptions {
   window?: (Window & typeof globalThis & Record<string, unknown>) | null;
+}
+
+/** Resolve the shell variant marker embedded by Classic or Mobile index.html. */
+export function readAppUiMode(
+  doc: DocumentLike | null = typeof document !== 'undefined' ? document : null,
+): AppUiMode {
+  return doc?.documentElement?.dataset?.piclawUi === 'mobile' ? 'mobile' : 'classic';
 }
 
 function getDefaultImportMetaUrl(): string | null {

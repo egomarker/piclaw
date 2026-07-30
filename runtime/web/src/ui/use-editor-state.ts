@@ -8,9 +8,15 @@
  * (panes/editor-extension.ts). This hook coordinates tabs only.
  */
 
-import { useState, useCallback, useRef, useEffect } from '../vendor/preact-htm.js';
+import { useState, useCallback, useRef, useEffect, useMemo } from '../vendor/preact-htm.js';
 import { paneRegistry, tabStore } from '../panes/index.js';
 import { addRecentFile } from './recent-files.js';
+import {
+    MOBILE_CHAT_TAB_ID,
+    composeMobileTabStripTabs,
+    isMobileChatTabId,
+    resolveMobileSurfaceAfterClose,
+} from './mobile-tab-state.js';
 
 function renamePaneOverrides(previous, oldPath, newPath, type) {
     if (!(previous instanceof Map) || previous.size === 0 || !oldPath || !newPath) return previous;
@@ -63,23 +69,39 @@ function renamePathSet(previous, oldPath, newPath, type) {
  *
  * @returns Tab state, handlers, and active tab info.
  */
-export function useEditorState({ onTabClosed } = {}) {
+export function useEditorState({ onTabClosed, uiMode = 'classic' } = {}) {
     // Store callback in ref so close handlers never re-create when the caller changes identity
     const onTabClosedRef = useRef(onTabClosed);
     onTabClosedRef.current = onTabClosed;
+    const mobileTabsEnabled = uiMode === 'mobile';
 
     // ── Tab strip state (driven by tabStore) ────────────────────
     const [tabStripTabs, setTabStripTabs] = useState(() => tabStore.getTabs());
     const [tabStripActiveId, setTabStripActiveId] = useState(() => tabStore.getActiveId());
     const [editorOpen, setEditorOpen] = useState(() => tabStore.getTabs().length > 0);
+    const [activeSurfaceId, setActiveSurfaceId] = useState(() => (
+        mobileTabsEnabled ? tabStore.getActiveId() || MOBILE_CHAT_TAB_ID : tabStore.getActiveId()
+    ));
+    const activeSurfaceIdRef = useRef(activeSurfaceId);
+
+    const activateSurface = useCallback((id) => {
+        activeSurfaceIdRef.current = id;
+        setActiveSurfaceId(id);
+    }, []);
 
     useEffect(() => {
         return tabStore.onChange((tabs, activeId) => {
             setTabStripTabs(tabs);
             setTabStripActiveId(activeId);
             setEditorOpen(tabs.length > 0);
+            if (!mobileTabsEnabled) return;
+            if (tabs.length === 0) {
+                activateSurface(MOBILE_CHAT_TAB_ID);
+            } else if (!isMobileChatTabId(activeSurfaceIdRef.current)) {
+                activateSurface(activeId || MOBILE_CHAT_TAB_ID);
+            }
         });
-    }, []);
+    }, [activateSurface, mobileTabsEnabled]);
 
     // ── Markdown preview state ────────────────────────────────
     const [previewTabs, setPreviewTabs] = useState(() => new Set());
@@ -154,6 +176,7 @@ export function useEditorState({ onTabClosed } = {}) {
         const viewState = options?.viewState && typeof options.viewState === 'object' ? options.viewState : null;
         const diffMode = options?.diffMode === 'saved' ? 'saved' : null;
         tabStore.open(path, label);
+        if (mobileTabsEnabled) activateSurface(path);
         addRecentFile(path);
         if (viewState) {
             tabStore.saveViewState(path, viewState);
@@ -174,43 +197,42 @@ export function useEditorState({ onTabClosed } = {}) {
                 return next;
             });
         }
-    }, []);
-
-    /** Close the active tab (with dirty confirmation). */
-    const closeEditor = useCallback(() => {
-        const activeId = tabStore.getActiveId();
-        if (activeId) {
-            const tab = tabStore.get(activeId);
-            if (tab?.dirty) {
-                const confirmed = window.confirm(`"${tab.label}" has unsaved changes. Close anyway?`);
-                if (!confirmed) return;
-            }
-            tabStore.close(activeId);
-            cleanupPreviewTab(activeId);
-            cleanupDiffTab(activeId);
-            cleanupPaneOverride(activeId);
-            onTabClosedRef.current?.(activeId);
-        }
-    }, [cleanupDiffTab, cleanupPaneOverride, cleanupPreviewTab]);
+    }, [activateSurface, mobileTabsEnabled]);
 
     /** Close a specific tab (from tab strip). */
     const handleTabClose = useCallback((id) => {
+        if (!id || (mobileTabsEnabled && isMobileChatTabId(id))) return;
         const tab = tabStore.get(id);
-        if (tab?.dirty) {
+        if (!tab) return;
+        if (tab.dirty) {
             const confirmed = window.confirm(`"${tab.label}" has unsaved changes. Close anyway?`);
             if (!confirmed) return;
         }
+        const nextSurfaceId = mobileTabsEnabled && activeSurfaceIdRef.current === id
+            ? resolveMobileSurfaceAfterClose(tabStore.getTabs(), id)
+            : null;
         tabStore.close(id);
         cleanupPreviewTab(id);
         cleanupDiffTab(id);
         cleanupPaneOverride(id);
         onTabClosedRef.current?.(id);
-    }, [cleanupDiffTab, cleanupPaneOverride, cleanupPreviewTab]);
+        if (nextSurfaceId) {
+            activateSurface(nextSurfaceId);
+            if (!isMobileChatTabId(nextSurfaceId)) tabStore.activate(nextSurfaceId);
+        }
+    }, [activateSurface, cleanupDiffTab, cleanupPaneOverride, cleanupPreviewTab, mobileTabsEnabled]);
 
-    /** Activate a tab by id. */
+    /** Close the active editor tab (with dirty confirmation). */
+    const closeEditor = useCallback(() => {
+        const activeId = tabStore.getActiveId();
+        if (activeId) handleTabClose(activeId);
+    }, [handleTabClose]);
+
+    /** Activate a pane tab or Mobile's synthetic Chat tab. */
     const handleTabActivate = useCallback((id) => {
-        tabStore.activate(id);
-    }, []);
+        if (mobileTabsEnabled) activateSurface(id);
+        if (!isMobileChatTabId(id)) tabStore.activate(id);
+    }, [activateSurface, mobileTabsEnabled]);
 
     /** Close all other tabs. */
     const handleTabCloseOthers = useCallback((id) => {
@@ -221,6 +243,9 @@ export function useEditorState({ onTabClosed } = {}) {
             if (!confirmed) return;
         }
         const closedIds = others.map(t => t.id);
+        const activeSurfaceWasClosed = mobileTabsEnabled
+            && !isMobileChatTabId(activeSurfaceIdRef.current)
+            && closedIds.includes(activeSurfaceIdRef.current);
         tabStore.closeOthers(id);
         closedIds.forEach(cid => {
             cleanupPreviewTab(cid);
@@ -228,7 +253,11 @@ export function useEditorState({ onTabClosed } = {}) {
             cleanupPaneOverride(cid);
             onTabClosedRef.current?.(cid);
         });
-    }, [cleanupDiffTab, cleanupPaneOverride, cleanupPreviewTab]);
+        if (activeSurfaceWasClosed) {
+            activateSurface(id);
+            tabStore.activate(id);
+        }
+    }, [activateSurface, cleanupDiffTab, cleanupPaneOverride, cleanupPreviewTab, mobileTabsEnabled]);
 
     /** Close all tabs. */
     const handleTabCloseAll = useCallback(() => {
@@ -239,6 +268,9 @@ export function useEditorState({ onTabClosed } = {}) {
             if (!confirmed) return;
         }
         const closedIds = tabs.map(t => t.id);
+        const activeSurfaceWasClosed = mobileTabsEnabled
+            && !isMobileChatTabId(activeSurfaceIdRef.current)
+            && closedIds.includes(activeSurfaceIdRef.current);
         tabStore.closeAll();
         closedIds.forEach(cid => {
             cleanupPreviewTab(cid);
@@ -246,7 +278,10 @@ export function useEditorState({ onTabClosed } = {}) {
             cleanupPaneOverride(cid);
             onTabClosedRef.current?.(cid);
         });
-    }, [cleanupDiffTab, cleanupPaneOverride, cleanupPreviewTab]);
+        if (activeSurfaceWasClosed) {
+            activateSurface(tabStore.getActiveId() || MOBILE_CHAT_TAB_ID);
+        }
+    }, [activateSurface, cleanupDiffTab, cleanupPaneOverride, cleanupPreviewTab, mobileTabsEnabled]);
 
     /** Toggle pin on a tab. */
     const handleTabTogglePin = useCallback((id) => {
@@ -262,8 +297,9 @@ export function useEditorState({ onTabClosed } = {}) {
             else next.add(id);
             return next;
         });
+        if (mobileTabsEnabled) activateSurface(id);
         tabStore.activate(id);
-    }, []);
+    }, [activateSurface, mobileTabsEnabled]);
 
     /** Replace a specialized editor tab with the generic source editor. */
     const handleTabEditSource = useCallback((id) => {
@@ -274,8 +310,9 @@ export function useEditorState({ onTabClosed } = {}) {
             next.set(id, 'editor');
             return next;
         });
+        if (mobileTabsEnabled) activateSurface(id);
         tabStore.activate(id);
-    }, []);
+    }, [activateSurface, mobileTabsEnabled]);
 
     /** Reveal active tab in workspace explorer. */
     const revealInExplorer = useCallback(() => {
@@ -320,11 +357,24 @@ export function useEditorState({ onTabClosed } = {}) {
         return () => window.removeEventListener('beforeunload', handleBeforeUnload);
     }, []);
 
+    const mobileTabStripTabs = useMemo(
+        () => composeMobileTabStripTabs(tabStripTabs, mobileTabsEnabled),
+        [mobileTabsEnabled, tabStripTabs],
+    );
+    const mobileTabStripActiveId = mobileTabsEnabled ? activeSurfaceId : tabStripActiveId;
+    const mobileChatActive = mobileTabsEnabled && isMobileChatTabId(activeSurfaceId);
+    const activateChatSurface = useCallback(() => {
+        if (mobileTabsEnabled) activateSurface(MOBILE_CHAT_TAB_ID);
+    }, [activateSurface, mobileTabsEnabled]);
+
     return {
         // State
         editorOpen,
         tabStripTabs,
         tabStripActiveId,
+        mobileTabStripTabs,
+        mobileTabStripActiveId,
+        mobileChatActive,
         previewTabs,
         diffTabs,
         tabPaneOverrides,
@@ -339,6 +389,7 @@ export function useEditorState({ onTabClosed } = {}) {
         handleTabTogglePreview,
         handleTabToggleDiff,
         handleTabEditSource,
+        activateChatSurface,
         revealInExplorer,
     };
 }

@@ -21,6 +21,16 @@ const MIN_H = 60;
 const DEFAULT_H = 220;
 const LS_KEY = 'mdPreviewHeight';
 
+/** Find the nearest rendered ancestor when an intermediate layout wrapper uses display: contents. */
+export function getPreviewContainerHeight(panelElement, fallback = 500) {
+    let container = panelElement?.parentElement || null;
+    while (container) {
+        if (container.offsetHeight > 0) return container.offsetHeight;
+        container = container.parentElement;
+    }
+    return fallback;
+}
+
 function getStoredHeight() {
     return readStoredPanelHeight(localStorage, LS_KEY, MIN_H, DEFAULT_H);
 }
@@ -132,8 +142,7 @@ export function MarkdownPreview({ getContent, subscribeContentChange, path, onCl
         e.preventDefault();
         const startY = e.clientY;
         const startH = panelRef.current?.offsetHeight || height;
-        const container = panelRef.current?.parentElement;
-        const maxH = container ? container.offsetHeight * 0.7 : 500;
+        const maxH = getPreviewContainerHeight(panelRef.current) * 0.7;
         const splitter = e.currentTarget;
         splitter.classList.add('dragging');
         document.body.style.cursor = 'row-resize';
@@ -163,8 +172,7 @@ export function MarkdownPreview({ getContent, subscribeContentChange, path, onCl
         if (!touch) return;
         const startY = touch.clientY;
         const startH = panelRef.current?.offsetHeight || height;
-        const container = panelRef.current?.parentElement;
-        const maxH = container ? container.offsetHeight * 0.7 : 500;
+        const maxH = getPreviewContainerHeight(panelRef.current) * 0.7;
         const splitter = e.currentTarget;
         splitter.classList.add('dragging');
         document.body.style.userSelect = 'none';

@@ -8,6 +8,25 @@ import {
   renderMainShell,
   scrollToPostedTimelineMessage,
 } from '../../web/src/ui/app-main-shell-render.js';
+import { composeMobileShellRenderOptions } from '../../web/src/ui/app-mobile-shell-render.js';
+
+test('Mobile maps unified display tabs without replacing pane runtime tabs', () => {
+  const paneTabs = [{ id: 'file' }];
+  const displayTabs = [{ id: 'piclaw://chat' }, ...paneTabs];
+  const options = composeMobileShellRenderOptions({
+    tabStripTabs: paneTabs,
+    tabStripActiveId: 'file',
+    mobileTabStripTabs: displayTabs,
+    mobileTabStripActiveId: 'piclaw://chat',
+    mobileChatActive: true,
+  });
+
+  expect(options.tabStripTabs).toBe(paneTabs);
+  expect(options.tabStripActiveId).toBe('file');
+  expect(options.displayTabStripTabs).toBe(displayTabs);
+  expect(options.displayTabStripActiveId).toBe('piclaw://chat');
+  expect(options.uiMode).toBe('mobile');
+});
 
 test('buildMainShellClassName composes workspace/editor/chat/zen modifiers', () => {
   expect(buildMainShellClassName({
@@ -23,6 +42,23 @@ test('buildMainShellClassName composes workspace/editor/chat/zen modifiers', () 
     chatOnlyMode: true,
     zenMode: true,
   })).toBe('app-shell workspace-collapsed editor-open chat-only zen-mode');
+
+  expect(buildMainShellClassName({
+    workspaceOpen: true,
+    editorOpen: true,
+    chatOnlyMode: false,
+    zenMode: false,
+    uiMode: 'mobile',
+  })).toBe('app-shell editor-open mobile-interface mobile-pane-active');
+
+  expect(buildMainShellClassName({
+    workspaceOpen: true,
+    editorOpen: true,
+    chatOnlyMode: false,
+    zenMode: false,
+    uiMode: 'mobile',
+    mobileChatActive: true,
+  })).toBe('app-shell editor-open mobile-interface mobile-chat-active');
 });
 
 test('extractPostedUserMessageId prefers user_message.id and falls back to row_id', () => {
@@ -243,6 +279,17 @@ function createMainShellRenderOptions(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+test('renderMainShell groups Chat chrome separately from global overlays', () => {
+  const tree = renderMainShell(createMainShellRenderOptions());
+  const classes = new Set<string>();
+  walkVNodes(tree, (node) => {
+    if (typeof node.props?.class === 'string') classes.add(node.props.class);
+  });
+
+  expect(classes.has('chat-surface-main')).toBe(true);
+  expect(classes.has('chat-surface-footer')).toBe(true);
+});
 
 test('renderMainShell passes queue controls to ComposeBox and does not render a top-level queue stack', () => {
   const followupQueueItems = [{ row_id: 7, content: 'queued item' }];

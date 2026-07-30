@@ -1,8 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { handleShellRoutes } from "../../../src/channels/web/http/dispatch-shell.js";
+import { handleShellRoutes, resolveWebUiIndexPath } from "../../../src/channels/web/http/dispatch-shell.js";
 import { buildRouteFlags } from "./helpers/route-flags.js";
 
 describe("web http shell dispatch", () => {
+  test("resolves the configured Classic, Visual, and Mobile shell paths", () => {
+    expect(resolveWebUiIndexPath("classic")).toBe("classic/index.html");
+    expect(resolveWebUiIndexPath("visual")).toBe("visual/index.html");
+    expect(resolveWebUiIndexPath("mobile")).toBe("mobile/index.html");
+    expect(resolveWebUiIndexPath("unknown")).toBe("classic/index.html");
+  });
+
   test("returns null when no shell route matches", async () => {
     const channel = {} as any;
     const req = new Request("https://example.com/unknown", { method: "GET" });

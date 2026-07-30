@@ -44,6 +44,7 @@ interface UsePaneRuntimeOrchestrationOptions {
   panePopoutLabel: string;
   chatOnlyMode: boolean;
   editorOpen: boolean;
+  paneSurfaceVisible?: boolean;
   tabStripTabs: any[];
   tabStripActiveId: string | null;
   previewTabs: Set<string>;
@@ -52,6 +53,7 @@ interface UsePaneRuntimeOrchestrationOptions {
   terminalTabPath: string;
   vncTabPrefix: string;
   openEditor: (path: string, options?: Record<string, unknown>) => void;
+  activateEditorTab?: (path: string) => void;
   closeEditor: () => void;
   getWorkspaceFile: (path: string, maxBytes: number, mode: string) => Promise<any>;
 }
@@ -91,6 +93,43 @@ export function removeSourcePaneAfterDetachClaim(options: {
     return;
   }
   options.closeTab?.(panePath);
+}
+
+export function scheduleVisiblePaneReactivation(options: {
+  visible: boolean;
+  instance: any;
+  getCurrentInstance: () => any;
+  requestFrame?: (callback: () => void) => number;
+  cancelFrame?: (handle: number) => void;
+}): () => void {
+  if (!options.visible || !options.instance) return () => {};
+  const requestFrame = options.requestFrame ?? ((callback) => requestAnimationFrame(callback));
+  const cancelFrame = options.cancelFrame ?? ((handle) => cancelAnimationFrame(handle));
+  const instance = options.instance;
+  const frame = requestFrame(() => {
+    if (options.getCurrentInstance() !== instance) return;
+    instance.resize?.();
+    instance.focus?.();
+  });
+  return () => cancelFrame(frame);
+}
+
+export function activateReattachedPane(options: {
+  panePath: string;
+  hasOpenTab: boolean;
+  activateEditorTab?: (path: string) => void;
+  activateStoredTab: (path: string) => void;
+  openEditor: (path: string) => void;
+}): void {
+  if (!options.hasOpenTab) {
+    options.openEditor(options.panePath);
+    return;
+  }
+  if (options.activateEditorTab) {
+    options.activateEditorTab(options.panePath);
+    return;
+  }
+  options.activateStoredTab(options.panePath);
 }
 
 interface DetachedPaneState {
@@ -338,6 +377,7 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
     panePopoutLabel,
     chatOnlyMode,
     editorOpen,
+    paneSurfaceVisible = true,
     tabStripTabs,
     tabStripActiveId,
     previewTabs,
@@ -346,6 +386,7 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
     terminalTabPath,
     vncTabPrefix,
     openEditor,
+    activateEditorTab,
     closeEditor,
     getWorkspaceFile,
   } = options;
@@ -474,12 +515,13 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
     } else if (normalizedPath === terminalTabPath && wasDetachedTab) {
       openEditor(normalizedPath, { label: 'Terminal' });
     } else {
-      const activeTab = tabStore.get(normalizedPath);
-      if (activeTab) {
-        tabStore.activate(normalizedPath);
-      } else {
-        openEditor(normalizedPath);
-      }
+      activateReattachedPane({
+        panePath: normalizedPath,
+        hasOpenTab: Boolean(tabStore.get(normalizedPath)),
+        activateEditorTab,
+        activateStoredTab: (path) => tabStore.activate(path),
+        openEditor,
+      });
     }
 
     if (options.closeDetachedWindow !== false && handle && typeof handle.close === 'function') {
@@ -487,7 +529,7 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
     }
 
     return true;
-  }, [clearDetachedPane, openEditor, setDockVisible, terminalTabPath]);
+  }, [activateEditorTab, clearDetachedPane, openEditor, setDockVisible, terminalTabPath]);
 
   const flushDeferredPaneCloseRecoveries = useCallback(() => {
     if (panePopoutMode) return;
@@ -992,6 +1034,12 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
       paneWindowId: detachState.paneWindowId,
     }, window.location.origin);
   }, [panePopoutMode]);
+
+  useEffect(() => scheduleVisiblePaneReactivation({
+    visible: paneSurfaceVisible,
+    instance: editorInstanceRef.current,
+    getCurrentInstance: () => editorInstanceRef.current,
+  }), [paneSurfaceVisible]);
 
   useEffect(() => {
     const openPaths = new Set(

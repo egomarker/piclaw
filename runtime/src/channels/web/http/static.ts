@@ -97,7 +97,7 @@ function renderHtmlTemplate(relPath: string, html: string): string {
     NOTIFICATION_SOURCE_LABELS_PLACEHOLDER,
     WEB_RUNTIME_CONFIG.notificationDebugLabels ? "1" : "0"
   );
-  if (relPath === "classic/index.html") {
+  if (relPath === "classic/index.html" || relPath === "mobile/index.html") {
     return renderedWithSharedFlags.replaceAll(APP_ASSET_VERSION_PLACEHOLDER, getAppAssetVersion());
   }
   if (relPath === "visual/index.html") {

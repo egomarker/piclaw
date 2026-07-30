@@ -1,0 +1,229 @@
+/*
+ * Mobile UI mode
+ *
+ * Mobile reuses Classic components but presents Chat and pane tabs as a
+ * single workspace. Every selector is scoped to .mobile-interface so the
+ * Classic shell remains byte-for-byte compatible at runtime.
+ */
+
+.app-shell.mobile-interface {
+    --mobile-content-column: 3;
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto auto auto auto;
+    align-items: stretch;
+    justify-content: stretch;
+}
+
+/*
+ * Classic caps Chat at --chat-max-width when its explorer is collapsed and no
+ * pane is open. Keep the Mobile Chat surface stretched across its grid track.
+ */
+.app-shell.mobile-interface.workspace-collapsed:not(.editor-open):not(.chat-only):not(.pane-popout) > .container {
+    width: 100%;
+    justify-self: stretch;
+}
+
+/* Keep the existing explorer as an independent left rail. */
+.app-shell.mobile-interface > .workspace-sidebar {
+    grid-column: 1;
+    grid-row: 1 / -1;
+}
+
+.app-shell.mobile-interface > .workspace-splitter {
+    grid-column: 2;
+    grid-row: 1 / -1;
+}
+
+.app-shell.mobile-interface > .editor-splitter {
+    display: none !important;
+}
+
+/*
+ * Let the editor container's children join the shell grid. This keeps every
+ * pane mounted while allowing Chat to occupy the same main-surface row.
+ */
+.app-shell.mobile-interface > .editor-pane-container {
+    display: contents;
+}
+
+.app-shell.mobile-interface > .editor-pane-container > .tab-strip {
+    grid-column: var(--mobile-content-column);
+    grid-row: 1;
+    min-width: 0;
+    padding-top: env(safe-area-inset-top, 0px);
+}
+
+.app-shell.mobile-interface > .editor-pane-container > .editor-pane-host {
+    grid-column: var(--mobile-content-column);
+    grid-row: 2;
+    min-width: 0;
+    min-height: 0;
+}
+
+.app-shell.mobile-interface > .editor-pane-container > .md-preview-splitter {
+    grid-column: var(--mobile-content-column);
+    grid-row: 3;
+}
+
+.app-shell.mobile-interface > .editor-pane-container > .md-preview-panel {
+    grid-column: var(--mobile-content-column);
+    grid-row: 4;
+    min-width: 0;
+}
+
+.app-shell.mobile-interface > .editor-pane-container > .dock-splitter {
+    grid-column: var(--mobile-content-column);
+    grid-row: 5;
+}
+
+.app-shell.mobile-interface > .editor-pane-container > .dock-panel {
+    grid-column: var(--mobile-content-column);
+    grid-row: 6;
+    min-width: 0;
+}
+
+.app-shell.mobile-interface > .container {
+    grid-column: var(--mobile-content-column);
+    grid-row: 2;
+    align-self: stretch;
+    width: 100%;
+    height: auto;
+    min-width: 0 !important;
+    min-height: 0;
+    max-width: none !important;
+    margin: 0 !important;
+}
+
+/* Chat and pane surfaces stay mounted; only the inactive surface is hidden. */
+.app-shell.mobile-interface > .container > .chat-surface-main {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.app-shell.mobile-interface > .container > .chat-surface-footer {
+    display: flex;
+    flex: 0 0 auto;
+    min-height: 0;
+    flex-direction: column;
+}
+
+/* Keep global dialogs/widgets usable while the Chat timeline itself is hidden. */
+.app-shell.mobile-interface.mobile-pane-active > .container {
+    display: flex;
+    background: transparent;
+    pointer-events: none;
+}
+
+.app-shell.mobile-interface.mobile-pane-active > .container > .chat-surface-main,
+.app-shell.mobile-interface.mobile-pane-active > .container > .chat-surface-footer {
+    display: none;
+}
+
+.app-shell.mobile-interface.mobile-pane-active > .container > :not(.chat-surface-main):not(.chat-surface-footer) {
+    pointer-events: auto;
+}
+
+.app-shell.mobile-interface.mobile-chat-active > .editor-pane-container > .editor-pane-host,
+.app-shell.mobile-interface.mobile-chat-active > .editor-pane-container > .md-preview-splitter,
+.app-shell.mobile-interface.mobile-chat-active > .editor-pane-container > .md-preview-panel {
+    display: none;
+}
+
+/* The dock is global to the selected surface, including Chat-only sessions. */
+.app-shell.mobile-interface > .editor-pane-container > .dock-panel.standalone {
+    height: var(--dock-height, 200px);
+    min-height: 100px;
+    max-height: 50vh;
+    flex: none;
+    border-top: 1px solid var(--border-color);
+}
+
+.app-shell.mobile-interface .tab-item.non-closable {
+    padding-right: 10px;
+}
+
+/* Reserve the fixed hamburger's hit area whenever it sits over main content. */
+.app-shell.mobile-interface.workspace-collapsed > .editor-pane-container > .tab-strip {
+    padding-left: max(44px, calc(env(safe-area-inset-left, 0px) + 44px));
+}
+
+/* Undo Classic's side-by-side compact Chat treatment. */
+.app-shell.mobile-interface.editor-open > .container {
+    font-size: 1em;
+}
+
+.app-shell.mobile-interface.editor-open > .container .post-content {
+    font-size: var(--chat-content-font-size);
+}
+
+.app-shell.mobile-interface.editor-open > .container .agent-status {
+    font-size: var(--font-size-sm);
+}
+
+.app-shell.mobile-interface.editor-open > .container .compose-input {
+    min-height: 50px;
+    padding: 0;
+}
+
+.app-shell.mobile-interface.editor-open > .container .post-avatar {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    font-size: var(--font-size-sm);
+}
+
+.app-shell.mobile-interface.editor-open > .container .post-avatar.has-image img {
+    width: 100%;
+    height: 100%;
+}
+
+/* Mobile Zen is Chat-only. Open panes and the dock remain mounted but hidden. */
+.app-shell.mobile-interface.zen-mode > .container {
+    display: flex !important;
+    grid-column: var(--mobile-content-column);
+    grid-row: 2;
+}
+
+.app-shell.mobile-interface.zen-mode > .editor-pane-container > .tab-strip,
+.app-shell.mobile-interface.zen-mode > .editor-pane-container > .zen-hover-zone,
+.app-shell.mobile-interface.zen-mode > .editor-pane-container > .editor-pane-host,
+.app-shell.mobile-interface.zen-mode > .editor-pane-container > .md-preview-splitter,
+.app-shell.mobile-interface.zen-mode > .editor-pane-container > .md-preview-panel,
+.app-shell.mobile-interface.zen-mode > .editor-pane-container > .dock-splitter,
+.app-shell.mobile-interface.zen-mode > .editor-pane-container > .dock-panel {
+    display: none !important;
+}
+
+@media (min-width: 640px) {
+    .app-shell.mobile-interface.editor-open > .container .post-avatar {
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+        min-height: 44px;
+    }
+}
+
+@media (min-width: 1024px) {
+    .app-shell.mobile-interface.editor-open > .container .post-avatar {
+        width: 48px;
+        height: 48px;
+        min-width: 48px;
+        min-height: 48px;
+    }
+}
+
+@media (max-width: 1023px) {
+    .app-shell.mobile-interface {
+        --mobile-content-column: 1;
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .app-shell.mobile-interface > .editor-pane-container > .tab-strip {
+        padding-left: max(44px, calc(env(safe-area-inset-left, 0px) + 44px));
+    }
+}

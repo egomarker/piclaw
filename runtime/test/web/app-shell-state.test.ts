@@ -7,7 +7,14 @@ import {
   getRenameBranchFormLock,
   loadStoredBtwSession,
   readAppLocationModes,
+  readAppUiMode,
 } from '../../web/src/ui/app-shell-state.js';
+
+test('readAppUiMode selects Mobile only from the explicit shell marker', () => {
+  expect(readAppUiMode({ documentElement: { dataset: { piclawUi: 'mobile' } } })).toBe('mobile');
+  expect(readAppUiMode({ documentElement: { dataset: { piclawUi: 'classic' } } })).toBe('classic');
+  expect(readAppUiMode(null)).toBe('classic');
+});
 
 function createScript(src: string) {
   return {

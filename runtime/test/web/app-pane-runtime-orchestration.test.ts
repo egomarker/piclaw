@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import {
+  activateReattachedPane,
   buildPanePopoutReattachRequestMessage,
   canRecoverDetachedPaneInForeground,
   consumePanePopoutReattachRequestMessage,
@@ -8,6 +9,7 @@ import {
   isLikelySafariBrowser,
   isWorkspaceUpdateRelevantForPath,
   removeSourcePaneAfterDetachClaim,
+  scheduleVisiblePaneReactivation,
   shouldApplyWorkspaceEditorRefresh,
   shouldDelayPaneReattachAfterWindowClose,
   shouldDisableTerminalReattach,
@@ -340,6 +342,79 @@ test('shouldRetainPaneDetachState keeps detached ownership even after the source
     hasPendingDetachedDockPane: false,
     hasDetachedDockPane: false,
   })).toBe(false);
+});
+
+test('scheduleVisiblePaneReactivation resizes and focuses only the current visible pane', () => {
+  const calls: string[] = [];
+  const instance = {
+    resize: () => calls.push('resize'),
+    focus: () => calls.push('focus'),
+  };
+  let scheduled: (() => void) | null = null;
+  let cancelled = 0;
+  const cancel = scheduleVisiblePaneReactivation({
+    visible: true,
+    instance,
+    getCurrentInstance: () => instance,
+    requestFrame: (callback) => {
+      scheduled = callback;
+      return 7;
+    },
+    cancelFrame: (handle) => { cancelled = handle; },
+  });
+
+  scheduled?.();
+  expect(calls).toEqual(['resize', 'focus']);
+  cancel();
+  expect(cancelled).toBe(7);
+
+  calls.length = 0;
+  scheduleVisiblePaneReactivation({
+    visible: false,
+    instance,
+    getCurrentInstance: () => instance,
+    requestFrame: () => { throw new Error('should not schedule'); },
+  });
+  expect(calls).toEqual([]);
+
+  scheduleVisiblePaneReactivation({
+    visible: true,
+    instance,
+    getCurrentInstance: () => null,
+    requestFrame: (callback) => {
+      callback();
+      return 8;
+    },
+  });
+  expect(calls).toEqual([]);
+});
+
+test('activateReattachedPane uses the shell activation adapter for an existing Mobile tab', () => {
+  const calls: string[] = [];
+  const common = {
+    panePath: '/workspace/foo.widget',
+    activateStoredTab: () => calls.push('store'),
+    openEditor: () => calls.push('open'),
+  };
+
+  activateReattachedPane({
+    ...common,
+    hasOpenTab: true,
+    activateEditorTab: () => calls.push('surface'),
+  });
+  expect(calls).toEqual(['surface']);
+
+  calls.length = 0;
+  activateReattachedPane({ ...common, hasOpenTab: true });
+  expect(calls).toEqual(['store']);
+
+  calls.length = 0;
+  activateReattachedPane({
+    ...common,
+    hasOpenTab: false,
+    activateEditorTab: () => calls.push('surface'),
+  });
+  expect(calls).toEqual(['open']);
 });
 
 test('removeSourcePaneAfterDetachClaim closes terminal tabs but hides detached dock panes', () => {

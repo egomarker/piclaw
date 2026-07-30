@@ -1,6 +1,26 @@
-import { useRef } from '../vendor/preact-htm.js';
+import { useCallback, useRef } from '../vendor/preact-htm.js';
 import { useEditorState } from './use-editor-state.js';
 import { usePaneRuntimeOrchestration } from './app-pane-runtime-orchestration.js';
+
+export function resolveMainPaneSurfaceVisibility(options: {
+  uiMode?: 'classic' | 'mobile';
+  panePopoutMode: boolean;
+  mobileChatActive: boolean;
+}): boolean {
+  return options.panePopoutMode || options.uiMode !== 'mobile' || !options.mobileChatActive;
+}
+
+export function runMainAppZenToggle(options: {
+  uiMode?: 'classic' | 'mobile';
+  zenMode: boolean;
+  activateChatSurface?: () => void;
+  toggleZenMode: () => void;
+}) {
+  if (options.uiMode === 'mobile' && !options.zenMode) {
+    options.activateChatSurface?.();
+  }
+  options.toggleZenMode();
+}
 
 export function buildMainAppPaneCompositionResult(options: {
   removeFileRefRef: { current: any };
@@ -19,6 +39,7 @@ export function useMainAppPaneComposition(options: {
   panePopoutPath: string | null;
   panePopoutLabel: string | null;
   chatOnlyMode: boolean;
+  uiMode?: 'classic' | 'mobile';
   terminalTabPath: string;
   vncTabPrefix: string;
   getWorkspaceFile: (path: string, maxBytes: number, mode: string) => Promise<any>;
@@ -27,6 +48,7 @@ export function useMainAppPaneComposition(options: {
 
   const editorState = useEditorState({
     onTabClosed: (path) => removeFileRefRef.current?.(path),
+    uiMode: options.uiMode,
   });
 
   const paneRuntime = usePaneRuntimeOrchestration({
@@ -35,6 +57,11 @@ export function useMainAppPaneComposition(options: {
     panePopoutLabel: options.panePopoutLabel,
     chatOnlyMode: options.chatOnlyMode,
     editorOpen: editorState.editorOpen,
+    paneSurfaceVisible: resolveMainPaneSurfaceVisibility({
+      uiMode: options.uiMode,
+      panePopoutMode: options.panePopoutMode,
+      mobileChatActive: editorState.mobileChatActive,
+    }),
     tabStripTabs: editorState.tabStripTabs,
     tabStripActiveId: editorState.tabStripActiveId,
     previewTabs: editorState.previewTabs,
@@ -43,13 +70,25 @@ export function useMainAppPaneComposition(options: {
     terminalTabPath: options.terminalTabPath,
     vncTabPrefix: options.vncTabPrefix,
     openEditor: editorState.openEditor,
+    activateEditorTab: editorState.handleTabActivate,
     closeEditor: editorState.closeEditor,
     getWorkspaceFile: options.getWorkspaceFile,
   });
 
+  const toggleZenMode = useCallback(() => {
+    runMainAppZenToggle({
+      uiMode: options.uiMode,
+      zenMode: paneRuntime.zenMode,
+      activateChatSurface: editorState.activateChatSurface,
+      toggleZenMode: paneRuntime.toggleZenMode,
+    });
+  }, [editorState.activateChatSurface, options.uiMode, paneRuntime.toggleZenMode, paneRuntime.zenMode]);
+
   return buildMainAppPaneCompositionResult({
     removeFileRefRef,
     editorState,
-    paneRuntime,
+    paneRuntime: options.uiMode === 'mobile'
+      ? { ...paneRuntime, toggleZenMode }
+      : paneRuntime,
   });
 }
