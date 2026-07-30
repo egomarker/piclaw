@@ -463,6 +463,7 @@ export function buildTerminalTheme(runtimeWindow = window, runtimeDocument = doc
     cursorAccent: background,
     selectionBackground,
     selectionForeground: foreground,
+    overviewRulerBorder: background,
     black: ensureTerminalColorContrast(background, hover, 3),
     red: ensureTerminalColorContrast(background, danger, 4.5),
     green: ensureTerminalColorContrast(background, success, 4.5),

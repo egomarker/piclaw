@@ -223,6 +223,7 @@ test('buildTerminalTheme prefers the theme foreground when it already satisfies 
         expect(theme.white).toBe('#5a3900');
         expect(theme.brightWhite).toBe('#5a3900');
         expect(theme.selectionForeground).toBe('#5a3900');
+        expect(theme.overviewRulerBorder).toBe(theme.background);
         expect(contrastRatio(theme.background, theme.foreground)).toBeGreaterThanOrEqual(7);
         expect(contrastRatio(theme.background, theme.cursor)).toBeGreaterThanOrEqual(3);
         expect(contrastRatio(theme.background, theme.blue)).toBeGreaterThanOrEqual(4.5);
@@ -269,6 +270,7 @@ test('buildTerminalTheme preserves dark theme foregrounds instead of forcing pur
         expect(theme.foreground).toBe('#c7d0d9');
         expect(theme.white).toBe('#c7d0d9');
         expect(theme.brightWhite).toBe('#c7d0d9');
+        expect(theme.overviewRulerBorder).toBe(theme.background);
         expect(contrastRatio(theme.background, theme.foreground)).toBeGreaterThanOrEqual(7);
         expect(contrastRatio(theme.background, theme.blue)).toBeGreaterThanOrEqual(4.5);
         expect(contrastRatio(theme.background, theme.red)).toBeGreaterThanOrEqual(4.5);
