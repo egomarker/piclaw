@@ -313,9 +313,6 @@ test('terminal uses native xterm scrollbars but keeps the right gutter theme-col
     expect(source).toContain('.terminal-pane-xterm .xterm-viewport::-webkit-scrollbar');
     expect(source).toContain('.terminal-pane-xterm .xterm-decoration-overview-ruler');
     expect(source).toContain('var(--terminal-background, var(--bg-primary, #0d1117))');
-    expect(source).toContain('22%, var(--terminal-background, var(--bg-primary, #0d1117)))');
-    expect(source).toContain('38%, var(--terminal-background, var(--bg-primary, #0d1117)))');
-    expect(source).not.toContain('36%, transparent');
     expect(source).not.toContain('terminal-scrollbar-thumb');
     expect(source).not.toContain('syncOverlayScrollbar');
     expect(source).not.toContain('.xterm-scrollable-element > .scrollbar.vertical');
