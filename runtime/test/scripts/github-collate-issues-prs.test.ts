@@ -1,6 +1,28 @@
 import { describe, expect, test } from "bun:test";
+import * as YAML from "js-yaml";
 
 import { buildSparklineSvg, svgDataUrl } from "../../../scripts/github-collate-issues-prs.ts";
+
+describe("github-collate-issues-prs YAML compatibility", () => {
+  test("js-yaml 5 loads and dumps the metrics history shape", () => {
+    const source = [
+      "generated_at: 2026-07-30T00:00:00.000Z",
+      "version: 1",
+      "points: 1",
+      "repos:",
+      "  - full_name: rcarmo/piclaw",
+      "    points:",
+      "      - at: 2026-07-30T00:00:00.000Z",
+      "        issues: 2",
+      "        pull_requests: 3",
+      "        stars: 4",
+    ].join("\n");
+    const parsed = YAML.load(source) as Record<string, unknown>;
+    expect(parsed).toMatchObject({ version: 1, points: 1 });
+    const dumped = YAML.dump(parsed, { lineWidth: 120, noRefs: true });
+    expect(YAML.load(dumped)).toEqual(parsed);
+  });
+});
 
 describe("github-collate-issues-prs sparklines", () => {
   test("buildSparklineSvg embeds theme-aware light/dark styles", () => {
