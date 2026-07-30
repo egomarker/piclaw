@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 const appCss = readFileSync(join(import.meta.dir, '../../web/src/styles/app.css'), 'utf8');
 const classicEditorCss = readFileSync(join(import.meta.dir, '../../web/static/classic/css/editor.css'), 'utf8');
+const classicWorkspaceCss = readFileSync(join(import.meta.dir, '../../web/static/classic/css/workspace.css'), 'utf8');
 const mobileCss = readFileSync(join(import.meta.dir, '../../web/static/mobile/css/mobile-interface.css'), 'utf8');
 
 test('authenticated styles load the isolated Mobile layout last', () => {
@@ -14,6 +15,13 @@ test('authenticated styles load the isolated Mobile layout last', () => {
 test('Mobile gives collapsed-explorer Chat the full content track', () => {
   expect(classicEditorCss).toContain('.app-shell.workspace-collapsed:not(.editor-open):not(.chat-only):not(.pane-popout)');
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface\.workspace-collapsed:not\(\.editor-open\):not\(\.chat-only\):not\(\.pane-popout\) > \.container \{[^}]*width: 100%;[^}]*justify-self: stretch;/s);
+});
+
+test('Mobile keeps Chat typography stable while pane tabs remain open', () => {
+  expect(classicWorkspaceCss).toMatch(/\.app-shell\.editor-open > \.container \.post-content \{\s*font-size: inherit;/);
+  expect(classicWorkspaceCss).toMatch(/\.app-shell\.editor-open > \.container \.agent-status \{\s*font-size: inherit;/);
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface\.editor-open > \.container \.post-content \{\s*font-size: var\(--chat-content-font-size\);/);
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface\.editor-open > \.container \.agent-status \{\s*font-size: var\(--font-size-sm\);/);
 });
 
 test('Mobile hides Chat chrome without suppressing global dialogs and widgets', () => {
