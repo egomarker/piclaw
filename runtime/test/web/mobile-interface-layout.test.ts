@@ -18,6 +18,9 @@ test('Mobile CSS overlays continuously mounted Chat, pane, preview, and dock row
   expect(mobileCss).toContain('grid-row: 6');
 });
 
-test('Mobile phone tabs reserve the fixed menu hit target', () => {
+test('Mobile Zen is Chat-only and the phone strip reserves the menu hit target', () => {
+  expect(mobileCss).toContain('.app-shell.mobile-interface.zen-mode > .container');
+  expect(mobileCss).toContain('display: flex !important');
+  expect(mobileCss).toContain('.app-shell.mobile-interface.zen-mode > .editor-pane-container > .tab-strip');
   expect(mobileCss).toContain('padding-left: max(44px');
 });

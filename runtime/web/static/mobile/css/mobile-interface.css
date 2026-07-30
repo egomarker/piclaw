@@ -138,6 +138,23 @@
     height: 100%;
 }
 
+/* Mobile Zen is Chat-only. Open panes and the dock remain mounted but hidden. */
+.app-shell.mobile-interface.zen-mode > .container {
+    display: flex !important;
+    grid-column: var(--mobile-content-column);
+    grid-row: 2;
+}
+
+.app-shell.mobile-interface.zen-mode > .editor-pane-container > .tab-strip,
+.app-shell.mobile-interface.zen-mode > .editor-pane-container > .zen-hover-zone,
+.app-shell.mobile-interface.zen-mode > .editor-pane-container > .editor-pane-host,
+.app-shell.mobile-interface.zen-mode > .editor-pane-container > .md-preview-splitter,
+.app-shell.mobile-interface.zen-mode > .editor-pane-container > .md-preview-panel,
+.app-shell.mobile-interface.zen-mode > .editor-pane-container > .dock-splitter,
+.app-shell.mobile-interface.zen-mode > .editor-pane-container > .dock-panel {
+    display: none !important;
+}
+
 @media (min-width: 640px) {
     .app-shell.mobile-interface.editor-open > .container .post-avatar {
         width: 44px;
