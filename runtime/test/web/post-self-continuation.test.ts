@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { getSelfContinuationMeta } from "../../web/src/components/post.js";
+import {
+  getRestartHandoffMeta,
+  getSelfContinuationMeta,
+} from "../../web/src/components/post.js";
 
 describe("self-continuation post helpers", () => {
-  test("labels an exit_process continuation as an agent self-resume", () => {
+  test("recognizes an exit_process continuation without persisting a display label", () => {
     const blocks = [
       {
         type: "restart_handoff",
@@ -14,24 +17,62 @@ describe("self-continuation post helpers", () => {
         type: "self_continuation",
         source: "exit_process",
         restart_id: "restart-123",
-        label: "Agent self-resume",
+        label: "Legacy English label",
       },
     ];
 
     expect(getSelfContinuationMeta(blocks)).toEqual({
       block: blocks[1],
       restartId: "restart-123",
-      label: "Agent self-resume",
     });
   });
 
-  test("ignores ordinary or malformed inbound message metadata", () => {
+  test("reads locale-neutral restart notice and completion metadata", () => {
+    expect(getRestartHandoffMeta([{
+      type: "restart_handoff",
+      source: "exit_process",
+      restart_id: " restart-notice ",
+      phase: "notice",
+      reason: " Deploy the new build. ",
+    }])).toEqual({
+      block: {
+        type: "restart_handoff",
+        source: "exit_process",
+        restart_id: " restart-notice ",
+        phase: "notice",
+        reason: " Deploy the new build. ",
+      },
+      restartId: "restart-notice",
+      phase: "notice",
+      reason: "Deploy the new build.",
+    });
+
+    expect(getRestartHandoffMeta([{
+      type: "restart_handoff",
+      source: "exit_process",
+      restart_id: "restart-complete",
+      phase: "completion",
+    }])).toMatchObject({
+      restartId: "restart-complete",
+      phase: "completion",
+      reason: "",
+    });
+  });
+
+  test("ignores ordinary or malformed restart metadata", () => {
     expect(getSelfContinuationMeta(undefined)).toBeNull();
     expect(getSelfContinuationMeta([{ type: "self_continuation", source: "user" }])).toBeNull();
     expect(getSelfContinuationMeta([{
       type: "self_continuation",
       source: "exit_process",
       restart_id: "",
+    }])).toBeNull();
+    expect(getRestartHandoffMeta([{ type: "restart_handoff", source: "user" }])).toBeNull();
+    expect(getRestartHandoffMeta([{
+      type: "restart_handoff",
+      source: "exit_process",
+      restart_id: "restart-invalid-phase",
+      phase: "unknown",
     }])).toBeNull();
   });
 });
