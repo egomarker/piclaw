@@ -162,6 +162,32 @@ describe("restart handoff recovery", () => {
     expect(getChatMessages(chatJid)).toHaveLength(2);
   });
 
+  test("recovers multiple handoffs for one chat with distinct targeted turns", () => {
+    const chatJid = `web:restart-multiple-${crypto.randomUUID()}`;
+    createReadyHandoff({ chatJid, reason: "First restart.", resumeMessage: "Resume first task." });
+    createReadyHandoff({ chatJid, reason: "Second restart.", resumeMessage: "Resume second task." });
+    const events: RecoveryEvent[] = [];
+
+    const summary = recoverPendingRestartHandoffs(createRecoveryWeb(events));
+
+    expect(summary).toMatchObject({
+      discovered: 2,
+      recovered: 2,
+      failed: 0,
+      completionMessagesCreated: 2,
+      resumeMessagesCreated: 2,
+      turnsResumed: 2,
+    });
+    const resumeEvents = events.filter((event) => event.kind === "resume");
+    expect(resumeEvents).toHaveLength(2);
+    expect(new Set(resumeEvents.map((event) => event.rowId)).size).toBe(2);
+    const content = getChatMessages(chatJid).map((message) => message.content);
+    expect(content.filter((value) => value === "Restart completed.")).toHaveLength(2);
+    expect(content).toContain("Resume first task.");
+    expect(content).toContain("Resume second task.");
+    expect(listRestartHandoffs()).toEqual([]);
+  });
+
   test("posts only the completion message when no continuation was requested", () => {
     const chatJid = `web:restart-no-resume-${crypto.randomUUID()}`;
     createReadyHandoff({

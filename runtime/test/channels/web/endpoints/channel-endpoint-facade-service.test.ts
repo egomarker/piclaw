@@ -7,7 +7,9 @@ import {
 import type { WebChannelEndpointContexts, WebChannelIdentitySnapshot } from "../../../../src/channels/web/endpoints/channel-endpoint-context-factory.js";
 import { createJsonResponder } from "../helpers/http.ts";
 
-const PNG_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9sAAAAASUVORK5CYII=";
+// Valid RGBA PNG generated deterministically with Sharp. Keep this decodable so
+// the endpoint test exercises avatar WebP conversion rather than decoder fallback.
+const PNG_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==";
 
 function createIdentitySnapshot(overrides: Partial<WebChannelIdentitySnapshot> = {}): WebChannelIdentitySnapshot {
   return {

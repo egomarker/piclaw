@@ -231,6 +231,8 @@ export function getSelfContinuationMeta(contentBlocks) {
     if (!block) return null;
     const restartId = typeof block.restart_id === 'string' ? block.restart_id.trim() : '';
     if (!restartId) return null;
+    const handoff = getRestartHandoffMeta(contentBlocks);
+    if (!handoff || handoff.phase !== 'resume' || handoff.restartId !== restartId) return null;
     return { block, restartId };
 }
 

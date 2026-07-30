@@ -11,6 +11,7 @@ import type { WebChannelLike } from "../core/web-channel-contracts.js";
 import type { InteractionRow } from "../../../db.js";
 import { parseJsonObjectRequest } from "../json-body.js";
 import { normalizeMediaIds } from "../posts-service.js";
+import { sanitizePublicInboundContentBlocks } from "./content-block-safety.js";
 
 /** AgentMessagePayload type definition. */
 export interface AgentMessagePayload {
@@ -82,6 +83,7 @@ export async function parseAgentMessageRequest(req: Request): Promise<{
   if (screenHint) data.screen_hint = screenHint;
   else delete data.screen_hint;
   delete data.client_context;
+  data.content_blocks = sanitizePublicInboundContentBlocks(data.content_blocks);
 
   return { payload: data };
 }

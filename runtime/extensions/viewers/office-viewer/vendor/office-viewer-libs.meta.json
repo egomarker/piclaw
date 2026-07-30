@@ -2,7 +2,7 @@
   "manifest_id": "office-viewer-libs",
   "packages": {
     "docx-preview": {
-      "version": "0.3.7",
+      "version": "0.4.0",
       "license": "Apache-2.0",
       "repository": "git+https://github.com/VolodymyrBaydalka/docxjs.git"
     },
@@ -27,7 +27,7 @@
       "repository": "https://github.com/Stuk/jszip.git"
     },
     "@fontsource-variable/inter": {
-      "version": "5.2.8",
+      "version": "5.3.0",
       "license": "OFL-1.1",
       "repository": "git+https://github.com/fontsource/font-files.git"
     }
@@ -37,8 +37,8 @@
       "package_name": "docx-preview",
       "package_path": "dist/docx-preview.min.js",
       "output_file": "extensions/viewers/office-viewer/vendor/docx-preview.min.js",
-      "sha256": "a011a499016a269eb048b8558a3eefc94bc33568ef434235943948ff24a40005",
-      "size_bytes": 74315
+      "sha256": "051ef503f2677d53159a388b7384e950eda41ea4e47a103e5e36f124d7faea40",
+      "size_bytes": 75297
     },
     {
       "package_name": "@e965/xlsx",
@@ -84,5 +84,5 @@
     }
   ],
   "metadata_file": "extensions/viewers/office-viewer/vendor/office-viewer-libs.meta.json",
-  "total_size_bytes": 2086817
+  "total_size_bytes": 2087799
 }

@@ -98,6 +98,10 @@ export function removeSession(chatJid: string): void {
   activityMap.delete(chatJid);
 }
 
+export function clearSessionStatusForTests(): void {
+  activityMap.clear();
+}
+
 export function getActiveSessionCount(excludeChatJid?: string): number {
   let count = 0;
   for (const [jid, activity] of activityMap) {

@@ -65,6 +65,21 @@ describe("self-continuation post helpers", () => {
     expect(getSelfContinuationMeta([{
       type: "self_continuation",
       source: "exit_process",
+      restart_id: "restart-unpaired",
+    }])).toBeNull();
+    expect(getSelfContinuationMeta([{
+      type: "restart_handoff",
+      source: "exit_process",
+      restart_id: "restart-a",
+      phase: "resume",
+    }, {
+      type: "self_continuation",
+      source: "exit_process",
+      restart_id: "restart-b",
+    }])).toBeNull();
+    expect(getSelfContinuationMeta([{
+      type: "self_continuation",
+      source: "exit_process",
       restart_id: "",
     }])).toBeNull();
     expect(getRestartHandoffMeta([{ type: "restart_handoff", source: "user" }])).toBeNull();

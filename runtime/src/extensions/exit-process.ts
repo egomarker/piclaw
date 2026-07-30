@@ -107,6 +107,14 @@ export const exitProcess: ExtensionFactory = (pi: ExtensionAPI) => {
         return buildFailure(reason, "Cannot determine the active chat; shutdown was not scheduled.");
       }
 
+      const otherActive = getActiveSessionCount(chatJid);
+      if (otherActive > 0) {
+        return buildFailure(
+          reason,
+          `${otherActive} other session(s) are active; shutdown was not scheduled. Wait for them to finish and call exit_process again.`,
+        );
+      }
+
       let handoff: RestartHandoff;
       try {
         handoff = prepareRestartHandoff({
@@ -188,12 +196,6 @@ export const exitProcess: ExtensionFactory = (pi: ExtensionAPI) => {
         return buildFailure(reason, "Failed to finalize the restart handoff; shutdown was not scheduled.");
       }
 
-      // Warn if other sessions are actively working.
-      const otherActive = getActiveSessionCount(chatJid);
-      const activeWarning = otherActive > 0
-        ? ` \u26a0\ufe0f ${otherActive} other session(s) currently active — their work will be interrupted.`
-        : "";
-
       log.info("Restart notice and handoff persisted; killing tracked subprocesses and marking pending shutdown", {
         reason,
         chatJid,
@@ -209,7 +211,7 @@ export const exitProcess: ExtensionFactory = (pi: ExtensionAPI) => {
       markPendingShutdown(reason);
 
       return {
-        content: [{ type: "text", text: `Restart notice posted. Graceful shutdown scheduled.${activeWarning} ${killed} subprocess${killed === 1 ? "" : "es"} killed. ${RESTART_HINT} Reason: ${reason}` }],
+        content: [{ type: "text", text: `Restart notice posted. Graceful shutdown scheduled. ${killed} subprocess${killed === 1 ? "" : "es"} killed. ${RESTART_HINT} Reason: ${reason}` }],
         details: {
           tool: "exit_process",
           scheduled: true,
