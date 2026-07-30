@@ -60,6 +60,23 @@ describe("prompt attempt finalization", () => {
     expect(snapshot.sawThinkingOnlyStop).toBe(false);
   });
 
+  test("does not treat pending streaming state as a terminal success", () => {
+    const { output } = finalizePromptAttemptOutput(baseInput({
+      finalText: "partial draft",
+      lastAssistantState: {
+        stopReason: "pending",
+        rawStopReason: "in_progress",
+        hadTextContent: true,
+        hadThinkingContent: false,
+        hadToolCallContent: false,
+      },
+    }));
+
+    expect(output.status).toBe("error");
+    expect(output.error).toContain("remained pending");
+    expect(output.error).toContain("in_progress");
+  });
+
   test("does not let a terminal side-effect hide earlier failed tools", () => {
     const { output, snapshot } = finalizePromptAttemptOutput(baseInput({
       session: {
