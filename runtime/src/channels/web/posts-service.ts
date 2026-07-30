@@ -9,6 +9,7 @@
  */
 
 import type { WebChannelLike } from "./core/web-channel-contracts.js";
+import { sanitizePublicInboundContentBlocks } from "./messaging/content-block-safety.js";
 
 /** Shape of the JSON body received from the compose box on POST /post. */
 export interface PostPayload {
@@ -62,7 +63,7 @@ export function storePost(
   }
 
   const mediaIds = normalizeMediaIds(data.media_ids);
-  const contentBlocks = Array.isArray(data.content_blocks) ? data.content_blocks : undefined;
+  const contentBlocks = sanitizePublicInboundContentBlocks(data.content_blocks);
   const linkPreviews = Array.isArray(data.link_previews) ? data.link_previews : undefined;
 
   const interaction = channel.storeMessage(chatJid, data.content || "", false, mediaIds, {

@@ -128,6 +128,19 @@ test('menu keys are translated across all peer locales', () => {
   expect(translate('menu.refreshTree', undefined, 'ja')).toBe('ツリーを更新');
 });
 
+test('restart handoff chrome is translated across all peer locales', () => {
+  expect(translate('post.restartNotice', { reason: 'Deploy' }, 'en'))
+    .toBe('Restarting now — Reason: Deploy');
+  expect(translate('post.restartNotice', { reason: '部署' }, 'zh-CN'))
+    .toBe('正在重启 — 原因：部署');
+  expect(translate('post.restartNotice', { reason: 'デプロイ' }, 'ja'))
+    .toBe('再起動中 — 理由：デプロイ');
+  expect(translate('post.restartCompleted', undefined, 'zh-CN')).toBe('重启完成。');
+  expect(translate('post.restartCompleted', undefined, 'ja')).toBe('再起動が完了しました。');
+  expect(translate('post.agentSelfResume', undefined, 'zh-CN')).toBe('代理自行恢复');
+  expect(translate('post.agentSelfResume', undefined, 'ja')).toBe('エージェントの自己再開');
+});
+
 test('interpolation replaces named placeholders and leaves unknown ones intact', () => {
   // Uses a transient key via translate fallback to key, then interpolation.
   expect(translate('hi {name}' as any, { name: 'Rui' }, 'en')).toBe('hi Rui');
