@@ -176,41 +176,46 @@ export async function bootstrapRuntime(deps: RuntimeBootstrapDeps): Promise<void
 
   deps.initializeRuntimeEnvironment(state);
   const hydratedMcpCredentials = await deps.hydrateMcpCredentials();
-  const agentPool = await deps.createAgentPool();
-  deps.log("=== Piclaw - Pi Coding Agent Assistant ===");
+  try {
+    const agentPool = await deps.createAgentPool();
+    deps.log("=== Piclaw - Pi Coding Agent Assistant ===");
 
-  const web = await deps.startWebChannel(queue, agentPool);
-  const pushover = await deps.startOptionalPushoverChannel();
-  deps.startBackgroundModelRefresh(agentPool);
+    const web = await deps.startWebChannel(queue, agentPool);
+    const pushover = await deps.startOptionalPushoverChannel();
+    deps.startBackgroundModelRefresh(agentPool);
 
-  const baseShutdown = deps.createShutdownHandler({
-    queue,
-    agentPool,
-    web,
-    pushover,
-    stopIpcWatcher: deps.stopIpcWatcher,
-    stopSchedulerLoop: deps.stopSchedulerLoop,
-    stopOptionalProviders: deps.stopOptionalProviders,
-  });
-  const shutdown = async (signal: string): Promise<void> => {
-    try {
-      await baseShutdown(signal);
-    } finally {
-      deps.clearMcpCredentials(hydratedMcpCredentials);
-    }
-  };
-  registerShutdownHandler(shutdown);
-  deps.registerRuntimeShutdownSignals(deps.signalRegistrar, shutdown);
+    const baseShutdown = deps.createShutdownHandler({
+      queue,
+      agentPool,
+      web,
+      pushover,
+      stopIpcWatcher: deps.stopIpcWatcher,
+      stopSchedulerLoop: deps.stopSchedulerLoop,
+      stopOptionalProviders: deps.stopOptionalProviders,
+    });
+    const shutdown = async (signal: string): Promise<void> => {
+      try {
+        await baseShutdown(signal);
+      } finally {
+        deps.clearMcpCredentials(hydratedMcpCredentials);
+      }
+    };
+    registerShutdownHandler(shutdown);
+    deps.registerRuntimeShutdownSignals(deps.signalRegistrar, shutdown);
 
-  const senders = deps.createRuntimeSenders(web, pushover);
-  deps.startRuntimeWorkers(queue, agentPool, web, senders);
+    const senders = deps.createRuntimeSenders(web, pushover);
+    deps.startRuntimeWorkers(queue, agentPool, web, senders);
 
-  await deps.startRuntimeLoop({
-    queue,
-    state,
-    agentPool,
-    assistantName: deps.assistantName,
-    triggerPattern: deps.triggerPattern,
-    pollIntervalMs: deps.pollIntervalMs,
-  });
+    await deps.startRuntimeLoop({
+      queue,
+      state,
+      agentPool,
+      assistantName: deps.assistantName,
+      triggerPattern: deps.triggerPattern,
+      pollIntervalMs: deps.pollIntervalMs,
+    });
+  } catch (error) {
+    deps.clearMcpCredentials(hydratedMcpCredentials);
+    throw error;
+  }
 }

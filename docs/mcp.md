@@ -93,6 +93,12 @@ Store the token with `piclaw keychain set mcp/memory --type token --secret-file 
 
 Do not combine `bearerTokenKeychain` with a literal `bearerToken`, and choose a dedicated environment variable name that is not already set.
 
+## Environment expansion
+
+`pi-mcp-adapter` 2.15.0 expands `${NAME}`, `$env:NAME`, and `{env:NAME}` in MCP `socket`, `env`, `cwd`, `url`, HTTP `headers`, and `bearerToken` values. Plain `$NAME` is intentionally literal. A leading `!!` preserves a literal leading `!`; a leading single `!` is an adapter command-secret expression.
+
+PiClaw validates all supported environment references before loading the adapter, after keychain-backed variables are hydrated. Missing variables fail startup instead of becoming empty stdio/header values. Keychain secrets remain in memory only and must not be written into MCP configuration, metadata caches, or logs.
+
 ## Safe starter shell
 
 The seeded examples contain no configured servers:
@@ -145,7 +151,7 @@ mcp({ tool: "filesystem_read_file", args: "{\"path\":\"./README.md\"}" })
 
 ## Timeout, abort, and output handling
 
-`pi-mcp-adapter` 2.11.0 forwards Pi abort signals into connect, discovery, resource, and tool requests. It also applies `requestTimeoutMs` consistently across those request types. Configure a global protocol-request timeout in the active MCP configuration file:
+`pi-mcp-adapter` 2.15.0 forwards Pi abort signals into connect, discovery, resource, and tool requests. It also applies `requestTimeoutMs` consistently across those request types. Configure a global protocol-request timeout in the active MCP configuration file:
 
 ```json
 {
