@@ -85,6 +85,37 @@ describe("github-copilot dynamic models overlay", () => {
     expect(authoritative.map((model) => model.id)).toEqual(["gpt-5.6"]);
   });
 
+  test("deduplicates built-in Copilot Opus 5 while preserving 1M adaptive-thinking metadata", () => {
+    const existing = [makeModel({
+      id: "claude-opus-5",
+      api: "anthropic-messages" as any,
+      reasoning: true,
+      contextWindow: 1_000_000,
+      maxTokens: 128_000,
+      thinkingLevelMap: { off: null, low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" } as any,
+    })];
+
+    const merged = mergeGitHubCopilotDynamicModels(existing, [
+      makeLiveModel("claude-opus-5", {
+        supported_endpoints: ["/v1/messages"],
+        capabilities: {
+          limits: { max_context_window_tokens: 1_000_000, max_output_tokens: 128_000 },
+          supports: { reasoning_effort: ["low", "medium", "high", "xhigh", "max"], tool_calls: true },
+        },
+      }),
+    ]);
+
+    expect(merged.filter((model) => model.id === "claude-opus-5")).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      id: "claude-opus-5",
+      api: "anthropic-messages",
+      reasoning: true,
+      contextWindow: 1_000_000,
+      maxTokens: 128_000,
+      thinkingLevelMap: { xhigh: "xhigh", max: "max" },
+    });
+  });
+
   test("fetch uses the shared abort signal and bounded endpoint", async () => {
     const calls: string[] = [];
     const controller = new AbortController();

@@ -101,6 +101,7 @@ function createFakeApi() {
 
     return {
       model: currentModel,
+      scopedModels: models.map((model) => ({ model })),
       hasUI: false,
       cwd: "/tmp",
       isIdle: () => true,
@@ -306,6 +307,17 @@ describe("model-control extension", () => {
     const ctx = fake.makeCtx();
     const result = await callTool(fake.tools, "list_models", { query: "other" }, ctx);
     expect(result.details.models.every((m: any) => m.label.includes("other"))).toBe(true);
+  });
+
+  test("extension context mock exposes the upstream resolved scopedModels snapshot", () => {
+    const ctx = fake.makeCtx();
+    expect(ctx.scopedModels.map((entry) => `${entry.model.provider}/${entry.model.id}`)).toEqual([
+      "test-provider/test-model",
+      "test-provider/reasoning-model",
+      "other/other-model",
+      "dup/shared-id",
+      "dup2/shared-id",
+    ]);
   });
 
   test("list_models respects scopedModelsOnly enabledModels patterns", async () => {
