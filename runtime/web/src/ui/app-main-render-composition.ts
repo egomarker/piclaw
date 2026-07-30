@@ -34,6 +34,9 @@ export function composeRenderedMainAppOptions(input: {
     editorOpen: boolean;
     tabStripTabs: any[];
     tabStripActiveId: string | null;
+    mobileTabStripTabs?: any[];
+    mobileTabStripActiveId?: string | null;
+    mobileChatActive?: boolean;
     handleTabActivate: (...args: any[]) => any;
     previewTabs: Set<string>;
     diffTabs: Set<string>;
@@ -129,6 +132,9 @@ export function composeRenderedMainAppOptions(input: {
       searchScope: input.surface.searchScope,
       tabStripTabs: input.editorState.tabStripTabs,
       tabStripActiveId: input.editorState.tabStripActiveId,
+      mobileTabStripTabs: input.editorState.mobileTabStripTabs,
+      mobileTabStripActiveId: input.editorState.mobileTabStripActiveId,
+      mobileChatActive: input.editorState.mobileChatActive,
       handleTabActivate: input.editorState.handleTabActivate,
       previewTabs: input.editorState.previewTabs,
       diffTabs: input.editorState.diffTabs,

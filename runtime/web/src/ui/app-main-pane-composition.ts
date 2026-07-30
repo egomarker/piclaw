@@ -19,6 +19,7 @@ export function useMainAppPaneComposition(options: {
   panePopoutPath: string | null;
   panePopoutLabel: string | null;
   chatOnlyMode: boolean;
+  uiMode?: 'classic' | 'mobile';
   terminalTabPath: string;
   vncTabPrefix: string;
   getWorkspaceFile: (path: string, maxBytes: number, mode: string) => Promise<any>;
@@ -27,6 +28,7 @@ export function useMainAppPaneComposition(options: {
 
   const editorState = useEditorState({
     onTabClosed: (path) => removeFileRefRef.current?.(path),
+    uiMode: options.uiMode,
   });
 
   const paneRuntime = usePaneRuntimeOrchestration({

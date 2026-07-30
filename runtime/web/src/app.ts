@@ -169,6 +169,7 @@ function MainApp({ locationParams, navigate }) {
         panePopoutPath,
         panePopoutLabel,
         chatOnlyMode,
+        uiMode: APP_UI_MODE,
         terminalTabPath: TERMINAL_TAB_PATH,
         vncTabPrefix: VNC_TAB_PREFIX,
         getWorkspaceFile,

@@ -1,7 +1,11 @@
 import { afterEach, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
-import { getStandaloneTabUrl } from '../../web/src/components/tab-strip.js';
+import {
+  getStandaloneTabUrl,
+  hasTabContextMenu,
+  isTabClosable,
+} from '../../web/src/components/tab-strip.js';
 import {
   registerAddonStandaloneTabUrlResolver,
   resetAddonWebRegistriesForTests,
@@ -9,6 +13,13 @@ import {
 
 afterEach(() => {
   resetAddonWebRegistriesForTests();
+});
+
+test('tab capabilities can make a synthetic tab permanent and menu-free', () => {
+  expect(isTabClosable({ id: 'file' })).toBe(true);
+  expect(hasTabContextMenu({ id: 'file' })).toBe(true);
+  expect(isTabClosable({ id: 'chat', closable: false })).toBe(false);
+  expect(hasTabContextMenu({ id: 'chat', contextMenu: false })).toBe(false);
 });
 
 test('getStandaloneTabUrl honors addon-provided standalone routes', () => {

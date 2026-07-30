@@ -24,9 +24,13 @@ export function buildMainShellClassName(options: {
   chatOnlyMode: boolean;
   zenMode: boolean;
   uiMode?: 'classic' | 'mobile';
+  mobileChatActive?: boolean;
 }): string {
-  const { workspaceOpen, editorOpen, chatOnlyMode, zenMode, uiMode = 'classic' } = options;
-  return `app-shell${workspaceOpen ? '' : ' workspace-collapsed'}${editorOpen ? ' editor-open' : ''}${chatOnlyMode ? ' chat-only' : ''}${zenMode ? ' zen-mode' : ''}${uiMode === 'mobile' ? ' mobile-interface' : ''}`;
+  const { workspaceOpen, editorOpen, chatOnlyMode, zenMode, uiMode = 'classic', mobileChatActive = false } = options;
+  const mobileSurfaceClass = uiMode === 'mobile'
+    ? ` mobile-interface ${mobileChatActive ? 'mobile-chat-active' : 'mobile-pane-active'}`
+    : '';
+  return `app-shell${workspaceOpen ? '' : ' workspace-collapsed'}${editorOpen ? ' editor-open' : ''}${chatOnlyMode ? ' chat-only' : ''}${zenMode ? ' zen-mode' : ''}${mobileSurfaceClass}`;
 }
 
 export function extractPostedUserMessageId(response: unknown): number | null {
@@ -117,6 +121,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
     chatOnlyMode,
     zenMode,
     uiMode = 'classic',
+    mobileChatActive = false,
     isRenameBranchFormOpen,
     closeRenameCurrentBranchForm,
     handleRenameCurrentBranch,
@@ -138,6 +143,8 @@ export function renderMainShell(options: MainShellRenderOptions): any {
     showEditorPaneContainer,
     tabStripTabs,
     tabStripActiveId,
+    displayTabStripTabs = tabStripTabs,
+    displayTabStripActiveId = tabStripActiveId,
     handleTabActivate,
     handleTabClose,
     handleTabCloseOthers,
@@ -283,7 +290,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
   };
 
   return html`
-    <div class=${buildMainShellClassName({ workspaceOpen, editorOpen, chatOnlyMode, zenMode, uiMode })} ref=${appShellRef}>
+    <div class=${buildMainShellClassName({ workspaceOpen, editorOpen, chatOnlyMode, zenMode, uiMode, mobileChatActive })} ref=${appShellRef}>
       <${SystemMetersHud} mode="overlay" />
       ${isRenameBranchFormOpen && html`
         <div class="rename-branch-overlay" onPointerDown=${(event: any) => {
@@ -361,8 +368,8 @@ export function renderMainShell(options: MainShellRenderOptions): any {
           ${zenMode && html`<div class="zen-hover-zone"></div>`}
           ${editorOpen && html`
             <${TabStrip}
-              tabs=${tabStripTabs}
-              activeId=${tabStripActiveId}
+              tabs=${displayTabStripTabs}
+              activeId=${displayTabStripActiveId}
               onActivate=${handleTabActivate}
               onClose=${handleTabClose}
               onCloseOthers=${handleTabCloseOthers}

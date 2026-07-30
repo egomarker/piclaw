@@ -8,6 +8,25 @@ import {
   renderMainShell,
   scrollToPostedTimelineMessage,
 } from '../../web/src/ui/app-main-shell-render.js';
+import { composeMobileShellRenderOptions } from '../../web/src/ui/app-mobile-shell-render.js';
+
+test('Mobile maps unified display tabs without replacing pane runtime tabs', () => {
+  const paneTabs = [{ id: 'file' }];
+  const displayTabs = [{ id: 'piclaw://chat' }, ...paneTabs];
+  const options = composeMobileShellRenderOptions({
+    tabStripTabs: paneTabs,
+    tabStripActiveId: 'file',
+    mobileTabStripTabs: displayTabs,
+    mobileTabStripActiveId: 'piclaw://chat',
+    mobileChatActive: true,
+  });
+
+  expect(options.tabStripTabs).toBe(paneTabs);
+  expect(options.tabStripActiveId).toBe('file');
+  expect(options.displayTabStripTabs).toBe(displayTabs);
+  expect(options.displayTabStripActiveId).toBe('piclaw://chat');
+  expect(options.uiMode).toBe('mobile');
+});
 
 test('buildMainShellClassName composes workspace/editor/chat/zen modifiers', () => {
   expect(buildMainShellClassName({
@@ -30,7 +49,16 @@ test('buildMainShellClassName composes workspace/editor/chat/zen modifiers', () 
     chatOnlyMode: false,
     zenMode: false,
     uiMode: 'mobile',
-  })).toBe('app-shell editor-open mobile-interface');
+  })).toBe('app-shell editor-open mobile-interface mobile-pane-active');
+
+  expect(buildMainShellClassName({
+    workspaceOpen: true,
+    editorOpen: true,
+    chatOnlyMode: false,
+    zenMode: false,
+    uiMode: 'mobile',
+    mobileChatActive: true,
+  })).toBe('app-shell editor-open mobile-interface mobile-chat-active');
 });
 
 test('extractPostedUserMessageId prefers user_message.id and falls back to row_id', () => {
