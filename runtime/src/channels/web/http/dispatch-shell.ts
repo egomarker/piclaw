@@ -19,6 +19,13 @@ function appleTouchIconSize(pathname: string): string {
   return match?.[1] || "180";
 }
 
+/** Resolve the authenticated app shell for a configured web UI mode. */
+export function resolveWebUiIndexPath(uiMode: string): string {
+  if (uiMode === "visual") return "visual/index.html";
+  if (uiMode === "mobile") return "mobile/index.html";
+  return "classic/index.html";
+}
+
 /**
  * Dispatch shell/static/avatar routes and return null when no shell path matches.
  * @param channel Web channel contract exposing shell/static handlers.
@@ -36,8 +43,7 @@ export async function handleShellRoutes(
   serveStaticAsset: ServeStaticAsset
 ): Promise<Response | null> {
   if (flags.isIndex) {
-    const indexPath = WEB_RUNTIME_CONFIG.uiMode === 'visual' ? 'visual/index.html' : 'classic/index.html';
-    return channel.serveStatic(indexPath, req);
+    return channel.serveStatic(resolveWebUiIndexPath(WEB_RUNTIME_CONFIG.uiMode), req);
   }
 
   if (flags.isManifest) {
