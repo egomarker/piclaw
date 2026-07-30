@@ -135,7 +135,7 @@
     "js-yaml": "4.1.1",
     "katex": "0.17.0",
     "marked": "18.0.6",
-    "pi-mcp-adapter": "2.11.0",
+    "pi-mcp-adapter": "2.15.0",
     "pptxviewjs": "1.1.9",
     "preact": "10.29.7",
     "proper-lockfile": "4.1.2",
@@ -202,5 +202,8 @@
     "hono": "4.12.23",
     "qs": "6.15.2",
     "ws": "8.21.0"
+  },
+  "patchedDependencies": {
+    "pi-mcp-adapter@2.15.0": "patches/pi-mcp-adapter@2.15.0.patch"
   }
 }

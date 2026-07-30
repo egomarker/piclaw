@@ -12,6 +12,37 @@ import {
 } from "../../src/runtime/bootstrap.js";
 import type { RuntimeSenders } from "../../src/runtime/wiring.js";
 
+function bootstrapDepsForFailure(overrides: Partial<RuntimeBootstrapDeps> = {}): RuntimeBootstrapDeps {
+  const queue = { shutdown: async () => {} } as RuntimeBootstrapQueue;
+  const agentPool = { shutdown: async () => {}, resolveModelInput: () => null } as RuntimeBootstrapAgentPool;
+  const web = { stop: async () => {} } as RuntimeBootstrapWeb;
+  return {
+    base: { queue, state: {} as RuntimeBootstrapState },
+    assistantName: "Pi",
+    triggerPattern: /@pi/i,
+    pollIntervalMs: 1,
+    signalRegistrar: { on: () => {} },
+    initializeRuntimeEnvironment: () => {},
+    hydrateMcpCredentials: async () => [{ serverName: "mcp", envName: "PICLAW_MCP_SECRET", keychainName: "mcp/test" }],
+    clearMcpCredentials: () => {},
+    createAgentPool: async () => agentPool,
+    startWebChannel: async () => web,
+    startBackgroundModelRefresh: () => {},
+    startOptionalPushoverChannel: async () => null,
+    createShutdownHandler: () => async () => {},
+    registerRuntimeShutdownSignals: () => {},
+    createRuntimeSenders: () => ({ sendMessage: async () => {}, sendNudge: async () => {} }),
+    startRuntimeWorkers: () => {},
+    queueStartupResumePendingIpc: () => {},
+    startRuntimeLoop: async () => {},
+    log: () => {},
+    stopIpcWatcher: async () => {},
+    stopSchedulerLoop: () => {},
+    stopOptionalProviders: () => {},
+    ...overrides,
+  };
+}
+
 describe("runtime bootstrap", () => {
   test("applies environment before AgentPool creation and starts refresh after channels", async () => {
     const events: string[] = [];
@@ -114,6 +145,28 @@ describe("runtime bootstrap", () => {
       "start-workers",
       "start-runtime-loop",
     ]);
+  });
+
+  test("clears hydrated MCP credentials when AgentPool creation fails", async () => {
+    const cleared: string[][] = [];
+    const deps = bootstrapDepsForFailure({
+      createAgentPool: async () => { throw new Error("agent pool failed"); },
+      clearMcpCredentials: (entries) => cleared.push(entries.map((entry) => entry.envName)),
+    });
+
+    await expect(bootstrapRuntime(deps)).rejects.toThrow("agent pool failed");
+    expect(cleared).toEqual([["PICLAW_MCP_SECRET"]]);
+  });
+
+  test("clears hydrated MCP credentials when web startup fails", async () => {
+    const cleared: string[][] = [];
+    const deps = bootstrapDepsForFailure({
+      startWebChannel: async () => { throw new Error("web failed"); },
+      clearMcpCredentials: (entries) => cleared.push(entries.map((entry) => entry.envName)),
+    });
+
+    await expect(bootstrapRuntime(deps)).rejects.toThrow("web failed");
+    expect(cleared).toEqual([["PICLAW_MCP_SECRET"]]);
   });
 
   test("background refresh is queued and not awaited by bootstrap", async () => {
