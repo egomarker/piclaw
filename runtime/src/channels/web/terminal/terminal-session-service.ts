@@ -361,9 +361,10 @@ function normalizeChunk(chunk: string | Uint8Array): string {
 
 const EXTRA_BIN_DIRS = ["/run/current-system/sw/bin", "/usr/local/bin", "/usr/bin", "/bin"];
 
-function findExecutable(name: string): string {
-  const dirs = (process.env.PATH || "").split(":").concat(EXTRA_BIN_DIRS);
+function findExecutable(name: string, env: NodeJS.ProcessEnv = process.env): string | null {
+  const dirs = (env.PATH || "").split(":").concat(EXTRA_BIN_DIRS);
   for (const dir of dirs) {
+    if (!dir) continue;
     const candidate = `${dir}/${name}`;
     try {
       accessSync(candidate, constants.X_OK);
@@ -372,18 +373,172 @@ function findExecutable(name: string): string {
       debugSuppressedError(log, "candidate executable unavailable", error, { name, candidate });
     }
   }
-  return name;
+  return null;
+}
+
+function resolveExecutableCandidate(value: string | null | undefined, env: NodeJS.ProcessEnv): string | null {
+  const candidate = String(value || "").trim();
+  if (!candidate) return null;
+  if (!candidate.includes("/")) return findExecutable(candidate, env);
+  try {
+    accessSync(candidate, constants.X_OK);
+    return candidate;
+  } catch {
+    return null;
+  }
+}
+
+function readPasswdLoginShell(uid = typeof process.getuid === "function" ? process.getuid() : -1): string | null {
+  if (uid < 0) return null;
+  try {
+    for (const line of readFileSync("/etc/passwd", "utf8").split(/\r?\n/)) {
+      const fields = line.split(":");
+      if (Number(fields[2]) !== uid) continue;
+      return String(fields[6] || "").trim() || null;
+    }
+  } catch (error) {
+    debugSuppressedError(log, "failed to resolve terminal shell from /etc/passwd", error, { uid });
+  }
+  return null;
+}
+
+/** Resolve the interactive shell without assuming bash exists. */
+export function resolveTerminalShell(
+  env: NodeJS.ProcessEnv = process.env,
+  passwdShell: string | null = readPasswdLoginShell(),
+): string {
+  const candidates = [
+    env.PICLAW_TERMINAL_SHELL,
+    passwdShell,
+    env.SHELL,
+    "/bin/bash",
+    "/bin/sh",
+  ];
+  for (const candidate of candidates) {
+    const resolved = resolveExecutableCandidate(candidate, env);
+    if (resolved) return resolved;
+  }
+  throw new Error("Terminal backend unavailable: no executable login shell found (checked PICLAW_TERMINAL_SHELL, passwd, SHELL, /bin/bash, /bin/sh).");
+}
+
+export type LinuxTerminalBackend = "bun-native-pty" | "script" | "unavailable";
+
+export function resolveLinuxTerminalBackend(options: {
+  bunTerminalAvailable?: boolean;
+  setsidPath?: string | null;
+  scriptPath?: string | null;
+} = {}): LinuxTerminalBackend {
+  const bunTerminalAvailable = options.bunTerminalAvailable ?? typeof Bun.Terminal === "function";
+  const setsidPath = options.setsidPath === undefined ? findExecutable("setsid") : options.setsidPath;
+  const scriptPath = options.scriptPath === undefined ? findExecutable("script") : options.scriptPath;
+  if (bunTerminalAvailable && setsidPath) return "bun-native-pty";
+  if (scriptPath) return "script";
+  return "unavailable";
 }
 
 const SCRIPT_BIN = findExecutable("script");
-const BASH_BIN = findExecutable("bash");
-const EXPECT_BIN = IS_LINUX ? "" : findExecutable("expect");
-const USER_SHELL = process.env.SHELL || BASH_BIN;
-const IS_ZSH = USER_SHELL.endsWith("/zsh");
+const SETSID_BIN = IS_LINUX ? findExecutable("setsid") : null;
+const EXPECT_BIN = IS_LINUX ? null : findExecutable("expect");
+let USER_SHELL = "";
+let USER_SHELL_ERROR: string | null = null;
+try {
+  USER_SHELL = resolveTerminalShell();
+} catch (error) {
+  USER_SHELL_ERROR = error instanceof Error ? error.message : String(error);
+  log.warn("No executable terminal shell is available", {
+    operation: "web_terminal.resolve_shell",
+    error: USER_SHELL_ERROR,
+  });
+}
 
 /** Build shell arguments: zsh gets PROMPT_SP disabled to avoid blank lines in the web terminal. */
-function buildShellArgs(): string[] {
-  return IS_ZSH ? ["+o", "PROMPT_SP", "-i"] : ["-i"];
+export function buildShellArgs(shell = USER_SHELL): string[] {
+  return shell.endsWith("/zsh") ? ["+o", "PROMPT_SP", "-i"] : ["-i"];
+}
+
+export function spawnBunNativePty(
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  shell = USER_SHELL,
+  cols = DEFAULT_COLS,
+  rows = DEFAULT_ROWS,
+  setsidPath: string | null = SETSID_BIN,
+): TerminalProcessLike | null {
+  if (typeof Bun.Terminal !== "function" || !setsidPath) return null;
+
+  const dataListeners: Array<(chunk: string | Uint8Array) => void> = [];
+  const exitListeners: Array<(code: number | null, signal: NodeJS.Signals | null) => void> = [];
+  let terminal: Bun.Terminal | null = null;
+  let exited = false;
+  try {
+    terminal = new Bun.Terminal({
+      cols,
+      rows,
+      name: env.TERM || "xterm-256color",
+      data(_terminal, data) {
+        for (const listener of dataListeners) listener(data);
+      },
+    });
+    // Bun.Terminal allocates the PTY, while setsid --ctty makes the shell a
+    // session leader with the PTY as its controlling terminal. Without this,
+    // interactive shells report that job control is unavailable.
+    const child = Bun.spawn([setsidPath, "--ctty", shell, ...buildShellArgs(shell)], {
+      cwd,
+      env,
+      terminal,
+    });
+    const notifyExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (exited) return;
+      exited = true;
+      for (const listener of exitListeners) listener(code, signal);
+      try { terminal?.close(); } catch (error) { debugSuppressedError(log, "failed to close Bun native PTY", error); }
+    };
+    void child.exited.then((code) => notifyExit(code, null), (error) => {
+      debugSuppressedError(log, "Bun native PTY child failed", error, { shell });
+      notifyExit(null, null);
+    });
+
+    const proc: TerminalProcessLike & { __bunNativePty: true; __resize(cols: number, rows: number): void } = {
+      __bunNativePty: true,
+      __resize(newCols, newRows) {
+        if (!terminal?.closed) terminal?.resize(newCols, newRows);
+      },
+      stdin: {
+        write(chunk) {
+          if (!terminal?.closed) terminal?.write(chunk);
+        },
+        end() {
+          try { terminal?.close(); } catch (error) { debugSuppressedError(log, "failed to close Bun native PTY input", error); }
+        },
+      },
+      stdout: {
+        on(event, listener) {
+          if (event === "data") dataListeners.push(listener);
+          return this;
+        },
+      },
+      stderr: { on() { return this; } },
+      on(event, listener) {
+        if (event === "exit") exitListeners.push(listener);
+        return this;
+      },
+      kill(signal) {
+        try {
+          child.kill(signal);
+          return true;
+        } catch (error) {
+          debugSuppressedError(log, "failed to kill Bun native PTY child", error, { pid: child.pid });
+          return false;
+        }
+      },
+      pid: child.pid,
+    };
+    return proc;
+  } catch (error) {
+    try { terminal?.close(); } catch { /* best-effort */ }
+    debugSuppressedError(log, "Bun native PTY unavailable", error, { shell, cwd });
+    return null;
+  }
 }
 
 function buildTerminalProcessEnv(): NodeJS.ProcessEnv {
@@ -406,19 +561,31 @@ function buildTerminalProcessEnv(): NodeJS.ProcessEnv {
 }
 
 function defaultSpawnProcess(cwd: string, env: NodeJS.ProcessEnv): TerminalProcessLike {
+  if (IS_LINUX) {
+    const native = spawnBunNativePty(cwd, env);
+    if (native) return native;
+    if (SCRIPT_BIN) {
+      const shellArgs = buildShellArgs();
+      return spawn(SCRIPT_BIN, ["-qf", "-c", [USER_SHELL, ...shellArgs].join(" "), "/dev/null"], {
+        cwd,
+        env,
+        stdio: ["pipe", "pipe", "pipe"],
+      }) as ChildProcessWithoutNullStreams;
+    }
+    throw new Error("Terminal backend unavailable: Bun native PTY failed and no executable 'script' fallback was found.");
+  }
+
   // macOS: prefer native PTY addon for proper resize (including setuid apps like top).
   if (IS_MACOS) {
     const proc = spawnMacOSNativePty(cwd, DEFAULT_COLS, DEFAULT_ROWS);
     if (proc) return proc;
   }
 
-  // Linux: use `script` with GNU flags to allocate a PTY.
-  // macOS fallback: use `expect` (no resize for setuid apps).
+  if (!EXPECT_BIN) {
+    throw new Error("Terminal backend unavailable: native PTY failed and no executable 'expect' fallback was found.");
+  }
   const shellArgs = buildShellArgs();
-  const command = IS_LINUX
-    ? { bin: SCRIPT_BIN, args: ["-qf", "-c", [USER_SHELL, ...shellArgs].join(" "), "/dev/null"] }
-    : { bin: EXPECT_BIN, args: ["-c", `log_user 0; spawn -noecho ${USER_SHELL} ${shellArgs.join(" ")}; log_user 1; interact`] };
-  return spawn(command.bin, command.args, {
+  return spawn(EXPECT_BIN, ["-c", `log_user 0; spawn -noecho ${USER_SHELL} ${shellArgs.join(" ")}; log_user 1; interact`], {
     cwd,
     env,
     stdio: ["pipe", "pipe", "pipe"],
@@ -463,12 +630,24 @@ export class TerminalSessionService {
 
   getSessionInfo(owner: TerminalSessionOwner) {
     const session = this.sessions.get(owner.token);
+    const backend = IS_LINUX
+      ? resolveLinuxTerminalBackend({ setsidPath: SETSID_BIN, scriptPath: SCRIPT_BIN })
+      : IS_MACOS
+        ? "native-or-expect"
+        : EXPECT_BIN
+          ? "expect"
+          : "unavailable";
+    const enabled = Boolean(USER_SHELL) && backend !== "unavailable";
     return {
-      enabled: true,
+      enabled,
       transport: "websocket",
       ws_path: "/terminal/ws",
       cwd: WORKSPACE_DIR,
-      shell: "/usr/bin/bash -i",
+      shell: USER_SHELL ? [USER_SHELL, ...buildShellArgs()].join(" ") : null,
+      backend,
+      ...(enabled ? {} : {
+        error: USER_SHELL_ERROR || "Terminal backend unavailable: Bun native PTY is unavailable and no script fallback was found.",
+      }),
       font_family: TERMINAL_FONT_FAMILY,
       active: Boolean(session),
       connected_clients: session?.clients.size ?? 0,
@@ -629,9 +808,9 @@ export class TerminalSessionService {
    * kernel window size.
    */
   private resizeSession(session: TerminalSessionRecord, cols: number, rows: number): void {
-    // macOS native PTY: resize via ioctl in the addon
+    // Native PTY backends resize directly through their owning terminal.
     const proc = session.process as any;
-    if (proc?.__macOSNativePty && typeof proc.__resize === "function") {
+    if ((proc?.__macOSNativePty || proc?.__bunNativePty) && typeof proc.__resize === "function") {
       proc.__resize(cols, rows);
       return;
     }
@@ -724,9 +903,9 @@ export class TerminalSessionService {
       }
     });
 
-    // Discover PTS device path after a short delay to let `script` allocate the PTY,
-    // then set the initial window size via ioctl so the shell starts with correct dimensions.
-    if (IS_LINUX && proc.pid) {
+    // Discover PTS device path only for the Linux `script` fallback. The Bun
+    // native PTY starts with the requested dimensions and resizes directly.
+    if (IS_LINUX && proc.pid && !(proc as any).__bunNativePty) {
       setTimeout(() => {
         if (!proc.pid) return;
         const result = findChildPts(proc.pid);
