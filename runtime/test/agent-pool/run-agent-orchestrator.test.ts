@@ -268,9 +268,12 @@ test("tool-execution watchdog heartbeat controller keeps pulsing while tools rem
     getIntervalMs: () => 10,
   });
 
+  expect(controller.getActiveExecutionCount()).toBe(0);
   controller.handleEvent({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "bash" });
+  expect(controller.getActiveExecutionCount()).toBe(1);
   await Bun.sleep(35);
   controller.handleEvent({ type: "tool_execution_end", toolCallId: "tool-1", toolName: "bash" });
+  expect(controller.getActiveExecutionCount()).toBe(0);
   const beatCountAfterEnd = beats.length;
   await Bun.sleep(25);
   controller.stop();
@@ -1995,6 +1998,7 @@ test("runAgentPrompt does not auto-recover generic failures after tool activity"
 
     expect(result.status).toBe("error");
     expect(result.error).toContain("Timed out after 30s");
+    expect(result.recovery?.diagnostics[0]?.hasUnresolvedToolExecution).toBe(true);
     expect(session.promptCalls).toBe(1);
     expect(session.compactCalls).toBe(0);
     expect(events).toEqual([]);
@@ -2156,6 +2160,7 @@ test("runAgentPrompt prompts the rotated runtime session after auto-rotation swa
 test("runAgentPrompt retries a recoverable interrupted turn and returns one final success", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
@@ -2671,6 +2676,7 @@ test("runAgentPrompt does not reset continuation budget across repeated compact_
 test("runAgentPrompt writes recovery diagnostics into the agent log", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
@@ -3432,7 +3438,9 @@ test("runAgentPrompt surfaces latent session state errors when no final text is 
   }
 });
 
-test("runAgentPrompt returns completed commentary-only visible output", async () => {
+test("runAgentPrompt does not return commentary-only output as a completed reply", async () => {
+  initDatabase();
+  const restoreEnv = setEnv({ PICLAW_TURN_AUTO_RECOVERY_ENABLED: "0" });
   class StubSession {
     private listeners: Array<(event: any) => void> = [];
     sessionManager = { getLeafId: () => "leaf-1" };
@@ -3476,16 +3484,122 @@ test("runAgentPrompt returns completed commentary-only visible output", async ()
     async abort() {}
   }
 
-  const session = new StubSession();
-  const turnCoordinator = new AgentTurnCoordinator({
-    takeAttachments: () => [],
-    touchSession: () => {},
-    recordMessageUsage: () => {},
-  });
+  try {
+    const session = new StubSession();
+    const discarded: Array<{ reason: string }> = [];
+    const turnCoordinator = new AgentTurnCoordinator({
+      takeAttachments: () => [],
+      touchSession: () => {},
+      recordMessageUsage: () => {},
+    });
 
-  const result = await runAgentPrompt("test", "web:default", { timeoutMs: 0 }, {
-    getOrCreateRuntime: async () => createRuntime(session, { enabled: false }) as any,
-    turnCoordinator,
+    const result = await runAgentPrompt("test", "web:default", {
+      timeoutMs: 0,
+      onTurnDiscard: (discard) => discarded.push(discard),
+    }, {
+      getOrCreateRuntime: async () => createRuntime(session, { enabled: false }) as any,
+      turnCoordinator,
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.result).toBeNull();
+    expect(result.error).toContain("without emitting an assistant reply");
+    expect(discarded).toEqual([{ reason: "commentary_only" }]);
+  } finally {
+    restoreEnv();
+  }
+});
+
+test("runAgentPrompt uses a later final answer after a commentary-only provider error", async () => {
+  initDatabase();
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    sessionManager = { getLeafId: () => "leaf-commentary-error-recovered" };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => {
+        this.listeners = this.listeners.filter((entry) => entry !== listener);
+      };
+    }
+    async prompt() {
+      const commentarySignature = JSON.stringify({ phase: "commentary" });
+      const finalSignature = JSON.stringify({ phase: "final_answer" });
+      for (const listener of this.listeners) {
+        listener({
+          type: "message_update",
+          assistantMessageEvent: {
+            type: "text_delta",
+            delta: "Searching saved output.",
+            contentIndex: 0,
+            partial: { content: [{ type: "text", textSignature: commentarySignature }] },
+          },
+        });
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "error",
+            errorMessage: "Temporary provider error; try again.",
+            content: [{ type: "text", text: "Searching saved output.", textSignature: commentarySignature }],
+          },
+        });
+        listener({
+          type: "message_update",
+          assistantMessageEvent: {
+            type: "text_start",
+            contentIndex: 1,
+            partial: { content: [
+              { type: "text", textSignature: commentarySignature },
+              { type: "text", textSignature: finalSignature },
+            ] },
+          },
+        });
+        listener({
+          type: "message_update",
+          assistantMessageEvent: {
+            type: "text_delta",
+            delta: "The request completed successfully.",
+            contentIndex: 1,
+            partial: { content: [
+              { type: "text", textSignature: commentarySignature },
+              { type: "text", textSignature: finalSignature },
+            ] },
+          },
+        });
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "stop",
+            content: [
+              { type: "text", text: "Checking one last detail. ", textSignature: commentarySignature },
+              { type: "text", text: "The request completed successfully.", textSignature: finalSignature },
+            ],
+          },
+        });
+      }
+    }
+    async abort() {}
+  }
+
+  const session = new StubSession();
+  const completed: Array<{ text: string }> = [];
+  const discarded: Array<{ reason: string }> = [];
+  const result = await runAgentPrompt("test", "web:default", {
+    timeoutMs: 0,
+    onTurnComplete: (turn) => completed.push({ text: turn.text }),
+    onTurnDiscard: (discard) => discarded.push(discard),
+  }, {
+    getOrCreateRuntime: async () => createRuntime(session) as any,
+    turnCoordinator: new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} }),
     clearAttachments: () => {},
     takeAttachments: () => [],
     logsDir: createTestLogsDir(),
@@ -3494,13 +3608,107 @@ test("runAgentPrompt returns completed commentary-only visible output", async ()
   });
 
   expect(result.status).toBe("success");
-  expect(result.result).toBe("progress update");
-  expect(result.attachments).toBeUndefined();
+  expect(result.result).toBe("The request completed successfully.");
+  expect(completed).toEqual([]);
+  expect(discarded).toEqual([{ reason: "commentary_only" }]);
 });
 
-test("runAgentPrompt requests closing prose after a non-terminal side-effecting tool", async () => {
+test("runAgentPrompt retries a persisted commentary-only error instead of classifying it as completed output", async () => {
+  initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
+    PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
+    PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
+  });
+
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    private leafId = "leaf-before-prompt";
+    sessionManager = { getLeafId: () => this.leafId };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    promptTexts: string[] = [];
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => {
+        this.listeners = this.listeners.filter((entry) => entry !== listener);
+      };
+    }
+    async prompt(text: string) {
+      this.promptTexts.push(text);
+      this.leafId = `leaf-after-prompt-${this.promptTexts.length}`;
+      const commentarySignature = JSON.stringify({ phase: "commentary" });
+      if (this.promptTexts.length === 1) {
+        for (const listener of this.listeners) {
+          listener({
+            type: "message_update",
+            assistantMessageEvent: {
+              type: "text_delta",
+              delta: "Checking transient state.",
+              contentIndex: 0,
+              partial: { content: [{ type: "text", textSignature: commentarySignature }] },
+            },
+          });
+          listener({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              stopReason: "error",
+              errorMessage: "Temporary provider error; try again.",
+              content: [{ type: "text", text: "Checking transient state.", textSignature: commentarySignature }],
+            },
+          });
+        }
+        return;
+      }
+      for (const listener of this.listeners) {
+        listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Recovered final answer." } });
+        listener({ type: "message_end", message: createAssistantMessage("Recovered final answer.") });
+      }
+    }
+    async abort() {}
+  }
+
+  try {
+    const session = new StubSession();
+    const completed: Array<{ text: string }> = [];
+    const discarded: Array<{ reason: string }> = [];
+    const result = await runAgentPrompt("test", "web:default", {
+      timeoutMs: 0,
+      onTurnComplete: (turn) => completed.push({ text: turn.text }),
+      onTurnDiscard: (discard) => discarded.push(discard),
+    }, {
+      getOrCreateRuntime: async () => createRuntime(session, { maxRetries: 2, baseDelayMs: 1, maxDelayMs: 60000 }) as any,
+      turnCoordinator: new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} }),
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.result).toBe("Recovered final answer.");
+    expect(result.recovery).toEqual(expect.objectContaining({
+      attemptsUsed: 1,
+      recovered: true,
+      lastClassifier: "transient",
+      strategyHistory: ["retry"],
+    }));
+    expect(session.promptTexts).toEqual(["test", RECOVERY_CONTINUATION_PROMPT]);
+    expect(completed).toEqual([]);
+    expect(discarded).toEqual([{ reason: "commentary_only" }]);
+  } finally {
+    restoreEnv();
+  }
+});
+
+test("runAgentPrompt continues with tools after a resolved side-effecting tool", async () => {
+  const restoreEnv = setEnv({
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
@@ -3532,7 +3740,7 @@ test("runAgentPrompt requests closing prose after a non-terminal side-effecting 
         }
         return;
       }
-      expect(this.activeTools).toEqual([]);
+      expect(this.activeTools).toEqual(["bash", "write"]);
       for (const listener of this.listeners) {
         listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Wrote /tmp/x successfully." } });
         listener({ type: "message_end", message: createAssistantMessage("Wrote /tmp/x successfully.") });
@@ -3716,6 +3924,7 @@ test("runAgentPrompt does not let a terminal side-effect tool mask an earlier to
 test("runAgentPrompt continues after a committed tool-use lead-in when closing prose is missing", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
@@ -3749,6 +3958,7 @@ test("runAgentPrompt continues after a committed tool-use lead-in when closing p
       this.promptCalls += 1;
       this.promptTexts.push(text);
       if (this.promptCalls > 1) {
+        expect(this.activeTools).toEqual(["bash", "read"]);
         for (const listener of this.listeners) {
           listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Tests passed. The requested work is complete." } });
           listener({
@@ -3827,8 +4037,7 @@ test("runAgentPrompt continues after a committed tool-use lead-in when closing p
     expect(result.result).toBe("Tests passed. The requested work is complete.");
     expect(session.promptCalls).toBe(2);
     expect(session.promptTexts).toEqual(["run tests", RECOVERY_CONTINUATION_PROMPT]);
-    expect(session.toolSets).toContainEqual([]);
-    expect(session.toolSets.at(-1)).toEqual(["bash", "read"]);
+    expect(session.toolSets).toEqual([]);
     expect(completedTurns).toEqual([
       { text: "I will run the tests now.", followedByToolUse: true },
     ]);
@@ -3841,10 +4050,11 @@ test("runAgentPrompt continues after a committed tool-use lead-in when closing p
   }
 });
 
-test("runAgentPrompt uses a tools-disabled continuation after timeout with non-terminal tool output", async () => {
+test("runAgentPrompt disables tools by default during transient recovery", async () => {
   initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: undefined,
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
@@ -4029,6 +4239,7 @@ test("runAgentPrompt clamps a recovery attempt to the remaining short timeout bu
   initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
@@ -4066,7 +4277,7 @@ test("runAgentPrompt clamps a recovery attempt to the remaining short timeout bu
         await new Promise<void>((resolve) => { this.resolveTimedOutPrompt = resolve; });
         return;
       }
-      expect(this.activeTools).toEqual([]);
+      expect(this.activeTools).toEqual(["bash", "read"]);
       for (const listener of this.listeners) {
         listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Recovered within the short budget." } });
         listener({ type: "message_end", message: createAssistantMessage("Recovered within the short budget.") });
@@ -4113,10 +4324,11 @@ test("runAgentPrompt clamps a recovery attempt to the remaining short timeout bu
   }
 });
 
-test("runAgentPrompt keeps tools disabled across repeated continuation attempts", async () => {
+test("runAgentPrompt keeps tools disabled across repeated opted-out continuation attempts", async () => {
   initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "0",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "3",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
@@ -4182,6 +4394,7 @@ test("runAgentPrompt keeps tools disabled across repeated continuation attempts"
 test("runAgentPrompt retries when provider stops after a read-only tool call without a final reply", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
@@ -4368,6 +4581,7 @@ test("runAgentPrompt retries once when the provider stops after emitting thinkin
 test("runAgentPrompt uses existing retry settings for automatic recovery attempts", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
 
@@ -4602,6 +4816,7 @@ test("runAgentPrompt ignores a queued late-timeout callback after prompt complet
 test("runAgentPrompt recovery loop guard numeric env rejects malformed suffixes", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "6",
     PICLAW_RECOVERY_LOOP_GUARD_ENABLED: "1",
     PICLAW_RECOVERY_LOOP_GUARD_MAX_FAILURES: "2oops",

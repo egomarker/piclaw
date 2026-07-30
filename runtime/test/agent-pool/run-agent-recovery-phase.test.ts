@@ -47,6 +47,8 @@ function attempt(partial: Partial<PromptAttemptResult> = {}): PromptAttemptResul
 function recoveryConfig(overrides: Partial<Parameters<typeof runAgentRecoveryPhase>[0]["recoveryConfig"]> = {}) {
   return {
     enabled: true,
+    transientRecoveryEnabled: true,
+    transientRecoveryToolsEnabled: true,
     maxAttempts: 3,
     totalBudgetMs: 1_000,
     baseDelayMs: 0,
@@ -56,11 +58,15 @@ function recoveryConfig(overrides: Partial<Parameters<typeof runAgentRecoveryPha
 }
 
 describe("runAgentRecoveryPhase", () => {
-  test("continues after a timed-out tool attempt with tools blocked and execution budget carried", async () => {
+  test("continues after resolved tool work with tools available and execution budget carried", async () => {
+    let activeTools = ["read", "bash"];
     const activeToolSets: string[][] = [];
     const sessionCtrl: SessionWithToolControl = {
-      getActiveToolNames: () => ["read", "bash"],
-      setActiveToolsByName: (names) => { activeToolSets.push([...names]); },
+      getActiveToolNames: () => [...activeTools],
+      setActiveToolsByName: (names) => {
+        activeTools = [...names];
+        activeToolSets.push([...names]);
+      },
     };
     const calls: Array<{ prompt: string; timeoutMs: number; toolExecutionCountAtStart: number }> = [];
     const events: unknown[] = [];
@@ -81,7 +87,7 @@ describe("runAgentRecoveryPhase", () => {
         calls.push({ prompt, timeoutMs, toolExecutionCountAtStart });
         if (calls.length === 1) {
           return attempt({
-            output: output("error", "Timed out after 1s"),
+            output: output("error", "429 Too Many Requests"),
             snapshot: {
               hadToolActivity: true,
               hadPartialOutput: false,
@@ -89,14 +95,14 @@ describe("runAgentRecoveryPhase", () => {
               hadTerminalTurnOutput: false,
               sawCompactionIntent: false,
               canDisableToolsForRecovery: true,
+              hasUnresolvedToolExecution: false,
               toolExecutionCount: 3,
             },
             promptWasPersisted: true,
-            timedOut: true,
             toolExecutionCount: 3,
           });
         }
-        expect(activeToolSets.at(-1)).toEqual([]);
+        expect(activeTools).toEqual(["read", "bash"]);
         return attempt({
           output: output("success", undefined, "done"),
           snapshot: {
@@ -107,7 +113,6 @@ describe("runAgentRecoveryPhase", () => {
             sawCompactionIntent: false,
           },
           promptWasPersisted: true,
-          timedOut: false,
           toolExecutionCount: toolExecutionCountAtStart,
         });
       },
@@ -121,17 +126,128 @@ describe("runAgentRecoveryPhase", () => {
     expect(calls[1]?.toolExecutionCountAtStart).toBe(3);
     expect(calls[1]?.timeoutMs).toBeGreaterThanOrEqual(950);
     expect(calls[1]?.timeoutMs).toBeLessThanOrEqual(1_000);
-    expect(activeToolSets).toEqual([[], ["read", "bash"]]);
+    expect(activeToolSets).toEqual([]);
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "recovery_start", attempt: 1, strategy: "retry" }),
       expect.objectContaining({ type: "recovery_end", outcome: "recovered", attemptsUsed: 1 }),
     ]));
   });
 
+  test("disables and restores tools when transient recovery tools are opted out", async () => {
+    let activeTools = ["read", "bash"];
+    const activeToolSets: string[][] = [];
+    const sessionCtrl: SessionWithToolControl = {
+      getActiveToolNames: () => [...activeTools],
+      setActiveToolsByName: (names) => {
+        activeTools = [...names];
+        activeToolSets.push([...names]);
+      },
+    };
+    let calls = 0;
+
+    const result = await runAgentRecoveryPhase({
+      prompt: "original prompt",
+      chatJid: "web:test-recovery-phase",
+      session: {} as any,
+      sessionCtrl,
+      timeoutMs: 0,
+      startTime: Date.now(),
+      modelLabel: "test/model",
+      recoveryConfig: recoveryConfig({ transientRecoveryToolsEnabled: false }),
+      runOptions: {},
+      logsDir: "/tmp/nonexistent-piclaw-test-logs",
+      clearAttachments: () => {},
+      runPromptAttempt: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return attempt({
+            output: output("error", "503 temporarily unavailable"),
+            snapshot: {
+              hadToolActivity: true,
+              hadPartialOutput: false,
+              hadCompletedTurnOutput: false,
+              hadTerminalTurnOutput: false,
+              sawCompactionIntent: false,
+              canDisableToolsForRecovery: true,
+              hasUnresolvedToolExecution: false,
+            },
+            promptWasPersisted: true,
+          });
+        }
+        expect(activeTools).toEqual([]);
+        return attempt({ output: output("success", undefined, "done") });
+      },
+    });
+
+    expect(result.status).toBe("success");
+    expect(activeToolSets).toEqual([[], ["read", "bash"]]);
+    expect(activeTools).toEqual(["read", "bash"]);
+  });
+
+  test("disables and restores tools for an unresolved transient tool execution", async () => {
+    let activeTools = ["read", "bash"];
+    const activeToolSets: string[][] = [];
+    const sessionCtrl: SessionWithToolControl = {
+      getActiveToolNames: () => [...activeTools],
+      setActiveToolsByName: (names) => {
+        activeTools = [...names];
+        activeToolSets.push([...names]);
+      },
+    };
+    let calls = 0;
+
+    const result = await runAgentRecoveryPhase({
+      prompt: "original prompt",
+      chatJid: "web:test-recovery-phase",
+      session: {} as any,
+      sessionCtrl,
+      timeoutMs: 0,
+      startTime: Date.now(),
+      modelLabel: "test/model",
+      recoveryConfig: recoveryConfig(),
+      runOptions: {},
+      logsDir: "/tmp/nonexistent-piclaw-test-logs",
+      clearAttachments: () => {},
+      runPromptAttempt: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return attempt({
+            output: output("error", "WebSocket closed 1006 Connection ended"),
+            snapshot: {
+              hadToolActivity: true,
+              hadPartialOutput: false,
+              hadCompletedTurnOutput: false,
+              hadTerminalTurnOutput: false,
+              sawCompactionIntent: false,
+              canDisableToolsForRecovery: true,
+              hasUnresolvedToolExecution: true,
+            },
+            promptWasPersisted: true,
+          });
+        }
+        expect(activeTools).toEqual([]);
+        return attempt({ output: output("success", undefined, "done") });
+      },
+    });
+
+    expect(result.status).toBe("success");
+    expect(activeToolSets).toEqual([[], ["read", "bash"]]);
+    expect(activeTools).toEqual(["read", "bash"]);
+  });
+
   test("runs recovery compaction outside the initial elapsed budget before retrying", async () => {
     let compactCalls = 0;
     const calls: Array<{ prompt: string; timeoutMs: number; toolExecutionCountAtStart: number }> = [];
     const events: unknown[] = [];
+    let activeTools = ["read", "bash"];
+    const activeToolSets: string[][] = [];
+    const sessionCtrl: SessionWithToolControl = {
+      getActiveToolNames: () => [...activeTools],
+      setActiveToolsByName: (names) => {
+        activeTools = [...names];
+        activeToolSets.push([...names]);
+      },
+    };
     const session = {
       compact: async () => {
         compactCalls += 1;
@@ -143,11 +259,16 @@ describe("runAgentRecoveryPhase", () => {
       prompt: "original prompt",
       chatJid: "web:test-recovery-compact",
       session,
-      sessionCtrl: null,
+      sessionCtrl,
       timeoutMs: 0,
       startTime: Date.now() - 60_000,
       modelLabel: "test/model",
-      recoveryConfig: recoveryConfig({ totalBudgetMs: 25 }),
+      recoveryConfig: recoveryConfig({
+        enabled: false,
+        transientRecoveryEnabled: false,
+        transientRecoveryToolsEnabled: false,
+        totalBudgetMs: 25,
+      }),
       runOptions: { onEvent: (event) => events.push(event) },
       logsDir: "/tmp/nonexistent-piclaw-test-logs",
       clearAttachments: () => {},
@@ -157,17 +278,20 @@ describe("runAgentRecoveryPhase", () => {
           return attempt({
             output: output("error", "context length exceeded"),
             snapshot: {
-              hadToolActivity: false,
+              hadToolActivity: true,
               hadPartialOutput: false,
               hadCompletedTurnOutput: false,
               hadTerminalTurnOutput: false,
               sawCompactionIntent: true,
+              canDisableToolsForRecovery: true,
+              hasUnresolvedToolExecution: true,
               toolExecutionCount: 2,
             },
             promptWasPersisted: true,
             toolExecutionCount: 2,
           });
         }
+        expect(activeTools).toEqual(["read", "bash"]);
         return attempt({
           output: output("success", undefined, "recovered"),
           snapshot: {
@@ -189,6 +313,7 @@ describe("runAgentRecoveryPhase", () => {
     expect(calls[1]?.toolExecutionCountAtStart).toBe(2);
     expect(calls[1]?.timeoutMs).toBeGreaterThanOrEqual(20);
     expect(calls[1]?.timeoutMs).toBeLessThanOrEqual(25);
+    expect(activeToolSets).toEqual([]);
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "compaction_start", trigger: "recovery" }),
       expect.objectContaining({ type: "compaction_end", trigger: "recovery", willRetry: true }),
@@ -210,6 +335,7 @@ describe("runAgentRecoveryPhase", () => {
         hadPartialOutput: true,
         hadCompletedTurnOutput: false,
         hadTerminalTurnOutput: false,
+        hasUnresolvedToolExecution: true,
         sawCompactionIntent: false,
         compactionErrorMessage: null,
         toolUseBudgetExceeded: true,
@@ -228,6 +354,7 @@ describe("runAgentRecoveryPhase", () => {
       hadPartialOutput: true,
       hadCompletedTurnOutput: false,
       hadTerminalTurnOutput: false,
+      hasUnresolvedToolExecution: true,
       sawCompactionIntent: false,
       compactionErrorMessage: null,
       toolUseBudgetExceeded: true,

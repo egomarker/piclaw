@@ -86,6 +86,10 @@ type MessageKey =
   | 'compose.mergeInto'
   | 'compose.mergeBlocked'
   | 'workspace.title'
+  | 'workspace.moveConfirm'
+  | 'workspace.root'
+  | 'workspace.file'
+  | 'workspace.folder'
   | 'workspace.newFile'
   | 'workspace.refresh'
   | 'workspace.actions'
@@ -724,6 +728,10 @@ const EN: Record<MessageKey, string> = {
   'compose.mergeInto': 'Merge this branch into {target}',
   'compose.mergeBlocked': 'This branch cannot be merged while active or while it has children',
   'workspace.title': 'Workspace',
+  'workspace.moveConfirm': 'Move {entry} "{name}" from {source} to {target}?',
+  'workspace.root': 'the workspace root',
+  'workspace.file': 'file',
+  'workspace.folder': 'folder',
   'workspace.newFile': 'New file',
   'workspace.refresh': 'Refresh',
   'workspace.actions': 'Workspace actions',
@@ -1355,6 +1363,10 @@ const ZH_CN: Partial<Record<MessageKey, string>> = {
   'compose.mergeInto': '将此分支合并到 {target}',
   'compose.mergeBlocked': '当此分支处于活动状态或有子分支时无法合并',
   'workspace.title': '工作区',
+  'workspace.moveConfirm': '将{entry}“{name}”从{source}移动到{target}？',
+  'workspace.root': '工作区根目录',
+  'workspace.file': '文件',
+  'workspace.folder': '文件夹',
   'workspace.newFile': '新建文件',
   'workspace.refresh': '刷新',
   'workspace.actions': '工作区操作',
@@ -1986,6 +1998,10 @@ const JA: Partial<Record<MessageKey, string>> = {
   'compose.mergeInto': 'このブランチを {target} にマージ',
   'compose.mergeBlocked': 'このブランチはアクティブな間または子がある間はマージできません',
   'workspace.title': 'ワークスペース',
+  'workspace.moveConfirm': '{entry}「{name}」を{source}から{target}へ移動しますか？',
+  'workspace.root': 'ワークスペースのルート',
+  'workspace.file': 'ファイル',
+  'workspace.folder': 'フォルダー',
   'workspace.newFile': '新規ファイル',
   'workspace.refresh': '更新',
   'workspace.actions': 'ワークスペース操作',

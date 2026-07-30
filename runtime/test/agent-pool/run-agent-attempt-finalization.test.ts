@@ -29,6 +29,7 @@ function baseInput(overrides: Partial<Parameters<typeof finalizePromptAttemptOut
     hadTerminalTurnOutput: false,
     sawAssistantToolCallMessage: false,
     onlyReadOnlyToolActivity: true,
+    hasUnresolvedToolExecution: false,
     sawTerminalSideEffectToolActivity: false,
     hadToolFailure: false,
     hadToolFailureBeforeSoftStop: false,
@@ -55,6 +56,7 @@ describe("prompt attempt finalization", () => {
     const { output, snapshot } = finalizePromptAttemptOutput(baseInput({ timedOut: true, timeoutMs: 2500 }));
     expect(output).toEqual({ status: "error", result: null, error: "Timed out after 2500ms" });
     expect(snapshot.hadToolActivity).toBe(false);
+    expect(snapshot.hasUnresolvedToolExecution).toBe(false);
     expect(snapshot.sawThinkingOnlyStop).toBe(false);
   });
 
@@ -76,6 +78,15 @@ describe("prompt attempt finalization", () => {
     expect(output.error).toContain("provider stopped after tool use without a final assistant reply");
     expect(snapshot.hadToolFailure).toBe(true);
     expect(snapshot.sawTerminalSideEffectToolActivity).toBe(true);
+  });
+
+  test("preserves unresolved tool execution state in the recovery snapshot", () => {
+    const { snapshot } = finalizePromptAttemptOutput(baseInput({
+      timedOut: true,
+      hadToolActivity: true,
+      hasUnresolvedToolExecution: true,
+    }));
+    expect(snapshot.hasUnresolvedToolExecution).toBe(true);
   });
 
   test("reads latent session state errors without throwing on missing internals", () => {

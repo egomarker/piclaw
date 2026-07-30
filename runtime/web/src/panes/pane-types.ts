@@ -129,6 +129,9 @@ export interface WebPaneExtension {
     /** Where this pane lives: "tabs" (content area) or "dock" (bottom panel). */
     placement: PanePlacement;
 
+    /** Keep this tab pane mounted and hidden when another tab becomes active. */
+    retainOnTabSwitch?: boolean;
+
     /**
      * For "tabs" panes: can this pane handle the given context?
      * Return true/false, or a priority number (higher wins).

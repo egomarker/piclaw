@@ -91,14 +91,15 @@ test("AgentTurnCoordinator trusts finalized message_end text over streamed draft
   expect(tracker.getFinalText()).toBe("final replacement");
 });
 
-test("AgentTurnCoordinator preserves commentary text without exposing hidden thinking", () => {
+test("AgentTurnCoordinator discards commentary-only text without exposing hidden thinking", () => {
+  const discarded: Array<{ reason: string }> = [];
   const coordinator = new AgentTurnCoordinator({
     takeAttachments: () => [],
     touchSession: () => {},
     recordMessageUsage: () => {},
   });
 
-  const tracker = coordinator.createTracker("web:default");
+  const tracker = coordinator.createTracker("web:default", undefined, (discard) => discarded.push(discard));
 
   tracker.handleMessageUpdate({
     type: "message_update",
@@ -128,20 +129,25 @@ test("AgentTurnCoordinator preserves commentary text without exposing hidden thi
     },
   } as any);
 
-  expect(tracker.getFinalText()).toBe("progress update");
-  expect(tracker.getFinalText()).not.toContain("private chain of thought");
+  expect(tracker.getFinalText()).toBe("");
+  expect(discarded).toEqual([{ reason: "commentary_only" }]);
   expect(tracker.getTurnCount()).toBe(0);
 });
 
-test("AgentTurnCoordinator flushes completed commentary before a later final answer", () => {
+test("AgentTurnCoordinator does not flush completed commentary before a later final answer", () => {
   const completed: Array<{ text: string; attachments: AttachmentInfo[] }> = [];
+  const discarded: Array<{ reason: string }> = [];
   const coordinator = new AgentTurnCoordinator({
     takeAttachments: () => [],
     touchSession: () => {},
     recordMessageUsage: () => {},
   });
 
-  const tracker = coordinator.createTracker("web:default", (turn) => completed.push(turn));
+  const tracker = coordinator.createTracker(
+    "web:default",
+    (turn) => completed.push(turn),
+    (discard) => discarded.push(discard),
+  );
 
   tracker.handleMessageUpdate({
     type: "message_update",
@@ -192,9 +198,85 @@ test("AgentTurnCoordinator flushes completed commentary before a later final ans
     },
   } as any);
 
-  expect(completed).toEqual([{ text: "progress", attachments: [] }]);
-  expect(tracker.getTurnCount()).toBe(1);
+  expect(completed).toEqual([]);
+  expect(discarded).toEqual([{ reason: "commentary_only" }]);
+  expect(tracker.getTurnCount()).toBe(0);
   expect(tracker.getFinalText()).toBe("done");
+});
+
+test("AgentTurnCoordinator keeps only signed final-answer text from mixed-phase content", () => {
+  const coordinator = new AgentTurnCoordinator({
+    takeAttachments: () => [],
+    touchSession: () => {},
+    recordMessageUsage: () => {},
+  });
+  const tracker = coordinator.createTracker("web:default");
+  const commentarySignature = JSON.stringify({ phase: "commentary" });
+  const finalSignature = JSON.stringify({ phase: "final_answer" });
+
+  tracker.handleMessageUpdate({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      stopReason: "stop",
+      content: [
+        { type: "text", text: "Searching saved output. ", textSignature: commentarySignature },
+        { type: "text", text: "Inspecting nearby events. ", textSignature: commentarySignature },
+        { type: "text", text: "The final result is ready.", textSignature: finalSignature },
+      ],
+    },
+  } as any);
+
+  expect(tracker.getFinalText()).toBe("The final result is ready.");
+});
+
+test("AgentTurnCoordinator preserves unphased text while filtering signed commentary", () => {
+  const coordinator = new AgentTurnCoordinator({
+    takeAttachments: () => [],
+    touchSession: () => {},
+    recordMessageUsage: () => {},
+  });
+  const tracker = coordinator.createTracker("web:default");
+
+  tracker.handleMessageUpdate({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      stopReason: "stop",
+      content: [
+        { type: "text", text: "Transient planning. ", textSignature: JSON.stringify({ phase: "commentary" }) },
+        { type: "text", text: "Legacy visible answer." },
+      ],
+    },
+  } as any);
+
+  expect(tracker.getFinalText()).toBe("Legacy visible answer.");
+});
+
+test("AgentTurnCoordinator discards dangling commentary when an attempt ends without message_end", () => {
+  const discarded: Array<{ reason: string }> = [];
+  const coordinator = new AgentTurnCoordinator({
+    takeAttachments: () => [],
+    touchSession: () => {},
+    recordMessageUsage: () => {},
+  });
+  const tracker = coordinator.createTracker("web:default", undefined, (discard) => discarded.push(discard));
+  const signature = JSON.stringify({ phase: "commentary" });
+
+  tracker.handleMessageUpdate({
+    type: "message_update",
+    assistantMessageEvent: {
+      type: "text_delta",
+      delta: "Still investigating.",
+      contentIndex: 0,
+      partial: { content: [{ type: "text", textSignature: signature }] },
+    },
+  } as any);
+
+  tracker.finalizeAttempt();
+
+  expect(tracker.getFinalText()).toBe("");
+  expect(discarded).toEqual([{ reason: "commentary_only" }]);
 });
 
 test("AgentTurnCoordinator subscribes and downgrades handler failures to warnings", () => {
@@ -540,6 +622,64 @@ test("AgentTurnCoordinator captures provider error from assistant message_end", 
   expect(tracker.getError()?.stopReason).toBe("error");
   expect(tracker.getError()?.errorMessage).toContain("invalid_request_error");
   expect(tracker.getError()?.errorMessage).toContain("extra usage");
+});
+
+test("AgentTurnCoordinator discards commentary on error and lets a later final answer supersede it", () => {
+  const completed: Array<{ text: string }> = [];
+  const discarded: Array<{ reason: string }> = [];
+  const coordinator = new AgentTurnCoordinator({
+    takeAttachments: () => [],
+    touchSession: () => {},
+    recordMessageUsage: () => {},
+  });
+  const tracker = coordinator.createTracker(
+    "web:default",
+    (turn) => completed.push({ text: turn.text }),
+    (discard) => discarded.push(discard),
+  );
+  const commentarySignature = JSON.stringify({ phase: "commentary" });
+  const finalSignature = JSON.stringify({ phase: "final_answer" });
+
+  tracker.handleMessageUpdate({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      stopReason: "error",
+      errorMessage: "Temporary provider error; try again.",
+      content: [
+        { type: "text", text: "Searching logs.", textSignature: commentarySignature },
+      ],
+    },
+  } as any);
+
+  expect(tracker.getError()?.errorMessage).toContain("Temporary provider error");
+  expect(tracker.getFinalText()).toBe("");
+  expect(completed).toEqual([]);
+  expect(discarded).toEqual([{ reason: "commentary_only" }]);
+
+  tracker.handleMessageUpdate({
+    type: "message_update",
+    assistantMessageEvent: {
+      type: "text_start",
+      contentIndex: 0,
+      partial: { content: [{ type: "text", textSignature: finalSignature }] },
+    },
+  } as any);
+  tracker.handleMessageUpdate({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      stopReason: "stop",
+      content: [
+        { type: "text", text: "Checking one last detail. ", textSignature: commentarySignature },
+        { type: "text", text: "The request completed successfully.", textSignature: finalSignature },
+      ],
+    },
+  } as any);
+
+  expect(completed).toEqual([]);
+  expect(tracker.getError()).toBeNull();
+  expect(tracker.getFinalText()).toBe("The request completed successfully.");
 });
 
 test("AgentTurnCoordinator does not set error for normal assistant messages", () => {

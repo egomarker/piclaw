@@ -334,6 +334,50 @@ describe("web agent streaming", () => {
     }
   });
 
+  test("does not recover discarded commentary into a provider-error reply", async () => {
+    const commentary = "Searching saved output for a matching record.";
+    const agentPool = {
+      setSessionBinder: () => {},
+      runAgent: async (_prompt: string, _chatJid: string, options: any) => {
+        options.onEvent?.(makeEvent("message_update", {
+          assistantMessageEvent: { type: "text_start" },
+        }));
+        options.onEvent?.(makeEvent("message_update", {
+          assistantMessageEvent: { type: "text_delta", delta: commentary },
+        }));
+        options.onTurnDiscard?.({ reason: "commentary_only" });
+        return { status: "error", result: null, error: "Temporary provider error; try again." };
+      },
+      getContextUsageForChat: async () => null,
+    } as any;
+
+    const fixture = await createWebChannelTestFixture({
+      workspace: "temp",
+      queue: new AgentQueue(),
+      agentPool,
+      resetSql: "DELETE FROM message_media; DELETE FROM messages; DELETE FROM chats; DELETE FROM chat_cursors;",
+    });
+
+    try {
+      const { channel, db, events } = fixture;
+      expect(channel.storeMessage("web:default", "inspect it", false, [])).not.toBeNull();
+
+      await channel.processChat("web:default", "default");
+
+      const timeline = db.getTimeline("web:default", 20);
+      expect(timeline.some((row) => String(row.data?.content || "").includes(commentary))).toBe(false);
+      const outcomeBlocks = timeline.flatMap((row) => row.data?.content_blocks || []);
+      expect(outcomeBlocks).toContainEqual(expect.objectContaining({
+        type: "turn_outcome_marker",
+        kind: "error",
+        draft_recovered: false,
+      }));
+      expect(events.some((event) => event.type === "agent_draft" && event.data?.text === "")).toBe(true);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   test("streams live generated widget events for show_widget tool calls", async () => {
     const agentPool = {
       setSessionBinder: () => {},

@@ -23,6 +23,7 @@ export interface AgentRecoveryDiagnosticEntry {
   hadPartialOutput: boolean;
   hadCompletedTurnOutput: boolean;
   hadTerminalTurnOutput: boolean;
+  hasUnresolvedToolExecution: boolean;
   sawCompactionIntent: boolean;
   compactionErrorMessage: string | null;
   toolUseBudgetExceeded?: boolean;
@@ -64,7 +65,7 @@ export interface TurnOutput {
 }
 
 export interface TurnDiscard {
-  reason: "tool_use_commentary";
+  reason: "tool_use_commentary" | "commentary_only";
 }
 
 /** Result returned from a side prompt run. */

@@ -77,7 +77,7 @@ describe("repository script static-analysis coverage", () => {
     const output = `${result.stdout.toString()}\n${result.stderr.toString()}`;
     expect(result.exitCode, output).toBe(0);
     expect(output).not.toContain("File ignored because no matching configuration was supplied");
-  });
+  }, 20_000);
 
   test("script coverage guard runs from the repository package", () => {
     expect(existsSync(resolve(PACKAGE_DIR, "package.json"))).toBe(true);

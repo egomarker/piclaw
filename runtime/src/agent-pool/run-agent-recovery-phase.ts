@@ -15,6 +15,7 @@ import {
   type AutomaticRecoveryConfig,
   type RecoveryAttemptSnapshot,
   type RecoveryClassifier,
+  type RecoveryDecision,
   type RecoveryStrategy,
 } from "./automatic-recovery.js";
 import {
@@ -181,6 +182,15 @@ export function shouldSuppressRecoveryLoop(options: {
   };
 }
 
+export function shouldDisableToolsForRecoveryAttempt(
+  decision: RecoveryDecision,
+  snapshot: RecoveryAttemptSnapshot,
+  config: AutomaticRecoveryConfig,
+): boolean {
+  if (decision.classifier !== "transient") return false;
+  return !config.transientRecoveryToolsEnabled || Boolean(snapshot.hasUnresolvedToolExecution);
+}
+
 export function buildRecoveryDiagnosticEntry(
   phase: AgentRecoveryDiagnosticEntry["phase"],
   attempt: number,
@@ -203,6 +213,7 @@ export function buildRecoveryDiagnosticEntry(
     hadPartialOutput: Boolean(snapshot.hadPartialOutput),
     hadCompletedTurnOutput: Boolean(snapshot.hadCompletedTurnOutput),
     hadTerminalTurnOutput: Boolean(snapshot.hadTerminalTurnOutput),
+    hasUnresolvedToolExecution: Boolean(snapshot.hasUnresolvedToolExecution),
     sawCompactionIntent: Boolean(snapshot.sawCompactionIntent),
     compactionErrorMessage: snapshot.compactionErrorMessage ?? null,
     toolUseBudgetExceeded: Boolean(snapshot.toolUseBudgetExceeded),
@@ -619,6 +630,8 @@ export async function runAgentRecoveryPhase(options: RunAgentRecoveryPhaseOption
       recoveryAttemptsUsed,
       recoveryStrategy: effectiveDecision.strategy,
       reason: effectiveDecision.reason,
+      hasUnresolvedToolExecution: Boolean(attempt.snapshot.hasUnresolvedToolExecution),
+      transientRecoveryToolsEnabled: recoveryConfig.transientRecoveryToolsEnabled,
       ...getRunObservabilityDetails(runOptions),
     });
 
@@ -714,7 +727,11 @@ export async function runAgentRecoveryPhase(options: RunAgentRecoveryPhaseOption
     if (attempt.promptWasPersisted || attempt.snapshot.hadToolActivity) {
       attemptPrompt = RECOVERY_CONTINUATION_PROMPT;
     }
-    recoveryContinuationWithoutTools = recoveryContinuationWithoutTools || attempt.snapshot.hadToolActivity;
+    recoveryContinuationWithoutTools = shouldDisableToolsForRecoveryAttempt(
+      effectiveDecision,
+      attempt.snapshot,
+      recoveryConfig,
+    );
 
     if (effectiveDecision.strategy === "compact_then_retry") {
       pauseRecoveryBudget();

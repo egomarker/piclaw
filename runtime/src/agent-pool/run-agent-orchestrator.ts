@@ -169,7 +169,11 @@ export function createToolExecutionWatchdogHeartbeatController(
     heartbeat?: (chatJid: string, phase: "tool_execution", metadata?: Record<string, unknown>) => void;
     getIntervalMs?: () => number;
   } = {},
-): { handleEvent: (event: ToolExecutionWatchdogEvent) => void; stop: () => void } {
+): {
+  handleEvent: (event: ToolExecutionWatchdogEvent) => void;
+  getActiveExecutionCount: () => number;
+  stop: () => void;
+} {
   const heartbeat = options.heartbeat ?? heartbeatTrackedPhase;
   const getIntervalMs = options.getIntervalMs ?? (() => getToolExecutionWatchdogHeartbeatIntervalMs());
   const activeTools = new Map<string, string | null>();
@@ -236,6 +240,9 @@ export function createToolExecutionWatchdogHeartbeatController(
         removeTool(event);
         stopTimerIfIdle();
       }
+    },
+    getActiveExecutionCount() {
+      return activeTools.size;
     },
     stop() {
       activeTools.clear();
@@ -661,6 +668,7 @@ async function runPromptAttempt(
   };
   let staleProgressInterrupted = false;
   let staleProgressAbortFailed: string | null = null;
+  let unresolvedToolExecutionCount: number;
   const unregisterProgressAborter = registerProgressWatchdogAborter(chatJid, async (stall) => {
     staleProgressInterrupted = true;
     options.onWarn?.("Stale-progress watchdog aborting stalled agent run", {
@@ -715,10 +723,12 @@ async function runPromptAttempt(
     restoreUpstreamAutoCompaction();
     finishPromptTimeout();
     unregisterProgressAborter();
+    unresolvedToolExecutionCount = toolExecutionWatchdogHeartbeat.getActiveExecutionCount();
     toolExecutionWatchdogHeartbeat.stop();
     unsub();
   }
 
+  tracker.finalizeAttempt();
   const trackedFinalText = tracker.getFinalText();
   const finalUsage = tracker.getFinalUsage();
   hadPartialOutput = hadPartialOutput || !!trackedFinalText;
@@ -753,6 +763,7 @@ async function runPromptAttempt(
     hadTerminalTurnOutput,
     sawAssistantToolCallMessage,
     onlyReadOnlyToolActivity,
+    hasUnresolvedToolExecution: unresolvedToolExecutionCount > 0,
     sawTerminalSideEffectToolActivity,
     hadToolFailure,
     hadToolFailureBeforeSoftStop: toolBudget.state.hadToolFailureBeforeSoftStop,
