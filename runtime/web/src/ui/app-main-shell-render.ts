@@ -23,9 +23,10 @@ export function buildMainShellClassName(options: {
   editorOpen: boolean;
   chatOnlyMode: boolean;
   zenMode: boolean;
+  uiMode?: 'classic' | 'mobile';
 }): string {
-  const { workspaceOpen, editorOpen, chatOnlyMode, zenMode } = options;
-  return `app-shell${workspaceOpen ? '' : ' workspace-collapsed'}${editorOpen ? ' editor-open' : ''}${chatOnlyMode ? ' chat-only' : ''}${zenMode ? ' zen-mode' : ''}`;
+  const { workspaceOpen, editorOpen, chatOnlyMode, zenMode, uiMode = 'classic' } = options;
+  return `app-shell${workspaceOpen ? '' : ' workspace-collapsed'}${editorOpen ? ' editor-open' : ''}${chatOnlyMode ? ' chat-only' : ''}${zenMode ? ' zen-mode' : ''}${uiMode === 'mobile' ? ' mobile-interface' : ''}`;
 }
 
 export function extractPostedUserMessageId(response: unknown): number | null {
@@ -115,6 +116,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
     editorOpen,
     chatOnlyMode,
     zenMode,
+    uiMode = 'classic',
     isRenameBranchFormOpen,
     closeRenameCurrentBranchForm,
     handleRenameCurrentBranch,
@@ -281,7 +283,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
   };
 
   return html`
-    <div class=${buildMainShellClassName({ workspaceOpen, editorOpen, chatOnlyMode, zenMode })} ref=${appShellRef}>
+    <div class=${buildMainShellClassName({ workspaceOpen, editorOpen, chatOnlyMode, zenMode, uiMode })} ref=${appShellRef}>
       <${SystemMetersHud} mode="overlay" />
       ${isRenameBranchFormOpen && html`
         <div class="rename-branch-overlay" onPointerDown=${(event: any) => {

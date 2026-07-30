@@ -23,6 +23,14 @@ test('buildMainShellClassName composes workspace/editor/chat/zen modifiers', () 
     chatOnlyMode: true,
     zenMode: true,
   })).toBe('app-shell workspace-collapsed editor-open chat-only zen-mode');
+
+  expect(buildMainShellClassName({
+    workspaceOpen: true,
+    editorOpen: true,
+    chatOnlyMode: false,
+    zenMode: false,
+    uiMode: 'mobile',
+  })).toBe('app-shell editor-open mobile-interface');
 });
 
 test('extractPostedUserMessageId prefers user_message.id and falls back to row_id', () => {
