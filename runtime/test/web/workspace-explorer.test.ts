@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test';
 
 import {
+  buildWorkspaceMoveConfirmationMessage,
+  confirmWorkspaceEntryMove,
   getWorkspaceTouchStartIntent,
   mergeWorkspaceTreeUpdates,
 } from '../../web/src/components/workspace-explorer.ts';
@@ -58,6 +60,34 @@ test('workspace touch start ignores rows that are being renamed', () => {
   }, '/workspace/demo.md');
 
   expect(intent).toBeNull();
+});
+
+test('workspace move confirmation describes file and folder destinations', () => {
+  expect(buildWorkspaceMoveConfirmationMessage('notes/report.md', 'archive', 'file')).toBe(
+    'Move file "report.md" from "notes" to "archive"?',
+  );
+  expect(buildWorkspaceMoveConfirmationMessage('projects/demo', '.', 'dir')).toBe(
+    'Move folder "demo" from "projects" to the workspace root?',
+  );
+});
+
+test('workspace move confirmation respects cancel and confirm responses', () => {
+  const prompts: string[] = [];
+  const cancel = confirmWorkspaceEntryMove('notes/report.md', 'archive', 'file', (message: string) => {
+    prompts.push(message);
+    return false;
+  });
+  const confirm = confirmWorkspaceEntryMove('projects/demo', '.', 'dir', (message: string) => {
+    prompts.push(message);
+    return true;
+  });
+
+  expect(cancel).toBe(false);
+  expect(confirm).toBe(true);
+  expect(prompts).toEqual([
+    'Move file "report.md" from "notes" to "archive"?',
+    'Move folder "demo" from "projects" to the workspace root?',
+  ]);
 });
 
 test('workspace root updates preserve descendants loaded beyond the watcher depth', () => {

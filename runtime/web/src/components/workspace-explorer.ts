@@ -639,6 +639,20 @@ export function getWorkspaceTouchStartIntent(event, renamingPath = null) {
     };
 }
 
+export function buildWorkspaceMoveConfirmationMessage(sourcePath, targetPath, entryType) {
+    const sourceName = sourcePath.split('/').pop() || sourcePath;
+    const sourceParent = sourcePath.includes('/')
+        ? (sourcePath.split('/').slice(0, -1).join('/') || '.')
+        : '.';
+    const entryLabel = entryType === 'dir' ? 'folder' : 'file';
+    const describeLocation = (path) => path === '.' ? 'the workspace root' : `"${path}"`;
+    return `Move ${entryLabel} "${sourceName}" from ${describeLocation(sourceParent)} to ${describeLocation(targetPath)}?`;
+}
+
+export function confirmWorkspaceEntryMove(sourcePath, targetPath, entryType, confirmMove = (message) => window.confirm(message)) {
+    return confirmMove(buildWorkspaceMoveConfirmationMessage(sourcePath, targetPath, entryType));
+}
+
 // ── WorkspaceExplorer ─────────────────────────────────────────────────────────
 
 /** Preact component: file tree explorer with upload, rename, and preview. */
@@ -2150,6 +2164,7 @@ export function WorkspaceExplorer({
             ? (sourcePath.split('/').slice(0, -1).join('/') || '.')
             : '.';
         if (targetDir === sourceParent) return;
+        if (!confirmWorkspaceEntryMove(sourcePath, targetDir, node.type)) return;
         try {
             const result = await moveWorkspaceEntry(sourcePath, targetDir);
             const nextPath = result?.path || sourcePath;
