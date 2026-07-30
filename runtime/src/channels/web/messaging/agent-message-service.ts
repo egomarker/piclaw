@@ -11,6 +11,7 @@ import type { WebChannelLike } from "../core/web-channel-contracts.js";
 import type { InteractionRow } from "../../../db.js";
 import { parseJsonObjectRequest } from "../json-body.js";
 import { normalizeMediaIds } from "../posts-service.js";
+import { sanitizePublicInboundContentBlocks } from "./content-block-safety.js";
 
 /** AgentMessagePayload type definition. */
 export interface AgentMessagePayload {
@@ -35,18 +36,6 @@ export interface AgentMessagePayload {
  */
 const MAX_AGENT_MESSAGE_CONTENT_LENGTH = 100 * 1024;
 const VALID_SCREEN_HINTS = new Set(["mobile", "tablet", "desktop"]);
-const INTERNAL_CONTENT_BLOCK_TYPES = new Set(["restart_handoff", "self_continuation"]);
-
-function stripInternalContentBlocks(value: unknown): unknown[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  return value.filter((block) => {
-    if (!block || typeof block !== "object" || Array.isArray(block)) return true;
-    const type = typeof (block as { type?: unknown }).type === "string"
-      ? (block as { type: string }).type
-      : "";
-    return !INTERNAL_CONTENT_BLOCK_TYPES.has(type);
-  });
-}
 
 function normalizeScreenHint(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -94,7 +83,7 @@ export async function parseAgentMessageRequest(req: Request): Promise<{
   if (screenHint) data.screen_hint = screenHint;
   else delete data.screen_hint;
   delete data.client_context;
-  data.content_blocks = stripInternalContentBlocks(data.content_blocks);
+  data.content_blocks = sanitizePublicInboundContentBlocks(data.content_blocks);
 
   return { payload: data };
 }

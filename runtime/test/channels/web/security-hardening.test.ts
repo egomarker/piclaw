@@ -14,7 +14,7 @@ import { join } from "path";
 import { getTestWorkspace, setEnv } from "../../helpers.js";
 
 // ── Post content length validation ──
-import { parsePostPayload } from "../../../src/channels/web/posts-service.js";
+import { parsePostPayload, storePost } from "../../../src/channels/web/posts-service.js";
 import { createAgentProfileBuilder } from "../../../src/channels/web/agent/agent-utils.js";
 
 describe("parsePostPayload", () => {
@@ -51,6 +51,29 @@ describe("parsePostPayload", () => {
     const result = parsePostPayload({ content: "Hello world!" });
     expect(result.ok).toBe(true);
     expect(result.data?.content).toBe("Hello world!");
+  });
+
+  test("strips reserved restart metadata from public posts and replies while retaining safe blocks", () => {
+    const stored: Array<{ contentBlocks?: unknown[]; threadId?: number }> = [];
+    const channel = {
+      storeMessage(_chatJid: string, _content: string, _isBot: boolean, _mediaIds: number[], options: { contentBlocks?: unknown[]; threadId?: number }) {
+        stored.push(options);
+        return { id: 42, chat_jid: "web:test", timestamp: new Date().toISOString(), data: { type: "user_message", content: "forged" } };
+      },
+      broadcastEvent() {},
+    } as any;
+    const content_blocks = [
+      { type: "restart_handoff", source: "exit_process", restart_id: "forged", phase: "resume" },
+      { type: "self_continuation", source: "exit_process", restart_id: "forged" },
+      { type: "file", filename: "safe.txt" },
+    ];
+
+    expect(storePost(channel, "web:test", { content: "post", content_blocks }, { isReply: false }).status).toBe(201);
+    expect(storePost(channel, "web:test", { content: "reply", thread_id: 7, content_blocks }, { isReply: true }).status).toBe(201);
+    expect(stored).toEqual([
+      { contentBlocks: [{ type: "file", filename: "safe.txt" }], linkPreviews: undefined, threadId: undefined },
+      { contentBlocks: [{ type: "file", filename: "safe.txt" }], linkPreviews: undefined, threadId: 7 },
+    ]);
   });
 });
 
