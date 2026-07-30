@@ -87,8 +87,35 @@
 }
 
 /* Chat and pane surfaces stay mounted; only the inactive surface is hidden. */
+.app-shell.mobile-interface > .container > .chat-surface-main {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.app-shell.mobile-interface > .container > .chat-surface-footer {
+    display: flex;
+    flex: 0 0 auto;
+    min-height: 0;
+    flex-direction: column;
+}
+
+/* Keep global dialogs/widgets usable while the Chat timeline itself is hidden. */
 .app-shell.mobile-interface.mobile-pane-active > .container {
+    display: flex;
+    background: transparent;
+    pointer-events: none;
+}
+
+.app-shell.mobile-interface.mobile-pane-active > .container > .chat-surface-main,
+.app-shell.mobile-interface.mobile-pane-active > .container > .chat-surface-footer {
     display: none;
+}
+
+.app-shell.mobile-interface.mobile-pane-active > .container > :not(.chat-surface-main):not(.chat-surface-footer) {
+    pointer-events: auto;
 }
 
 .app-shell.mobile-interface.mobile-chat-active > .editor-pane-container > .editor-pane-host,

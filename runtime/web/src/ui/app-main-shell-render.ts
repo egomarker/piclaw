@@ -478,7 +478,8 @@ export function renderMainShell(options: MainShellRenderOptions): any {
         onPrefillCompose=${requestComposePrefill}
       />
       <div class="container">
-        ${searchQuery && isIOSDevice() && html`<div class="search-results-spacer"></div>`}
+        <div class="chat-surface-main">
+          ${searchQuery && isIOSDevice() && html`<div class="search-results-spacer"></div>`}
         ${(currentHashtag || searchQuery) && html`
           <div class="hashtag-header">
             <button class="back-btn" onClick=${handleBackToTimeline}>
@@ -528,12 +529,13 @@ export function renderMainShell(options: MainShellRenderOptions): any {
           onPanelToggle=${handlePanelToggle}
           showExtensionPanels=${false}
         />
-        <${BtwPanel}
-          session=${btwSession}
-          onClose=${closeBtwPanel}
-          onRetry=${handleBtwRetry}
-          onInject=${handleBtwInject}
-        />
+          <${BtwPanel}
+            session=${btwSession}
+            onClose=${closeBtwPanel}
+            onRetry=${handleBtwRetry}
+            onInject=${handleBtwInject}
+          />
+        </div>
         <${FloatingWidgetPane}
           widget=${floatingWidget}
           onClose=${handleCloseFloatingWidget}
@@ -547,8 +549,9 @@ export function renderMainShell(options: MainShellRenderOptions): any {
           />
         `}
         <${SettingsDialogLoader} />
-        <${AgentStatus}
-          extensionPanels=${Array.from(extensionStatusPanels.values())}
+        <div class="chat-surface-footer">
+          <${AgentStatus}
+            extensionPanels=${Array.from(extensionStatusPanels.values())}
           pendingPanelActions=${pendingExtensionPanelActions}
           onExtensionPanelAction=${handleExtensionPanelAction}
           turnId=${currentTurnId}
@@ -619,9 +622,10 @@ export function renderMainShell(options: MainShellRenderOptions): any {
           onModelChange=${setActiveModel}
           onModelStateChange=${applyModelState}
           statusNotice=${isCompactionStatus(agentStatus) ? agentStatus : null}
-          extensionWorkingState=${extensionWorkingState}
-          prefillRequest=${composePrefillRequest}
-        />
+            extensionWorkingState=${extensionWorkingState}
+            prefillRequest=${composePrefillRequest}
+          />
+        </div>
         <${AgentRequestModal}
           request=${pendingRequest}
           onRespond=${() => {

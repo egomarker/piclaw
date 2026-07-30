@@ -280,6 +280,17 @@ function createMainShellRenderOptions(overrides: Record<string, unknown> = {}) {
   };
 }
 
+test('renderMainShell groups Chat chrome separately from global overlays', () => {
+  const tree = renderMainShell(createMainShellRenderOptions());
+  const classes = new Set<string>();
+  walkVNodes(tree, (node) => {
+    if (typeof node.props?.class === 'string') classes.add(node.props.class);
+  });
+
+  expect(classes.has('chat-surface-main')).toBe(true);
+  expect(classes.has('chat-surface-footer')).toBe(true);
+});
+
 test('renderMainShell passes queue controls to ComposeBox and does not render a top-level queue stack', () => {
   const followupQueueItems = [{ row_id: 7, content: 'queued item' }];
   const handleRemoveQueuedFollowup = mock(() => {});
