@@ -2,7 +2,13 @@ import { beforeEach, expect, test } from "bun:test";
 
 import { WEB_RUNTIME_CONFIG } from "../../../src/core/config.js";
 import { createWebSession, deleteExpiredWebSessions, getDb, initDatabase } from "../../../src/db.js";
-import { TerminalSessionService } from "../../../src/channels/web/terminal/terminal-session-service.js";
+import {
+  TerminalSessionService,
+  buildShellArgs,
+  resolveLinuxTerminalBackend,
+  resolveTerminalShell,
+  spawnBunNativePty,
+} from "../../../src/channels/web/terminal/terminal-session-service.js";
 
 class FakeStream {
   listeners: Array<(chunk: string) => void> = [];
@@ -49,6 +55,37 @@ beforeEach(() => {
   getDb().prepare("DELETE FROM web_sessions").run();
   deleteExpiredWebSessions(new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000));
 });
+
+test("terminal shell and backend selection prefer explicit native-capable paths", () => {
+  expect(resolveTerminalShell({ PICLAW_TERMINAL_SHELL: "/bin/sh", PATH: "/bin" }, "/bin/bash")).toBe("/bin/sh");
+  expect(buildShellArgs("/usr/bin/zsh")).toEqual(["+o", "PROMPT_SP", "-i"]);
+  expect(buildShellArgs("/bin/sh")).toEqual(["-i"]);
+  expect(resolveLinuxTerminalBackend({ bunTerminalAvailable: true, setsidPath: "/usr/bin/setsid", scriptPath: null })).toBe("bun-native-pty");
+  expect(resolveLinuxTerminalBackend({ bunTerminalAvailable: true, setsidPath: null, scriptPath: "/usr/bin/script" })).toBe("script");
+  expect(resolveLinuxTerminalBackend({ bunTerminalAvailable: false, setsidPath: "/usr/bin/setsid", scriptPath: "/usr/bin/script" })).toBe("script");
+  expect(resolveLinuxTerminalBackend({ bunTerminalAvailable: false, setsidPath: null, scriptPath: null })).toBe("unavailable");
+});
+
+const nativePtyTest = process.platform === "linux" && typeof Bun.Terminal === "function" ? test : test.skip;
+
+nativePtyTest("Bun native Linux PTY provides a controlling TTY and foreground job control without script", async () => {
+  const setsid = "/usr/bin/setsid";
+  const proc = spawnBunNativePty(process.cwd(), { ...process.env, PS1: "", TERM: "xterm-256color" }, "/bin/bash", 80, 24, setsid);
+  expect(proc).not.toBeNull();
+  const output: string[] = [];
+  proc!.stdout.on("data", (chunk) => output.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8")));
+  const exited = new Promise<void>((resolve) => proc!.on("exit", () => resolve()));
+  proc!.stdin.write("tty; /bin/sh -c 't=$(ps -o tpgid= -p $$); p=$(ps -o pgid= -p $$); [ $t -eq $p ] && echo PICLAW_JOB_CONTROL_OK'; exit\n");
+  await Promise.race([
+    exited,
+    Bun.sleep(5_000).then(() => { throw new Error("native PTY shell did not exit"); }),
+  ]);
+  const text = output.join("");
+  expect(text).toMatch(/\/dev\/pts\/\d+/);
+  expect(text).toContain("PICLAW_JOB_CONTROL_OK");
+  expect(text).not.toContain("no job control");
+  expect(text).not.toContain("can't access tty");
+}, 10_000);
 
 test("terminal session service resolves owner from web session cookie", () => {
   createWebSession("terminal-token", "user-1", 3600, "totp");

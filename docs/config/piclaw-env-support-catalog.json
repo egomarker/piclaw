@@ -3154,6 +3154,36 @@
       "migrationDisposition": "migrated-to-domain-config"
     },
     {
+      "name": "PICLAW_TERMINAL_SHELL",
+      "owner": "web",
+      "type": "string",
+      "default": null,
+      "bounds": "path or executable name resolving to an executable interactive shell",
+      "allowedValues": [],
+      "secret": false,
+      "persistence": [
+        "env",
+        "dotenv"
+      ],
+      "precedence": [
+        "process.env",
+        "passwd login shell",
+        "SHELL",
+        "/bin/bash",
+        "/bin/sh"
+      ],
+      "status": "supported",
+      "compatibilityAliasFor": null,
+      "deprecation": null,
+      "removalVersion": null,
+      "bootstrapAllowed": false,
+      "source": "runtime/src/channels/web/terminal/terminal-session-service.ts (#842)",
+      "migrationDisposition": "retain-per-invocation-context",
+      "supportedPersistence": [
+        "env"
+      ]
+    },
+    {
       "name": "PICLAW_TEST_PLATFORM",
       "owner": "web",
       "type": "string",
