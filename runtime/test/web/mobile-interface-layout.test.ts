@@ -11,6 +11,11 @@ test('authenticated styles load the isolated Mobile layout last', () => {
   expect(mobileCss).not.toMatch(/^\.app-shell(?!\.mobile-interface)/m);
 });
 
+test('Mobile gives collapsed-explorer Chat the full content track', () => {
+  expect(classicEditorCss).toContain('.app-shell.workspace-collapsed:not(.editor-open):not(.chat-only):not(.pane-popout)');
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface\.workspace-collapsed:not\(\.editor-open\):not\(\.chat-only\):not\(\.pane-popout\) > \.container \{[^}]*width: 100%;[^}]*justify-self: stretch;/s);
+});
+
 test('Mobile hides Chat chrome without suppressing global dialogs and widgets', () => {
   expect(classicEditorCss).toMatch(/\.chat-surface-main,\s*\n\.chat-surface-footer \{\s*\n\s*display: contents;/);
   expect(mobileCss).toContain('.app-shell.mobile-interface.mobile-pane-active > .container > .chat-surface-main');
