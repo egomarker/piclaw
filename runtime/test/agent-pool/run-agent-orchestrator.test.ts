@@ -2160,6 +2160,7 @@ test("runAgentPrompt prompts the rotated runtime session after auto-rotation swa
 test("runAgentPrompt retries a recoverable interrupted turn and returns one final success", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
@@ -2675,6 +2676,7 @@ test("runAgentPrompt does not reset continuation budget across repeated compact_
 test("runAgentPrompt writes recovery diagnostics into the agent log", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
@@ -3615,6 +3617,7 @@ test("runAgentPrompt retries a persisted commentary-only error instead of classi
   initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
@@ -3705,6 +3708,7 @@ test("runAgentPrompt retries a persisted commentary-only error instead of classi
 test("runAgentPrompt continues with tools after a resolved side-effecting tool", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
@@ -3920,6 +3924,7 @@ test("runAgentPrompt does not let a terminal side-effect tool mask an earlier to
 test("runAgentPrompt continues after a committed tool-use lead-in when closing prose is missing", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
@@ -4045,11 +4050,11 @@ test("runAgentPrompt continues after a committed tool-use lead-in when closing p
   }
 });
 
-test("runAgentPrompt honors the tools-disabled transient recovery opt-out", async () => {
+test("runAgentPrompt disables tools by default during transient recovery", async () => {
   initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
-    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "0",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: undefined,
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
@@ -4234,6 +4239,7 @@ test("runAgentPrompt clamps a recovery attempt to the remaining short timeout bu
   initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
@@ -4388,6 +4394,7 @@ test("runAgentPrompt keeps tools disabled across repeated opted-out continuation
 test("runAgentPrompt retries when provider stops after a read-only tool call without a final reply", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
@@ -4574,6 +4581,7 @@ test("runAgentPrompt retries once when the provider stops after emitting thinkin
 test("runAgentPrompt uses existing retry settings for automatic recovery attempts", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
 
@@ -4808,6 +4816,7 @@ test("runAgentPrompt ignores a queued late-timeout callback after prompt complet
 test("runAgentPrompt recovery loop guard numeric env rejects malformed suffixes", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "6",
     PICLAW_RECOVERY_LOOP_GUARD_ENABLED: "1",
     PICLAW_RECOVERY_LOOP_GUARD_MAX_FAILURES: "2oops",

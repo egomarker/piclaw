@@ -120,6 +120,7 @@ test("agent pool aggregates recovery counters into memory instrumentation", asyn
     PICLAW_STORE: ws.store,
     PICLAW_DATA: ws.data,
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });

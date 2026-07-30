@@ -35,6 +35,7 @@ function createRuntime(session: any, retrySettings?: { enabled?: boolean; maxRet
 test("runAgentPrompt retries a blank user-only session delta and returns the recovered reply", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });
@@ -110,6 +111,7 @@ test("runAgentPrompt retries a blank turn below the configured context threshold
   initDatabase();
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "1",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
     PICLAW_COMPACTION_THRESHOLD_PERCENT: "80",
@@ -254,6 +256,7 @@ test("runAgentPrompt treats terminal UI side-effect tools as successful even aft
 test("runAgentPrompt exhausts recovery when repeated blank user-only deltas persist", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
     PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
     PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
   });

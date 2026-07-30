@@ -26,9 +26,11 @@ test("workspace tree cache reuses responses briefly", async () => {
   const ws = getTestWorkspace();
   restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
 
-  const { WorkspaceService } = await importFresh<typeof import("../src/channels/web/workspace/service.js")>(
-    "../src/channels/web/workspace/service.js"
-  );
+  const [{ WorkspaceService }, { WORKSPACE_DIR }] = await Promise.all([
+    importFresh<typeof import("../src/channels/web/workspace/service.js")>("../src/channels/web/workspace/service.js"),
+    import("../../../src/core/config.js"),
+  ]);
+  await fs.mkdir(WORKSPACE_DIR, { recursive: true });
 
   const service = new WorkspaceService();
   const originalNow = Date.now;

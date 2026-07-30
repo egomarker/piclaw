@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -29,7 +29,16 @@ function makeLargeTextToolResult(textChars = 300_000) {
 test("session tool-result env limits reject malformed suffixes at module initialization", { timeout: 30000 }, async () => {
   const tempRoot = mkdtempSync(join(tmpdir(), "piclaw-session-strict-env-"));
   const sessionDir = join(tempRoot, "session");
+  const workspaceDir = join(tempRoot, "workspace");
+  const storeDir = join(tempRoot, "store");
+  const dataDir = join(tempRoot, "data");
+  mkdirSync(workspaceDir, { recursive: true });
+  mkdirSync(storeDir, { recursive: true });
+  mkdirSync(dataDir, { recursive: true });
   const restore = setEnv({
+    PICLAW_WORKSPACE: workspaceDir,
+    PICLAW_STORE: storeDir,
+    PICLAW_DATA: dataDir,
     PICLAW_SESSION_TOOL_RESULT_MAX_PERSIST_BYTES: "500000oops",
     PICLAW_SESSION_FILE_PRELOAD_SANITIZE_MIN_BYTES: "500000oops",
     PICLAW_SESSION_TOOL_RESULT_PREVIEW_CHARS: "20oops",

@@ -3821,7 +3821,7 @@
       "name": "PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED",
       "owner": "agent-runtime",
       "type": "boolean",
-      "default": true,
+      "default": false,
       "bounds": null,
       "allowedValues": [
         "1",

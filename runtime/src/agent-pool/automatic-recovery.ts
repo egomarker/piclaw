@@ -85,7 +85,7 @@ export const DEFAULT_RETRY_BACKOFF_SETTINGS: Readonly<RetryBackoffSettings> = Ob
 export const DEFAULT_AUTOMATIC_RECOVERY_CONFIG: Readonly<AutomaticRecoveryConfig> = Object.freeze({
   enabled: true,
   transientRecoveryEnabled: true,
-  transientRecoveryToolsEnabled: true,
+  transientRecoveryToolsEnabled: false,
   maxAttempts: DEFAULT_MAX_ATTEMPTS,
   totalBudgetMs: DEFAULT_TOTAL_BUDGET_MS,
   baseDelayMs: DEFAULT_RETRY_BASE_DELAY_MS,

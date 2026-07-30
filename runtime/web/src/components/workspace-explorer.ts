@@ -656,18 +656,27 @@ export function getWorkspaceTouchStartIntent(event, renamingPath = null) {
     };
 }
 
-export function buildWorkspaceMoveConfirmationMessage(sourcePath, targetPath, entryType) {
+export function buildWorkspaceMoveConfirmationMessage(sourcePath, targetPath, entryType, translate) {
     const sourceName = sourcePath.split('/').pop() || sourcePath;
     const sourceParent = sourcePath.includes('/')
         ? (sourcePath.split('/').slice(0, -1).join('/') || '.')
         : '.';
+    if (typeof translate === 'function') {
+        const describeLocation = (path) => path === '.' ? translate('workspace.root') : `"${path}"`;
+        return translate('workspace.moveConfirm', {
+            entry: translate(entryType === 'dir' ? 'workspace.folder' : 'workspace.file'),
+            name: sourceName,
+            source: describeLocation(sourceParent),
+            target: describeLocation(targetPath),
+        });
+    }
     const entryLabel = entryType === 'dir' ? 'folder' : 'file';
     const describeLocation = (path) => path === '.' ? 'the workspace root' : `"${path}"`;
     return `Move ${entryLabel} "${sourceName}" from ${describeLocation(sourceParent)} to ${describeLocation(targetPath)}?`;
 }
 
-export function confirmWorkspaceEntryMove(sourcePath, targetPath, entryType, confirmMove = (message) => window.confirm(message)) {
-    return confirmMove(buildWorkspaceMoveConfirmationMessage(sourcePath, targetPath, entryType));
+export function confirmWorkspaceEntryMove(sourcePath, targetPath, entryType, confirmMove = (message) => window.confirm(message), translate) {
+    return confirmMove(buildWorkspaceMoveConfirmationMessage(sourcePath, targetPath, entryType, translate));
 }
 
 // ── WorkspaceExplorer ─────────────────────────────────────────────────────────
@@ -2202,7 +2211,7 @@ export function WorkspaceExplorer({
             ? (sourcePath.split('/').slice(0, -1).join('/') || '.')
             : '.';
         if (targetDir === sourceParent) return;
-        if (!confirmWorkspaceEntryMove(sourcePath, targetDir, node.type)) return;
+        if (!confirmWorkspaceEntryMove(sourcePath, targetDir, node.type, undefined, t)) return;
         try {
             const result = await moveWorkspaceEntry(sourcePath, targetDir);
             const nextPath = result?.path || sourcePath;
@@ -2235,7 +2244,7 @@ export function WorkspaceExplorer({
         } catch (err) {
             setError(err?.message || 'Failed to move entry');
         }
-    }, []);
+    }, [t]);
     moveEntryToTargetRef.current = moveEntryToTarget;
 
     const handleDrop = useCallback(async (event) => {
