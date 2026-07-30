@@ -25,6 +25,7 @@ import {
   type PaneHostTransferEnvelope,
 } from '../panes/pane-host-transfer.js';
 import { claimPaneLiveTransfer, clearPaneLiveTransferForPath, registerPaneLiveTransfer } from '../panes/pane-live-transfer.js';
+import { RetainedPaneCache } from '../panes/retained-pane-cache.js';
 import { paneRegistry, tabStore } from '../panes/index.js';
 import {
   getPanePopoutTitle,
@@ -351,6 +352,8 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
 
   const editorContainerRef = useRef<any>(null);
   const editorInstanceRef = useRef<any>(null);
+  const retainedPaneCacheRef = useRef<RetainedPaneCache | null>(null);
+  const retainedPaneCache = retainedPaneCacheRef.current ??= new RetainedPaneCache();
   const dockContainerRef = useRef<any>(null);
   const dockInstanceRef = useRef<any>(null);
 
@@ -577,7 +580,8 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
       const preservedInstance = editorInstanceRef.current;
       const useLiveTransfer = shouldUseLivePaneTransfer({ panePath, terminalTabPath });
       if (useLiveTransfer && preservedInstance && typeof preservedInstance.moveHost === 'function') {
-        registerPaneLiveTransfer({
+        let releasedRetainedEntry: ReturnType<RetainedPaneCache['release']> = null;
+        const registered = registerPaneLiveTransfer({
           panePath,
           paneInstanceId: pendingTab.paneInstanceId,
           paneWindowId: pendingTab.ownerWindowId,
@@ -586,8 +590,12 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
             if (editorInstanceRef.current === preservedInstance) {
               editorInstanceRef.current = null;
             }
+            releasedRetainedEntry?.host.remove();
           },
         });
+        if (registered) {
+          releasedRetainedEntry = retainedPaneCache.release(panePath, preservedInstance);
+        }
       }
       if (useLiveTransfer && editorInstanceRef.current) {
         editorInstanceRef.current = null;
@@ -647,7 +655,7 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
       sourceHost: 'dock',
     });
     return true;
-  }, [setDockVisible, terminalTabPath]);
+  }, [retainedPaneCache, setDockVisible, terminalTabPath]);
 
   const sendPanePopoutReattachRequest = useCallback((closeWindow = false, allowLiveTransfer = true) => {
     if (!panePopoutMode) return false;
@@ -986,18 +994,26 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
   }, [panePopoutMode]);
 
   useEffect(() => {
+    const openPaths = new Set(
+      tabStripTabs
+        .map((tab) => typeof tab?.id === 'string' ? tab.id : '')
+        .filter(Boolean),
+    );
+    retainedPaneCache.prune(openPaths);
+  }, [retainedPaneCache, tabStripTabs]);
+
+  useEffect(() => () => retainedPaneCache.disposeAll(), [retainedPaneCache]);
+
+  useEffect(() => {
     const container = editorContainerRef.current;
     if (!container) return;
 
-    if (editorInstanceRef.current) {
-      editorInstanceRef.current.dispose();
-      editorInstanceRef.current = null;
-    }
+    retainedPaneCache.activate(null);
 
     const activeId = tabStripActiveId;
     if (!activeId) return;
     if (!panePopoutMode && activeDetachedTab?.panePath === activeId) {
-      container.innerHTML = '';
+      retainedPaneCache.remove(activeId);
       return;
     }
 
@@ -1037,17 +1053,60 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
       || paneRegistry.resolve(context)
       || paneRegistry.get('editor');
 
+    const createInstanceHost = () => {
+      const host = container.ownerDocument.createElement('div');
+      host.className = 'editor-pane-instance-host';
+      host.dataset.panePath = activeId;
+      container.appendChild(host);
+      return host;
+    };
+
     if (!ext) {
-      container.innerHTML = '<div style="padding:2em;color:var(--text-secondary);text-align:center;">No editor available for this file.</div>';
-      return;
+      const placeholderHost = createInstanceHost();
+      placeholderHost.innerHTML = '<div style="padding:2em;color:var(--text-secondary);text-align:center;">No editor available for this file.</div>';
+      return () => placeholderHost.remove();
     }
 
+    const retainOnTabSwitch = ext.placement === 'tabs' && ext.retainOnTabSwitch === true;
+    if (!retainOnTabSwitch || pendingTransfer || pendingHostTransfer) {
+      retainedPaneCache.remove(activeId);
+    }
+
+    const retainedEntry = retainOnTabSwitch
+      ? retainedPaneCache.get(activeId, ext.id)
+      : null;
+    if (retainedEntry) {
+      retainedPaneCache.activate(activeId);
+      editorInstanceRef.current = retainedEntry.instance;
+      requestAnimationFrame(() => {
+        if (editorInstanceRef.current !== retainedEntry.instance) return;
+        retainedEntry.instance.resize?.();
+        retainedEntry.instance.focus?.();
+      });
+      return () => {
+        if (editorInstanceRef.current === retainedEntry.instance) {
+          editorInstanceRef.current = null;
+        }
+        retainedPaneCache.deactivate(activeId);
+      };
+    }
+
+    const instanceHost = createInstanceHost();
     let instance: any = null;
     let disposed = false;
 
     const bindInstance = (nextInstance: any) => {
       instance = nextInstance;
       editorInstanceRef.current = nextInstance;
+      if (retainOnTabSwitch) {
+        retainedPaneCache.set({
+          path: activeId,
+          extensionId: ext.id,
+          host: instanceHost,
+          instance: nextInstance,
+        });
+        retainedPaneCache.activate(activeId);
+      }
 
       nextInstance.onDirtyChange?.((dirty: boolean) => {
         tabStore.setDirty(activeId, dirty);
@@ -1058,7 +1117,7 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
       });
 
       nextInstance.onClose?.(() => {
-        closeEditor();
+        if (tabStore.getActiveId() === activeId) closeEditor();
       });
 
       const viewState = tabStore.getViewState(activeId);
@@ -1091,6 +1150,7 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
             if (editorInstanceRef.current === nextInstance) {
               editorInstanceRef.current = null;
             }
+            retainedPaneCache.release(activeId, nextInstance)?.host.remove();
           },
         });
       }
@@ -1103,7 +1163,9 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
         console.warn('[pane-attach] afterAttachToHost failed:', error);
       });
 
-      requestAnimationFrame(() => nextInstance.focus?.());
+      requestAnimationFrame(() => {
+        if (editorInstanceRef.current === nextInstance) nextInstance.focus?.();
+      });
     };
 
     void (async () => {
@@ -1126,7 +1188,7 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
 
       if (pendingHostTransfer && liveTransferClaim && liveTransferSourceWindow) {
         try {
-          const claimedInstance = await claimPaneLiveTransfer(liveTransferSourceWindow, liveTransferClaim, container, {
+          const claimedInstance = await claimPaneLiveTransfer(liveTransferSourceWindow, liveTransferClaim, instanceHost, {
             path: activeId,
             hostMode: liveTransferHostMode,
             transferState: resolvedTransferState,
@@ -1155,7 +1217,7 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
       }
 
       if (disposed) return;
-      bindInstance(ext.mount(container, context));
+      bindInstance(ext.mount(instanceHost, context));
       if (pendingPopoutTransfer) {
         pendingEditorPopoutTransferRef.current = null;
       }
@@ -1174,12 +1236,31 @@ export function usePaneRuntimeOrchestration(options: UsePaneRuntimeOrchestration
 
     return () => {
       disposed = true;
-      if (editorInstanceRef.current === instance) {
+      if (!instance) {
+        instanceHost.remove();
+        return;
+      }
+
+      const wasActiveInstance = editorInstanceRef.current === instance;
+      if (wasActiveInstance) editorInstanceRef.current = null;
+
+      if (retainOnTabSwitch) {
+        if (retainedPaneCache.owns(activeId, instance)) {
+          retainedPaneCache.deactivate(activeId);
+        } else {
+          instanceHost.hidden = true;
+          instanceHost.setAttribute('aria-hidden', 'true');
+        }
+        return;
+      }
+
+      // A live host transfer clears editorInstanceRef before this cleanup.
+      if (wasActiveInstance) {
         instance.dispose();
-        editorInstanceRef.current = null;
+        instanceHost.remove();
       }
     };
-  }, [activeDetachedTab, activePaneOverrideId, closeEditor, panePopoutMode, tabStripActiveId]);
+  }, [activeDetachedTab, activePaneOverrideId, closeEditor, panePopoutMode, retainedPaneCache, tabStripActiveId]);
 
   useEffect(() => {
     const activeId = tabStripActiveId;
