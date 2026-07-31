@@ -115,6 +115,8 @@ export function composeMainAppShellOptions(input: ComposeMainAppShellOptionsInpu
     mobileTabStripTabs: shellState.mobileTabStripTabs,
     mobileTabStripActiveId: shellState.mobileTabStripActiveId,
     mobileChatActive: shellState.mobileChatActive,
+    mobileWorkspaceActive: shellState.mobileWorkspaceActive,
+    mobileWorkspaceTabEnabled: shellState.mobileWorkspaceTabEnabled,
     handleTabActivate: shellState.handleTabActivate,
     previewTabs: shellState.previewTabs,
     diffTabs: shellState.diffTabs,

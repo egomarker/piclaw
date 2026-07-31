@@ -6,8 +6,11 @@ export function resolveMainPaneSurfaceVisibility(options: {
   uiMode?: 'classic' | 'mobile';
   panePopoutMode: boolean;
   mobileChatActive: boolean;
+  mobileWorkspaceActive?: boolean;
 }): boolean {
-  return options.panePopoutMode || options.uiMode !== 'mobile' || !options.mobileChatActive;
+  return options.panePopoutMode
+    || options.uiMode !== 'mobile'
+    || (!options.mobileChatActive && !options.mobileWorkspaceActive);
 }
 
 export function runMainAppZenToggle(options: {
@@ -40,6 +43,8 @@ export function useMainAppPaneComposition(options: {
   panePopoutLabel: string | null;
   chatOnlyMode: boolean;
   uiMode?: 'classic' | 'mobile';
+  mobileWorkspaceTabEnabled?: boolean;
+  onMobileWorkspacePromotedToRail?: () => void;
   terminalTabPath: string;
   vncTabPrefix: string;
   getWorkspaceFile: (path: string, maxBytes: number, mode: string) => Promise<any>;
@@ -49,6 +54,8 @@ export function useMainAppPaneComposition(options: {
   const editorState = useEditorState({
     onTabClosed: (path) => removeFileRefRef.current?.(path),
     uiMode: options.uiMode,
+    mobileWorkspaceTabEnabled: options.mobileWorkspaceTabEnabled,
+    onMobileWorkspacePromotedToRail: options.onMobileWorkspacePromotedToRail,
   });
 
   const paneRuntime = usePaneRuntimeOrchestration({
@@ -61,6 +68,7 @@ export function useMainAppPaneComposition(options: {
       uiMode: options.uiMode,
       panePopoutMode: options.panePopoutMode,
       mobileChatActive: editorState.mobileChatActive,
+      mobileWorkspaceActive: editorState.mobileWorkspaceActive,
     }),
     tabStripTabs: editorState.tabStripTabs,
     tabStripActiveId: editorState.tabStripActiveId,

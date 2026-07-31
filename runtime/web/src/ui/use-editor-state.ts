@@ -13,9 +13,13 @@ import { paneRegistry, tabStore } from '../panes/index.js';
 import { addRecentFile } from './recent-files.js';
 import {
     MOBILE_CHAT_TAB_ID,
+    MOBILE_WORKSPACE_TAB_ID,
     composeMobileTabStripTabs,
     isMobileChatTabId,
+    isMobilePermanentTabId,
+    isMobileWorkspaceTabId,
     resolveMobileSurfaceAfterClose,
+    resolveSurfaceAfterWorkspaceTabDisabled,
 } from './mobile-tab-state.js';
 
 function renamePaneOverrides(previous, oldPath, newPath, type) {
@@ -69,11 +73,19 @@ function renamePathSet(previous, oldPath, newPath, type) {
  *
  * @returns Tab state, handlers, and active tab info.
  */
-export function useEditorState({ onTabClosed, uiMode = 'classic' } = {}) {
-    // Store callback in ref so close handlers never re-create when the caller changes identity
+export function useEditorState({
+    onTabClosed,
+    uiMode = 'classic',
+    mobileWorkspaceTabEnabled = false,
+    onMobileWorkspacePromotedToRail,
+} = {}) {
+    // Store callbacks in refs so handlers never re-create when callers change identity.
     const onTabClosedRef = useRef(onTabClosed);
     onTabClosedRef.current = onTabClosed;
+    const onMobileWorkspacePromotedToRailRef = useRef(onMobileWorkspacePromotedToRail);
+    onMobileWorkspacePromotedToRailRef.current = onMobileWorkspacePromotedToRail;
     const mobileTabsEnabled = uiMode === 'mobile';
+    const workspaceTabEnabled = mobileTabsEnabled && Boolean(mobileWorkspaceTabEnabled);
 
     // ── Tab strip state (driven by tabStore) ────────────────────
     const [tabStripTabs, setTabStripTabs] = useState(() => tabStore.getTabs());
@@ -83,9 +95,12 @@ export function useEditorState({ onTabClosed, uiMode = 'classic' } = {}) {
         mobileTabsEnabled ? tabStore.getActiveId() || MOBILE_CHAT_TAB_ID : tabStore.getActiveId()
     ));
     const activeSurfaceIdRef = useRef(activeSurfaceId);
+    const lastPrimarySurfaceIdRef = useRef(activeSurfaceId || MOBILE_CHAT_TAB_ID);
+    const previousWorkspaceTabEnabledRef = useRef(workspaceTabEnabled);
 
     const activateSurface = useCallback((id) => {
         activeSurfaceIdRef.current = id;
+        if (!isMobileWorkspaceTabId(id)) lastPrimarySurfaceIdRef.current = id;
         setActiveSurfaceId(id);
     }, []);
 
@@ -96,12 +111,33 @@ export function useEditorState({ onTabClosed, uiMode = 'classic' } = {}) {
             setEditorOpen(tabs.length > 0);
             if (!mobileTabsEnabled) return;
             if (tabs.length === 0) {
-                activateSurface(MOBILE_CHAT_TAB_ID);
-            } else if (!isMobileChatTabId(activeSurfaceIdRef.current)) {
+                if (!isMobileWorkspaceTabId(activeSurfaceIdRef.current)) {
+                    activateSurface(MOBILE_CHAT_TAB_ID);
+                }
+            } else if (!isMobilePermanentTabId(activeSurfaceIdRef.current)) {
                 activateSurface(activeId || MOBILE_CHAT_TAB_ID);
             }
         });
     }, [activateSurface, mobileTabsEnabled]);
+
+    useEffect(() => {
+        const wasEnabled = previousWorkspaceTabEnabledRef.current;
+        previousWorkspaceTabEnabledRef.current = workspaceTabEnabled;
+        if (!wasEnabled || workspaceTabEnabled) return;
+
+        const transition = resolveSurfaceAfterWorkspaceTabDisabled(
+            activeSurfaceIdRef.current,
+            lastPrimarySurfaceIdRef.current,
+            tabStore.getTabs(),
+        );
+        if (!transition.openWorkspaceRail) return;
+
+        activateSurface(transition.surfaceId);
+        if (!isMobileChatTabId(transition.surfaceId)) {
+            tabStore.activate(transition.surfaceId);
+        }
+        onMobileWorkspacePromotedToRailRef.current?.();
+    }, [activateSurface, workspaceTabEnabled]);
 
     // ── Markdown preview state ────────────────────────────────
     const [previewTabs, setPreviewTabs] = useState(() => new Set());
@@ -201,7 +237,7 @@ export function useEditorState({ onTabClosed, uiMode = 'classic' } = {}) {
 
     /** Close a specific tab (from tab strip). */
     const handleTabClose = useCallback((id) => {
-        if (!id || (mobileTabsEnabled && isMobileChatTabId(id))) return;
+        if (!id || (mobileTabsEnabled && isMobilePermanentTabId(id))) return;
         const tab = tabStore.get(id);
         if (!tab) return;
         if (tab.dirty) {
@@ -209,7 +245,7 @@ export function useEditorState({ onTabClosed, uiMode = 'classic' } = {}) {
             if (!confirmed) return;
         }
         const nextSurfaceId = mobileTabsEnabled && activeSurfaceIdRef.current === id
-            ? resolveMobileSurfaceAfterClose(tabStore.getTabs(), id)
+            ? resolveMobileSurfaceAfterClose(tabStore.getTabs(), id, workspaceTabEnabled)
             : null;
         tabStore.close(id);
         cleanupPreviewTab(id);
@@ -218,9 +254,9 @@ export function useEditorState({ onTabClosed, uiMode = 'classic' } = {}) {
         onTabClosedRef.current?.(id);
         if (nextSurfaceId) {
             activateSurface(nextSurfaceId);
-            if (!isMobileChatTabId(nextSurfaceId)) tabStore.activate(nextSurfaceId);
+            if (!isMobilePermanentTabId(nextSurfaceId)) tabStore.activate(nextSurfaceId);
         }
-    }, [activateSurface, cleanupDiffTab, cleanupPaneOverride, cleanupPreviewTab, mobileTabsEnabled]);
+    }, [activateSurface, cleanupDiffTab, cleanupPaneOverride, cleanupPreviewTab, mobileTabsEnabled, workspaceTabEnabled]);
 
     /** Close the active editor tab (with dirty confirmation). */
     const closeEditor = useCallback(() => {
@@ -228,10 +264,10 @@ export function useEditorState({ onTabClosed, uiMode = 'classic' } = {}) {
         if (activeId) handleTabClose(activeId);
     }, [handleTabClose]);
 
-    /** Activate a pane tab or Mobile's synthetic Chat tab. */
+    /** Activate a pane tab or one of Mobile's permanent synthetic tabs. */
     const handleTabActivate = useCallback((id) => {
         if (mobileTabsEnabled) activateSurface(id);
-        if (!isMobileChatTabId(id)) tabStore.activate(id);
+        if (!isMobilePermanentTabId(id)) tabStore.activate(id);
     }, [activateSurface, mobileTabsEnabled]);
 
     /** Close all other tabs. */
@@ -279,9 +315,9 @@ export function useEditorState({ onTabClosed, uiMode = 'classic' } = {}) {
             onTabClosedRef.current?.(cid);
         });
         if (activeSurfaceWasClosed) {
-            activateSurface(tabStore.getActiveId() || MOBILE_CHAT_TAB_ID);
+            activateSurface(tabStore.getActiveId() || (workspaceTabEnabled ? MOBILE_WORKSPACE_TAB_ID : MOBILE_CHAT_TAB_ID));
         }
-    }, [activateSurface, cleanupDiffTab, cleanupPaneOverride, cleanupPreviewTab, mobileTabsEnabled]);
+    }, [activateSurface, cleanupDiffTab, cleanupPaneOverride, cleanupPreviewTab, mobileTabsEnabled, workspaceTabEnabled]);
 
     /** Toggle pin on a tab. */
     const handleTabTogglePin = useCallback((id) => {
@@ -358,14 +394,18 @@ export function useEditorState({ onTabClosed, uiMode = 'classic' } = {}) {
     }, []);
 
     const mobileTabStripTabs = useMemo(
-        () => composeMobileTabStripTabs(tabStripTabs, mobileTabsEnabled),
-        [mobileTabsEnabled, tabStripTabs],
+        () => composeMobileTabStripTabs(tabStripTabs, mobileTabsEnabled, workspaceTabEnabled),
+        [mobileTabsEnabled, tabStripTabs, workspaceTabEnabled],
     );
     const mobileTabStripActiveId = mobileTabsEnabled ? activeSurfaceId : tabStripActiveId;
     const mobileChatActive = mobileTabsEnabled && isMobileChatTabId(activeSurfaceId);
+    const mobileWorkspaceActive = workspaceTabEnabled && isMobileWorkspaceTabId(activeSurfaceId);
     const activateChatSurface = useCallback(() => {
         if (mobileTabsEnabled) activateSurface(MOBILE_CHAT_TAB_ID);
     }, [activateSurface, mobileTabsEnabled]);
+    const activateWorkspaceSurface = useCallback(() => {
+        if (workspaceTabEnabled) activateSurface(MOBILE_WORKSPACE_TAB_ID);
+    }, [activateSurface, workspaceTabEnabled]);
 
     return {
         // State
@@ -375,6 +415,8 @@ export function useEditorState({ onTabClosed, uiMode = 'classic' } = {}) {
         mobileTabStripTabs,
         mobileTabStripActiveId,
         mobileChatActive,
+        mobileWorkspaceActive,
+        mobileWorkspaceTabEnabled: workspaceTabEnabled,
         previewTabs,
         diffTabs,
         tabPaneOverrides,
@@ -390,6 +432,7 @@ export function useEditorState({ onTabClosed, uiMode = 'classic' } = {}) {
         handleTabToggleDiff,
         handleTabEditSource,
         activateChatSurface,
+        activateWorkspaceSurface,
         revealInExplorer,
     };
 }

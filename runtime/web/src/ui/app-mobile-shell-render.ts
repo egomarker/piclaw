@@ -6,6 +6,8 @@ export function composeMobileShellRenderOptions(options: MainShellRenderOptions)
     ...options,
     uiMode: 'mobile',
     mobileChatActive: Boolean(options.mobileChatActive),
+    mobileWorkspaceActive: Boolean(options.mobileWorkspaceActive),
+    mobileWorkspaceTabEnabled: Boolean(options.mobileWorkspaceTabEnabled),
     displayTabStripTabs: options.mobileTabStripTabs || options.tabStripTabs,
     displayTabStripActiveId: options.mobileTabStripActiveId || options.tabStripActiveId,
   };

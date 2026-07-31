@@ -162,9 +162,9 @@ The allowed values are:
 
 - `classic` — the default split-pane web interface;
 - `visual` — the alternate Visual interface;
-- `mobile` — the Classic feature set with one unified workspace where Chat is a permanent, non-closeable tab whenever file, viewer, terminal, or extension panes are open.
+- `mobile` — the Classic feature set with one unified workspace. At widths below `1024px` and in every portrait viewport, Chat and Workspace are permanent, non-closeable tabs followed by file, viewer, terminal, and extension panes. Desktop-width landscape viewports use the existing Workspace rail instead.
 
-`mobile` is an explicit third mode, not device detection: desktop browsers and installed PWAs use the same unified Chat/tab model when it is selected. Classic and Visual defaults are unchanged, and there is no in-app mode switcher. After changing the setting, use the normal PiClaw restart/reload flow.
+`mobile` is an explicit third mode, not device detection: desktop browsers and installed PWAs use its responsive tab/rail model when it is selected. Classic and Visual defaults are unchanged, and there is no in-app mode switcher. After changing the setting, use the normal PiClaw restart/reload flow.
 
 ### Notification delivery debug labels
 

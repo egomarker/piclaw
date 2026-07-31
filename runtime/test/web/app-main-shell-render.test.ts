@@ -1,6 +1,10 @@
 import { expect, mock, test } from 'bun:test';
 
 import { ComposeBox, QueuedFollowupStack } from '../../web/src/components/compose-box.js';
+import { TabStrip } from '../../web/src/components/tab-strip.js';
+import { TimelineMenu } from '../../web/src/components/timeline-menu.js';
+import { TimelineQuickActions } from '../../web/src/components/timeline-quick-actions.js';
+import { WorkspaceExplorer } from '../../web/src/components/workspace-explorer.js';
 import {
   buildMainShellClassName,
   extractPostedUserMessageId,
@@ -19,6 +23,8 @@ test('Mobile maps unified display tabs without replacing pane runtime tabs', () 
     mobileTabStripTabs: displayTabs,
     mobileTabStripActiveId: 'piclaw://chat',
     mobileChatActive: true,
+    mobileWorkspaceActive: false,
+    mobileWorkspaceTabEnabled: true,
   });
 
   expect(options.tabStripTabs).toBe(paneTabs);
@@ -26,6 +32,7 @@ test('Mobile maps unified display tabs without replacing pane runtime tabs', () 
   expect(options.displayTabStripTabs).toBe(displayTabs);
   expect(options.displayTabStripActiveId).toBe('piclaw://chat');
   expect(options.uiMode).toBe('mobile');
+  expect(options.mobileWorkspaceTabEnabled).toBe(true);
 });
 
 test('buildMainShellClassName composes workspace/editor/chat/zen modifiers', () => {
@@ -59,6 +66,15 @@ test('buildMainShellClassName composes workspace/editor/chat/zen modifiers', () 
     uiMode: 'mobile',
     mobileChatActive: true,
   })).toBe('app-shell editor-open mobile-interface mobile-chat-active');
+
+  expect(buildMainShellClassName({
+    workspaceOpen: false,
+    editorOpen: false,
+    chatOnlyMode: false,
+    zenMode: false,
+    uiMode: 'mobile',
+    mobileWorkspaceActive: true,
+  })).toBe('app-shell workspace-collapsed mobile-interface mobile-workspace-active');
 });
 
 test('extractPostedUserMessageId prefers user_message.id and falls back to row_id', () => {
@@ -289,6 +305,47 @@ test('renderMainShell groups Chat chrome separately from global overlays', () =>
 
   expect(classes.has('chat-surface-main')).toBe(true);
   expect(classes.has('chat-surface-footer')).toBe(true);
+});
+
+test('compact Mobile renders Workspace as a permanent surface without rail controls', () => {
+  const displayTabs = [
+    { id: 'piclaw://chat', label: 'Chat', path: 'Chat' },
+    { id: 'piclaw://workspace', label: 'Workspace', path: 'Workspace' },
+  ];
+  const tree = renderMainShell(createMainShellRenderOptions({
+    chatOnlyMode: false,
+    workspaceOpen: true,
+    uiMode: 'mobile',
+    mobileWorkspaceTabEnabled: true,
+    mobileWorkspaceActive: true,
+    mobileChatActive: false,
+    displayTabStripTabs: displayTabs,
+    displayTabStripActiveId: 'piclaw://workspace',
+  }));
+
+  let explorerVNode: any = null;
+  let tabStripVNode: any = null;
+  let menuVNode: any = null;
+  let quickActionsVNode: any = null;
+  const classes = new Set<string>();
+  walkVNodes(tree, (node) => {
+    if (node.type === WorkspaceExplorer) explorerVNode = node;
+    if (node.type === TabStrip) tabStripVNode = node;
+    if (node.type === TimelineMenu) menuVNode = node;
+    if (node.type === TimelineQuickActions) quickActionsVNode = node;
+    if (typeof node.props?.class === 'string') classes.add(node.props.class);
+  });
+
+  expect(explorerVNode?.props.visible).toBe(true);
+  expect(explorerVNode?.props.active).toBe(true);
+  expect(tabStripVNode?.props.tabs).toBe(displayTabs);
+  expect(tabStripVNode?.props.activeId).toBe('piclaw://workspace');
+  expect(menuVNode?.props.showWorkspaceToggle).toBe(false);
+  expect(menuVNode?.props.workspaceVisible).toBe(true);
+  expect(quickActionsVNode?.props.showWorkspaceToggle).toBe(false);
+  expect(classes.has('app-shell workspace-collapsed mobile-interface mobile-workspace-active')).toBe(true);
+  expect([...classes].some((value) => value.startsWith('workspace-toggle-tab'))).toBe(false);
+  expect(classes.has('workspace-splitter')).toBe(false);
 });
 
 test('renderMainShell passes queue controls to ComposeBox and does not render a top-level queue stack', () => {

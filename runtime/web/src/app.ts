@@ -170,6 +170,10 @@ function MainApp({ locationParams, navigate }) {
         panePopoutLabel,
         chatOnlyMode,
         uiMode: APP_UI_MODE,
+        mobileWorkspaceTabEnabled: APP_UI_MODE === 'mobile'
+            && surface.workspaceLayoutBucket === 'narrow'
+            && !chatOnlyMode,
+        onMobileWorkspacePromotedToRail: () => surface.setWorkspaceOpen(true),
         terminalTabPath: TERMINAL_TAB_PATH,
         vncTabPrefix: VNC_TAB_PREFIX,
         getWorkspaceFile,
@@ -229,9 +233,12 @@ function MainApp({ locationParams, navigate }) {
             isRenameBranchFormOpen: surface.isRenameBranchFormOpen,
             renameBranchNameInputRef: surface.renameBranchNameInputRef,
             appShellRef: surface.appShellRef,
+            uiMode: APP_UI_MODE,
             setIsWebAppMode: surface.setIsWebAppMode,
             workspaceOpen: surface.workspaceOpen,
             setWorkspaceOpen: surface.setWorkspaceOpen,
+            workspaceLayoutBucket: surface.workspaceLayoutBucket,
+            setWorkspaceLayoutBucket: surface.setWorkspaceLayoutBucket,
             btwSession: surface.btwSession,
             agents: surface.agents,
             agentsRef: surface.agentsRef,
