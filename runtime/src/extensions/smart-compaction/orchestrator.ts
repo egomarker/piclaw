@@ -834,6 +834,12 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           if (abortSignal.aborted || /Compaction cancelled/i.test(msg)) return { cancel: true };
+          const diagnostic = err as {
+            validationCode?: string;
+            validationPhase?: string;
+            validationRetryCount?: number;
+            fileTagSequence?: string[];
+          };
           log.warn("Progressive compaction failed after provider-native fallback", {
             operation: "smart_compaction.progressive_failed",
             method: smartCompactionMethod,
@@ -841,6 +847,10 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
             remoteReason,
             durationMs: Date.now() - compactionStartedAt,
             reason: msg,
+            validationCode: diagnostic.validationCode ?? null,
+            validationPhase: diagnostic.validationPhase ?? null,
+            validationRetryCount: diagnostic.validationRetryCount ?? null,
+            fileTagSequence: diagnostic.fileTagSequence ?? [],
           });
           return cancelCompactionWithReason(ctx, `${msg} (provider-native pre-pass: ${remoteOutcome} — ${remoteReason})`);
         }

@@ -278,6 +278,52 @@ describe("smart-compaction output validation", () => {
     }
   });
 
+  it("discards nested/interleaved model-authored file blocks before validation when deterministic facts replace them", () => {
+    const modelOutput = `${validSummary}\n<read-files>\n/workspace/a.ts\n<modified-files>\n/workspace/b.ts\n</modified-files>\n</read-files>`;
+    expect(validateCompactionSummaryResponse(
+      { content: [{ type: "text", text: modelOutput }], stopReason: "stop" },
+      "final",
+      20_000,
+    )).toMatchObject({ ok: false, code: "invalid_file_sections" });
+
+    const result = validateCompactionSummaryResponse(
+      { content: [{ type: "text", text: modelOutput }], stopReason: "stop" },
+      "final",
+      20_000,
+      { modelFileBlocks: "discard" },
+    );
+    expect(result).toEqual({ ok: true, text: validSummary, stopReason: "stop" });
+    if (!result.ok) throw new Error(result.reason);
+    const canonical = canonicalizeFileLists(result.text, {
+      read: new Set(["/workspace/authoritative-read.ts"]),
+      written: new Set(["/workspace/authoritative-write.ts"]),
+      edited: new Set(),
+    });
+    expect(canonical).toContain("authoritative-read.ts");
+    expect(canonical).toContain("authoritative-write.ts");
+    expect(canonical).not.toContain("/workspace/a.ts");
+    expect(canonical).not.toContain("/workspace/b.ts");
+  });
+
+  it("discards repeated, mismatched, dangling, and unbalanced model file tags in discard mode", () => {
+    const cases = [
+      `${validSummary}\n<read-files>\na.ts\n</read-files>\n<read-files>\nb.ts\n</read-files>`,
+      `${validSummary}\n<read-files>\na.ts\n</modified-files>`,
+      `${validSummary}\n<read-files>\nsecret path\n</modified-files>\n- LEAKED INSIDE BLOCK\n</read-files>`,
+      `${validSummary}\n<read-files>\nsecret path\n</modified-files>\n- LEAKED THROUGH EOF`,
+      `${validSummary}\n</read-files>`,
+      `${validSummary}\n<modified-files>\na.ts`,
+    ];
+    for (const text of cases) {
+      expect(validateCompactionSummaryResponse(
+        { content: [{ type: "text", text }], stopReason: "stop" },
+        "final",
+        20_000,
+        { modelFileBlocks: "discard" },
+      )).toEqual({ ok: true, text: validSummary, stopReason: "stop" });
+    }
+  });
+
   it("strips repeated trailing model-authored file blocks before final validation", () => {
     const result = validateCompactionSummaryResponse(
       {
@@ -2752,7 +2798,7 @@ describe("smart-compaction", () => {
             type: "text",
             text: fileFactsAfterTerminalSchema
               ? `${validFinal}\nFile facts from deterministic tool analysis:\nModified files:\n/workspace/progressive.ts`
-              : validFinal,
+              : `${validFinal}\n<read-files>\n/workspace/invented.ts\n<modified-files>\n/workspace/nested.ts\n</modified-files>\n</read-files>`,
           }],
           stopReason: "stop",
         };
@@ -2779,6 +2825,10 @@ describe("smart-compaction", () => {
       expect(result.compaction.summary).toContain("Preserve deterministic file facts");
       expect(result.compaction.summary).toContain("<read-files>");
       expect(result.compaction.summary).toContain("<modified-files>");
+      expect(result.compaction.summary).toContain("context.ts");
+      expect(result.compaction.summary).toContain("progressive.ts");
+      expect(result.compaction.summary).not.toContain("/workspace/invented.ts");
+      expect(result.compaction.summary).not.toContain("/workspace/nested.ts");
       expect(finalPrompts).toHaveLength(1);
       expect(finalPrompts[0].lastIndexOf("File facts from deterministic tool analysis:"))
         .toBeLessThan(finalPrompts[0].lastIndexOf("## Critical Context"));
@@ -3231,6 +3281,62 @@ describe("smart-compaction", () => {
         if (previousPromptChars === undefined) delete process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS;
         else process.env.PICLAW_PROGRESSIVE_COMPACTION_PROMPT_CHARS = previousPromptChars;
       }
+    });
+
+    it("returns a bounded deterministic checkpoint when the final progressive merge fails", async () => {
+      const sourceUnits = Array.from({ length: 4 }, (_, index) => ({
+        id: `failure-unit-${index}`,
+        groupId: `failure-group-${index}`,
+        renderedText: `FAILURE_SOURCE_${index} ${"s".repeat(6_000)}`,
+        sourceIndexes: [index],
+        sourceEntryIds: [`entry-${index}`],
+        segmentIndex: 1,
+        segmentCount: 1,
+      }));
+      let chunkCalls = 0;
+      (completeSimple as any).mockImplementation(async (_model: any, context: any) => {
+        const prompt = context.messages[0].content[0].text as string;
+        if (!prompt.includes("deterministic chunk")) throw new Error("simulated final merge provider failure");
+        const index = chunkCalls++;
+        return {
+          content: [{ type: "text", text: `## Chunk Range\n- ${index}-${index}\n\n## Goals / User Intent\n- Preserve fallback facts\n\n## Constraints & Preferences\n- Keep unsummarized source verbatim\n\n## Decisions\n- Use deterministic fallback\n\n## Files / Commands / Tool Outcomes\n- none\n\n## Progress\n- Done: chunk summarized\n- In progress: final merge\n- Blocked: provider failure\n\n## Open Questions / Next Steps\n- Continue from retained source\n\n## Key Continuity Facts\n- CHUNK_FAILURE_${index}` }],
+          stopReason: "stop",
+        };
+      });
+
+      const result = await runProgressiveCompaction({
+        llmMessages: [],
+        sourceUnits,
+        humanUserIndexes: new Set<number>(),
+        model: { provider: "test", id: "failed-final-merge", contextWindow: 128_000, reasoning: false },
+        auth: {},
+        settings: { reserveTokens: 8_192 },
+        fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
+        budget: {
+          contextWindow: 128_000,
+          promptBudgetChars: 7_000,
+          chunkBudgetChars: 7_000,
+          mergeBudgetChars: 7_000,
+          forceProgressive: true,
+        },
+        abortSignal: new AbortController().signal,
+        ctx: { ui: { setStatus: vi.fn() } },
+        streamFn: compactionStreamFn,
+        timeoutMs: 300_000,
+        startedAt: Date.now(),
+      });
+
+      expect(result.complete).toBe(false);
+      expect(result.processedChunkCount).toBeGreaterThan(0);
+      expect(result.processedChunkCount).toBeLessThan(result.totalChunkCount);
+      expect(result.nextUnprocessedSourceMessageIndex).toBe(result.processedChunkCount);
+      expect(result.nextUnprocessedEntryId).toBe(`entry-${result.processedChunkCount}`);
+      expect(result.partialReason).toContain("simulated final merge provider failure");
+      expect(validateCompactionSummaryResponse(
+        { content: [{ type: "text", text: result.summary }], stopReason: "stop" },
+        "final",
+        8_192 * 4,
+      ).ok).toBe(true);
     });
 
     it("returns a bounded partial checkpoint when the final progressive merge runs out of time", async () => {

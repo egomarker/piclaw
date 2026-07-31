@@ -53,6 +53,18 @@ export type {
 
 const log = createLogger("ext.smart-compaction.progressive");
 
+function describeModelFileTagSequence(response: any): string[] {
+  const text = Array.isArray(response?.content)
+    ? response.content
+      .filter((block: any) => block?.type === "text" && typeof block.text === "string")
+      .map((block: any) => block.text)
+      .join("\n")
+    : "";
+  const tags = [...text.matchAll(/<\/?(?:read-files|modified-files)\b[^>\n]*(?:>|$)/gi)]
+    .map((match) => match[0].toLowerCase().replace(/\s+/g, " "));
+  return tags.length <= 12 ? tags : [...tags.slice(0, 12), `…(+${tags.length - 12})`];
+}
+
 function hasSafeCompactionOutputRoom(model: any, promptText: string, maxTokens: number): boolean {
   try {
     getSafeCompactionMaxTokens(model, promptText, maxTokens);
@@ -95,24 +107,37 @@ async function completeCompactionPrompt(
       streamFn,
       onProgress,
     });
-    const validation = validateCompactionSummaryResponse(response, schema, safeOutput.maxTokens * 4);
+    const validation = validateCompactionSummaryResponse(response, schema, safeOutput.maxTokens * 4, {
+      modelFileBlocks: "discard",
+    });
     if (!validation.ok) {
       log.debug("Progressive compaction output validation failed", {
         operation: "smart_compaction.progressive_output_invalid",
         schema,
         stopReason: validation.stopReason,
         validationFailure: validation.code,
+        validationPhase: schema,
         retryCount,
+        fileTagSequence: describeModelFileTagSequence(response),
       });
       const providerError = response?.stopReason === "error" && typeof response?.errorMessage === "string"
         ? `: ${response.errorMessage}`
         : "";
+      const tagSequence = describeModelFileTagSequence(response);
       const error = new Error(`Progressive compaction output invalid (${validation.code}): ${validation.reason}${providerError}`) as Error & {
         retryableOutput?: boolean;
         validationReason?: string;
+        validationCode?: string;
+        validationPhase?: CompactionSummarySchema;
+        validationRetryCount?: number;
+        fileTagSequence?: string[];
       };
       error.retryableOutput = validation.retryable;
       error.validationReason = validation.reason;
+      error.validationCode = validation.code;
+      error.validationPhase = schema;
+      error.validationRetryCount = retryCount;
+      error.fileTagSequence = tagSequence;
       throw error;
     }
     if (abortSignal.aborted) throw new Error("Compaction cancelled");
@@ -709,6 +734,16 @@ export async function runProgressiveCompaction(input: {
       ));
     } catch (error) {
       abortBatch();
+      if (input.abortSignal.aborted) throw error;
+      if (chunkSummaries.length > 0) {
+        const message = error instanceof Error ? error.message : String(error);
+        const elapsed = input.startedAt ? Date.now() - input.startedAt : 0;
+        return buildTimeBudgetPartial(
+          chunkSummaries.length,
+          elapsed,
+          `progressive chunk ${firstChunk.index}-${lastChunk.index} failed: ${message}`,
+        );
+      }
       throw error;
     } finally {
       input.abortSignal.removeEventListener("abort", abortBatch);
@@ -762,13 +797,15 @@ export async function runProgressiveCompaction(input: {
       modelCallCount,
     };
   } catch (err) {
+    if (input.abortSignal.aborted) throw err;
     const msg = err instanceof Error ? err.message : String(err);
-    if (!/time budget exhausted/i.test(msg)) throw err;
     const elapsed = input.startedAt ? Date.now() - input.startedAt : input.timeoutMs ?? 0;
     // A deterministic fallback that embeds every chunk summary can exceed the
     // same final output contract as the failed merge. Retain a bounded prefix
-    // and leave at least one complete atomic tail group verbatim instead.
-    return buildTimeBudgetPartial(chunkSummaries.length - 1, elapsed, msg);
+    // and leave at least one complete atomic tail group verbatim instead. This
+    // is safe for output-validation/provider failures as well as timeouts: the
+    // checkpoint claims coverage only for already validated chunk summaries.
+    return buildTimeBudgetPartial(chunkSummaries.length - 1, elapsed, `progressive final merge failed: ${msg}`);
   }
 }
 
