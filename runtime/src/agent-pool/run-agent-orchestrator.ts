@@ -368,6 +368,7 @@ async function runPromptAttempt(
   chatJid: string,
   session: AgentSession,
   timeoutMs: number,
+  finalizationReserveMs: number,
   runOptions: RunAgentOptions,
   options: RunAgentOrchestratorOptions,
   totalRunStartedAt: number,
@@ -399,6 +400,25 @@ async function runPromptAttempt(
     onWarn: options.onWarn,
     getRunObservabilityDetails,
   });
+  let finalizationReserveTimer: ReturnType<typeof setTimeout> | null = null;
+  if (finalizationReserveMs > 0 && timeoutMs > finalizationReserveMs) {
+    finalizationReserveTimer = setTimeout(() => {
+      if (!toolBudget.applyFinalizationReserve()) return;
+      options.onInfo?.("Recovery finalization reserve reached; disabling tools for terminal reply", {
+        operation: "run_agent.recovery_finalization_reserve",
+        chatJid,
+        timeoutMs,
+        finalizationReserveMs,
+        ...getRunObservabilityDetails(runOptions),
+      });
+      runOptions.onEvent?.({
+        type: "recovery_finalization_reserve",
+        timeoutMs,
+        finalizationReserveMs,
+      } as unknown as AgentSessionEvent);
+    }, timeoutMs - finalizationReserveMs);
+    if (typeof finalizationReserveTimer.unref === "function") finalizationReserveTimer.unref();
+  }
   runOptions.sessionLeafId = typeof session.sessionManager?.getLeafId === "function"
     ? session.sessionManager.getLeafId() ?? undefined
     : runOptions.sessionLeafId;
@@ -718,6 +738,7 @@ async function runPromptAttempt(
   } catch (error) {
     promptThrownError = error instanceof Error ? error.message : String(error);
   } finally {
+    if (finalizationReserveTimer) clearTimeout(finalizationReserveTimer);
     toolBudget.restoreToolBudgetGuard();
     toolBudget.restoreToolBudgetSoftStop();
     restoreUpstreamAutoCompaction();
@@ -972,11 +993,12 @@ export async function runAgentPrompt(
       onWarn: options.onWarn,
       clearAttachments: options.clearAttachments,
       toolCallCap: toolCallCapRef,
-      runPromptAttempt: async (attemptPrompt, attemptTimeoutMs, turnToolExecutionCount) => await runPromptAttempt(
+      runPromptAttempt: async (attemptPrompt, attemptTimeoutMs, turnToolExecutionCount, finalizationReserveMs = 0) => await runPromptAttempt(
         attemptPrompt,
         chatJid,
         session,
         attemptTimeoutMs,
+        finalizationReserveMs,
         runOptions,
         options,
         startTime,

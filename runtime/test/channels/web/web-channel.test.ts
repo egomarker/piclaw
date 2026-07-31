@@ -2934,6 +2934,73 @@ test("processChat drains queued follow-ups after a persisted timeout fallback", 
   expect(contents).toContain("reply after fallback");
 });
 
+test("processChat persists readable timeout text when no draft survives recovery", async () => {
+  const ws = createTempWorkspace("piclaw-web-channel-");
+  cleanupWorkspace = ws.cleanup;
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+
+  const db = await import("../../../src/db.js");
+  db.initDatabase();
+  db.getDb().exec("DELETE FROM message_media; DELETE FROM messages; DELETE FROM chats; DELETE FROM chat_cursors; DELETE FROM chat_cursors;");
+  db.storeChatMetadata("web:default", new Date().toISOString(), "Web");
+  db.storeMessage({
+    id: `msg-${Math.random()}`,
+    chat_jid: "web:default",
+    sender: "user",
+    sender_name: "User",
+    content: "hello",
+    timestamp: new Date().toISOString(),
+    is_from_me: false,
+    is_bot_message: false,
+  });
+
+  const webMod = await import("../../../src/channels/web.js");
+  const web = new (webMod.WebChannel as any)({
+    queue: { enqueue: () => {} },
+    agentPool: {
+      setSessionBinder: () => {},
+      runAgent: async (_prompt: string, _chatJid: string, options: any) => {
+        options.onEvent?.({
+          type: "recovery_end",
+          outcome: "exhausted",
+          attemptsUsed: 1,
+          classifier: "budget_exhausted",
+          errorMessage: "Timed out after 360.0s",
+        });
+        return {
+          status: "error",
+          result: null,
+          error: "Timed out after 360.0s",
+          recovery: {
+            attemptsUsed: 1,
+            totalElapsedMs: 1_380_772,
+            recovered: false,
+            exhausted: true,
+            lastClassifier: "budget_exhausted",
+            strategyHistory: ["compact_then_retry"],
+            diagnostics: [],
+          },
+        };
+      },
+      getContextUsageForChat: async () => null,
+    },
+  });
+
+  await web.processChat("web:default", "default");
+
+  const timeline = db.getTimeline("web:default", 10);
+  const botMessages = timeline.filter((item: any) => item.data.type === "agent_response");
+  expect(botMessages).toHaveLength(1);
+  expect(botMessages[0].data.content).toContain("⚠️ Timed out");
+  expect(botMessages[0].data.content).toContain("Automatic recovery exhausted");
+  expect(botMessages[0].data.content).toContain("Timed out after 360.0s");
+  expect(botMessages[0].data.content_blocks).toContainEqual(expect.objectContaining({
+    type: "timeout_marker",
+    timed_out: true,
+    draft_recovered: false,
+  }));
+});
+
 test("processChat treats a persisted timeout fallback as a terminal completion", async () => {
   const ws = createTempWorkspace("piclaw-web-channel-");
   cleanupWorkspace = ws.cleanup;

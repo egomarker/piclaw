@@ -35,6 +35,9 @@ import { heartbeatTrackedPhase } from "../runtime/progress-watchdog.js";
 import { isRotationFallbackCompactionError } from "../session-rotation.js";
 
 const MAX_RECOVERY_LOOP_GUARD_CHATS = 512;
+const MIN_RECOVERY_FINALIZATION_RESERVE_MS = 5_000;
+const MAX_RECOVERY_FINALIZATION_RESERVE_MS = 60_000;
+const RECOVERY_FINALIZATION_RESERVE_RATIO = 0.15;
 
 interface RecoveryFailureSignatureRecord {
   atMs: number;
@@ -55,6 +58,7 @@ export type RunPromptAttemptCallback = (
   prompt: string,
   timeoutMs: number,
   toolExecutionCountAtStart: number,
+  finalizationReserveMs?: number,
 ) => Promise<PromptAttemptResult>;
 
 export interface SessionWithToolControl {
@@ -105,6 +109,15 @@ function getRunObservabilityDetails(
 async function sleep(ms: number): Promise<void> {
   if (ms <= 0) return;
   await Bun.sleep(ms);
+}
+
+export function getRecoveryFinalizationReserveMs(attemptTimeoutMs: number): number {
+  if (!Number.isFinite(attemptTimeoutMs) || attemptTimeoutMs < 2) return 0;
+  return Math.min(
+    MAX_RECOVERY_FINALIZATION_RESERVE_MS,
+    Math.floor(attemptTimeoutMs / 2),
+    Math.max(MIN_RECOVERY_FINALIZATION_RESERVE_MS, Math.floor(attemptTimeoutMs * RECOVERY_FINALIZATION_RESERVE_RATIO)),
+  );
 }
 
 function pruneRecoveryFailureMap(now: number, windowMs: number): void {
@@ -498,13 +511,19 @@ export async function runAgentRecoveryPhase(options: RunAgentRecoveryPhaseOption
       ? (timeoutMs > 0 ? Math.min(timeoutMs, remainingRecoveryBudgetMs) : remainingRecoveryBudgetMs)
       : timeoutMs;
     let recoverySavedToolNames: string[] | null = null;
-    if (recoveryContinuationWithoutTools && sessionCtrl && typeof sessionCtrl.getActiveToolNames === "function" && typeof sessionCtrl.setActiveToolsByName === "function") {
-      recoverySavedToolNames = sessionCtrl.getActiveToolNames();
-      sessionCtrl.setActiveToolsByName([]);
+    const canControlTools = sessionCtrl
+      && typeof sessionCtrl.getActiveToolNames === "function"
+      && typeof sessionCtrl.setActiveToolsByName === "function";
+    if (recoveryContinuationWithoutTools && canControlTools) {
+      recoverySavedToolNames = sessionCtrl.getActiveToolNames!();
+      sessionCtrl.setActiveToolsByName!([]);
     }
+    const finalizationReserveMs = recoveryAttemptsUsed > 0 && !recoveryContinuationWithoutTools
+      ? getRecoveryFinalizationReserveMs(attemptTimeoutMs)
+      : 0;
     let attempt: PromptAttemptResult;
     try {
-      attempt = await options.runPromptAttempt(attemptPrompt, attemptTimeoutMs, turnToolExecutionCount);
+      attempt = await options.runPromptAttempt(attemptPrompt, attemptTimeoutMs, turnToolExecutionCount, finalizationReserveMs);
       turnToolExecutionCount = attempt.toolExecutionCount;
     } finally {
       if (recoverySavedToolNames && sessionCtrl && typeof sessionCtrl.setActiveToolsByName === "function") {
