@@ -39,6 +39,12 @@ test('Mobile CSS overlays continuously mounted Chat, pane, preview, and dock row
   expect(mobileCss).toContain('grid-row: 6');
 });
 
+test('Mobile applies the standalone bottom inset to every grid surface without double-insetting Chat', () => {
+  expect(classicEditorCss).toMatch(/html\[data-iphone-standalone-compose-inset="1"\] \.container \{\s*padding-bottom: var\(--iphone-standalone-compose-safe-area-bottom, 0px\);/);
+  expect(mobileCss).toMatch(/html\[data-iphone-standalone-compose-inset="1"\] \.app-shell\.mobile-interface \{\s*padding-bottom: var\(--iphone-standalone-compose-safe-area-bottom, 0px\);/);
+  expect(mobileCss).toMatch(/html\[data-iphone-standalone-compose-inset="1"\] \.app-shell\.mobile-interface > \.container \{\s*padding-bottom: 0;/);
+});
+
 test('Mobile Zen is Chat-only and the phone strip reserves the menu hit target', () => {
   expect(mobileCss).toContain('.app-shell.mobile-interface.zen-mode > .container');
   expect(mobileCss).toContain('display: flex !important');
