@@ -5,6 +5,40 @@ import "../helpers.js";
 import { createAttemptToolBudgetController } from "../../src/agent-pool/run-agent-attempt-budget.js";
 
 describe("prompt attempt tool budget", () => {
+  test("blocks newly emitted tool calls during the recovery finalization reserve", async () => {
+    let activeTools = ["read", "bash"];
+    const session = {
+      agent: {},
+      getActiveToolNames: () => [...activeTools],
+      setActiveToolsByName: (names: string[]) => { activeTools = [...names]; },
+    } as any;
+    const controller = createAttemptToolBudgetController({
+      session,
+      chatJid: "web:test-finalization-reserve",
+      initialToolExecutionCount: 0,
+      toolUseMessageBudget: 64,
+      toolUseWarningThreshold: 48,
+      runOptions: {},
+      getRunObservabilityDetails: () => ({}),
+    });
+
+    expect(controller.applyFinalizationReserve()).toBe(true);
+    expect(activeTools).toEqual([]);
+    const blocked = await session.agent.beforeToolCall({
+      toolCall: { id: "call-after-reserve", name: "bash" },
+      args: { command: "echo late" },
+    });
+    expect(blocked).toEqual({
+      block: true,
+      reason: "Automatic recovery is in its finalization window. Return a terminal assistant reply without calling more tools.",
+    });
+    expect(controller.applyFinalizationReserve()).toBe(false);
+
+    controller.restoreToolBudgetGuard();
+    controller.restoreToolBudgetSoftStop();
+    expect(activeTools).toEqual(["read", "bash"]);
+  });
+
   test("applies a deferred soft stop after every threshold-crossing tool call finishes", () => {
     let activeTools = ["read", "bash"];
     const session = {
