@@ -5,7 +5,10 @@ import {
   buildTimelineQuickActionItems,
   normalizeTimelineQuickActionsSettingsData,
 } from '../../web/src/ui/timeline-quick-actions.js';
-import { shouldOpenTimelineQuickActionsFromKeyEvent } from '../../web/src/components/timeline-quick-actions.ts';
+import {
+  buildWorkspaceCommands,
+  shouldOpenTimelineQuickActionsFromKeyEvent,
+} from '../../web/src/components/timeline-quick-actions.ts';
 
 test('normalizeTimelineQuickActionsSettingsData dedupes configured ids and command names', () => {
   expect(normalizeTimelineQuickActionsSettingsData({
@@ -19,6 +22,17 @@ test('normalizeTimelineQuickActionsSettingsData dedupes configured ids and comma
 
 test('workspace quick-action catalog does not expose the terminal dock toggle', () => {
   expect(WORKSPACE_QUICK_ACTIONS_CATALOG.map((entry) => entry.id)).not.toContain('toggle-terminal-dock');
+});
+
+test('compact Workspace tab mode omits rail show/hide commands', () => {
+  const commands = buildWorkspaceCommands({
+    workspaceOpen: false,
+    chatOnlyMode: false,
+    showWorkspaceToggle: false,
+  });
+  expect(commands.map((entry) => entry.id)).not.toContain('toggle-workspace');
+  expect(commands.map((entry) => entry.id)).not.toContain('open-explorer');
+  expect(commands.map((entry) => entry.id)).toContain('open-settings');
 });
 
 test('buildTimelineQuickActionItems keeps pinned ordering agents then workspace then slash commands', () => {

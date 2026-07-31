@@ -19,8 +19,15 @@ test('Mobile exposes the pane surface only when a pane or popout is active', () 
   })).toBe(true);
   expect(resolveMainPaneSurfaceVisibility({
     uiMode: 'mobile',
+    panePopoutMode: false,
+    mobileChatActive: false,
+    mobileWorkspaceActive: true,
+  })).toBe(false);
+  expect(resolveMainPaneSurfaceVisibility({
+    uiMode: 'mobile',
     panePopoutMode: true,
     mobileChatActive: true,
+    mobileWorkspaceActive: true,
   })).toBe(true);
   expect(resolveMainPaneSurfaceVisibility({
     uiMode: 'classic',

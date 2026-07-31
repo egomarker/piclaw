@@ -7,12 +7,15 @@ import {
   persistWorkspaceOpenPreference,
   readStoredWorkspaceOpenPreference,
   resolveWorkspaceLayoutBucket,
+  resolveWorkspaceOpenAfterLayoutChange,
 } from '../../web/src/ui/workspace-visibility.js';
 
 const originalWindow = (globalThis as any).window;
 
 function createRuntime(options: {
   matchesDesktop?: boolean;
+  width?: number;
+  height?: number;
   storage?: Record<string, string>;
 } = {}) {
   const storage = new Map(Object.entries(options.storage || {}));
@@ -24,7 +27,9 @@ function createRuntime(options: {
       },
     },
     matchMedia: () => ({
-      matches: Boolean(options.matchesDesktop),
+      matches: options.matchesDesktop ?? (
+        Number(options.width) >= 1024 && Number(options.width) > Number(options.height)
+      ),
     }),
     __storage: storage,
   } as any;
@@ -39,6 +44,20 @@ describe('workspace visibility preferences', () => {
     expect(resolveWorkspaceLayoutBucket(createRuntime({ matchesDesktop: true }))).toBe('desktop');
     expect(resolveWorkspaceLayoutBucket(createRuntime({ matchesDesktop: false }))).toBe('narrow');
     expect(resolveWorkspaceLayoutBucket(null)).toBe('desktop');
+  });
+
+  test('uses the compact Workspace tab for the required portrait matrix and the rail for desktop landscape', () => {
+    const viewports = [
+      { width: 768, height: 1024, expected: 'narrow' },
+      { width: 1024, height: 1366, expected: 'narrow' },
+      { width: 1200, height: 1600, expected: 'narrow' },
+      { width: 1024, height: 800, expected: 'desktop' },
+      { width: 1440, height: 900, expected: 'desktop' },
+    ] as const;
+
+    for (const viewport of viewports) {
+      expect(resolveWorkspaceLayoutBucket(createRuntime(viewport))).toBe(viewport.expected);
+    }
   });
 
   test('persists workspace visibility separately for desktop and narrow layouts', () => {
@@ -72,6 +91,43 @@ describe('workspace visibility preferences', () => {
       runtime: narrowRuntime,
       allowLegacyFallback: true,
       defaultValue: false,
+    })).toBe(false);
+  });
+
+  test('layout transitions collapse narrow and restore the saved desktop rail preference', () => {
+    const runtime = createRuntime({
+      matchesDesktop: false,
+      storage: {
+        [DESKTOP_WORKSPACE_OPEN_STORAGE_KEY]: 'true',
+        [NARROW_WORKSPACE_OPEN_STORAGE_KEY]: 'false',
+      },
+    });
+
+    expect(resolveWorkspaceOpenAfterLayoutChange({
+      previousBucket: 'desktop',
+      nextBucket: 'narrow',
+      currentValue: true,
+      runtime,
+    })).toBe(false);
+    expect(resolveWorkspaceOpenAfterLayoutChange({
+      previousBucket: 'narrow',
+      nextBucket: 'desktop',
+      currentValue: false,
+      restoreDesktopPreference: true,
+      runtime,
+    })).toBe(true);
+    expect(resolveWorkspaceOpenAfterLayoutChange({
+      previousBucket: 'narrow',
+      nextBucket: 'desktop',
+      currentValue: false,
+      restoreDesktopPreference: false,
+      runtime,
+    })).toBe(false);
+    expect(resolveWorkspaceOpenAfterLayoutChange({
+      previousBucket: 'desktop',
+      nextBucket: 'desktop',
+      currentValue: false,
+      runtime,
     })).toBe(false);
   });
 

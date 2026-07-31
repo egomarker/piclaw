@@ -25,10 +25,19 @@ export function buildMainShellClassName(options: {
   zenMode: boolean;
   uiMode?: 'classic' | 'mobile';
   mobileChatActive?: boolean;
+  mobileWorkspaceActive?: boolean;
 }): string {
-  const { workspaceOpen, editorOpen, chatOnlyMode, zenMode, uiMode = 'classic', mobileChatActive = false } = options;
+  const {
+    workspaceOpen,
+    editorOpen,
+    chatOnlyMode,
+    zenMode,
+    uiMode = 'classic',
+    mobileChatActive = false,
+    mobileWorkspaceActive = false,
+  } = options;
   const mobileSurfaceClass = uiMode === 'mobile'
-    ? ` mobile-interface ${mobileChatActive ? 'mobile-chat-active' : 'mobile-pane-active'}`
+    ? ` mobile-interface ${mobileWorkspaceActive ? 'mobile-workspace-active' : mobileChatActive ? 'mobile-chat-active' : 'mobile-pane-active'}`
     : '';
   return `app-shell${workspaceOpen ? '' : ' workspace-collapsed'}${editorOpen ? ' editor-open' : ''}${chatOnlyMode ? ' chat-only' : ''}${zenMode ? ' zen-mode' : ''}${mobileSurfaceClass}`;
 }
@@ -122,6 +131,8 @@ export function renderMainShell(options: MainShellRenderOptions): any {
     zenMode,
     uiMode = 'classic',
     mobileChatActive = false,
+    mobileWorkspaceActive = false,
+    mobileWorkspaceTabEnabled = false,
     isRenameBranchFormOpen,
     closeRenameCurrentBranchForm,
     handleRenameCurrentBranch,
@@ -284,13 +295,19 @@ export function renderMainShell(options: MainShellRenderOptions): any {
     toggleWorkspace,
   } = options;
 
+  const workspaceTabMode = uiMode === 'mobile' && mobileWorkspaceTabEnabled && !chatOnlyMode;
+  const workspaceRailOpen = workspaceTabMode ? false : workspaceOpen;
+  const workspaceVisible = workspaceTabMode ? mobileWorkspaceActive : workspaceRailOpen;
+  const showPaneContainer = showEditorPaneContainer || workspaceTabMode;
+  const showTabStrip = editorOpen || workspaceTabMode;
+
   const handleComposeFocus = () => {
     if (isIOSDevice()) return;
     scrollToBottom();
   };
 
   return html`
-    <div class=${buildMainShellClassName({ workspaceOpen, editorOpen, chatOnlyMode, zenMode, uiMode, mobileChatActive })} ref=${appShellRef}>
+    <div class=${buildMainShellClassName({ workspaceOpen: workspaceRailOpen, editorOpen, chatOnlyMode, zenMode, uiMode, mobileChatActive, mobileWorkspaceActive })} ref=${appShellRef}>
       <${SystemMetersHud} mode="overlay" />
       ${isRenameBranchFormOpen && html`
         <div class="rename-branch-overlay" onPointerDown=${(event: any) => {
@@ -345,28 +362,30 @@ export function renderMainShell(options: MainShellRenderOptions): any {
         <${WorkspaceExplorer}
           onFileSelect=${addFileRef}
           onFolderSelect=${addFolderRef}
-          visible=${workspaceOpen}
-          active=${workspaceOpen || editorOpen}
+          visible=${workspaceVisible}
+          active=${workspaceVisible || (!workspaceTabMode && editorOpen)}
           onOpenEditor=${openEditor}
           onOpenTerminalTab=${openTerminalTab}
           onOpenVncTab=${openVncTab}
         />
-        <button
-          class=${`workspace-toggle-tab${workspaceOpen ? ' open' : ' closed'}`}
-          onClick=${toggleWorkspace}
-          title=${workspaceOpen ? 'Hide workspace' : 'Show workspace'}
-          aria-label=${workspaceOpen ? 'Hide workspace' : 'Show workspace'}
-        >
-          <svg class="workspace-toggle-tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline points="6 3 11 8 6 13" />
-          </svg>
-        </button>
-        <div class="workspace-splitter" onMouseDown=${handleSplitterMouseDown} onTouchStart=${handleSplitterTouchStart}></div>
+        ${!workspaceTabMode && html`
+          <button
+            class=${`workspace-toggle-tab${workspaceOpen ? ' open' : ' closed'}`}
+            onClick=${toggleWorkspace}
+            title=${workspaceOpen ? 'Hide workspace' : 'Show workspace'}
+            aria-label=${workspaceOpen ? 'Hide workspace' : 'Show workspace'}
+          >
+            <svg class="workspace-toggle-tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="6 3 11 8 6 13" />
+            </svg>
+          </button>
+          <div class="workspace-splitter" onMouseDown=${handleSplitterMouseDown} onTouchStart=${handleSplitterTouchStart}></div>
+        `}
       `}
-      ${showEditorPaneContainer && html`
+      ${showPaneContainer && html`
         <div class="editor-pane-container">
           ${zenMode && html`<div class="zen-hover-zone"></div>`}
-          ${editorOpen && html`
+          ${showTabStrip && html`
             <${TabStrip}
               tabs=${displayTabStripTabs}
               activeId=${displayTabStripActiveId}
@@ -459,7 +478,9 @@ export function renderMainShell(options: MainShellRenderOptions): any {
         <div class="editor-splitter" onMouseDown=${handleEditorSplitterMouseDown} onTouchStart=${handleEditorSplitterTouchStart}></div>
       `}
       <${TimelineMenu}
-        workspaceOpen=${workspaceOpen}
+        workspaceOpen=${workspaceRailOpen}
+        workspaceVisible=${workspaceVisible}
+        showWorkspaceToggle=${!workspaceTabMode}
         toggleWorkspace=${toggleWorkspace}
         chatOnlyMode=${chatOnlyMode}
         openEditor=${openEditor}
@@ -469,7 +490,8 @@ export function renderMainShell(options: MainShellRenderOptions): any {
       <${TimelineQuickActions}
         activeChatAgents=${activeChatAgents}
         currentChatJid=${currentChatJid}
-        workspaceOpen=${workspaceOpen}
+        workspaceOpen=${workspaceRailOpen}
+        showWorkspaceToggle=${!workspaceTabMode}
         chatOnlyMode=${chatOnlyMode}
         onSwitchChat=${handleBranchPickerChange}
         onToggleWorkspace=${toggleWorkspace}

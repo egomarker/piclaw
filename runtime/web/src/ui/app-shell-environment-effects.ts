@@ -4,6 +4,8 @@ import {
   DESKTOP_WORKSPACE_LAYOUT_MEDIA_QUERY,
   persistWorkspaceOpenPreference,
   resolveWorkspaceLayoutBucket,
+  resolveWorkspaceOpenAfterLayoutChange,
+  type WorkspaceLayoutBucket,
 } from './workspace-visibility.js';
 import { initTheme, reapplyStoredTheme } from './theme.js';
 import { useTimestampRefresh } from './app-helpers.js';
@@ -25,8 +27,11 @@ export interface UseAppShellEnvironmentEffectsOptions {
   renameBranchNameInputRef: RefBox<any>;
   appShellRef: RefBox<HTMLElement | null>;
   setIsWebAppMode: (next: boolean) => void;
+  uiMode?: 'classic' | 'mobile';
   workspaceOpen: boolean;
   setWorkspaceOpen: (next: boolean) => void;
+  workspaceLayoutBucket: WorkspaceLayoutBucket;
+  setWorkspaceLayoutBucket: (next: WorkspaceLayoutBucket) => void;
   btwSession: any;
   agents: Record<string, unknown> | null | undefined;
   agentsRef: RefBox<Record<string, unknown>>;
@@ -132,8 +137,11 @@ export function useAppShellEnvironmentEffects(options: UseAppShellEnvironmentEff
     renameBranchNameInputRef,
     appShellRef,
     setIsWebAppMode,
+    uiMode = 'classic',
     workspaceOpen,
     setWorkspaceOpen,
+    workspaceLayoutBucket,
+    setWorkspaceLayoutBucket,
     btwSession,
     agents,
     agentsRef,
@@ -175,7 +183,7 @@ export function useAppShellEnvironmentEffects(options: UseAppShellEnvironmentEff
     };
   }, [appShellRef]);
 
-  const workspaceLayoutBucketRef = useRef(resolveWorkspaceLayoutBucket());
+  const workspaceLayoutBucketRef = useRef(workspaceLayoutBucket || resolveWorkspaceLayoutBucket());
 
   useEffect(() => {
     persistWorkspaceOpenPreference(workspaceOpen, {
@@ -192,12 +200,16 @@ export function useAppShellEnvironmentEffects(options: UseAppShellEnvironmentEff
       if (workspaceLayoutBucketRef.current === nextBucket) return;
       const prevBucket = workspaceLayoutBucketRef.current;
       workspaceLayoutBucketRef.current = nextBucket;
-      // When shrinking to narrow, collapse the workspace to avoid overlap.
-      // When widening to desktop, do NOT auto-open — respect the user's
-      // explicit toggle. They can open it themselves.
-      if (prevBucket === 'desktop' && nextBucket === 'narrow') {
-        setWorkspaceOpen(false);
-      }
+      setWorkspaceLayoutBucket(nextBucket);
+      const nextOpen = resolveWorkspaceOpenAfterLayoutChange({
+        previousBucket: prevBucket,
+        nextBucket,
+        currentValue: workspaceOpen,
+        restoreDesktopPreference: uiMode === 'mobile',
+        runtime: window,
+      });
+      persistWorkspaceOpenPreference(nextOpen, { bucket: nextBucket, runtime: window });
+      setWorkspaceOpen(nextOpen);
     };
 
     if (media.addEventListener) media.addEventListener('change', applyLayoutPreference);
@@ -207,7 +219,7 @@ export function useAppShellEnvironmentEffects(options: UseAppShellEnvironmentEff
       if (media.removeEventListener) media.removeEventListener('change', applyLayoutPreference);
       else if (media.removeListener) media.removeListener(applyLayoutPreference);
     };
-  }, [setWorkspaceOpen]);
+  }, [setWorkspaceLayoutBucket, setWorkspaceOpen, uiMode, workspaceOpen]);
 
   useEffect(() => installStandaloneMobileViewportFix(), []);
 

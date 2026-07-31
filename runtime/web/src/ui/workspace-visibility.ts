@@ -78,3 +78,29 @@ export function persistWorkspaceOpenPreference(
   const targetBucket = bucket || resolveWorkspaceLayoutBucket(runtime);
   writeRuntimeStorageBoolean(runtime, getWorkspaceOpenStorageKey(targetBucket), Boolean(workspaceOpen));
 }
+
+/** Resolve rail visibility when crossing the shared desktop-landscape breakpoint. */
+export function resolveWorkspaceOpenAfterLayoutChange(options: {
+  previousBucket: WorkspaceLayoutBucket;
+  nextBucket: WorkspaceLayoutBucket;
+  currentValue: boolean;
+  restoreDesktopPreference?: boolean;
+  runtime?: any;
+}): boolean {
+  const {
+    previousBucket,
+    nextBucket,
+    currentValue,
+    restoreDesktopPreference = false,
+    runtime = typeof window !== 'undefined' ? window : null,
+  } = options;
+  if (previousBucket === nextBucket) return currentValue;
+  if (nextBucket === 'narrow') return false;
+  if (!restoreDesktopPreference) return currentValue;
+  return readStoredWorkspaceOpenPreference({
+    runtime,
+    bucket: 'desktop',
+    allowLegacyFallback: true,
+    defaultValue: false,
+  });
+}

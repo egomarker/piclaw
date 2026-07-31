@@ -37,6 +37,8 @@ export function composeRenderedMainAppOptions(input: {
     mobileTabStripTabs?: any[];
     mobileTabStripActiveId?: string | null;
     mobileChatActive?: boolean;
+    mobileWorkspaceActive?: boolean;
+    mobileWorkspaceTabEnabled?: boolean;
     handleTabActivate: (...args: any[]) => any;
     previewTabs: Set<string>;
     diffTabs: Set<string>;
@@ -135,6 +137,8 @@ export function composeRenderedMainAppOptions(input: {
       mobileTabStripTabs: input.editorState.mobileTabStripTabs,
       mobileTabStripActiveId: input.editorState.mobileTabStripActiveId,
       mobileChatActive: input.editorState.mobileChatActive,
+      mobileWorkspaceActive: input.editorState.mobileWorkspaceActive,
+      mobileWorkspaceTabEnabled: input.editorState.mobileWorkspaceTabEnabled,
       handleTabActivate: input.editorState.handleTabActivate,
       previewTabs: input.editorState.previewTabs,
       diffTabs: input.editorState.diffTabs,

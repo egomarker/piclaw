@@ -31,12 +31,20 @@ test('Mobile hides Chat chrome without suppressing global dialogs and widgets', 
   expect(mobileCss).toContain('pointer-events: auto');
 });
 
-test('Mobile CSS overlays continuously mounted Chat, pane, preview, and dock rows', () => {
+test('Mobile CSS overlays continuously mounted Chat, Workspace, pane, preview, and dock rows', () => {
   expect(mobileCss).toContain('grid-template-rows: auto minmax(0, 1fr) auto auto auto auto');
   expect(mobileCss).toContain('.app-shell.mobile-interface.mobile-pane-active > .container');
+  expect(mobileCss).toContain('.app-shell.mobile-interface.mobile-workspace-active > .container');
   expect(mobileCss).toContain('.app-shell.mobile-interface.mobile-chat-active > .editor-pane-container > .editor-pane-host');
+  expect(mobileCss).toContain('.app-shell.mobile-interface.mobile-workspace-active > .editor-pane-container > .editor-pane-host');
   expect(mobileCss).toContain('> .editor-pane-container > .dock-panel');
   expect(mobileCss).toContain('grid-row: 6');
+});
+
+test('Mobile uses a full Workspace tab surface except at desktop-width landscape', () => {
+  expect(mobileCss).toContain('@media (max-width: 1023.98px), (orientation: portrait)');
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface\.mobile-workspace-active > \.workspace-sidebar \{[^}]*display: flex;[^}]*grid-row: 2;[^}]*width: 100%;/s);
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface > \.workspace-sidebar \{\s*display: none;/);
 });
 
 test('Mobile applies the standalone bottom inset to every grid surface without double-insetting Chat', () => {

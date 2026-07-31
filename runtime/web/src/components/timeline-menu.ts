@@ -19,6 +19,8 @@ import { useTranslation } from '../utils/i18n.js';
 
 export function TimelineMenu({
     workspaceOpen,
+    workspaceVisible = workspaceOpen,
+    showWorkspaceToggle = true,
     toggleWorkspace,
     chatOnlyMode,
     openEditor,
@@ -176,10 +178,12 @@ export function TimelineMenu({
         </button>
         ${open && html`
             <div class="workspace-menu-dropdown timeline-menu-dropdown" ref=${menuRef} role="menu">
-                <button class="workspace-menu-item" role="menuitem" onClick=${() => run(toggleWorkspace)}>
-                    ${workspaceOpen ? t('menu.hideWorkspace') : t('menu.showWorkspace')}
-                </button>
-                ${!workspaceOpen && !chatOnlyMode && html`
+                ${showWorkspaceToggle && html`
+                    <button class="workspace-menu-item" role="menuitem" onClick=${() => run(toggleWorkspace)}>
+                        ${workspaceOpen ? t('menu.hideWorkspace') : t('menu.showWorkspace')}
+                    </button>
+                `}
+                ${showWorkspaceToggle && !workspaceOpen && !chatOnlyMode && html`
                     <button class="workspace-menu-item" role="menuitem" onClick=${() => run(() => { toggleWorkspace(); })}>
                         ${t('menu.openExplorer')}
                     </button>
@@ -193,7 +197,7 @@ export function TimelineMenu({
                 ${onOpenVncTab && html`<button class="workspace-menu-item" role="menuitem" onClick=${() => run(onOpenVncTab)}>${t('menu.openVnc')}</button>`}
 
                 <div class="workspace-menu-separator"></div>
-                <button class="workspace-menu-item" role="menuitem" disabled=${!workspaceOpen} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'new-file' } })))}>${t('menu.newFile')}</button>
+                <button class="workspace-menu-item" role="menuitem" disabled=${!workspaceVisible} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'new-file' } })))}>${t('menu.newFile')}</button>
                 ${(() => {
                     const recent = getRecentFiles();
                     if (recent.length === 0) return null;
@@ -209,9 +213,9 @@ export function TimelineMenu({
                     `;
                 })()}
                 <div class="workspace-menu-separator"></div>
-                <button class="workspace-menu-item" role="menuitem" disabled=${!workspaceOpen} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'refresh' } })))}>${t('menu.refreshTree')}</button>
-                <button class="workspace-menu-item" role="menuitem" disabled=${!workspaceOpen} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'reindex' } })))}>${t('menu.reindex')}</button>
-                <button class=${`workspace-menu-item${showHidden ? ' active' : ''}`} role="menuitem" disabled=${!workspaceOpen} onClick=${() => run(() => {
+                <button class="workspace-menu-item" role="menuitem" disabled=${!workspaceVisible} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'refresh' } })))}>${t('menu.refreshTree')}</button>
+                <button class="workspace-menu-item" role="menuitem" disabled=${!workspaceVisible} onClick=${() => run(() => window.dispatchEvent(new CustomEvent('piclaw:workspace-action', { detail: { action: 'reindex' } })))}>${t('menu.reindex')}</button>
+                <button class=${`workspace-menu-item${showHidden ? ' active' : ''}`} role="menuitem" disabled=${!workspaceVisible} onClick=${() => run(() => {
                     const next = !showHidden;
                     setShowHidden(next);
                     try { localStorage.setItem('workspaceShowHidden', String(next)); } catch { setShowHidden(next); }

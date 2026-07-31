@@ -87,7 +87,6 @@ Bootstrap environment variables are reviewed as an allowlist in the inventory. T
 | `PICLAW_WEB_PORT` | `8080` | Web UI port |
 | `PICLAW_WEB_HOST` | `0.0.0.0` | Bind address |
 | `PICLAW_WEB_IDLE_TIMEOUT` | `0` (disabled) | Drop idle clients after this many seconds |
-| `PICLAW_WEB_UI_MODE` | `classic` | Compatibility alias for `domains.web.uiMode`; select `classic`, `visual`, or `mobile`. |
 | `PICLAW_WEB_TERMINAL_ENABLED` | `1` on Linux/macOS, `0` on Windows | Enable or disable the authenticated web terminal backend/pane |
 | `PICLAW_WEB_VNC_TARGETS` | _(empty)_ | JSON allowlist for VNC targets (or use `PICLAW_VNC_TARGETS`). Supports array or object form. |
 | `PICLAW_WEB_VNC_ALLOW_DIRECT` | `1` on Linux/macOS/Windows | Allow or disable direct VNC targets supplied at runtime (`PICLAW_VNC_ALLOW_DIRECT` alias) |
@@ -163,9 +162,9 @@ The allowed values are:
 
 - `classic` — the default split-pane web interface;
 - `visual` — the alternate Visual interface;
-- `mobile` — the Classic feature set with one unified workspace where Chat is a permanent, non-closeable tab whenever file, viewer, terminal, or extension panes are open.
+- `mobile` — the Classic feature set with one unified workspace. At widths below `1024px` and in every portrait viewport, Chat and Workspace are permanent, non-closeable tabs followed by file, viewer, terminal, and extension panes. Desktop-width landscape viewports use the existing Workspace rail instead.
 
-`mobile` is an explicit third mode, not device detection: desktop browsers and installed PWAs use the same unified Chat/tab model when it is selected. Classic and Visual defaults are unchanged, and there is no in-app mode switcher. After changing the setting, use the normal PiClaw restart/reload flow. The temporary compatibility form is `PICLAW_WEB_UI_MODE=mobile`.
+`mobile` is an explicit third mode, not device detection: desktop browsers and installed PWAs use its responsive tab/rail model when it is selected. Classic and Visual defaults are unchanged, and there is no in-app mode switcher. After changing the setting, use the normal PiClaw restart/reload flow.
 
 ### Notification delivery debug labels
 

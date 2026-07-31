@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from '../vendor/preact-htm.js';
 import {
   readStoredWorkspaceOpenPreference,
+  resolveWorkspaceLayoutBucket,
 } from './workspace-visibility.js';
 import { useNotifications } from './use-notifications.js';
 import { isStandaloneWebAppMode } from './chat-window.js';
@@ -122,6 +123,7 @@ export function useMainAppSurfaceState(options: {
     allowLegacyFallback: true,
     defaultValue: false,
   }));
+  const [workspaceLayoutBucket, setWorkspaceLayoutBucket] = useState(() => resolveWorkspaceLayoutBucket());
   const [userProfile, setUserProfile] = useState({ name: 'You', avatar_url: null, avatar_background: null });
   const staleUiVersionRef = useRef<string | null>(null);
   const staleUiReloadScheduledRef = useRef(false);
@@ -239,6 +241,8 @@ export function useMainAppSurfaceState(options: {
     setRemovingPostIds,
     workspaceOpen,
     setWorkspaceOpen,
+    workspaceLayoutBucket,
+    setWorkspaceLayoutBucket,
     userProfile,
     setUserProfile,
     staleUiVersionRef,

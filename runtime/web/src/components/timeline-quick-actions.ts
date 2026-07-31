@@ -61,7 +61,7 @@ function toggleChatOnlyMode(chatOnlyMode) {
     window.location.href = url.toString();
 }
 
-function buildWorkspaceCommands(options) {
+export function buildWorkspaceCommands(options) {
     const commands = [];
     const byId = new Map(WORKSPACE_QUICK_ACTIONS_CATALOG.map((entry) => [entry.id, entry]));
     const add = (id, overrides = {}) => {
@@ -70,12 +70,14 @@ function buildWorkspaceCommands(options) {
         commands.push({ ...base, ...overrides });
     };
 
-    add('toggle-workspace', {
-        label: options.workspaceOpen ? t('palette.hideWorkspace') : t('palette.showWorkspace'),
-        description: options.workspaceOpen ? t('palette.hideWorkspaceDesc') : t('palette.showWorkspaceDesc'),
-    });
-    if (!options.workspaceOpen && !options.chatOnlyMode) {
-        add('open-explorer');
+    if (options.showWorkspaceToggle !== false) {
+        add('toggle-workspace', {
+            label: options.workspaceOpen ? t('palette.hideWorkspace') : t('palette.showWorkspace'),
+            description: options.workspaceOpen ? t('palette.hideWorkspaceDesc') : t('palette.showWorkspaceDesc'),
+        });
+        if (!options.workspaceOpen && !options.chatOnlyMode) {
+            add('open-explorer');
+        }
     }
     add('toggle-chat-only', {
         label: options.chatOnlyMode ? t('palette.exitChatOnly') : t('palette.chatOnly'),
@@ -127,6 +129,7 @@ export function TimelineQuickActions({
     activeChatAgents = [],
     currentChatJid = 'web:default',
     workspaceOpen = false,
+    showWorkspaceToggle = true,
     chatOnlyMode = false,
     onSwitchChat,
     onToggleWorkspace,
@@ -173,10 +176,11 @@ export function TimelineQuickActions({
 
     const workspaceCommands = useMemo(() => buildWorkspaceCommands({
         workspaceOpen,
+        showWorkspaceToggle,
         chatOnlyMode,
         onOpenTerminalTab,
         onOpenVncTab,
-    }), [chatOnlyMode, onOpenTerminalTab, onOpenVncTab, workspaceOpen]);
+    }), [chatOnlyMode, onOpenTerminalTab, onOpenVncTab, showWorkspaceToggle, workspaceOpen]);
 
     const items = useMemo(() => buildTimelineQuickActionItems({
         agents: activeChatAgents,
