@@ -16,6 +16,19 @@
 }
 
 /*
+ * Shared standalone-PWA handling reserves the lower unsafe viewport region on
+ * Chat's .container. Mobile panes and the dock are sibling grid surfaces, so
+ * consume that inset on the shell instead and remove Chat's duplicate copy.
+ */
+html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface {
+    padding-bottom: var(--iphone-standalone-compose-safe-area-bottom, 0px);
+}
+
+html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .container {
+    padding-bottom: 0;
+}
+
+/*
  * Classic caps Chat at --chat-max-width when its explorer is collapsed and no
  * pane is open. Keep the Mobile Chat surface stretched across its grid track.
  */

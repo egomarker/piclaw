@@ -250,9 +250,9 @@ This keeps interactive content below the Dynamic Island / status bar while allow
 
 For the main shell overall, **do not add a blanket bottom safe-area inset**. With `100vh` in standalone mode, the app shell itself should still reach the bottom of the screen.
 
-However, on **iPhone standalone PWAs specifically**, the chat surface can sit too low when the standalone viewport is still in its undocked / under-reported state, and the compose area's lower edge can be clipped by the lower screen boundary. The narrow fix is to reserve a runtime-controlled bottom inset at the **chat container level**, only when detection confirms **iPhone + standalone PWA**.
+However, on **Apple touch devices in standalone mode** (iPhone and iPad), the usable viewport can end above the lower edge reported by `100vh`. The runtime therefore exposes a bottom inset that is at least `env(safe-area-inset-bottom)` and can grow to match the current `screen.height - visualViewport.height` gap while the viewport is under-reporting.
 
-That bottom inset should be at least `env(safe-area-inset-bottom)`, and while the viewport is under-reporting it may need to grow to match the current `screen.height - visualViewport.height` gap. That moves the whole compose region above the lower screen boundary without changing iPhone Safari, iPad Safari/PWA, or Android layouts.
+Classic and Visual consume that inset on the Chat `.container`. Mobile presents Chat, panes, previews, and the dock as sibling grid surfaces, so Mobile consumes the same inset once on `.app-shell.mobile-interface` and removes the container-level duplicate. Keeping the inset at the Mobile shell level prevents terminal rows and dock content from rendering under the home-indicator region while preserving the established Classic and Visual layout.
 
 ### Left / Right (landscape rotation)
 
