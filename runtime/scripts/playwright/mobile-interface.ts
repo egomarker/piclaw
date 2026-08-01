@@ -161,12 +161,39 @@ async function openWorkspaceFile(page: Page, filePath: string) {
   const rowSelector = `.workspace-row[data-path=${JSON.stringify(filePath)}]`;
   const row = page.locator(rowSelector);
   await row.waitFor({ state: 'visible', timeout: 20000 });
-  await row.click();
+  const tabStripTopBefore = (await readRect(page, '.tab-strip')).y;
+  await row.tap();
 
   const previewTitle = page.locator('.workspace-preview-title');
   await previewTitle.waitFor({ state: 'visible', timeout: 15000 });
   assert((await previewTitle.textContent())?.trim() === filePath,
     `Workspace preview selected the wrong path: ${String(await previewTitle.textContent())}.`);
+  await page.waitForTimeout(250);
+
+  const touchPreviewState = await page.evaluate(() => {
+    const active = document.activeElement as HTMLElement | null;
+    const tabStrip = document.querySelector<HTMLElement>('.tab-strip');
+    return {
+      activeClass: active?.className || null,
+      treeListFocused: Boolean(active?.classList.contains('workspace-tree-list')),
+      windowScrollY: Math.round(window.scrollY),
+      scrollingElementScrollTop: Math.round(document.scrollingElement?.scrollTop || 0),
+      visualViewportPageTop: Math.round(window.visualViewport?.pageTop || 0),
+      visualViewportOffsetTop: Math.round(window.visualViewport?.offsetTop || 0),
+      tabStripTop: Math.round(tabStrip?.getBoundingClientRect().top || 0),
+    };
+  });
+  assert(!touchPreviewState.treeListFocused,
+    `Touch selection forced focus onto the Workspace tree: ${JSON.stringify(touchPreviewState)}.`);
+  assert(
+    touchPreviewState.windowScrollY === 0
+      && touchPreviewState.scrollingElementScrollTop === 0
+      && touchPreviewState.visualViewportPageTop === 0
+      && touchPreviewState.visualViewportOffsetTop === 0,
+    `Workspace preview refresh shifted the root viewport: ${JSON.stringify(touchPreviewState)}.`,
+  );
+  assert(Math.abs(touchPreviewState.tabStripTop - tabStripTopBefore) <= 1,
+    `Workspace preview refresh moved the Mobile tab strip: before=${tabStripTopBefore}, after=${touchPreviewState.tabStripTop}.`);
 
   const editButton = page.locator('.workspace-preview-actions .workspace-edit');
   await editButton.waitFor({ state: 'visible', timeout: 15000 });
@@ -187,7 +214,7 @@ async function openWorkspaceFile(page: Page, filePath: string) {
   const paneRect = await readRect(page, '.editor-pane-host');
   assert(paneRect.width > 0 && paneRect.height > 0,
     `Opened pane has zero geometry: ${JSON.stringify(paneRect)}.`);
-  return { fileLabel, paneRect };
+  return { fileLabel, paneRect, touchPreviewState };
 }
 
 async function verifyAttachToChatControl(page: Page, filePath: string, fileLabel: string, exerciseFlow = false) {

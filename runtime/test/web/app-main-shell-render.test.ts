@@ -351,6 +351,7 @@ test('compact Mobile renders Workspace as a permanent surface without rail contr
 
   expect(explorerVNode?.props.visible).toBe(true);
   expect(explorerVNode?.props.active).toBe(true);
+  expect(explorerVNode?.props.mobileInterface).toBe(true);
   expect(tabStripVNode?.props.tabs).toBe(displayTabs);
   expect(tabStripVNode?.props.activeId).toBe('piclaw://workspace');
   expect(menuVNode?.props.showWorkspaceToggle).toBe(false);
@@ -496,6 +497,7 @@ test('Classic shell does not opt into Mobile tab or panel accessibility behavior
   expect(tabStripVNode?.props.tabListId).toBeUndefined();
   expect(explorerVNode?.props.surfaceRole).toBeUndefined();
   expect(explorerVNode?.props.surfaceInert).toBeUndefined();
+  expect(explorerVNode?.props.mobileInterface).toBeUndefined();
   expect(chatMainVNode?.props.role).toBeUndefined();
   expect(chatMainVNode?.props['aria-hidden']).toBeUndefined();
   expect(chatMainVNode?.props.inert).toBeUndefined();

@@ -443,6 +443,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
           surfaceLabelledBy=${mobileWorkspacePanelEnabled ? MOBILE_WORKSPACE_TAB_ELEMENT_ID : undefined}
           surfaceAriaHidden=${mobileWorkspaceSurfaceInactive ? 'true' : undefined}
           surfaceInert=${mobileWorkspaceSurfaceInactive || undefined}
+          mobileInterface=${uiMode === 'mobile' || undefined}
         />
         ${!workspaceTabMode && html`
           <button

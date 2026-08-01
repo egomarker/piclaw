@@ -48,6 +48,8 @@ import {
     subscribeWorkspaceRowActions,
 } from '../ui/workspace-row-actions.js';
 
+const WORKSPACE_TOUCH_ACTIVATION_WINDOW_MS = 1000;
+
 const isHiddenNode = (node) => {
     if (!node || !node.name) return false;
     if (node.path === '.') return false;
@@ -656,6 +658,27 @@ export function getWorkspaceTouchStartIntent(event, renamingPath = null) {
     };
 }
 
+export function shouldFocusWorkspaceTreeAfterActivation({
+    mobileInterface = false,
+    event = null,
+    lastTouchActivationAt = 0,
+    now = Date.now(),
+} = {}) {
+    if (!mobileInterface) return true;
+    if (event?.sourceCapabilities?.firesTouchEvents === true) return false;
+    if (String(event?.pointerType || '').toLowerCase() === 'touch') return false;
+
+    const touchAt = Number(lastTouchActivationAt);
+    const currentTime = Number(now);
+    return !(
+        Number.isFinite(touchAt)
+        && touchAt > 0
+        && Number.isFinite(currentTime)
+        && currentTime >= touchAt
+        && currentTime - touchAt <= WORKSPACE_TOUCH_ACTIVATION_WINDOW_MS
+    );
+}
+
 export function buildWorkspaceMoveConfirmationMessage(sourcePath, targetPath, entryType, translate) {
     const sourceName = sourcePath.split('/').pop() || sourcePath;
     const sourceParent = sourcePath.includes('/')
@@ -695,6 +718,7 @@ export function WorkspaceExplorer({
     surfaceLabelledBy,
     surfaceAriaHidden,
     surfaceInert = false,
+    mobileInterface = false,
 }) {
     const { t } = useTranslation();
     const [tree,          setTree]          = useState(null);
@@ -758,6 +782,8 @@ export function WorkspaceExplorer({
     const mouseDragRef     = useRef({ path: null, dragging: false, startX: 0, startY: 0 });
     const dragExpandRef    = useRef({ path: null, timer: 0 });
     const suppressClickRef = useRef(false);
+    const lastTouchActivationAtRef = useRef(0);
+    const mobileInterfaceRef = useRef(Boolean(mobileInterface));
     const previewHeightRef= useRef(0);
     const folderChartCacheRef = useRef(new Map());
     const folderChartPayloadRef = useRef(null);
@@ -786,6 +812,7 @@ export function WorkspaceExplorer({
     onFileSelectRef.current = onFileSelect;
     onFolderSelectRef.current = onFolderSelect;
     onOpenEditorRef.current = onOpenEditor;
+    mobileInterfaceRef.current = Boolean(mobileInterface);
     useEffect(() => { expandedRef.current = expanded; }, [expanded]);
     useEffect(() => { showHiddenRef.current = showHidden; }, [showHidden]);
     useEffect(() => { visibleRef.current = visible; }, [visible]);
@@ -1755,13 +1782,31 @@ export function WorkspaceExplorer({
     // ── Single stable click handler via event delegation ──────────────────────
     // Created once; reads live state through refs so it never needs recreation.
     const handleTreeClick = useRef((e) => {
+        const mobileInterfaceActive = mobileInterfaceRef.current;
+        const shouldFocusTree = shouldFocusWorkspaceTreeAfterActivation({
+            mobileInterface: mobileInterfaceActive,
+            event: e,
+            lastTouchActivationAt: lastTouchActivationAtRef.current,
+        });
+        lastTouchActivationAtRef.current = 0;
+
         if (suppressClickRef.current) {
             suppressClickRef.current = false;
             return;
         }
         const targetEl = getEventTargetElement(e);
         const rowEl = targetEl?.closest?.('[data-path]');
-        treeListRef.current?.focus?.();
+        if (shouldFocusTree) {
+            if (mobileInterfaceActive) {
+                try {
+                    treeListRef.current?.focus?.({ preventScroll: true });
+                } catch {
+                    treeListRef.current?.focus?.();
+                }
+            } else {
+                treeListRef.current?.focus?.();
+            }
+        }
         if (!rowEl) return;
         const clickedPath = rowEl.dataset.path;
         const clickedType = rowEl.dataset.type;
@@ -1980,6 +2025,7 @@ export function WorkspaceExplorer({
         const intent = getWorkspaceTouchStartIntent(event, renamingPathRef.current);
         if (!intent) return;
 
+        lastTouchActivationAtRef.current = Date.now();
         touchDragRef.current = {
             path: intent.dragPath,
             dragging: false,
