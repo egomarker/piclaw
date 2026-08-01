@@ -259,12 +259,16 @@ async function runScenario(options: {
     try {
       await scenario.page.screenshot({ path: failurePath, fullPage: true });
       writeFileSync(join(options.artifactDir, `${options.name}-failure.html`), await scenario.page.content());
-    } catch {
-      // Preserve the original assertion failure if artifact capture also fails.
+    } catch (captureError) {
+      console.warn(`[mobile-interface-e2e] Failure artifact capture also failed for ${options.name}:`, captureError);
     }
     throw error;
   } finally {
-    await scenario.context.tracing.stop({ path: tracePath }).catch(() => {});
+    try {
+      await scenario.context.tracing.stop({ path: tracePath });
+    } catch (traceError) {
+      console.warn(`[mobile-interface-e2e] Trace capture failed for ${options.name}:`, traceError);
+    }
     await scenario.context.close();
   }
 }
