@@ -43,7 +43,8 @@ test('Mobile CSS overlays continuously mounted Chat, Workspace, pane, preview, a
 
 test('Mobile uses a full Workspace tab surface except at desktop-width landscape', () => {
   expect(mobileCss).toContain('@media (max-width: 1023.98px), (orientation: portrait)');
-  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface\.mobile-workspace-active > \.workspace-sidebar \{[^}]*display: flex;[^}]*grid-row: 2;[^}]*margin-top: 10px;[^}]*width: 100%;/s);
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface\.mobile-workspace-active > \.workspace-sidebar \{[^}]*display: flex;[^}]*grid-row: 2;[^}]*margin-right: 10px;[^}]*width: calc\(100% - 10px\);/s);
+  expect(mobileCss).not.toMatch(/\.app-shell\.mobile-interface\.mobile-workspace-active > \.workspace-sidebar \{[^}]*margin-top:/s);
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface > \.workspace-sidebar \{\s*display: none;/);
 });
 
