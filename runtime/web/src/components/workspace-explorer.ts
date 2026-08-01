@@ -760,6 +760,7 @@ export function WorkspaceExplorer({
     const uploadInputRef  = useRef(null);
     const uploadTargetRef = useRef('.');
     const uploadProgressTimerRef = useRef(0);
+    const touchFocusRestoreTimerRef = useRef(0);
     const touchDragRef     = useRef({ path: null, dragging: false, startX: 0, startY: 0 });
     const mouseDragRef     = useRef({ path: null, dragging: false, startX: 0, startY: 0 });
     const dragExpandRef    = useRef({ path: null, timer: 0 });
@@ -807,7 +808,39 @@ export function WorkspaceExplorer({
         uploadProgressTimerRef.current = 0;
     }, []);
 
-    useEffect(() => () => clearUploadProgressTimer(), [clearUploadProgressTimer]);
+    const clearTouchFocusRestoreTimer = useCallback(() => {
+        if (!touchFocusRestoreTimerRef.current) return;
+        clearTimeout(touchFocusRestoreTimerRef.current);
+        touchFocusRestoreTimerRef.current = 0;
+    }, []);
+
+    const restoreWorkspaceTreeTabStop = useCallback(() => {
+        clearTouchFocusRestoreTimer();
+        treeListRef.current?.setAttribute?.('tabindex', '0');
+    }, [clearTouchFocusRestoreTimer]);
+
+    // iPad standalone WebKit focuses the nearest tabindex ancestor during its
+    // synthetic mouse sequence, before click runs. Temporarily remove the tree
+    // tab stop so preview reflow cannot pan the root viewport to retain focus.
+    const suppressWorkspaceTreeTouchFocus = useCallback(() => {
+        if (!mobileInterfaceRef.current) return;
+        clearTouchFocusRestoreTimer();
+        treeListRef.current?.removeAttribute?.('tabindex');
+    }, [clearTouchFocusRestoreTimer]);
+
+    const scheduleWorkspaceTreeTabStopRestore = useCallback(() => {
+        if (!mobileInterfaceRef.current || typeof window === 'undefined') return;
+        clearTouchFocusRestoreTimer();
+        touchFocusRestoreTimerRef.current = window.setTimeout(() => {
+            touchFocusRestoreTimerRef.current = 0;
+            treeListRef.current?.setAttribute?.('tabindex', '0');
+        }, WORKSPACE_TOUCH_ACTIVATION_WINDOW_MS);
+    }, [clearTouchFocusRestoreTimer]);
+
+    useEffect(() => () => {
+        clearUploadProgressTimer();
+        clearTouchFocusRestoreTimer();
+    }, [clearUploadProgressTimer, clearTouchFocusRestoreTimer]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return undefined;
@@ -1751,6 +1784,7 @@ export function WorkspaceExplorer({
             lastTouchActivationAt: lastTouchActivationAtRef.current,
         });
         lastTouchActivationAtRef.current = 0;
+        if (mobileInterfaceActive) restoreWorkspaceTreeTabStop();
 
         if (suppressClickRef.current) {
             suppressClickRef.current = false;
@@ -1988,13 +2022,14 @@ export function WorkspaceExplorer({
         if (!intent) return;
 
         lastTouchActivationAtRef.current = Date.now();
+        suppressWorkspaceTreeTouchFocus();
         touchDragRef.current = {
             path: intent.dragPath,
             dragging: false,
             startX: intent.startX,
             startY: intent.startY,
         };
-    }, []);
+    }, [suppressWorkspaceTreeTouchFocus]);
 
     const handleRowTouchEnd = useCallback(() => {
         const dragState = touchDragRef.current;
@@ -2011,7 +2046,8 @@ export function WorkspaceExplorer({
         updateDropTarget(null);
         clearDragExpandTimer();
         clearDragGhost();
-    }, [resolveDropTargetPath, clearDragGhost, updateDropTarget, clearDragExpandTimer]);
+        scheduleWorkspaceTreeTabStopRestore();
+    }, [resolveDropTargetPath, clearDragGhost, updateDropTarget, clearDragExpandTimer, scheduleWorkspaceTreeTabStopRestore]);
 
     const handleRowTouchMove = useCallback((event) => {
         const dragState = touchDragRef.current;
