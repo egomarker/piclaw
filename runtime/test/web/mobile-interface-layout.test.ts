@@ -79,11 +79,12 @@ test('Attach to Chat toolbar states remain scoped to Mobile', () => {
   expect(classicEditorCss).not.toContain('tab-strip-attach-to-chat');
 });
 
-test('Mobile reveals enlarged tab close targets for any touch-capable pointer mix', () => {
+test('Mobile always reveals enlarged tab close targets regardless of pointer media', () => {
   const hiddenCloseRule = /\.tab-close \{[^}]*width: 22px;[^}]*height: 22px;[^}]*min-width: 22px;[^}]*min-height: 22px;[^}]*opacity: 0;[^}]*pointer-events: none;/s;
   expect(classicEditorCss).toMatch(hiddenCloseRule);
   expect(visualEditorCss).toMatch(hiddenCloseRule);
-  expect(mobileCss).toMatch(/@media \(any-pointer: coarse\) \{\s*\.app-shell\.mobile-interface \.tab-close \{[^}]*width: 30px;[^}]*height: 30px;[^}]*min-width: 30px;[^}]*min-height: 30px;[^}]*opacity: 1;[^}]*pointer-events: auto;/s);
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface \.tab-close \{[^}]*width: 30px;[^}]*height: 30px;[^}]*min-width: 30px;[^}]*min-height: 30px;[^}]*opacity: 1;[^}]*pointer-events: auto;/s);
+  expect(mobileCss).not.toContain('@media (any-pointer: coarse)');
   expect(mobileCss).not.toContain('(not (any-pointer: fine))');
   expect(mobileCss).not.toMatch(/\.tab-close > svg[^}]*width:/s);
 });

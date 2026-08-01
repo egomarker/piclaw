@@ -196,16 +196,14 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     opacity: 1;
 }
 
-/* Enlarge and reveal close targets whenever the device has a coarse touch pointer. */
-@media (any-pointer: coarse) {
-    .app-shell.mobile-interface .tab-close {
-        width: 30px;
-        height: 30px;
-        min-width: 30px;
-        min-height: 30px;
-        opacity: 1;
-        pointer-events: auto;
-    }
+/* Keep close targets enlarged and visible throughout Mobile mode. */
+.app-shell.mobile-interface .tab-close {
+    width: 30px;
+    height: 30px;
+    min-width: 30px;
+    min-height: 30px;
+    opacity: 1;
+    pointer-events: auto;
 }
 
 /* Reserve the fixed hamburger's hit area whenever it sits over main content. */
