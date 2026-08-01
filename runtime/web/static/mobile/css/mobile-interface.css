@@ -253,8 +253,8 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
         grid-column: var(--mobile-content-column);
         grid-row: 2;
         align-self: stretch;
-        margin-top: 10px;
-        width: 100%;
+        margin-right: 10px;
+        width: calc(100% - 10px);
         min-width: 0;
         max-width: none;
         height: auto;
