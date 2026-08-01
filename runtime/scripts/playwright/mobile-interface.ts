@@ -161,7 +161,10 @@ async function openWorkspaceFile(page: Page, filePath: string) {
   const rowSelector = `.workspace-row[data-path=${JSON.stringify(filePath)}]`;
   const row = page.locator(rowSelector);
   await row.waitFor({ state: 'visible', timeout: 20000 });
-  const tabStripTopBefore = (await readRect(page, '.tab-strip')).y;
+  const topAnchorSelector = await page.locator('.tab-strip').count() > 0
+    ? '.tab-strip'
+    : '.workspace-header';
+  const topAnchorBefore = (await readRect(page, topAnchorSelector)).y;
   await row.tap();
 
   const previewTitle = page.locator('.workspace-preview-title');
@@ -170,9 +173,9 @@ async function openWorkspaceFile(page: Page, filePath: string) {
     `Workspace preview selected the wrong path: ${String(await previewTitle.textContent())}.`);
   await page.waitForTimeout(250);
 
-  const touchPreviewState = await page.evaluate(() => {
+  const touchPreviewState = await page.evaluate((selector) => {
     const active = document.activeElement as HTMLElement | null;
-    const tabStrip = document.querySelector<HTMLElement>('.tab-strip');
+    const topAnchor = document.querySelector<HTMLElement>(selector);
     return {
       activeClass: active?.className || null,
       treeListFocused: Boolean(active?.classList.contains('workspace-tree-list')),
@@ -180,9 +183,10 @@ async function openWorkspaceFile(page: Page, filePath: string) {
       scrollingElementScrollTop: Math.round(document.scrollingElement?.scrollTop || 0),
       visualViewportPageTop: Math.round(window.visualViewport?.pageTop || 0),
       visualViewportOffsetTop: Math.round(window.visualViewport?.offsetTop || 0),
-      tabStripTop: Math.round(tabStrip?.getBoundingClientRect().top || 0),
+      topAnchor: selector,
+      topAnchorTop: Math.round(topAnchor?.getBoundingClientRect().top || 0),
     };
-  });
+  }, topAnchorSelector);
   assert(!touchPreviewState.treeListFocused,
     `Touch selection forced focus onto the Workspace tree: ${JSON.stringify(touchPreviewState)}.`);
   assert(
@@ -192,8 +196,8 @@ async function openWorkspaceFile(page: Page, filePath: string) {
       && touchPreviewState.visualViewportOffsetTop === 0,
     `Workspace preview refresh shifted the root viewport: ${JSON.stringify(touchPreviewState)}.`,
   );
-  assert(Math.abs(touchPreviewState.tabStripTop - tabStripTopBefore) <= 1,
-    `Workspace preview refresh moved the Mobile tab strip: before=${tabStripTopBefore}, after=${touchPreviewState.tabStripTop}.`);
+  assert(Math.abs(touchPreviewState.topAnchorTop - topAnchorBefore) <= 1,
+    `Workspace preview refresh moved ${topAnchorSelector}: before=${topAnchorBefore}, after=${touchPreviewState.topAnchorTop}.`);
 
   const editButton = page.locator('.workspace-preview-actions .workspace-edit');
   await editButton.waitFor({ state: 'visible', timeout: 15000 });
