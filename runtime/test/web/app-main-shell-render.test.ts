@@ -529,7 +529,7 @@ test('Classic shell does not opt into Mobile tab or panel accessibility behavior
   expect(paneHostVNode?.props.inert).toBeUndefined();
 });
 
-test('only Mobile moves selected-document attachment from ComposeBox to the tab toolbar', () => {
+test('only Mobile exposes the selected-document attachment toggle in the tab toolbar', () => {
   const documentTab = {
     id: 'notes/plan.md',
     path: 'notes/plan.md',
@@ -538,6 +538,7 @@ test('only Mobile moves selected-document attachment from ComposeBox to the tab 
     pinned: false,
   };
   const addFileRef = mock(() => {});
+  const removeFileRef = mock(() => {});
   const handleTabActivate = mock(() => {});
   const attachActiveEditorFile = mock(() => {});
   const findControls = (overrides: Record<string, unknown>) => {
@@ -550,6 +551,7 @@ test('only Mobile moves selected-document attachment from ComposeBox to the tab 
       displayTabStripTabs: [documentTab],
       displayTabStripActiveId: documentTab.id,
       addFileRef,
+      removeFileRef,
       handleTabActivate,
       attachActiveEditorFile,
       ...overrides,
@@ -575,7 +577,17 @@ test('only Mobile moves selected-document attachment from ComposeBox to the tab 
   }));
   mobile.tabStripVNode.props.toolbarAction.onClick();
   expect(addFileRef).toHaveBeenCalledWith('notes/plan.md');
-  expect(handleTabActivate).toHaveBeenCalledWith(MOBILE_CHAT_TAB_ID);
+  expect(handleTabActivate).not.toHaveBeenCalled();
+
+  const attachedMobile = findControls({ uiMode: 'mobile', fileRefs: ['notes/plan.md'] });
+  expect(attachedMobile.tabStripVNode?.props.toolbarAction).toEqual(expect.objectContaining({
+    title: 'Detach plan.md from Chat',
+    disabled: false,
+    pressed: true,
+  }));
+  attachedMobile.tabStripVNode.props.toolbarAction.onClick();
+  expect(removeFileRef).toHaveBeenCalledWith('notes/plan.md');
+  expect(handleTabActivate).not.toHaveBeenCalled();
 
   const classic = findControls({ uiMode: 'classic' });
   expect(classic.composeVNode?.props.activeEditorPath).toBe(documentTab.id);

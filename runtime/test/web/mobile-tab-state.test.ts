@@ -8,13 +8,13 @@ import {
   MOBILE_WORKSPACE_PANEL_ID,
   MOBILE_WORKSPACE_TAB_ELEMENT_ID,
   MOBILE_WORKSPACE_TAB_ID,
-  attachMobileDocumentToChat,
   composeMobileTabStripTabs,
   getMobileSurfacePanelId,
   getMobileSurfaceTabElementId,
   resolveMobileAttachToChatAction,
   resolveMobileSurfaceAfterClose,
   resolveSurfaceAfterWorkspaceTabDisabled,
+  toggleMobileDocumentChatAttachment,
 } from '../../web/src/ui/mobile-tab-state.js';
 
 function tab(id: string) {
@@ -133,8 +133,9 @@ test('Mobile exposes Attach to Chat only for the selected workspace document', (
     fileRefs: ['notes/plan.md'],
   })).toEqual(expect.objectContaining({
     kind: 'attached',
-    title: 'plan.md is attached to Chat',
-    disabled: true,
+    title: 'Detach plan.md from Chat',
+    ariaLabel: 'Detach plan.md from Chat',
+    disabled: false,
     pressed: true,
   }));
 });
@@ -159,25 +160,33 @@ test('Mobile hides Attach to Chat for permanent, synthetic, missing, and detache
   }
 });
 
-test('Mobile attaches the selected document before activating and focusing Chat', () => {
+test('Mobile toggles the selected document attachment without changing surfaces', () => {
   const calls: string[] = [];
-  expect(attachMobileDocumentToChat({
+  const callbacks = {
+    addFileRef: (path: string) => { calls.push(`attach:${path}`); },
+    removeFileRef: (path: string) => { calls.push(`detach:${path}`); },
+  };
+
+  expect(toggleMobileDocumentChatAttachment({
     path: 'notes/plan.md',
-    addFileRef: (path) => { calls.push(`attach:${path}`); },
-    activateTab: (id) => { calls.push(`activate:${id}`); },
-    focusCompose: () => { calls.push('focus'); },
+    attached: false,
+    ...callbacks,
   })).toBe(true);
-  expect(calls).toEqual([
-    'attach:notes/plan.md',
-    `activate:${MOBILE_CHAT_TAB_ID}`,
-    'focus',
-  ]);
+  expect(calls).toEqual(['attach:notes/plan.md']);
 
   calls.length = 0;
-  expect(attachMobileDocumentToChat({
+  expect(toggleMobileDocumentChatAttachment({
+    path: 'notes/plan.md',
+    attached: true,
+    ...callbacks,
+  })).toBe(true);
+  expect(calls).toEqual(['detach:notes/plan.md']);
+
+  calls.length = 0;
+  expect(toggleMobileDocumentChatAttachment({
     path: 'piclaw://terminal',
-    addFileRef: (path) => { calls.push(`attach:${path}`); },
-    activateTab: (id) => { calls.push(`activate:${id}`); },
+    attached: false,
+    ...callbacks,
   })).toBe(false);
   expect(calls).toEqual([]);
 });
