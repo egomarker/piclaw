@@ -7,7 +7,9 @@ import {
   hasTabContextMenu,
   isTabClosable,
   resolveRovingTabIndex,
+  resolveTabFocusAfterClose,
   resolveTabKeyboardTargetId,
+  shouldQueueTabFocusAfterClose,
 } from '../../web/src/components/tab-strip.js';
 import {
   registerAddonStandaloneTabUrlResolver,
@@ -36,6 +38,20 @@ test('roving tab navigation wraps and supports Home and End', () => {
   expect(resolveRovingTabIndex(tabs, 'workspace', 'workspace')).toBe(0);
   expect(resolveRovingTabIndex(tabs, 'workspace', 'chat')).toBe(-1);
   expect(resolveRovingTabIndex(tabs, 'missing', 'chat')).toBe(0);
+});
+
+test('Mobile tab close focus waits for removal and follows the replacement active tab', () => {
+  const beforeClose = [{ id: 'chat' }, { id: 'first' }, { id: 'second' }];
+  const afterMiddleClose = [{ id: 'chat' }, { id: 'second' }];
+  const afterFinalClose = [{ id: 'chat' }];
+
+  expect(shouldQueueTabFocusAfterClose(true, 'first', 'first')).toBe(true);
+  expect(shouldQueueTabFocusAfterClose(false, 'first', 'first')).toBe(false);
+  expect(shouldQueueTabFocusAfterClose(true, 'first', 'second')).toBe(false);
+  expect(resolveTabFocusAfterClose(beforeClose, 'first', 'first')).toBeNull();
+  expect(resolveTabFocusAfterClose(afterMiddleClose, 'second', 'first')).toBe('second');
+  expect(resolveTabFocusAfterClose(afterFinalClose, 'chat', 'second')).toBe('chat');
+  expect(resolveTabFocusAfterClose(afterMiddleClose, 'missing', 'first')).toBeNull();
 });
 
 test('roving tab keyboard actions focus and activate the resolved tab', () => {

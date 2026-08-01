@@ -40,6 +40,7 @@ import { canTabEditSource, getTabEditSourceLabel } from '../ui/tab-source-editor
  * @param {boolean} [props.dockVisible] - Whether the terminal dock is currently visible.
  * @param {(id: string, label?: string) => void} [props.onPopOutTab] - Open a tab in a standalone window.
  * @param {boolean} [props.rovingFocus] - Enable one-tab-stop keyboard navigation.
+ * @param {boolean} [props.restoreFocusAfterClose] - Restore focus to the replacement active tab after closing the active tab.
  * @param {string} [props.tabListId] - Stable id for the tablist.
  * @param {string} [props.tabListLabel] - Accessible name for the tablist.
  * @param {(id: string) => string} [props.getTabElementId] - Resolve a stable DOM id for a tab.
@@ -102,6 +103,15 @@ export function resolveRovingTabIndex(tabs, activeId, tabId) {
     return tabId === focusableId ? 0 : -1;
 }
 
+export function shouldQueueTabFocusAfterClose(enabled, activeId, closingId) {
+    return enabled === true && Boolean(activeId) && closingId === activeId;
+}
+
+export function resolveTabFocusAfterClose(tabs, activeId, closedId) {
+    if (!closedId || !Array.isArray(tabs) || tabs.some((tab) => tab.id === closedId)) return null;
+    return tabs.some((tab) => tab.id === activeId) ? activeId : null;
+}
+
 export function handleRovingTabKeyDown(event, { tabs, currentId, focusTab, onActivate }) {
     if (event.altKey || event.ctrlKey || event.metaKey) return false;
     const activationKey = event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar';
@@ -115,10 +125,11 @@ export function handleRovingTabKeyDown(event, { tabs, currentId, focusTab, onAct
     return true;
 }
 
-export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, onCloseAll, onTogglePin, onTogglePreview, onToggleDiff, onEditSource, previewTabs, diffTabs, paneOverrides, detachedTabs, onReattachTab, onToggleDock, dockVisible, onToggleZen, zenMode, onPopOutTab, rovingFocus = false, tabListId, tabListLabel, getTabElementId, getTabPanelId }) {
+export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, onCloseAll, onTogglePin, onTogglePreview, onToggleDiff, onEditSource, previewTabs, diffTabs, paneOverrides, detachedTabs, onReattachTab, onToggleDock, dockVisible, onToggleZen, zenMode, onPopOutTab, rovingFocus = false, restoreFocusAfterClose = false, tabListId, tabListLabel, getTabElementId, getTabPanelId }) {
     const { t } = useTranslation();
     const [contextMenu, setContextMenu] = useState(null);
     const stripRef = useRef(null);
+    const pendingFocusAfterCloseRef = useRef(null);
 
     const focusTabById = useCallback((id) => {
         if (!rovingFocus || !stripRef.current) return;
@@ -130,6 +141,27 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
             : stripRef.current.querySelectorAll('[role="tab"]')[tabIndex];
         target?.focus?.({ preventScroll: true });
     }, [getTabElementId, rovingFocus, tabs]);
+
+    const requestTabClose = useCallback((id) => {
+        if (shouldQueueTabFocusAfterClose(rovingFocus && restoreFocusAfterClose, activeId, id)) {
+            pendingFocusAfterCloseRef.current = id;
+        }
+        onClose?.(id);
+    }, [activeId, onClose, restoreFocusAfterClose, rovingFocus]);
+
+    useEffect(() => {
+        if (!rovingFocus || !restoreFocusAfterClose) return;
+        const closedId = pendingFocusAfterCloseRef.current;
+        if (!closedId) return;
+        if (tabs.some((tab) => tab.id === closedId)) {
+            pendingFocusAfterCloseRef.current = null;
+            return;
+        }
+        const focusTargetId = resolveTabFocusAfterClose(tabs, activeId, closedId);
+        if (!focusTargetId) return;
+        pendingFocusAfterCloseRef.current = null;
+        focusTabById(focusTargetId);
+    }, [activeId, focusTabById, restoreFocusAfterClose, rovingFocus, tabs]);
 
     // Close context menu on outside click or Escape
     useEffect(() => {
@@ -174,14 +206,14 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
                     const activeTab = tabs.find((tab) => tab.id === activeId);
                     if (isTabClosable(activeTab)) {
                         e.preventDefault();
-                        onClose?.(activeId);
+                        requestTabClose(activeId);
                     }
                 }
             }
         };
         document.addEventListener('keydown', onKeyDown);
         return () => document.removeEventListener('keydown', onKeyDown);
-    }, [tabs, activeId, focusTabById, onActivate, onClose, rovingFocus]);
+    }, [tabs, activeId, focusTabById, onActivate, requestTabClose, rovingFocus]);
 
     const handleTabMouseDown = useCallback((e, tab) => {
         // Skip if the press landed on the close button — let close handle it.
@@ -197,9 +229,9 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
         // Middle-click closes immediately so the tab never becomes active.
         if (e.button === 1 && isTabClosable(tab)) {
             e.preventDefault();
-            onClose?.(tab.id);
+            requestTabClose(tab.id);
         }
-    }, [onActivate, onClose, rovingFocus]);
+    }, [onActivate, requestTabClose, rovingFocus]);
 
     const handleTabKeyDown = useCallback((event, tab) => {
         if (!rovingFocus || event.target !== event.currentTarget) return;
@@ -236,8 +268,8 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
     const handleCloseClick = useCallback((e, id) => {
         e.preventDefault();
         e.stopPropagation();
-        onClose?.(id);
-    }, [onClose]);
+        requestTabClose(id);
+    }, [requestTabClose]);
 
     // Scroll active tab into view
     useEffect(() => {
@@ -379,7 +411,7 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
         </div>
         ${contextMenu && html`
             <div class="tab-context-menu" style=${{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }}>
-                <button onClick=${() => { onClose?.(contextMenu.id); setContextMenu(null); }}>${t('tab.close')}</button>
+                <button onClick=${() => { requestTabClose(contextMenu.id); setContextMenu(null); }}>${t('tab.close')}</button>
                 <button onClick=${() => { onCloseOthers?.(contextMenu.id); setContextMenu(null); }}>${t('tab.closeOthers')}</button>
                 <button onClick=${() => { onCloseAll?.(); setContextMenu(null); }}>${t('tab.closeAll')}</button>
                 <hr />

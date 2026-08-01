@@ -400,6 +400,7 @@ test('Mobile connects roving tabs to active and inert surface panels', () => {
   });
 
   expect(tabStripVNode?.props.rovingFocus).toBe(true);
+  expect(tabStripVNode?.props.restoreFocusAfterClose).toBe(true);
   expect(tabStripVNode?.props.tabListId).toBe(MOBILE_SURFACE_TABLIST_ID);
   expect(tabStripVNode?.props.getTabElementId).toBe(getMobileSurfaceTabElementId);
   expect(tabStripVNode?.props.getTabPanelId).toBe(getMobileSurfacePanelId);
@@ -491,6 +492,7 @@ test('Classic shell does not opt into Mobile tab or panel accessibility behavior
   });
 
   expect(tabStripVNode?.props.rovingFocus).toBeUndefined();
+  expect(tabStripVNode?.props.restoreFocusAfterClose).toBeUndefined();
   expect(tabStripVNode?.props.tabListId).toBeUndefined();
   expect(explorerVNode?.props.surfaceRole).toBeUndefined();
   expect(explorerVNode?.props.surfaceInert).toBeUndefined();
