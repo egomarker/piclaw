@@ -49,8 +49,9 @@ test('Mobile CSS overlays continuously mounted Chat, Workspace, pane, preview, a
   expect(mobileCss).toContain('grid-row: 6');
 });
 
-test('Only Mobile raises comfortable Workspace rows to touch-target height', () => {
-  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface > \.workspace-sidebar\[data-workspace-scale="comfortable"\] \{\s*--workspace-row-height: 44px;/);
+test('Only Mobile differentiates comfortable Workspace tab and explorer rail row heights', () => {
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface > \.workspace-sidebar\[data-workspace-scale="comfortable"\] \{\s*--workspace-row-height: 30px;/);
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface\.mobile-workspace-active > \.workspace-sidebar\[data-workspace-scale="comfortable"\] \{\s*--workspace-row-height: 44px;/);
   expect(classicWorkspaceCss).toMatch(/\.workspace-sidebar\[data-workspace-scale="comfortable"\] \{[^}]*--workspace-row-height: 28px;/s);
   expect(visualWorkspaceCss).toMatch(/\.workspace-sidebar\[data-workspace-scale="comfortable"\] \{[^}]*--workspace-row-height: 28px;/s);
   expect(classicWorkspaceCss).not.toContain('--workspace-row-height: 44px');

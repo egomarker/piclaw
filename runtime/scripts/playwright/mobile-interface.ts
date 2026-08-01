@@ -188,16 +188,20 @@ async function showWorkspace(page: Page, compactWorkspace: boolean) {
   await firstRow.waitFor({ state: 'visible', timeout: 20000 });
   const treeSizing = await sidebar.evaluate((element) => {
     const row = element.querySelector<HTMLElement>('.workspace-row');
+    const shell = element.closest<HTMLElement>('.app-shell.mobile-interface');
     return {
       scale: element.getAttribute('data-workspace-scale'),
+      workspaceTabActive: Boolean(shell?.classList.contains('mobile-workspace-active')),
       configuredRowHeight: getComputedStyle(element).getPropertyValue('--workspace-row-height').trim(),
       measuredRowHeight: row ? Math.round(row.getBoundingClientRect().height) : 0,
     };
   });
+  const expectedRowHeight = compactWorkspace ? 44 : 30;
   assert(
     treeSizing.scale === 'comfortable'
-      && treeSizing.configuredRowHeight === '44px'
-      && treeSizing.measuredRowHeight === 44,
+      && treeSizing.workspaceTabActive === compactWorkspace
+      && treeSizing.configuredRowHeight === `${expectedRowHeight}px`
+      && treeSizing.measuredRowHeight === expectedRowHeight,
     `Mobile comfortable Workspace row sizing is wrong: ${JSON.stringify(treeSizing)}.`,
   );
 
