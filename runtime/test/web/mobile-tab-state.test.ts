@@ -1,9 +1,16 @@
 import { expect, test } from 'bun:test';
 
 import {
+  MOBILE_CHAT_PANEL_ID,
+  MOBILE_CHAT_TAB_ELEMENT_ID,
   MOBILE_CHAT_TAB_ID,
+  MOBILE_PANE_PANEL_ID,
+  MOBILE_WORKSPACE_PANEL_ID,
+  MOBILE_WORKSPACE_TAB_ELEMENT_ID,
   MOBILE_WORKSPACE_TAB_ID,
   composeMobileTabStripTabs,
+  getMobileSurfacePanelId,
+  getMobileSurfaceTabElementId,
   resolveMobileSurfaceAfterClose,
   resolveSurfaceAfterWorkspaceTabDisabled,
 } from '../../web/src/ui/mobile-tab-state.js';
@@ -42,6 +49,20 @@ test('Mobile keeps Chat conditional in wide mode and adds permanent Chat and Wor
     expect.objectContaining({ label: 'Workspace', closable: false, contextMenu: false }),
   ]);
   expect(composeMobileTabStripTabs(panes, false, true)).toBe(panes);
+});
+
+test('Mobile surface accessibility ids are stable and connect tabs to their panel type', () => {
+  const panePath = '/workspace/Notes/a b.md';
+  const paneTabId = getMobileSurfaceTabElementId(panePath);
+
+  expect(getMobileSurfaceTabElementId(MOBILE_CHAT_TAB_ID)).toBe(MOBILE_CHAT_TAB_ELEMENT_ID);
+  expect(getMobileSurfaceTabElementId(MOBILE_WORKSPACE_TAB_ID)).toBe(MOBILE_WORKSPACE_TAB_ELEMENT_ID);
+  expect(paneTabId).toBe(getMobileSurfaceTabElementId(panePath));
+  expect(paneTabId).toMatch(/^piclaw-mobile-surface-tab-pane-[A-Za-z0-9_]+$/);
+  expect(paneTabId).not.toBe(getMobileSurfaceTabElementId('/workspace/Notes/a_b.md'));
+  expect(getMobileSurfacePanelId(MOBILE_CHAT_TAB_ID)).toBe(MOBILE_CHAT_PANEL_ID);
+  expect(getMobileSurfacePanelId(MOBILE_WORKSPACE_TAB_ID)).toBe(MOBILE_WORKSPACE_PANEL_ID);
+  expect(getMobileSurfacePanelId(panePath)).toBe(MOBILE_PANE_PANEL_ID);
 });
 
 test('Mobile close selection follows pane order and falls back to the adjacent permanent surface', () => {

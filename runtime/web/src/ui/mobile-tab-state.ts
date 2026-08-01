@@ -3,6 +3,35 @@ import type { TabState } from '../panes/tab-store.js';
 export const MOBILE_CHAT_TAB_ID = 'piclaw://chat';
 export const MOBILE_WORKSPACE_TAB_ID = 'piclaw://workspace';
 
+export const MOBILE_SURFACE_TABLIST_ID = 'piclaw-mobile-surface-tablist';
+export const MOBILE_CHAT_TAB_ELEMENT_ID = 'piclaw-mobile-surface-tab-chat';
+export const MOBILE_WORKSPACE_TAB_ELEMENT_ID = 'piclaw-mobile-surface-tab-workspace';
+export const MOBILE_CHAT_PANEL_ID = 'piclaw-mobile-surface-panel-chat';
+export const MOBILE_WORKSPACE_PANEL_ID = 'piclaw-mobile-surface-panel-workspace';
+export const MOBILE_PANE_PANEL_ID = 'piclaw-mobile-surface-panel-pane';
+
+function encodeMobilePaneTabId(id: string): string {
+  const encoded = Array.from(id, (character) => {
+    if (/^[A-Za-z0-9]$/.test(character)) return character;
+    return `_${character.codePointAt(0)?.toString(16) || '0'}_`;
+  }).join('');
+  return encoded || 'empty';
+}
+
+/** Stable DOM id for a Mobile surface tab, including arbitrary pane paths. */
+export function getMobileSurfaceTabElementId(id: string): string {
+  if (id === MOBILE_CHAT_TAB_ID) return MOBILE_CHAT_TAB_ELEMENT_ID;
+  if (id === MOBILE_WORKSPACE_TAB_ID) return MOBILE_WORKSPACE_TAB_ELEMENT_ID;
+  return `piclaw-mobile-surface-tab-pane-${encodeMobilePaneTabId(String(id || ''))}`;
+}
+
+/** Mobile reuses one pane host while switching among file and terminal tabs. */
+export function getMobileSurfacePanelId(id: string): string {
+  if (id === MOBILE_CHAT_TAB_ID) return MOBILE_CHAT_PANEL_ID;
+  if (id === MOBILE_WORKSPACE_TAB_ID) return MOBILE_WORKSPACE_PANEL_ID;
+  return MOBILE_PANE_PANEL_ID;
+}
+
 export interface MobileTabState extends TabState {
   closable?: boolean;
   contextMenu?: boolean;

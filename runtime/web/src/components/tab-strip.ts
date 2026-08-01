@@ -39,6 +39,11 @@ import { canTabEditSource, getTabEditSourceLabel } from '../ui/tab-source-editor
  * @param {() => void} [props.onToggleDock] - Toggle terminal dock visibility.
  * @param {boolean} [props.dockVisible] - Whether the terminal dock is currently visible.
  * @param {(id: string, label?: string) => void} [props.onPopOutTab] - Open a tab in a standalone window.
+ * @param {boolean} [props.rovingFocus] - Enable one-tab-stop keyboard navigation.
+ * @param {string} [props.tabListId] - Stable id for the tablist.
+ * @param {string} [props.tabListLabel] - Accessible name for the tablist.
+ * @param {(id: string) => string} [props.getTabElementId] - Resolve a stable DOM id for a tab.
+ * @param {(id: string) => string} [props.getTabPanelId] - Resolve the controlled panel DOM id for a tab.
  */
 const OFFICE_EXTENSIONS = /\.(docx?|xlsx?|pptx?|odt|ods|odp|rtf)$/i;
 const CSV_EXTENSIONS = /\.(csv|tsv)$/i;
@@ -75,10 +80,56 @@ export function getStandaloneTabUrl(path, { hasPopOutTab = false } = {}) {
     return null;
 }
 
-export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, onCloseAll, onTogglePin, onTogglePreview, onToggleDiff, onEditSource, previewTabs, diffTabs, paneOverrides, detachedTabs, onReattachTab, onToggleDock, dockVisible, onToggleZen, zenMode, onPopOutTab }) {
+export function resolveTabKeyboardTargetId(tabs, currentId, key) {
+    if (!Array.isArray(tabs) || tabs.length === 0) return null;
+    const currentIndex = tabs.findIndex((tab) => tab.id === currentId);
+    if (key === 'Home') return tabs[0]?.id || null;
+    if (key === 'End') return tabs[tabs.length - 1]?.id || null;
+    if (key === 'ArrowRight') {
+        if (currentIndex < 0) return tabs[0]?.id || null;
+        return tabs[(currentIndex + 1) % tabs.length]?.id || null;
+    }
+    if (key === 'ArrowLeft') {
+        if (currentIndex < 0) return tabs[tabs.length - 1]?.id || null;
+        return tabs[(currentIndex - 1 + tabs.length) % tabs.length]?.id || null;
+    }
+    return null;
+}
+
+export function resolveRovingTabIndex(tabs, activeId, tabId) {
+    if (!Array.isArray(tabs) || tabs.length === 0) return -1;
+    const focusableId = tabs.some((tab) => tab.id === activeId) ? activeId : tabs[0]?.id;
+    return tabId === focusableId ? 0 : -1;
+}
+
+export function handleRovingTabKeyDown(event, { tabs, currentId, focusTab, onActivate }) {
+    if (event.altKey || event.ctrlKey || event.metaKey) return false;
+    const activationKey = event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar';
+    const targetId = activationKey
+        ? tabs.find((tab) => tab.id === currentId)?.id || null
+        : resolveTabKeyboardTargetId(tabs, currentId, event.key);
+    if (!targetId) return false;
+    event.preventDefault();
+    focusTab?.(targetId);
+    onActivate?.(targetId);
+    return true;
+}
+
+export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, onCloseAll, onTogglePin, onTogglePreview, onToggleDiff, onEditSource, previewTabs, diffTabs, paneOverrides, detachedTabs, onReattachTab, onToggleDock, dockVisible, onToggleZen, zenMode, onPopOutTab, rovingFocus = false, tabListId, tabListLabel, getTabElementId, getTabPanelId }) {
     const { t } = useTranslation();
     const [contextMenu, setContextMenu] = useState(null);
     const stripRef = useRef(null);
+
+    const focusTabById = useCallback((id) => {
+        if (!rovingFocus || !stripRef.current) return;
+        const elementId = getTabElementId?.(id);
+        const byId = elementId ? stripRef.current.ownerDocument?.getElementById(elementId) : null;
+        const tabIndex = tabs.findIndex((tab) => tab.id === id);
+        const target = byId && stripRef.current.contains(byId)
+            ? byId
+            : stripRef.current.querySelectorAll('[role="tab"]')[tabIndex];
+        target?.focus?.({ preventScroll: true });
+    }, [getTabElementId, rovingFocus, tabs]);
 
     // Close context menu on outside click or Escape
     useEffect(() => {
@@ -102,13 +153,16 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
             if (e.ctrlKey && e.key === 'Tab') {
                 e.preventDefault();
                 if (!tabs.length) return;
-                const idx = tabs.findIndex(t => t.id === activeId);
-                if (e.shiftKey) {
-                    const prev = tabs[(idx - 1 + tabs.length) % tabs.length];
-                    onActivate?.(prev.id);
-                } else {
-                    const next = tabs[(idx + 1) % tabs.length];
-                    onActivate?.(next.id);
+                const activeIndex = tabs.findIndex((tab) => tab.id === activeId);
+                const classicTarget = e.shiftKey
+                    ? tabs[(activeIndex - 1 + tabs.length) % tabs.length]
+                    : tabs[(activeIndex + 1) % tabs.length];
+                const targetId = rovingFocus
+                    ? resolveTabKeyboardTargetId(tabs, activeId, e.shiftKey ? 'ArrowLeft' : 'ArrowRight')
+                    : classicTarget?.id || null;
+                if (targetId) {
+                    focusTabById(targetId);
+                    onActivate?.(targetId);
                 }
                 return;
             }
@@ -127,7 +181,7 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
         };
         document.addEventListener('keydown', onKeyDown);
         return () => document.removeEventListener('keydown', onKeyDown);
-    }, [tabs, activeId, onActivate, onClose]);
+    }, [tabs, activeId, focusTabById, onActivate, onClose, rovingFocus]);
 
     const handleTabMouseDown = useCallback((e, tab) => {
         // Skip if the press landed on the close button — let close handle it.
@@ -136,6 +190,7 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
         // and touch/pointer paths can swallow the synthetic click, but the
         // tab should still come to the front as soon as the primary press lands.
         if (e.button === 0) {
+            if (rovingFocus) e.currentTarget?.focus?.({ preventScroll: true });
             onActivate?.(tab.id);
             return;
         }
@@ -144,7 +199,17 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
             e.preventDefault();
             onClose?.(tab.id);
         }
-    }, [onActivate, onClose]);
+    }, [onActivate, onClose, rovingFocus]);
+
+    const handleTabKeyDown = useCallback((event, tab) => {
+        if (!rovingFocus || event.target !== event.currentTarget) return;
+        handleRovingTabKeyDown(event, {
+            tabs,
+            currentId: tab.id,
+            focusTab: focusTabById,
+            onActivate,
+        });
+    }, [focusTabById, onActivate, rovingFocus, tabs]);
 
     const handleTabClick = useCallback((e, id) => {
         if (e.defaultPrevented) return;
@@ -224,16 +289,27 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
     if (!tabs.length) return null;
 
     return html`
-        <div class="tab-strip" ref=${stripRef} role="tablist">
+        <div
+            class="tab-strip"
+            ref=${stripRef}
+            role="tablist"
+            id=${rovingFocus ? tabListId : undefined}
+            aria-label=${rovingFocus ? tabListLabel : undefined}
+            aria-orientation=${rovingFocus ? 'horizontal' : undefined}
+        >
             ${tabs.map(tab => html`
                 <div
                     key=${tab.id}
+                    id=${rovingFocus ? getTabElementId?.(tab.id) : undefined}
                     class=${`tab-item${tab.id === activeId ? ' active' : ''}${tab.dirty ? ' dirty' : ''}${tab.pinned ? ' pinned' : ''}${isTabClosable(tab) ? '' : ' non-closable'}`}
                     role="tab"
                     aria-selected=${tab.id === activeId}
+                    aria-controls=${rovingFocus ? getTabPanelId?.(tab.id) : undefined}
+                    tabIndex=${rovingFocus ? resolveRovingTabIndex(tabs, activeId, tab.id) : undefined}
                     title=${tab.path}
                     onMouseDown=${(e) => handleTabMouseDown(e, tab)}
                     onClick=${(e) => handleTabClick(e, tab.id)}
+                    onKeyDown=${rovingFocus ? (e) => handleTabKeyDown(e, tab) : undefined}
                     onContextMenu=${(e) => handleContextMenu(e, tab)}
                 >
                     ${tab.pinned && html`

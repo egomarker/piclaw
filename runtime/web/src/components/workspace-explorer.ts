@@ -673,6 +673,11 @@ export function WorkspaceExplorer({
     onOpenEditor,
     onOpenTerminalTab,
     onOpenVncTab,
+    surfaceId,
+    surfaceRole,
+    surfaceLabelledBy,
+    surfaceAriaHidden,
+    surfaceInert = false,
 }) {
     const { t } = useTranslation();
     const [tree,          setTree]          = useState(null);
@@ -2397,6 +2402,11 @@ export function WorkspaceExplorer({
         <aside
             class=${`workspace-sidebar${dragActive ? ' workspace-drop-active' : ''}`}
             data-workspace-scale=${explorerScale}
+            id=${surfaceId}
+            role=${surfaceRole}
+            aria-labelledby=${surfaceLabelledBy}
+            aria-hidden=${surfaceAriaHidden}
+            inert=${surfaceInert ? true : undefined}
             ref=${sidebarRef}
             onDragEnter=${handleDragEnter}
             onDragOver=${handleDragOver}

@@ -3,8 +3,11 @@ import { readFileSync } from 'node:fs';
 
 import {
   getStandaloneTabUrl,
+  handleRovingTabKeyDown,
   hasTabContextMenu,
   isTabClosable,
+  resolveRovingTabIndex,
+  resolveTabKeyboardTargetId,
 } from '../../web/src/components/tab-strip.js';
 import {
   registerAddonStandaloneTabUrlResolver,
@@ -20,6 +23,48 @@ test('tab capabilities can make a synthetic tab permanent and menu-free', () => 
   expect(hasTabContextMenu({ id: 'file' })).toBe(true);
   expect(isTabClosable({ id: 'chat', closable: false })).toBe(false);
   expect(hasTabContextMenu({ id: 'chat', contextMenu: false })).toBe(false);
+});
+
+test('roving tab navigation wraps and supports Home and End', () => {
+  const tabs = [{ id: 'chat' }, { id: 'workspace' }, { id: 'file' }];
+
+  expect(resolveTabKeyboardTargetId(tabs, 'chat', 'ArrowLeft')).toBe('file');
+  expect(resolveTabKeyboardTargetId(tabs, 'file', 'ArrowRight')).toBe('chat');
+  expect(resolveTabKeyboardTargetId(tabs, 'workspace', 'Home')).toBe('chat');
+  expect(resolveTabKeyboardTargetId(tabs, 'workspace', 'End')).toBe('file');
+  expect(resolveTabKeyboardTargetId(tabs, 'workspace', 'PageDown')).toBeNull();
+  expect(resolveRovingTabIndex(tabs, 'workspace', 'workspace')).toBe(0);
+  expect(resolveRovingTabIndex(tabs, 'workspace', 'chat')).toBe(-1);
+  expect(resolveRovingTabIndex(tabs, 'missing', 'chat')).toBe(0);
+});
+
+test('roving tab keyboard actions focus and activate the resolved tab', () => {
+  const calls: string[] = [];
+  const event = {
+    key: 'ArrowRight',
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    preventDefault: () => { calls.push('prevent'); },
+  };
+  const handled = handleRovingTabKeyDown(event, {
+    tabs: [{ id: 'chat' }, { id: 'workspace' }, { id: 'file' }],
+    currentId: 'workspace',
+    focusTab: (id: string) => { calls.push(`focus:${id}`); },
+    onActivate: (id: string) => { calls.push(`activate:${id}`); },
+  });
+
+  expect(handled).toBe(true);
+  expect(calls).toEqual(['prevent', 'focus:file', 'activate:file']);
+
+  calls.length = 0;
+  expect(handleRovingTabKeyDown({ ...event, key: 'ArrowLeft', ctrlKey: true }, {
+    tabs: [{ id: 'chat' }, { id: 'workspace' }],
+    currentId: 'workspace',
+    focusTab: (id: string) => { calls.push(`focus:${id}`); },
+    onActivate: (id: string) => { calls.push(`activate:${id}`); },
+  })).toBe(false);
+  expect(calls).toEqual([]);
 });
 
 test('getStandaloneTabUrl honors addon-provided standalone routes', () => {
