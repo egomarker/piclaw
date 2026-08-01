@@ -188,21 +188,28 @@ async function showWorkspace(page: Page, compactWorkspace: boolean) {
   await firstRow.waitFor({ state: 'visible', timeout: 20000 });
   const treeSizing = await sidebar.evaluate((element) => {
     const row = element.querySelector<HTMLElement>('.workspace-row');
+    const label = row?.querySelector<HTMLElement>('.workspace-label');
     const shell = element.closest<HTMLElement>('.app-shell.mobile-interface');
+    const sidebarStyle = getComputedStyle(element);
     return {
       scale: element.getAttribute('data-workspace-scale'),
       workspaceTabActive: Boolean(shell?.classList.contains('mobile-workspace-active')),
-      configuredRowHeight: getComputedStyle(element).getPropertyValue('--workspace-row-height').trim(),
+      configuredRowHeight: sidebarStyle.getPropertyValue('--workspace-row-height').trim(),
       measuredRowHeight: row ? Math.round(row.getBoundingClientRect().height) : 0,
+      configuredFontSize: sidebarStyle.getPropertyValue('--workspace-tree-font-size').trim(),
+      measuredLabelFontSize: label ? getComputedStyle(label).fontSize : null,
     };
   });
   const expectedRowHeight = compactWorkspace ? 44 : 30;
+  const expectedFontSize = compactWorkspace ? 16 : 14;
   assert(
     treeSizing.scale === 'comfortable'
       && treeSizing.workspaceTabActive === compactWorkspace
       && treeSizing.configuredRowHeight === `${expectedRowHeight}px`
-      && treeSizing.measuredRowHeight === expectedRowHeight,
-    `Mobile comfortable Workspace row sizing is wrong: ${JSON.stringify(treeSizing)}.`,
+      && treeSizing.measuredRowHeight === expectedRowHeight
+      && treeSizing.configuredFontSize === `${expectedFontSize}px`
+      && treeSizing.measuredLabelFontSize === `${expectedFontSize}px`,
+    `Mobile comfortable Workspace sizing is wrong: ${JSON.stringify(treeSizing)}.`,
   );
 
   return { ...rect, treeSizing };
