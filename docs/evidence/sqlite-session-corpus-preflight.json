@@ -1,0 +1,12 @@
+{
+  "files": 1350,
+  "badCount": 482,
+  "badBytes": 1010914986,
+  "reasons": [
+    {
+      "reason": "NUL byte",
+      "count": 482,
+      "bytes": 1010914986
+    }
+  ]
+}
