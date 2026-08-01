@@ -1,6 +1,7 @@
 import { expect, mock, test } from 'bun:test';
 
 import { ComposeBox, QueuedFollowupStack } from '../../web/src/components/compose-box.js';
+import { MarkdownPreview } from '../../web/src/components/markdown-preview.js';
 import { TabStrip } from '../../web/src/components/tab-strip.js';
 import { TimelineMenu } from '../../web/src/components/timeline-menu.js';
 import { TimelineQuickActions } from '../../web/src/components/timeline-quick-actions.js';
@@ -13,6 +14,18 @@ import {
   scrollToPostedTimelineMessage,
 } from '../../web/src/ui/app-main-shell-render.js';
 import { composeMobileShellRenderOptions } from '../../web/src/ui/app-mobile-shell-render.js';
+import {
+  MOBILE_CHAT_PANEL_ID,
+  MOBILE_CHAT_TAB_ELEMENT_ID,
+  MOBILE_CHAT_TAB_ID,
+  MOBILE_PANE_PANEL_ID,
+  MOBILE_SURFACE_TABLIST_ID,
+  MOBILE_WORKSPACE_PANEL_ID,
+  MOBILE_WORKSPACE_TAB_ELEMENT_ID,
+  MOBILE_WORKSPACE_TAB_ID,
+  getMobileSurfacePanelId,
+  getMobileSurfaceTabElementId,
+} from '../../web/src/ui/mobile-tab-state.js';
 
 test('Mobile maps unified display tabs without replacing pane runtime tabs', () => {
   const paneTabs = [{ id: 'file' }];
@@ -346,6 +359,147 @@ test('compact Mobile renders Workspace as a permanent surface without rail contr
   expect(classes.has('app-shell workspace-collapsed mobile-interface mobile-workspace-active')).toBe(true);
   expect([...classes].some((value) => value.startsWith('workspace-toggle-tab'))).toBe(false);
   expect(classes.has('workspace-splitter')).toBe(false);
+});
+
+test('Mobile connects roving tabs to active and inert surface panels', () => {
+  const paneTab = { id: 'notes/file.md', label: 'file.md', path: 'notes/file.md' };
+  const displayTabs = [
+    { id: MOBILE_CHAT_TAB_ID, label: 'Chat', path: 'Chat' },
+    { id: MOBILE_WORKSPACE_TAB_ID, label: 'Workspace', path: 'Workspace' },
+    paneTab,
+  ];
+  const tree = renderMainShell(createMainShellRenderOptions({
+    chatOnlyMode: false,
+    workspaceOpen: true,
+    editorOpen: true,
+    showEditorPaneContainer: true,
+    uiMode: 'mobile',
+    mobileWorkspaceTabEnabled: true,
+    mobileWorkspaceActive: true,
+    mobileChatActive: false,
+    tabStripTabs: [paneTab],
+    tabStripActiveId: paneTab.id,
+    displayTabStripTabs: displayTabs,
+    displayTabStripActiveId: MOBILE_WORKSPACE_TAB_ID,
+    previewTabs: new Set([paneTab.id]),
+  }));
+
+  let tabStripVNode: any = null;
+  let explorerVNode: any = null;
+  let previewVNode: any = null;
+  let chatMainVNode: any = null;
+  let chatFooterVNode: any = null;
+  let paneHostVNode: any = null;
+  walkVNodes(tree, (node) => {
+    if (node.type === TabStrip) tabStripVNode = node;
+    if (node.type === WorkspaceExplorer) explorerVNode = node;
+    if (node.type === MarkdownPreview) previewVNode = node;
+    if (node.props?.class === 'chat-surface-main') chatMainVNode = node;
+    if (node.props?.class === 'chat-surface-footer') chatFooterVNode = node;
+    if (node.props?.class === 'editor-pane-host') paneHostVNode = node;
+  });
+
+  expect(tabStripVNode?.props.rovingFocus).toBe(true);
+  expect(tabStripVNode?.props.tabListId).toBe(MOBILE_SURFACE_TABLIST_ID);
+  expect(tabStripVNode?.props.getTabElementId).toBe(getMobileSurfaceTabElementId);
+  expect(tabStripVNode?.props.getTabPanelId).toBe(getMobileSurfacePanelId);
+  expect(explorerVNode?.props).toEqual(expect.objectContaining({
+    surfaceId: MOBILE_WORKSPACE_PANEL_ID,
+    surfaceRole: 'tabpanel',
+    surfaceLabelledBy: MOBILE_WORKSPACE_TAB_ELEMENT_ID,
+  }));
+  expect(explorerVNode?.props.surfaceAriaHidden).toBeUndefined();
+  expect(explorerVNode?.props.surfaceInert).toBeUndefined();
+  expect(chatMainVNode?.props).toEqual(expect.objectContaining({
+    id: MOBILE_CHAT_PANEL_ID,
+    role: 'tabpanel',
+    'aria-labelledby': MOBILE_CHAT_TAB_ELEMENT_ID,
+    'aria-hidden': 'true',
+    inert: true,
+  }));
+  expect(chatFooterVNode?.props['aria-hidden']).toBe('true');
+  expect(chatFooterVNode?.props.inert).toBe(true);
+  expect(paneHostVNode?.props).toEqual(expect.objectContaining({
+    id: MOBILE_PANE_PANEL_ID,
+    role: 'tabpanel',
+    'aria-labelledby': getMobileSurfaceTabElementId(paneTab.id),
+    'aria-hidden': 'true',
+    inert: true,
+  }));
+  expect(previewVNode?.props.surfaceInactive).toBe(true);
+});
+
+test('Mobile pane activation hides Chat and compact Workspace while exposing the pane panel', () => {
+  const paneTab = { id: 'notes/file.md', label: 'file.md', path: 'notes/file.md' };
+  const tree = renderMainShell(createMainShellRenderOptions({
+    chatOnlyMode: false,
+    workspaceOpen: true,
+    editorOpen: true,
+    showEditorPaneContainer: true,
+    uiMode: 'mobile',
+    mobileWorkspaceTabEnabled: true,
+    mobileWorkspaceActive: false,
+    mobileChatActive: false,
+    tabStripTabs: [paneTab],
+    tabStripActiveId: paneTab.id,
+    displayTabStripTabs: [
+      { id: MOBILE_CHAT_TAB_ID, label: 'Chat', path: 'Chat' },
+      { id: MOBILE_WORKSPACE_TAB_ID, label: 'Workspace', path: 'Workspace' },
+      paneTab,
+    ],
+    displayTabStripActiveId: paneTab.id,
+  }));
+
+  let explorerVNode: any = null;
+  let chatMainVNode: any = null;
+  let paneHostVNode: any = null;
+  walkVNodes(tree, (node) => {
+    if (node.type === WorkspaceExplorer) explorerVNode = node;
+    if (node.props?.class === 'chat-surface-main') chatMainVNode = node;
+    if (node.props?.class === 'editor-pane-host') paneHostVNode = node;
+  });
+
+  expect(explorerVNode?.props.surfaceAriaHidden).toBe('true');
+  expect(explorerVNode?.props.surfaceInert).toBe(true);
+  expect(chatMainVNode?.props['aria-hidden']).toBe('true');
+  expect(chatMainVNode?.props.inert).toBe(true);
+  expect(paneHostVNode?.props['aria-hidden']).toBeUndefined();
+  expect(paneHostVNode?.props.inert).toBeUndefined();
+  expect(paneHostVNode?.props['aria-labelledby']).toBe(getMobileSurfaceTabElementId(paneTab.id));
+});
+
+test('Classic shell does not opt into Mobile tab or panel accessibility behavior', () => {
+  const paneTab = { id: 'notes/file.md', label: 'file.md', path: 'notes/file.md' };
+  const tree = renderMainShell(createMainShellRenderOptions({
+    chatOnlyMode: false,
+    workspaceOpen: true,
+    editorOpen: true,
+    showEditorPaneContainer: true,
+    tabStripTabs: [paneTab],
+    tabStripActiveId: paneTab.id,
+  }));
+
+  let tabStripVNode: any = null;
+  let explorerVNode: any = null;
+  let chatMainVNode: any = null;
+  let paneHostVNode: any = null;
+  walkVNodes(tree, (node) => {
+    if (node.type === TabStrip) tabStripVNode = node;
+    if (node.type === WorkspaceExplorer) explorerVNode = node;
+    if (node.props?.class === 'chat-surface-main') chatMainVNode = node;
+    if (node.props?.class === 'editor-pane-host') paneHostVNode = node;
+  });
+
+  expect(tabStripVNode?.props.rovingFocus).toBeUndefined();
+  expect(tabStripVNode?.props.tabListId).toBeUndefined();
+  expect(explorerVNode?.props.surfaceRole).toBeUndefined();
+  expect(explorerVNode?.props.surfaceInert).toBeUndefined();
+  expect(chatMainVNode?.props.role).toBeUndefined();
+  expect(chatMainVNode?.props['aria-hidden']).toBeUndefined();
+  expect(chatMainVNode?.props.inert).toBeUndefined();
+  expect(paneHostVNode?.props.role).toBeUndefined();
+  expect(paneHostVNode?.props['aria-hidden']).toBeUndefined();
+  expect(paneHostVNode?.props.inert).toBeUndefined();
 });
 
 test('renderMainShell passes queue controls to ComposeBox and does not render a top-level queue stack', () => {

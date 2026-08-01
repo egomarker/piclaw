@@ -13,6 +13,16 @@ import { WorkspaceExplorer } from '../components/workspace-explorer.js';
 import { TabStrip } from '../components/tab-strip.js';
 import { MarkdownPreview } from '../components/markdown-preview.js';
 import { SystemMetersHud } from '../components/system-meters-hud.js';
+import {
+  MOBILE_CHAT_PANEL_ID,
+  MOBILE_CHAT_TAB_ELEMENT_ID,
+  MOBILE_PANE_PANEL_ID,
+  MOBILE_SURFACE_TABLIST_ID,
+  MOBILE_WORKSPACE_PANEL_ID,
+  MOBILE_WORKSPACE_TAB_ELEMENT_ID,
+  getMobileSurfacePanelId,
+  getMobileSurfaceTabElementId,
+} from './mobile-tab-state.js';
 
 export interface MainShellRenderOptions {
   [key: string]: any;
@@ -300,6 +310,14 @@ export function renderMainShell(options: MainShellRenderOptions): any {
   const workspaceVisible = workspaceTabMode ? mobileWorkspaceActive : workspaceRailOpen;
   const showPaneContainer = showEditorPaneContainer || workspaceTabMode;
   const showTabStrip = editorOpen || workspaceTabMode;
+  const mobileTabAccessibilityEnabled = uiMode === 'mobile' && showPaneContainer && showTabStrip;
+  const mobileChatSurfaceInactive = mobileTabAccessibilityEnabled && !mobileChatActive;
+  const mobileWorkspacePanelEnabled = mobileTabAccessibilityEnabled && workspaceTabMode;
+  const mobileWorkspaceSurfaceInactive = mobileWorkspacePanelEnabled && !mobileWorkspaceActive;
+  const mobilePaneSurfaceInactive = mobileTabAccessibilityEnabled && (mobileChatActive || mobileWorkspaceActive);
+  const mobilePaneLabelledBy = mobileTabAccessibilityEnabled && tabStripActiveId
+    ? getMobileSurfaceTabElementId(tabStripActiveId)
+    : undefined;
 
   const handleComposeFocus = () => {
     if (isIOSDevice()) return;
@@ -367,6 +385,11 @@ export function renderMainShell(options: MainShellRenderOptions): any {
           onOpenEditor=${openEditor}
           onOpenTerminalTab=${openTerminalTab}
           onOpenVncTab=${openVncTab}
+          surfaceId=${mobileWorkspacePanelEnabled ? MOBILE_WORKSPACE_PANEL_ID : undefined}
+          surfaceRole=${mobileWorkspacePanelEnabled ? 'tabpanel' : undefined}
+          surfaceLabelledBy=${mobileWorkspacePanelEnabled ? MOBILE_WORKSPACE_TAB_ELEMENT_ID : undefined}
+          surfaceAriaHidden=${mobileWorkspaceSurfaceInactive ? 'true' : undefined}
+          surfaceInert=${mobileWorkspaceSurfaceInactive || undefined}
         />
         ${!workspaceTabMode && html`
           <button
@@ -407,10 +430,22 @@ export function renderMainShell(options: MainShellRenderOptions): any {
               onToggleZen=${toggleZenMode}
               zenMode=${zenMode}
               onPopOutTab=${isWebAppMode ? undefined : handlePopOutPane}
+              rovingFocus=${mobileTabAccessibilityEnabled || undefined}
+              tabListId=${mobileTabAccessibilityEnabled ? MOBILE_SURFACE_TABLIST_ID : undefined}
+              tabListLabel=${mobileTabAccessibilityEnabled ? 'Open surfaces' : undefined}
+              getTabElementId=${mobileTabAccessibilityEnabled ? getMobileSurfaceTabElementId : undefined}
+              getTabPanelId=${mobileTabAccessibilityEnabled ? getMobileSurfacePanelId : undefined}
             />
           `}
           ${editorOpen && activeDetachedTab && html`
-            <div class="editor-pane-host editor-pane-detached-host">
+            <div
+              class="editor-pane-host editor-pane-detached-host"
+              id=${mobileTabAccessibilityEnabled ? MOBILE_PANE_PANEL_ID : undefined}
+              role=${mobileTabAccessibilityEnabled ? 'tabpanel' : undefined}
+              aria-labelledby=${mobilePaneLabelledBy}
+              aria-hidden=${mobilePaneSurfaceInactive ? 'true' : undefined}
+              inert=${mobilePaneSurfaceInactive || undefined}
+            >
               <div class="editor-empty-state">
                 <div class="editor-empty-state-title">${activeDetachedTab.label || activeDetachedTab.panePath || 'Detached pane'}</div>
                 <div class="editor-empty-state-body">This pane is detached into another window.</div>
@@ -420,13 +455,24 @@ export function renderMainShell(options: MainShellRenderOptions): any {
               </div>
             </div>
           `}
-          ${editorOpen && !activeDetachedTab && html`<div class="editor-pane-host" ref=${editorContainerRef}></div>`}
+          ${editorOpen && !activeDetachedTab && html`
+            <div
+              class="editor-pane-host"
+              ref=${editorContainerRef}
+              id=${mobileTabAccessibilityEnabled ? MOBILE_PANE_PANEL_ID : undefined}
+              role=${mobileTabAccessibilityEnabled ? 'tabpanel' : undefined}
+              aria-labelledby=${mobilePaneLabelledBy}
+              aria-hidden=${mobilePaneSurfaceInactive ? 'true' : undefined}
+              inert=${mobilePaneSurfaceInactive || undefined}
+            ></div>
+          `}
           ${editorOpen && !activeDetachedTab && tabStripActiveId && previewTabs.has(tabStripActiveId) && html`
             <${MarkdownPreview}
               getContent=${() => editorInstanceRef.current?.getContent?.()}
               subscribeContentChange=${(cb) => editorInstanceRef.current?.onContentChange?.(cb)}
               path=${tabStripActiveId}
               onClose=${() => handleTabTogglePreview(tabStripActiveId)}
+              surfaceInactive=${mobilePaneSurfaceInactive}
             />
           `}
           ${hasDockPanes && dockVisible && html`<div class="dock-splitter" onMouseDown=${handleDockSplitterMouseDown} onTouchStart=${handleDockSplitterTouchStart}></div>`}
@@ -500,7 +546,14 @@ export function renderMainShell(options: MainShellRenderOptions): any {
         onPrefillCompose=${requestComposePrefill}
       />
       <div class="container">
-        <div class="chat-surface-main">
+        <div
+          class="chat-surface-main"
+          id=${mobileTabAccessibilityEnabled ? MOBILE_CHAT_PANEL_ID : undefined}
+          role=${mobileTabAccessibilityEnabled ? 'tabpanel' : undefined}
+          aria-labelledby=${mobileTabAccessibilityEnabled ? MOBILE_CHAT_TAB_ELEMENT_ID : undefined}
+          aria-hidden=${mobileChatSurfaceInactive ? 'true' : undefined}
+          inert=${mobileChatSurfaceInactive || undefined}
+        >
           ${searchQuery && isIOSDevice() && html`<div class="search-results-spacer"></div>`}
         ${(currentHashtag || searchQuery) && html`
           <div class="hashtag-header">
@@ -571,7 +624,12 @@ export function renderMainShell(options: MainShellRenderOptions): any {
           />
         `}
         <${SettingsDialogLoader} />
-        <div class="chat-surface-footer">
+        <div
+          class="chat-surface-footer"
+          aria-labelledby=${mobileTabAccessibilityEnabled ? MOBILE_CHAT_TAB_ELEMENT_ID : undefined}
+          aria-hidden=${mobileChatSurfaceInactive ? 'true' : undefined}
+          inert=${mobileChatSurfaceInactive || undefined}
+        >
           <${AgentStatus}
             extensionPanels=${Array.from(extensionStatusPanels.values())}
           pendingPanelActions=${pendingExtensionPanelActions}

@@ -43,8 +43,9 @@ function getStoredHeight() {
  * @param {(cb: (content: string) => void) => (() => void)|void} props.subscribeContentChange - Subscribe to editor content changes.
  * @param {string} props.path - File path (for display).
  * @param {() => void} props.onClose - Close the preview.
+ * @param {boolean} [props.surfaceInactive] - Prevent interaction while the owning Mobile pane is inactive.
  */
-export function MarkdownPreview({ getContent, subscribeContentChange, path, onClose }) {
+export function MarkdownPreview({ getContent, subscribeContentChange, path, onClose, surfaceInactive = false }) {
     const { t } = useTranslation();
     const [renderedHtml, setRenderedHtml] = useState('');
     const [height, setHeight] = useState(getStoredHeight);
@@ -200,10 +201,18 @@ export function MarkdownPreview({ getContent, subscribeContentChange, path, onCl
     return html`
         <div
             class="md-preview-splitter"
+            aria-hidden=${surfaceInactive ? 'true' : undefined}
+            inert=${surfaceInactive ? true : undefined}
             onMouseDown=${handleMouseDown}
             onTouchStart=${handleTouchStart}
         ></div>
-        <div class="md-preview-panel" ref=${panelRef} style=${{ height: height + 'px' }}>
+        <div
+            class="md-preview-panel"
+            ref=${panelRef}
+            style=${{ height: height + 'px' }}
+            aria-hidden=${surfaceInactive ? 'true' : undefined}
+            inert=${surfaceInactive ? true : undefined}
+        >
             <div class="md-preview-header">
                 <span class="md-preview-title">Preview</span>
                 <button class="md-preview-close" onClick=${onClose} title=${t('mdpreview.close')} aria-label=${t('mdpreview.close')}>
