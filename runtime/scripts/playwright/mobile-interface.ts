@@ -414,6 +414,25 @@ async function runKeyboardScenario(page: Page, filePath: string) {
   await showWorkspace(page, true);
   const opened = await openWorkspaceFile(page, filePath);
   const terminalTab = await openTerminalFromMenu(page);
+  const inactiveFileCloseState = await tabByLabel(page, opened.fileLabel).locator('.tab-close').evaluate((button) => {
+    const style = getComputedStyle(button);
+    const rect = button.getBoundingClientRect();
+    return {
+      coarsePointer: matchMedia('(pointer: coarse)').matches,
+      anyFinePointer: matchMedia('(any-pointer: fine)').matches,
+      opacity: style.opacity,
+      pointerEvents: style.pointerEvents,
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    };
+  });
+  assert(inactiveFileCloseState.coarsePointer && !inactiveFileCloseState.anyFinePointer,
+    `Touch scenario did not use coarse-only pointer media: ${JSON.stringify(inactiveFileCloseState)}.`);
+  assert(inactiveFileCloseState.opacity === '1' && inactiveFileCloseState.pointerEvents === 'auto',
+    `Inactive Mobile close target is not visibly interactive: ${JSON.stringify(inactiveFileCloseState)}.`);
+  assert(inactiveFileCloseState.width === 30 && inactiveFileCloseState.height === 30,
+    `Inactive Mobile close target has the wrong touch geometry: ${JSON.stringify(inactiveFileCloseState)}.`);
+
   // Terminal mount intentionally claims focus. Wait for that lifecycle to settle,
   // then move focus back to the tab before exercising roving-key navigation.
   await page.waitForTimeout(100);
@@ -469,6 +488,7 @@ async function runKeyboardScenario(page: Page, filePath: string) {
 
   return {
     opened,
+    inactiveFileCloseState,
     chatState,
     terminalState,
     afterCloseState,
