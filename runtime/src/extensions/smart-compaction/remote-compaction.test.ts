@@ -209,6 +209,33 @@ describe("remote compaction request contract", () => {
     expect(repeatedIds).toHaveLength(1);
   });
 
+  test("removes orphan function-call outputs from persisted remote state before dispatch", async () => {
+    let body: Record<string, unknown> = {};
+    const result = await attemptRemoteCompaction({
+      model: model(),
+      auth,
+      messages: messages(),
+      previousDetails: details({
+        output: [
+          { type: "function_call_output", call_id: "call_orphan", output: "secret persisted output" },
+          { type: "compaction", id: "compact-previous", encrypted_content: "encrypted-previous" },
+        ],
+      }),
+      fileOps,
+      signal: new AbortController().signal,
+      timeoutMs: 1_000,
+      fetchFn: (async (_input, init) => {
+        body = JSON.parse(String(init?.body));
+        return new Response(JSON.stringify({ output: canonicalOutput("repaired") }), { status: 200 });
+      }) as typeof fetch,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(JSON.stringify(body.input)).not.toContain("call_orphan");
+    expect(JSON.stringify(body.input)).not.toContain("secret persisted output");
+    expect(JSON.stringify(body.input)).toContain("encrypted-previous");
+  });
+
   test("applies bounded per-model backoff after a provider failure", async () => {
     clearRemoteCompactionBackoffForTests();
     let clock = 1_000;
