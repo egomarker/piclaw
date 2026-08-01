@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { getChatJid, persistChatJid } from "../api/chat-jid";
+import { updateActiveSessionHandle } from "../api/agent-identity";
 import { useDialog } from "../hooks/useDialog";
 import { useDismissableLayer } from "../hooks/useDismissableLayer";
 import {
@@ -58,6 +59,10 @@ export function SessionPill() {
     () => sessions.find((entry) => entry.jid === activeChatJid),
     [sessions, activeChatJid],
   );
+
+  useEffect(() => {
+    updateActiveSessionHandle(activeSession?.name);
+  }, [activeSession?.name]);
 
   const goToChat = (chatJid: string) => {
     persistChatJid(chatJid);
