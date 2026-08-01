@@ -6,6 +6,7 @@ const appCss = readFileSync(join(import.meta.dir, '../../web/src/styles/app.css'
 const classicEditorCss = readFileSync(join(import.meta.dir, '../../web/static/classic/css/editor.css'), 'utf8');
 const classicWorkspaceCss = readFileSync(join(import.meta.dir, '../../web/static/classic/css/workspace.css'), 'utf8');
 const mobileCss = readFileSync(join(import.meta.dir, '../../web/static/mobile/css/mobile-interface.css'), 'utf8');
+const visualEditorCss = readFileSync(join(import.meta.dir, '../../web/static/visual/css/editor.css'), 'utf8');
 
 test('authenticated styles load the isolated Mobile layout last', () => {
   expect(appCss.trimEnd().endsWith('@import "../../static/mobile/css/mobile-interface.css";')).toBe(true);
@@ -60,9 +61,11 @@ test('Attach to Chat toolbar states remain scoped to Mobile', () => {
   expect(classicEditorCss).not.toContain('tab-strip-attach-to-chat');
 });
 
-test('Mobile enlarges tab close targets only for coarse touch-only input', () => {
-  expect(classicEditorCss).toMatch(/\.tab-close \{[^}]*width: 22px;[^}]*height: 22px;[^}]*min-width: 22px;[^}]*min-height: 22px;/s);
-  expect(mobileCss).toMatch(/@media \(pointer: coarse\) and \(not \(any-pointer: fine\)\) \{\s*\.app-shell\.mobile-interface \.tab-close \{[^}]*width: 30px;[^}]*height: 30px;[^}]*min-width: 30px;[^}]*min-height: 30px;/s);
+test('Mobile reveals enlarged tab close targets only for coarse touch-only input', () => {
+  const hiddenCloseRule = /\.tab-close \{[^}]*width: 22px;[^}]*height: 22px;[^}]*min-width: 22px;[^}]*min-height: 22px;[^}]*opacity: 0;[^}]*pointer-events: none;/s;
+  expect(classicEditorCss).toMatch(hiddenCloseRule);
+  expect(visualEditorCss).toMatch(hiddenCloseRule);
+  expect(mobileCss).toMatch(/@media \(pointer: coarse\) and \(not \(any-pointer: fine\)\) \{\s*\.app-shell\.mobile-interface \.tab-close \{[^}]*width: 30px;[^}]*height: 30px;[^}]*min-width: 30px;[^}]*min-height: 30px;[^}]*opacity: 1;[^}]*pointer-events: auto;/s);
   expect(mobileCss).not.toMatch(/\.tab-close > svg[^}]*width:/s);
 });
 
