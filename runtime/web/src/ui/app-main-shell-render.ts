@@ -315,6 +315,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
   const mobileWorkspacePanelEnabled = mobileTabAccessibilityEnabled && workspaceTabMode;
   const mobileWorkspaceSurfaceInactive = mobileWorkspacePanelEnabled && !mobileWorkspaceActive;
   const mobilePaneSurfaceInactive = mobileTabAccessibilityEnabled && (mobileChatActive || mobileWorkspaceActive);
+  const mobileTerminalDockControlEnabled = uiMode === 'mobile' && hasDockPanes && !chatOnlyMode;
   const mobilePaneLabelledBy = mobileTabAccessibilityEnabled && tabStripActiveId
     ? getMobileSurfaceTabElementId(tabStripActiveId)
     : undefined;
@@ -700,6 +701,9 @@ export function renderMainShell(options: MainShellRenderOptions): any {
           notificationsEnabled=${notificationsEnabled}
           notificationPermission=${notificationPermission}
           onToggleNotifications=${handleToggleNotifications}
+          terminalDockAvailable=${mobileTerminalDockControlEnabled}
+          terminalDockVisible=${mobileTerminalDockControlEnabled ? dockVisible : undefined}
+          onToggleTerminalDock=${mobileTerminalDockControlEnabled ? toggleDock : undefined}
           onModelChange=${setActiveModel}
           onModelStateChange=${applyModelState}
           statusNotice=${isCompactionStatus(agentStatus) ? agentStatus : null}

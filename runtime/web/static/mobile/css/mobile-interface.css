@@ -166,6 +166,11 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     padding-right: 10px;
 }
 
+/* Match the active state of the terminal control in the shared tab strip. */
+.app-shell.mobile-interface .compose-terminal-dock-toggle.active {
+    color: var(--accent-color);
+}
+
 /* Enlarge close targets only when no mouse or other fine pointer is available. */
 @media (pointer: coarse) and (not (any-pointer: fine)) {
     .app-shell.mobile-interface .tab-close {

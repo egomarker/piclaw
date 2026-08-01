@@ -95,6 +95,42 @@ async function assertMobileShell(page: Page) {
   await page.locator('.app-shell.mobile-interface').waitFor({ state: 'visible', timeout: 20000 });
 }
 
+async function verifyComposeTerminalDockControl(page: Page) {
+  const button = page.locator('[data-testid="compose-terminal-dock-toggle"]');
+  await button.waitFor({ state: 'visible', timeout: 15000 });
+  const initialState = await button.evaluate((element) => ({
+    firstComposeAction: element.parentElement?.firstElementChild === element,
+    ariaPressed: element.getAttribute('aria-pressed'),
+    ariaLabel: element.getAttribute('aria-label'),
+  }));
+  assert(initialState.firstComposeAction,
+    'Terminal dock control is not the first compose action.');
+  assert(initialState.ariaPressed === 'false' && initialState.ariaLabel === 'Show terminal',
+    `Terminal dock control has the wrong closed state: ${JSON.stringify(initialState)}.`);
+
+  await button.click();
+  await page.waitForFunction(() => {
+    const control = document.querySelector('[data-testid="compose-terminal-dock-toggle"]');
+    const dock = document.querySelector('.dock-panel');
+    return control?.getAttribute('aria-pressed') === 'true'
+      && control?.getAttribute('aria-label') === 'Hide terminal'
+      && dock && !dock.classList.contains('hidden');
+  }, undefined, { timeout: 15000 });
+  const dockRect = await readRect(page, '.dock-panel:not(.hidden)');
+  assert(dockRect.width > 0 && dockRect.height > 0,
+    `Terminal dock has zero geometry: ${JSON.stringify(dockRect)}.`);
+
+  await button.click();
+  await page.waitForFunction(() => {
+    const control = document.querySelector('[data-testid="compose-terminal-dock-toggle"]');
+    const dock = document.querySelector('.dock-panel');
+    return control?.getAttribute('aria-pressed') === 'false'
+      && dock?.classList.contains('hidden');
+  }, undefined, { timeout: 15000 });
+
+  return { initialState, openDockRect: dockRect };
+}
+
 async function showWorkspace(page: Page, compactWorkspace: boolean) {
   const sidebar = page.locator('.workspace-sidebar');
   await sidebar.waitFor({ state: 'attached', timeout: 15000 });
@@ -273,11 +309,20 @@ async function runScenario(options: {
   }
 }
 
-async function runViewportScenario(page: Page, compactWorkspace: boolean, filePath: string) {
+async function runViewportScenario(
+  page: Page,
+  compactWorkspace: boolean,
+  filePath: string,
+  verifyTerminalDockControl = false,
+) {
+  const terminalDockControl = verifyTerminalDockControl
+    ? await verifyComposeTerminalDockControl(page)
+    : null;
   const workspaceRect = await showWorkspace(page, compactWorkspace);
   const opened = await openWorkspaceFile(page, filePath);
   return {
     compactWorkspace,
+    terminalDockControl,
     workspaceRect,
     ...opened,
   };
@@ -362,7 +407,12 @@ async function main() {
         artifactDir,
         name: viewport.name,
         viewport,
-        run: (page) => runViewportScenario(page, viewport.compactWorkspace, args.filePath),
+        run: (page) => runViewportScenario(
+          page,
+          viewport.compactWorkspace,
+          args.filePath,
+          viewport.name === 'phone-portrait',
+        ),
       }));
     }
 

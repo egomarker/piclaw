@@ -1103,6 +1103,9 @@ export function ComposeBox({
     notificationsEnabled = false,
     notificationPermission = 'default',
     onToggleNotifications,
+    terminalDockAvailable = false,
+    terminalDockVisible = false,
+    onToggleTerminalDock,
     onModelChange,
     onModelStateChange,
     activeEditorPath = null,
@@ -3594,6 +3597,23 @@ export function ComposeBox({
                             type="button"
                         >
                             ${searchMatchMode === 'or' ? 'OR' : 'AND'}
+                        </button>
+                    `}
+                    ${terminalDockAvailable && onToggleTerminalDock && !searchMode && html`
+                        <button
+                            class=${`icon-btn compose-terminal-dock-toggle${terminalDockVisible ? ' active' : ''}`}
+                            data-testid="compose-terminal-dock-toggle"
+                            onClick=${onToggleTerminalDock}
+                            title=${`${terminalDockVisible ? 'Hide' : 'Show'} terminal (Ctrl+\`)`}
+                            aria-label=${`${terminalDockVisible ? 'Hide' : 'Show'} terminal`}
+                            aria-pressed=${terminalDockVisible ? 'true' : 'false'}
+                            type="button"
+                        >
+                            <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                                <rect x="1.75" y="2.25" width="12.5" height="11.5" rx="2"/>
+                                <polyline points="4.5 5.25 7 7.75 4.5 10.25"/>
+                                <line x1="8.5" y1="10.25" x2="11.5" y2="10.25"/>
+                            </svg>
                         </button>
                     `}
                     <button

@@ -50,6 +50,10 @@ test('Mobile uses a full Workspace tab surface and insets tree content without m
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface > \.workspace-sidebar \{\s*display: none;/);
 });
 
+test('Mobile compose terminal control mirrors the active terminal tab-strip state', () => {
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface \.compose-terminal-dock-toggle\.active \{\s*color: var\(--accent-color\);/);
+});
+
 test('Mobile enlarges tab close targets only for coarse touch-only input', () => {
   expect(classicEditorCss).toMatch(/\.tab-close \{[^}]*width: 22px;[^}]*height: 22px;[^}]*min-width: 22px;[^}]*min-height: 22px;/s);
   expect(mobileCss).toMatch(/@media \(pointer: coarse\) and \(not \(any-pointer: fine\)\) \{\s*\.app-shell\.mobile-interface \.tab-close \{[^}]*width: 30px;[^}]*height: 30px;[^}]*min-width: 30px;[^}]*min-height: 30px;/s);

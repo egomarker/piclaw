@@ -504,6 +504,38 @@ test('Classic shell does not opt into Mobile tab or panel accessibility behavior
   expect(paneHostVNode?.props.inert).toBeUndefined();
 });
 
+test('only Mobile exposes the terminal dock control in ComposeBox', () => {
+  const toggleDock = mock(() => {});
+  const findComposeVNode = (overrides: Record<string, unknown>) => {
+    const tree = renderMainShell(createMainShellRenderOptions({
+      chatOnlyMode: false,
+      hasDockPanes: true,
+      dockVisible: true,
+      toggleDock,
+      ...overrides,
+    }));
+    let composeVNode: any = null;
+    walkVNodes(tree, (node) => {
+      if (node.type === ComposeBox) composeVNode = node;
+    });
+    return composeVNode;
+  };
+
+  const mobileCompose = findComposeVNode({ uiMode: 'mobile' });
+  expect(mobileCompose?.props.terminalDockAvailable).toBe(true);
+  expect(mobileCompose?.props.terminalDockVisible).toBe(true);
+  expect(mobileCompose?.props.onToggleTerminalDock).toBe(toggleDock);
+
+  const classicCompose = findComposeVNode({ uiMode: 'classic' });
+  expect(classicCompose?.props.terminalDockAvailable).toBe(false);
+  expect(classicCompose?.props.terminalDockVisible).toBeUndefined();
+  expect(classicCompose?.props.onToggleTerminalDock).toBeUndefined();
+
+  const chatOnlyMobileCompose = findComposeVNode({ uiMode: 'mobile', chatOnlyMode: true });
+  expect(chatOnlyMobileCompose?.props.terminalDockAvailable).toBe(false);
+  expect(chatOnlyMobileCompose?.props.onToggleTerminalDock).toBeUndefined();
+});
+
 test('renderMainShell passes queue controls to ComposeBox and does not render a top-level queue stack', () => {
   const followupQueueItems = [{ row_id: 7, content: 'queued item' }];
   const handleRemoveQueuedFollowup = mock(() => {});
