@@ -12,6 +12,7 @@ import { getAttachmentRegistry } from "../../src/agent-pool/attachments.js";
 import { setCompactionSettlementGraceForTests } from "../../src/agent-pool/compaction.js";
 import { AgentTurnCoordinator } from "../../src/agent-pool/turn-coordinator.js";
 import { createToolExecutionWatchdogHeartbeatController, runAgentPrompt } from "../../src/agent-pool/run-agent-orchestrator.js";
+import { getRecoveryFinalizationReserveMs } from "../../src/agent-pool/run-agent-recovery-phase.js";
 import { RECOVERY_CONTINUATION_PROMPT } from "../../src/agent-pool/context-pressure-retry.js";
 import { getSshConfig, initDatabase, setChatAutoCompactionWindow, upsertSshConfig } from "../../src/db.js";
 import {
@@ -2518,6 +2519,81 @@ test("runAgentPrompt gives compact_then_retry a full continuation budget after a
     restoreEnv();
   }
 });
+
+test("recovery finalization reserve scales with continuation budgets", () => {
+  expect(getRecoveryFinalizationReserveMs(1)).toBe(0);
+  expect(getRecoveryFinalizationReserveMs(30)).toBe(15);
+  expect(getRecoveryFinalizationReserveMs(10_000)).toBe(5_000);
+  expect(getRecoveryFinalizationReserveMs(30_000)).toBe(5_000);
+  expect(getRecoveryFinalizationReserveMs(360_000)).toBe(54_000);
+  expect(getRecoveryFinalizationReserveMs(600_000)).toBe(60_000);
+});
+
+test("runAgentPrompt reserves the tail of compact_then_retry for a tools-disabled final reply", async () => {
+  initDatabase();
+  const restoreEnv = setEnv({
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
+    PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30",
+  });
+
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    private activeTools = ["bash", "read"];
+    private releaseContinuation: (() => void) | null = null;
+    sessionManager = { getLeafId: () => "leaf-finalization-reserve" };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    promptCalls = 0;
+    compactCalls = 0;
+    toolSets: string[][] = [];
+    getActiveToolNames() { return [...this.activeTools]; }
+    setActiveToolsByName(names: string[]) {
+      this.activeTools = [...names];
+      this.toolSets.push([...names]);
+      if (this.promptCalls === 2 && names.length === 0) this.releaseContinuation?.();
+    }
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => { this.listeners = this.listeners.filter((entry) => entry !== listener); };
+    }
+    async compact() { this.compactCalls += 1; }
+    async prompt() {
+      this.promptCalls += 1;
+      if (this.promptCalls === 1) throw new Error("maximum context length exceeded before retry");
+      await new Promise<void>((resolve) => { this.releaseContinuation = resolve; });
+      expect(this.activeTools).toEqual([]);
+      for (const listener of this.listeners) {
+        listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Final answer from the reserved window." } });
+        listener({ type: "message_end", message: createAssistantMessage("Final answer from the reserved window.") });
+      }
+    }
+    async abort() { this.releaseContinuation?.(); }
+  }
+
+  try {
+    const session = new StubSession();
+    const result = await runAgentPrompt("large turn", "web:finalization-reserve", { timeoutMs: 30 }, {
+      getOrCreateRuntime: async () => createRuntime(session, { maxRetries: 2, baseDelayMs: 1, maxDelayMs: 1 }) as any,
+      turnCoordinator: new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} }),
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.result).toBe("Final answer from the reserved window.");
+    expect(session.promptCalls).toBe(2);
+    expect(session.compactCalls).toBe(1);
+    expect(session.toolSets).toContainEqual([]);
+    expect(session.getActiveToolNames()).toEqual(["bash", "read"]);
+  } finally {
+    restoreEnv();
+  }
+}, 5_000);
 
 test("runAgentPrompt bounds the compact_then_retry continuation attempt timeout", async () => {
   initDatabase();
