@@ -23,6 +23,8 @@ import path from "path";
 import { STORE_DIR, WORKSPACE_DIR, getRuntimeBootstrapPathOverrides } from "../core/config.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
 import { recompressExistingMedia } from "./media-recompress.js";
+import { createVerifiedSqliteBackup, type SqliteBackupManifest } from "./backup.js";
+import { ensureOwnedMigrationLedger } from "./migrations.js";
 
 const log = createLogger("db.connection");
 
@@ -884,6 +886,7 @@ export function initDatabase(): void {
   }
   migrateLegacyConfigTables(db);
   createSchema(db);
+  ensureOwnedMigrationLedger(db);
   ensureChatBranchConstraints(db);
   ensureMessageColumns(db);
   ensureKeychainNoteColumns(db);
@@ -1033,6 +1036,14 @@ export function getDb(): Database {
     throw new Error("Database not initialized");
   }
   return db;
+}
+
+/** Create a verified online snapshot of the initialized file-backed messages database. */
+export function backupDatabase(destinationPath: string): SqliteBackupManifest {
+  if (!db || dbMode !== "file" || !dbPathCache) {
+    throw new Error("Database backup requires an initialized file-backed database.");
+  }
+  return createVerifiedSqliteBackup(db, dbPathCache, destinationPath);
 }
 
 export function closeDatabase(options?: { shrinkMemory?: boolean }): void {

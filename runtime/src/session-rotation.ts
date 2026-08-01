@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { basename, dirname, extname, join } from "path";
 import { formatBytes } from "./agent-control/agent-control-helpers.js";
 import { runCompactionWithTimeout } from "./agent-pool/compaction.js";
+import { createSessionManagerPersistencePort, type SessionEntryAppendPort, type SessionManagerLike } from "./agent-pool/session-persistence.js";
 import { createLogger, debugSuppressedError } from "./utils/logger.js";
 import { writeMergedSessionArchive } from "./session-archive.js";
 
@@ -153,30 +154,24 @@ export function collectCarriedSummary(messages: readonly AgentMessage[]): { summ
 }
 
 /** Seed a freshly-created session from the current effective session context. */
-export function seedRotatedSession(
-  sessionManager: SessionManager,
+export async function seedRotatedSession(
+  sessionManager: SessionManager | SessionEntryAppendPort,
   context: SessionContext,
   options: {
     sessionName?: string;
     model?: RotationModel | null;
     thinkingLevel?: ThinkingLevel | null;
   }
-): void {
-  if (options.sessionName?.trim()) {
-    sessionManager.appendSessionInfo(options.sessionName.trim());
-  }
-
-  if (options.model) {
-    sessionManager.appendModelChange(options.model.provider, options.model.modelId);
-  }
-  if (options.thinkingLevel) {
-    sessionManager.appendThinkingLevelChange(options.thinkingLevel);
-  }
+): Promise<void> {
+  const persistence = "getEntries" in sessionManager
+    ? createSessionManagerPersistencePort(sessionManager as unknown as SessionManagerLike)
+    : sessionManager as SessionEntryAppendPort;
+  if (options.sessionName?.trim()) await persistence.appendSessionInfo(options.sessionName.trim());
+  if (options.model) await persistence.appendModelChange(options.model.provider, options.model.modelId);
+  if (options.thinkingLevel) await persistence.appendThinkingLevelChange(options.thinkingLevel);
 
   const carried = collectCarriedSummary(context.messages);
-  if (carried.summary) {
-    sessionManager.appendCompaction(carried.summary, "rotated-context", carried.tokensBefore);
-  }
+  if (carried.summary) await persistence.appendCompaction(carried.summary, "rotated-context", carried.tokensBefore);
 
   for (const message of context.messages) {
     if (message.role === "compactionSummary" || message.role === "branchSummary") {
@@ -184,7 +179,7 @@ export function seedRotatedSession(
     }
 
     if (message.role === "custom") {
-      sessionManager.appendCustomMessageEntry(
+      await persistence.appendCustomMessageEntry(
         message.customType,
         message.content,
         message.display,
@@ -193,7 +188,7 @@ export function seedRotatedSession(
       continue;
     }
 
-    sessionManager.appendMessage(message as PersistableSessionMessage);
+    await persistence.appendMessage(message as PersistableSessionMessage);
   }
 }
 
@@ -263,8 +258,8 @@ export function buildEmergencyRotationSummary(
   return { summary, tokensBefore, recentMessageCount: visibleMessages.length };
 }
 
-export function seedEmergencyRotatedSession(
-  sessionManager: SessionManager,
+export async function seedEmergencyRotatedSession(
+  sessionManager: SessionManager | SessionEntryAppendPort,
   context: SessionContext,
   options: {
     sessionName?: string;
@@ -274,20 +269,16 @@ export function seedEmergencyRotatedSession(
     previousSessionFile?: string | null;
     archivePath?: string | null;
   },
-): void {
-  if (options.sessionName?.trim()) {
-    sessionManager.appendSessionInfo(options.sessionName.trim());
-  }
-
-  if (options.model) {
-    sessionManager.appendModelChange(options.model.provider, options.model.modelId);
-  }
-  if (options.thinkingLevel) {
-    sessionManager.appendThinkingLevelChange(options.thinkingLevel);
-  }
+): Promise<void> {
+  const persistence = "getEntries" in sessionManager
+    ? createSessionManagerPersistencePort(sessionManager as unknown as SessionManagerLike)
+    : sessionManager as SessionEntryAppendPort;
+  if (options.sessionName?.trim()) await persistence.appendSessionInfo(options.sessionName.trim());
+  if (options.model) await persistence.appendModelChange(options.model.provider, options.model.modelId);
+  if (options.thinkingLevel) await persistence.appendThinkingLevelChange(options.thinkingLevel);
 
   const emergency = buildEmergencyRotationSummary(context, options);
-  sessionManager.appendCompaction(emergency.summary, "emergency-rotation", emergency.tokensBefore);
+  await persistence.appendCompaction(emergency.summary, "emergency-rotation", emergency.tokensBefore);
 }
 
 interface RotationRestoreResult {
@@ -516,7 +507,7 @@ export async function rotateSession(
       parentSession: archivePath,
       setup: async (sessionManager) => {
         if (emergencyFallback) {
-          seedEmergencyRotatedSession(sessionManager, context, {
+          await seedEmergencyRotatedSession(sessionManager, context, {
             sessionName: currentSessionName,
             model: currentModel,
             thinkingLevel: currentThinkingLevel,
@@ -526,7 +517,7 @@ export async function rotateSession(
           });
           return;
         }
-        seedRotatedSession(sessionManager, context, {
+        await seedRotatedSession(sessionManager, context, {
           sessionName: currentSessionName,
           model: currentModel,
           thinkingLevel: currentThinkingLevel,

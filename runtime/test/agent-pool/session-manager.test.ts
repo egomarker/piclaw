@@ -167,6 +167,35 @@ test("AgentSessionManager singleflights concurrent side-session creation for the
   expect(fixture.sidePool.get("web:default")?.runtime.session).toBe(session);
 });
 
+test("AgentSessionManager disposes runtime and persistence exactly once across overlapping recreate calls", async () => {
+  let runtimeDisposals = 0;
+  let persistenceDisposals = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const session = {
+    sessionId: "overlap",
+    isStreaming: false,
+    isBashRunning: false,
+    isCompacting: false,
+    dispose() {},
+  };
+  const runtime = createRuntime(session);
+  runtime.dispose = async () => { runtimeDisposals += 1; await gate; };
+  const fixture = createManager({
+    disposePersistence: async () => { persistenceDisposals += 1; },
+  });
+  fixture.pool.set("web:overlap", { runtime, lastUsed: Date.now() });
+
+  const first = fixture.manager.recreate("web:overlap");
+  const second = fixture.manager.recreate("web:overlap");
+  await Bun.sleep(0);
+  expect(runtimeDisposals).toBe(1);
+  release();
+  await Promise.all([first, second]);
+  expect(runtimeDisposals).toBe(1);
+  expect(persistenceDisposals).toBe(1);
+});
+
 test("AgentSessionManager recreates cached main and side sessions", async () => {
   let disposed = 0;
   const mainSession = {

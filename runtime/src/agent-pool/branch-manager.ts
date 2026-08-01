@@ -585,7 +585,7 @@ export class AgentBranchManager {
       agent_name: nextAgentName,
     });
 
-    writeDeferredBranchSeed(nextChatJid, createDeferredBranchSeed(sourceSession, {
+    writeDeferredBranchSeed(nextChatJid, await createDeferredBranchSeed(sourceSession, {
       stableLeafId: stableForkLeafId,
       sessionName: nextBranch.agent_name,
       sourceIsActive,
