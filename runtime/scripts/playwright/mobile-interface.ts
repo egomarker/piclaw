@@ -599,7 +599,6 @@ async function runKeyboardScenario(page: Page, filePath: string) {
     const rect = button.getBoundingClientRect();
     return {
       coarsePointer: matchMedia('(pointer: coarse)').matches,
-      anyCoarsePointer: matchMedia('(any-pointer: coarse)').matches,
       anyFinePointer: matchMedia('(any-pointer: fine)').matches,
       opacity: style.opacity,
       pointerEvents: style.pointerEvents,
@@ -607,8 +606,8 @@ async function runKeyboardScenario(page: Page, filePath: string) {
       height: Math.round(rect.height),
     };
   });
-  assert(inactiveFileCloseState.anyCoarsePointer,
-    `Touch scenario did not expose a coarse pointer: ${JSON.stringify(inactiveFileCloseState)}.`);
+  assert(inactiveFileCloseState.coarsePointer && !inactiveFileCloseState.anyFinePointer,
+    `Touch scenario did not use coarse-only pointer media: ${JSON.stringify(inactiveFileCloseState)}.`);
   assert(inactiveFileCloseState.opacity === '1' && inactiveFileCloseState.pointerEvents === 'auto',
     `Inactive Mobile close target is not visibly interactive: ${JSON.stringify(inactiveFileCloseState)}.`);
   assert(inactiveFileCloseState.width === 30 && inactiveFileCloseState.height === 30,

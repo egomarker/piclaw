@@ -196,8 +196,8 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     opacity: 1;
 }
 
-/* Enlarge and reveal close targets whenever the device has a coarse touch pointer. */
-@media (any-pointer: coarse) {
+/* Enlarge and reveal close targets only when no mouse or other fine pointer is available. */
+@media (pointer: coarse) and (not (any-pointer: fine)) {
     .app-shell.mobile-interface .tab-close {
         width: 30px;
         height: 30px;
