@@ -89,6 +89,36 @@ async function readRect(page: Page, selector: string) {
   });
 }
 
+async function readReplyAvatarProbe(page: Page) {
+  return await page.evaluate(() => {
+    const shell = document.querySelector<HTMLElement>('.app-shell.mobile-interface');
+    const container = shell?.querySelector<HTMLElement>(':scope > .container');
+    if (!shell || !container) return null;
+
+    const reply = document.createElement('article');
+    reply.className = 'post thread-reply';
+    reply.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;';
+    const avatar = document.createElement('div');
+    avatar.className = 'post-avatar';
+    avatar.textContent = 'A';
+    reply.appendChild(avatar);
+    container.appendChild(reply);
+
+    const style = getComputedStyle(avatar);
+    const rect = avatar.getBoundingClientRect();
+    const result = {
+      editorOpen: shell.classList.contains('editor-open'),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      minWidth: Math.round(Number.parseFloat(style.minWidth) || 0),
+      minHeight: Math.round(Number.parseFloat(style.minHeight) || 0),
+      flexBasis: style.flexBasis,
+    };
+    reply.remove();
+    return result;
+  });
+}
+
 async function assertMobileShell(page: Page) {
   const mode = await page.evaluate(() => document.documentElement.dataset.piclawUi || null);
   assert(mode === 'mobile', `Expected Mobile UI mode, received ${String(mode)}.`);
@@ -454,11 +484,31 @@ async function runViewportScenario(
   verifyTerminalDockControl = false,
   exerciseAttachToChat = false,
 ) {
+  const replyAvatarWithoutClosableTab = await readReplyAvatarProbe(page);
+  assert(
+    replyAvatarWithoutClosableTab
+      && !replyAvatarWithoutClosableTab.editorOpen
+      && replyAvatarWithoutClosableTab.width === 28
+      && replyAvatarWithoutClosableTab.height === 28,
+    `Reply avatar has the wrong baseline geometry: ${JSON.stringify(replyAvatarWithoutClosableTab)}.`,
+  );
+
   const terminalDockControl = verifyTerminalDockControl
     ? await verifyComposeTerminalDockControl(page)
     : null;
   const workspaceRect = await showWorkspace(page, compactWorkspace);
   const opened = await openWorkspaceFile(page, filePath);
+  const replyAvatarWithClosableTab = await readReplyAvatarProbe(page);
+  assert(
+    replyAvatarWithClosableTab
+      && replyAvatarWithClosableTab.editorOpen
+      && replyAvatarWithClosableTab.width === 28
+      && replyAvatarWithClosableTab.height === 28
+      && replyAvatarWithClosableTab.minWidth === 28
+      && replyAvatarWithClosableTab.minHeight === 28
+      && replyAvatarWithClosableTab.flexBasis === '28px',
+    `Closable tab changed reply avatar geometry: ${JSON.stringify(replyAvatarWithClosableTab)}.`,
+  );
   const attachToChatControl = await verifyAttachToChatControl(
     page,
     filePath,
@@ -470,6 +520,8 @@ async function runViewportScenario(
     compactWorkspace,
     terminalDockControl,
     attachToChatControl,
+    replyAvatarWithoutClosableTab,
+    replyAvatarWithClosableTab,
     workspaceRect,
     ...opened,
   };
