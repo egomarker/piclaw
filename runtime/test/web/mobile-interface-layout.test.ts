@@ -25,6 +25,12 @@ test('Mobile keeps Chat typography stable while pane tabs remain open', () => {
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface\.editor-open > \.container \.agent-status \{\s*font-size: var\(--font-size-sm\);/);
 });
 
+test('Mobile keeps reply avatars compact while pane tabs are open', () => {
+  const replySelector = '.app-shell.mobile-interface.editor-open > .container .post.thread-reply .post-avatar';
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface\.editor-open > \.container \.post\.thread-reply \.post-avatar \{[^}]*width: 28px;[^}]*height: 28px;[^}]*min-width: 28px;[^}]*min-height: 28px;[^}]*flex: 0 0 28px;[^}]*font-size: 0\.65rem;/s);
+  expect(mobileCss.indexOf(replySelector)).toBeGreaterThan(mobileCss.indexOf('@media (min-width: 1024px)'));
+});
+
 test('Mobile hides Chat chrome without suppressing global dialogs and widgets', () => {
   expect(classicEditorCss).toMatch(/\.chat-surface-main,\s*\n\.chat-surface-footer \{\s*\n\s*display: contents;/);
   expect(mobileCss).toContain('.app-shell.mobile-interface.mobile-pane-active > .container > .chat-surface-main');

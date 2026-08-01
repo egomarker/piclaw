@@ -268,6 +268,16 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     }
 }
 
+/* Keep nested reply avatars compact when pane tabs toggle editor-open. */
+.app-shell.mobile-interface.editor-open > .container .post.thread-reply .post-avatar {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    min-height: 28px;
+    flex: 0 0 28px;
+    font-size: 0.65rem;
+}
+
 /* Compact Workspace is every viewport except desktop-width landscape. */
 @media (max-width: 1023.98px), (orientation: portrait) {
     .app-shell.mobile-interface {
