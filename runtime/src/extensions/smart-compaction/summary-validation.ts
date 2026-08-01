@@ -33,6 +33,14 @@ export type CompactionSummaryValidation =
   | CompactionSummaryValidationSuccess
   | CompactionSummaryValidationFailure;
 
+export interface CompactionSummaryValidationOptions {
+  /**
+   * Model-authored file blocks are disposable because deterministic tool
+   * analysis supplies the authoritative blocks after validation.
+   */
+  modelFileBlocks?: "strict" | "discard";
+}
+
 const FINAL_HEADINGS = [
   "Goal",
   "Current Active Topic",
@@ -143,6 +151,33 @@ function normalizeModelFileBlocks(
   return { ok: true, text: text.trim() };
 }
 
+function discardModelFileBlocks(rawText: string): string {
+  const matches = [...rawText.matchAll(/<\/?(?:read-files|modified-files)\b[^>\n]*(?:>|$)/gi)];
+  if (matches.length === 0) return rawText;
+
+  const stack: Array<"read-files" | "modified-files"> = [];
+  let cursor = 0;
+  let text = "";
+  for (const match of matches) {
+    const index = match.index ?? cursor;
+    if (stack.length === 0) text += rawText.slice(cursor, index);
+    const tag = /modified-files/i.test(match[0]) ? "modified-files" : "read-files";
+    const closing = /^<\//.test(match[0]);
+    if (!closing) {
+      stack.push(tag);
+    } else if (stack.at(-1) === tag) {
+      stack.pop();
+    }
+    // A mismatched close never pops another tag type. This keeps all content
+    // inside the original opener disposable until its matching close or EOF.
+    cursor = index + match[0].length;
+  }
+  // An unbalanced opening tag makes the remaining model-authored suffix
+  // disposable. A dangling close outside a block removes only the tag token.
+  if (stack.length === 0) text += rawText.slice(cursor);
+  return text.replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function normalizeChunkProgressLabels(text: string): string {
   const progressMatch = /^##\s+Progress\s*$([\s\S]*?)(?=^##\s+|(?![\s\S]))/gmi.exec(text);
   if (!progressMatch) return text;
@@ -198,6 +233,7 @@ export function validateCompactionSummaryResponse(
   response: any,
   schema: CompactionSummarySchema,
   maxChars: number,
+  options: CompactionSummaryValidationOptions = {},
 ): CompactionSummaryValidation {
   const stopReason = typeof response?.stopReason === "string" ? response.stopReason : "missing";
   if (stopReason !== "stop") {
@@ -211,12 +247,17 @@ export function validateCompactionSummaryResponse(
 
   const rawText = extractResponseText(response);
   if (!rawText) return failure("missing_text", "completion contained no text", stopReason);
-  if (rawText.length > maxChars) {
+  if (options.modelFileBlocks !== "discard" && rawText.length > maxChars) {
     return failure("too_large", `summary was ${rawText.length} characters; maximum is ${maxChars}`, stopReason);
   }
-  const normalizedFiles = normalizeModelFileBlocks(rawText, schema, stopReason);
+  const normalizedFiles = options.modelFileBlocks === "discard"
+    ? { ok: true as const, text: discardModelFileBlocks(rawText) }
+    : normalizeModelFileBlocks(rawText, schema, stopReason);
   if (!normalizedFiles.ok) return normalizedFiles;
   const text = schema === "chunk" ? normalizeChunkProgressLabels(normalizedFiles.text) : normalizedFiles.text;
+  if (options.modelFileBlocks === "discard" && text.length > maxChars) {
+    return failure("too_large", `summary was ${text.length} characters; maximum is ${maxChars}`, stopReason);
+  }
   if (text.length < MIN_SUMMARY_CHARS) {
     return failure("too_short", `summary was ${text.length} characters; minimum is ${MIN_SUMMARY_CHARS}`, stopReason);
   }

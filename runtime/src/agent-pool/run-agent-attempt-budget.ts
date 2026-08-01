@@ -5,6 +5,7 @@ import type { RunAgentOptions } from "./contracts.js";
 export interface AttemptToolBudgetState {
   toolUseBudgetExceeded: boolean;
   toolUseSoftStopApplied: boolean;
+  finalizationReserveApplied: boolean;
   hadToolFailureBeforeSoftStop: boolean;
   hadToolFailureAfterSoftStop: boolean;
   reservedToolExecutionCount: number;
@@ -14,6 +15,7 @@ export interface AttemptToolBudgetController {
   state: AttemptToolBudgetState;
   restoreToolBudgetGuard(): void;
   restoreToolBudgetSoftStop(): void;
+  applyFinalizationReserve(): boolean;
   requestToolBudgetSoftStop(toolCallBlocks: Array<Record<string, unknown>>, assistantToolUseMessageCount: number): void;
   consumeToolExecutionEnd(toolCallId: unknown, isError: unknown): { wasBlockedByBudget: boolean };
 }
@@ -31,6 +33,7 @@ export function createAttemptToolBudgetController(options: {
   const state: AttemptToolBudgetState = {
     toolUseBudgetExceeded: false,
     toolUseSoftStopApplied: false,
+    finalizationReserveApplied: false,
     hadToolFailureBeforeSoftStop: false,
     hadToolFailureAfterSoftStop: false,
     reservedToolExecutionCount: options.initialToolExecutionCount,
@@ -84,6 +87,12 @@ export function createAttemptToolBudgetController(options: {
   const toolBudgetBeforeToolCall: NonNullable<AgentSession["agent"]["beforeToolCall"]> = async (context, signal) => {
     const prior = await originalBeforeToolCall?.(context, signal);
     if (prior?.block) return prior;
+    if (state.finalizationReserveApplied) {
+      return {
+        block: true,
+        reason: "Automatic recovery is in its finalization window. Return a terminal assistant reply without calling more tools.",
+      };
+    }
     if (!toolUseWarningEmitted && state.reservedToolExecutionCount >= options.toolUseWarningThreshold) {
       toolUseWarningEmitted = true;
       options.onWarn?.("Tool-use budget warning threshold reached", {
@@ -122,6 +131,19 @@ export function createAttemptToolBudgetController(options: {
         toolControl.setActiveToolsByName(softStopSavedToolNames);
       }
       softStopSavedToolNames = null;
+    },
+    applyFinalizationReserve() {
+      if (state.finalizationReserveApplied) return false;
+      state.finalizationReserveApplied = true;
+      const toolControl = options.session as unknown as {
+        getActiveToolNames?: () => string[];
+        setActiveToolsByName?: (toolNames: string[]) => void;
+      };
+      if (typeof toolControl.getActiveToolNames === "function" && typeof toolControl.setActiveToolsByName === "function") {
+        softStopSavedToolNames = softStopSavedToolNames ?? toolControl.getActiveToolNames();
+        toolControl.setActiveToolsByName([]);
+      }
+      return true;
     },
     requestToolBudgetSoftStop(toolCallBlocks, assistantToolUseMessageCount) {
       if (toolUseSoftStopRequested || assistantToolUseMessageCount < options.toolUseMessageBudget) return;

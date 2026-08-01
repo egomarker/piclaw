@@ -56,7 +56,9 @@ export async function runCompactionModelExecution(input: {
     let retryCount = 0;
     ({ response, maxOutputChars } = await runCompletion(activePromptText));
 
-    let validation = validateCompactionSummaryResponse(response, "final", maxOutputChars);
+    let validation = validateCompactionSummaryResponse(response, "final", maxOutputChars, {
+      modelFileBlocks: "discard",
+    });
     const responseErrorMessage = typeof response?.errorMessage === "string" ? response.errorMessage : "";
     const providerInputOverflow = response?.stopReason === "error" && isCompactionInputOverflow(responseErrorMessage);
     if (!validation.ok && validation.retryable && !providerInputOverflow && !input.abortSignal.aborted) {
@@ -81,7 +83,9 @@ export async function runCompactionModelExecution(input: {
         });
         input.onStage?.("output_repair_retry", estimateCompactionPromptTokens(activePromptText));
         ({ response, maxOutputChars } = await runCompletion(activePromptText));
-        validation = validateCompactionSummaryResponse(response, "final", maxOutputChars);
+        validation = validateCompactionSummaryResponse(response, "final", maxOutputChars, {
+          modelFileBlocks: "discard",
+        });
       }
     }
 

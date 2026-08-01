@@ -485,26 +485,29 @@ function buildFailureVisibleText(options: {
   attemptsUsed?: number;
   classifier?: string;
   inlineDiagnostic?: boolean;
+  showDiagnosticWithoutDraft?: boolean;
 }): string {
   const draftText = readTrimmedString(options.draftText);
+  const title = readTrimmedString(options.title) || "Turn failed";
+  const detail = readTrimmedString(options.detail);
+  const actionSummary = readTrimmedString(options.actionSummary);
+  const nextAction = /tool-use budget exceeded/i.test(`${title} ${detail}`)
+    ? "Ask me to continue; I will resume from the latest known partial state."
+    : null;
+  const diagnostic = [
+    `⚠️ ${title}`,
+    actionSummary || null,
+    detail && !actionSummary.includes(detail) ? detail : null,
+    nextAction,
+  ].filter(Boolean).join("\n");
   if (draftText && options.inlineDiagnostic) {
-    const title = readTrimmedString(options.title) || "Turn failed";
-    const detail = readTrimmedString(options.detail);
-    const nextAction = /tool-use budget exceeded/i.test(`${title} ${detail}`)
-      ? "Ask me to continue; I will resume from the latest known partial state."
-      : null;
-    const diagnostic = [
-      `⚠️ ${title}`,
-      detail || null,
-      nextAction,
-    ].filter(Boolean).join("\n");
     return diagnostic ? `${draftText}\n\n${diagnostic}` : draftText;
   }
   // Diagnostic info is usually carried in the outcome marker content block and
   // rendered by the client as a collapsible pill. Keep ordinary recovered drafts
-  // concise, but let high-risk terminal failures opt in to visible diagnostics.
+  // concise, but make recovery-budget timeout failures readable without a draft.
   if (draftText) return draftText;
-  return "";
+  return options.showDiagnosticWithoutDraft ? diagnostic : "";
 }
 
 function buildRetryStatusPayload(base: {
@@ -1645,11 +1648,14 @@ export async function processChat(
     const marker = withFailureActionMetadata(markerBase, lastAction);
     const title = readTrimmedString(marker?.title) || "Turn failed";
     const markerDetail = readTrimmedString(marker?.detail);
+    const markerType = readTrimmedString(marker?.type);
     const markerKind = readTrimmedString(marker?.kind);
     const markerClassifier = readTrimmedString(marker?.classifier);
     const inlineDiagnostic = markerKind === "tool_budget"
       || markerClassifier === "tool_history_pressure"
       || markerClassifier === "budget_exhausted";
+    const showDiagnosticWithoutDraft = markerType === "timeout_marker"
+      && markerClassifier === "budget_exhausted";
     const text = buildFailureVisibleText({
       draftText,
       title,
@@ -1658,6 +1664,7 @@ export async function processChat(
       attemptsUsed: Number.isFinite(marker?.attempts_used) ? (marker?.attempts_used as number) : undefined,
       classifier: markerClassifier,
       inlineDiagnostic,
+      showDiagnosticWithoutDraft,
     });
 
     return persistTerminalOutcome(text, marker);
@@ -1690,6 +1697,8 @@ export async function processChat(
           timed_out: true,
           title: "Timed out",
           draft_recovered: Boolean(draftText),
+          attempts_used: streamState.lastRecoveryMeta?.attemptsUsed,
+          classifier: streamState.lastRecoveryMeta?.lastClassifier ?? null,
         }
       : reason === "rate-limit"
         ? buildErrorOutcomeMarker(detail || "rate limit", {
