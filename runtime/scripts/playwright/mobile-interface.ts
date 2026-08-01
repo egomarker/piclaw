@@ -183,7 +183,25 @@ async function showWorkspace(page: Page, compactWorkspace: boolean) {
   const rect = await readRect(page, '.workspace-sidebar');
   assert(rect.width > 0 && rect.height > 0,
     `Workspace has zero geometry: ${JSON.stringify(rect)}.`);
-  return rect;
+
+  const firstRow = sidebar.locator('.workspace-row').first();
+  await firstRow.waitFor({ state: 'visible', timeout: 20000 });
+  const treeSizing = await sidebar.evaluate((element) => {
+    const row = element.querySelector<HTMLElement>('.workspace-row');
+    return {
+      scale: element.getAttribute('data-workspace-scale'),
+      configuredRowHeight: getComputedStyle(element).getPropertyValue('--workspace-row-height').trim(),
+      measuredRowHeight: row ? Math.round(row.getBoundingClientRect().height) : 0,
+    };
+  });
+  assert(
+    treeSizing.scale === 'comfortable'
+      && treeSizing.configuredRowHeight === '44px'
+      && treeSizing.measuredRowHeight === 44,
+    `Mobile comfortable Workspace row sizing is wrong: ${JSON.stringify(treeSizing)}.`,
+  );
+
+  return { ...rect, treeSizing };
 }
 
 async function openWorkspaceFile(page: Page, filePath: string) {

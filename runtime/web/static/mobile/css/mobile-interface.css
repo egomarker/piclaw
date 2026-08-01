@@ -43,6 +43,11 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     grid-row: 1 / -1;
 }
 
+/* Give comfortable Mobile tree rows full touch-target height. */
+.app-shell.mobile-interface > .workspace-sidebar[data-workspace-scale="comfortable"] {
+    --workspace-row-height: 44px;
+}
+
 .app-shell.mobile-interface > .workspace-splitter {
     grid-column: 2;
     grid-row: 1 / -1;

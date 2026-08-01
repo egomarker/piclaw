@@ -7,6 +7,7 @@ const classicEditorCss = readFileSync(join(import.meta.dir, '../../web/static/cl
 const classicWorkspaceCss = readFileSync(join(import.meta.dir, '../../web/static/classic/css/workspace.css'), 'utf8');
 const mobileCss = readFileSync(join(import.meta.dir, '../../web/static/mobile/css/mobile-interface.css'), 'utf8');
 const visualEditorCss = readFileSync(join(import.meta.dir, '../../web/static/visual/css/editor.css'), 'utf8');
+const visualWorkspaceCss = readFileSync(join(import.meta.dir, '../../web/static/visual/css/workspace.css'), 'utf8');
 
 test('authenticated styles load the isolated Mobile layout last', () => {
   expect(appCss.trimEnd().endsWith('@import "../../static/mobile/css/mobile-interface.css";')).toBe(true);
@@ -46,6 +47,14 @@ test('Mobile CSS overlays continuously mounted Chat, Workspace, pane, preview, a
   expect(mobileCss).toContain('.app-shell.mobile-interface.mobile-workspace-active > .editor-pane-container > .editor-pane-host');
   expect(mobileCss).toContain('> .editor-pane-container > .dock-panel');
   expect(mobileCss).toContain('grid-row: 6');
+});
+
+test('Only Mobile raises comfortable Workspace rows to touch-target height', () => {
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface > \.workspace-sidebar\[data-workspace-scale="comfortable"\] \{\s*--workspace-row-height: 44px;/);
+  expect(classicWorkspaceCss).toMatch(/\.workspace-sidebar\[data-workspace-scale="comfortable"\] \{[^}]*--workspace-row-height: 28px;/s);
+  expect(visualWorkspaceCss).toMatch(/\.workspace-sidebar\[data-workspace-scale="comfortable"\] \{[^}]*--workspace-row-height: 28px;/s);
+  expect(classicWorkspaceCss).not.toContain('--workspace-row-height: 44px');
+  expect(visualWorkspaceCss).not.toContain('--workspace-row-height: 44px');
 });
 
 test('Mobile uses a full Workspace tab surface and insets tree content without moving its scrollbar', () => {
