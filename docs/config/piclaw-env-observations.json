@@ -78,13 +78,13 @@
       "semanticReaderOccurrences": 0
     },
     "tooling": {
-      "referencedNames": 75,
-      "directReaderNames": 40,
-      "directReaderOccurrences": 67,
+      "referencedNames": 76,
+      "directReaderNames": 41,
+      "directReaderOccurrences": 73,
       "helperReaderNames": 0,
       "helperReaderOccurrences": 0,
-      "semanticReaderNames": 40,
-      "semanticReaderOccurrences": 67
+      "semanticReaderNames": 41,
+      "semanticReaderOccurrences": 73
     },
     "docsDeploy": {
       "referencedNames": 122,
@@ -1697,13 +1697,15 @@
       "scopes": {
         "tooling": {
           "referenced": true,
-          "directReaders": 1,
+          "directReaders": 2,
           "helperReaders": 0,
-          "semanticReaders": 1,
+          "semanticReaders": 2,
           "files": [
+            "runtime/scripts/playwright/mobile-interface.ts",
             "runtime/scripts/playwright/terminal-reopen.ts"
           ],
           "readerFiles": [
+            "runtime/scripts/playwright/mobile-interface.ts",
             "runtime/scripts/playwright/terminal-reopen.ts"
           ]
         }
@@ -1714,13 +1716,15 @@
       "scopes": {
         "tooling": {
           "referenced": true,
-          "directReaders": 1,
+          "directReaders": 2,
           "helperReaders": 0,
-          "semanticReaders": 1,
+          "semanticReaders": 2,
           "files": [
+            "runtime/scripts/playwright/mobile-interface.ts",
             "runtime/scripts/playwright/terminal-reopen.ts"
           ],
           "readerFiles": [
+            "runtime/scripts/playwright/mobile-interface.ts",
             "runtime/scripts/playwright/terminal-reopen.ts"
           ]
         }
@@ -2187,10 +2191,11 @@
         },
         "tooling": {
           "referenced": true,
-          "directReaders": 4,
+          "directReaders": 5,
           "helperReaders": 0,
-          "semanticReaders": 4,
+          "semanticReaders": 5,
           "files": [
+            "runtime/scripts/playwright/mobile-interface.ts",
             "runtime/scripts/playwright/terminal-reopen-multicycle.ts",
             "runtime/scripts/playwright/terminal-reopen-race.ts",
             "runtime/scripts/playwright/terminal-reopen.ts",
@@ -2198,6 +2203,7 @@
             "scripts/audit-piclaw-env-surface.ts"
           ],
           "readerFiles": [
+            "runtime/scripts/playwright/mobile-interface.ts",
             "runtime/scripts/playwright/terminal-reopen-multicycle.ts",
             "runtime/scripts/playwright/terminal-reopen-race.ts",
             "runtime/scripts/playwright/terminal-reopen.ts",
@@ -2714,6 +2720,23 @@
       }
     },
     {
+      "name": "PICLAW_MOBILE_E2E_FILE",
+      "scopes": {
+        "tooling": {
+          "referenced": true,
+          "directReaders": 1,
+          "helperReaders": 0,
+          "semanticReaders": 1,
+          "files": [
+            "runtime/scripts/playwright/mobile-interface.ts"
+          ],
+          "readerFiles": [
+            "runtime/scripts/playwright/mobile-interface.ts"
+          ]
+        }
+      }
+    },
+    {
       "name": "PICLAW_MULTICYCLE_COUNT",
       "scopes": {
         "tooling": {
@@ -2937,15 +2960,17 @@
       "scopes": {
         "tooling": {
           "referenced": true,
-          "directReaders": 3,
+          "directReaders": 4,
           "helperReaders": 0,
-          "semanticReaders": 3,
+          "semanticReaders": 4,
           "files": [
+            "runtime/scripts/playwright/mobile-interface.ts",
             "runtime/scripts/playwright/terminal-reopen-multicycle.ts",
             "runtime/scripts/playwright/terminal-reopen-race.ts",
             "runtime/scripts/playwright/terminal-reopen.ts"
           ],
           "readerFiles": [
+            "runtime/scripts/playwright/mobile-interface.ts",
             "runtime/scripts/playwright/terminal-reopen-multicycle.ts",
             "runtime/scripts/playwright/terminal-reopen-race.ts",
             "runtime/scripts/playwright/terminal-reopen.ts"
@@ -6392,10 +6417,11 @@
         },
         "tooling": {
           "referenced": true,
-          "directReaders": 4,
+          "directReaders": 5,
           "helperReaders": 0,
-          "semanticReaders": 4,
+          "semanticReaders": 5,
           "files": [
+            "runtime/scripts/playwright/mobile-interface.ts",
             "runtime/scripts/playwright/terminal-reopen-multicycle.ts",
             "runtime/scripts/playwright/terminal-reopen-race.ts",
             "runtime/scripts/playwright/terminal-reopen.ts",
@@ -6403,6 +6429,7 @@
             "scripts/audit-piclaw-env-surface.ts"
           ],
           "readerFiles": [
+            "runtime/scripts/playwright/mobile-interface.ts",
             "runtime/scripts/playwright/terminal-reopen-multicycle.ts",
             "runtime/scripts/playwright/terminal-reopen-race.ts",
             "runtime/scripts/playwright/terminal-reopen.ts",
