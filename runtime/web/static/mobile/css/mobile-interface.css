@@ -43,8 +43,12 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     grid-row: 1 / -1;
 }
 
-/* Give comfortable Mobile tree rows full touch-target height. */
+/* Keep the comfortable explorer rail compact, but give its full tab touch-target rows. */
 .app-shell.mobile-interface > .workspace-sidebar[data-workspace-scale="comfortable"] {
+    --workspace-row-height: 30px;
+}
+
+.app-shell.mobile-interface.mobile-workspace-active > .workspace-sidebar[data-workspace-scale="comfortable"] {
     --workspace-row-height: 44px;
 }
 
