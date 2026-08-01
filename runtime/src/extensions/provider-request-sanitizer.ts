@@ -15,10 +15,20 @@
  */
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
+import { createLogger } from "../utils/logger.js";
+
+const log = createLogger("extensions.provider-request-sanitizer");
+
 type PayloadRecord = Record<string, unknown>;
 
 export interface ProviderPayloadSanitizerOptions {
   stripConnectionBoundIds?: boolean;
+  onOrphanFunctionCallOutputs?: (diagnostic: OrphanFunctionCallOutputDiagnostic) => void;
+}
+
+export interface OrphanFunctionCallOutputDiagnostic {
+  removedCount: number;
+  callIds: string[];
 }
 
 function isPayloadRecord(value: unknown): value is PayloadRecord {
@@ -28,6 +38,10 @@ function isPayloadRecord(value: unknown): value is PayloadRecord {
 function cloneWithoutId(item: PayloadRecord): PayloadRecord {
   const { id: _id, ...rest } = item;
   return rest;
+}
+
+function readNonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 /**
@@ -40,6 +54,8 @@ export function sanitizeProviderPayloadItemIds(
 ): unknown {
   if (!isPayloadRecord(payload) || !Array.isArray(payload.input)) return payload;
 
+  const precedingFunctionCallIds = new Set<string>();
+  const orphanCallIds: string[] = [];
   const seen = new Set<string>();
   let changed = false;
   const input: unknown[] = [];
@@ -52,6 +68,19 @@ export function sanitizeProviderPayloadItemIds(
 
     const itemType = typeof rawItem.type === "string" ? rawItem.type : "";
     const itemId = typeof rawItem.id === "string" && rawItem.id ? rawItem.id : null;
+
+    if (itemType === "function_call") {
+      const callId = readNonEmptyString(rawItem.call_id);
+      if (callId) precedingFunctionCallIds.add(callId);
+    }
+    if (itemType === "function_call_output") {
+      const callId = readNonEmptyString(rawItem.call_id);
+      if (callId && !precedingFunctionCallIds.has(callId)) {
+        changed = true;
+        orphanCallIds.push(callId);
+        continue;
+      }
+    }
 
     if (options.stripConnectionBoundIds) {
       if (itemType === "reasoning") {
@@ -78,6 +107,12 @@ export function sanitizeProviderPayloadItemIds(
     input.push(cloneWithoutId(rawItem));
   }
 
+  if (orphanCallIds.length > 0) {
+    options.onOrphanFunctionCallOutputs?.({
+      removedCount: orphanCallIds.length,
+      callIds: [...new Set(orphanCallIds)].slice(0, 32).map((callId) => callId.slice(0, 128)),
+    });
+  }
   if (!changed) return payload;
   return { ...payload, input };
 }
@@ -90,6 +125,18 @@ function needsStatelessCopilotReplay(ctx: unknown): boolean {
 export const providerRequestSanitizer: ExtensionFactory = (pi) => {
   pi.on("before_provider_request", async (event, ctx) => sanitizeProviderPayloadItemIds(
     event.payload,
-    { stripConnectionBoundIds: needsStatelessCopilotReplay(ctx) },
+    {
+      stripConnectionBoundIds: needsStatelessCopilotReplay(ctx),
+      onOrphanFunctionCallOutputs: (diagnostic) => {
+        log.warn("Removed orphan OpenAI Responses function-call outputs before provider dispatch", {
+          operation: "provider_request_sanitizer.orphan_function_call_outputs",
+          removedCount: diagnostic.removedCount,
+          callIds: diagnostic.callIds,
+          provider: ctx.model?.provider,
+          modelId: ctx.model?.id,
+          api: ctx.model?.api,
+        });
+      },
+    },
   ));
 };
