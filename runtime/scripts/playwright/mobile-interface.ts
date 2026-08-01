@@ -607,6 +607,8 @@ async function runKeyboardScenario(page: Page, filePath: string) {
       height: Math.round(rect.height),
     };
   });
+  assert(inactiveFileCloseState.anyCoarsePointer,
+    `Touch scenario did not expose a coarse pointer: ${JSON.stringify(inactiveFileCloseState)}.`);
   assert(inactiveFileCloseState.opacity === '1' && inactiveFileCloseState.pointerEvents === 'auto',
     `Inactive Mobile close target is not visibly interactive: ${JSON.stringify(inactiveFileCloseState)}.`);
   assert(inactiveFileCloseState.width === 30 && inactiveFileCloseState.height === 30,
