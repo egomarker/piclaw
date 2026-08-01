@@ -193,8 +193,16 @@ crashCheck.close();
 
 const partialPath = join(config.out, "partial-migration.db");
 const partial = new Database(partialPath, { create: true, strict: true });
-try { partial.transaction(() => partial.exec("CREATE TABLE partial_a(id INTEGER); INSERT INTO partial_a VALUES (1); INSERT INTO missing VALUES (1)"))(); } catch {}
-faults.partialMigration = { passed: !partial.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='partial_a'").get() };
+let partialMigrationError = "";
+try {
+  partial.transaction(() => partial.exec("CREATE TABLE partial_a(id INTEGER); INSERT INTO partial_a VALUES (1); INSERT INTO missing VALUES (1)"))();
+} catch (error) {
+  partialMigrationError = String(error);
+}
+faults.partialMigration = {
+  passed: partialMigrationError.length > 0 && !partial.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='partial_a'").get(),
+  error: partialMigrationError,
+};
 partial.close();
 
 const corruptSeparate = join(config.out, "corrupt-separate.db");
