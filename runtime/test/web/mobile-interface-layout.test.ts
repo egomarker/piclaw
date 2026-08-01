@@ -49,13 +49,15 @@ test('Mobile CSS overlays continuously mounted Chat, Workspace, pane, preview, a
   expect(mobileCss).toContain('grid-row: 6');
 });
 
-test('Only Mobile differentiates comfortable Workspace tab and explorer rail row heights', () => {
-  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface > \.workspace-sidebar\[data-workspace-scale="comfortable"\] \{\s*--workspace-row-height: 30px;/);
-  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface\.mobile-workspace-active > \.workspace-sidebar\[data-workspace-scale="comfortable"\] \{\s*--workspace-row-height: 44px;/);
-  expect(classicWorkspaceCss).toMatch(/\.workspace-sidebar\[data-workspace-scale="comfortable"\] \{[^}]*--workspace-row-height: 28px;/s);
-  expect(visualWorkspaceCss).toMatch(/\.workspace-sidebar\[data-workspace-scale="comfortable"\] \{[^}]*--workspace-row-height: 28px;/s);
+test('Only Mobile differentiates comfortable Workspace tab and explorer rail sizing', () => {
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface > \.workspace-sidebar\[data-workspace-scale="comfortable"\] \{\s*--workspace-row-height: 30px;\s*--workspace-tree-font-size: 14px;/);
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface\.mobile-workspace-active > \.workspace-sidebar\[data-workspace-scale="comfortable"\] \{\s*--workspace-row-height: 44px;\s*--workspace-tree-font-size: 16px;/);
+  expect(classicWorkspaceCss).toMatch(/\.workspace-sidebar\[data-workspace-scale="comfortable"\] \{[^}]*--workspace-tree-font-size: 13px;[^}]*--workspace-row-height: 28px;/s);
+  expect(visualWorkspaceCss).toMatch(/\.workspace-sidebar\[data-workspace-scale="comfortable"\] \{[^}]*--workspace-tree-font-size: 13px;[^}]*--workspace-row-height: 28px;/s);
   expect(classicWorkspaceCss).not.toContain('--workspace-row-height: 44px');
   expect(visualWorkspaceCss).not.toContain('--workspace-row-height: 44px');
+  expect(classicWorkspaceCss).not.toMatch(/--workspace-tree-font-size: (?:14|16)px/);
+  expect(visualWorkspaceCss).not.toMatch(/--workspace-tree-font-size: (?:14|16)px/);
 });
 
 test('Mobile uses a full Workspace tab surface and insets tree content without moving its scrollbar', () => {

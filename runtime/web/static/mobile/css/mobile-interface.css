@@ -43,13 +43,15 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     grid-row: 1 / -1;
 }
 
-/* Keep the comfortable explorer rail compact, but give its full tab touch-target rows. */
+/* Keep the comfortable explorer rail compact, but give its full tab larger touch targets. */
 .app-shell.mobile-interface > .workspace-sidebar[data-workspace-scale="comfortable"] {
     --workspace-row-height: 30px;
+    --workspace-tree-font-size: 14px;
 }
 
 .app-shell.mobile-interface.mobile-workspace-active > .workspace-sidebar[data-workspace-scale="comfortable"] {
     --workspace-row-height: 44px;
+    --workspace-tree-font-size: 16px;
 }
 
 .app-shell.mobile-interface > .workspace-splitter {
