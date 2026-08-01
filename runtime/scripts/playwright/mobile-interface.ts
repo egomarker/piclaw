@@ -297,7 +297,7 @@ async function verifyAttachToChatControl(
   }));
   assert(
     workspaceSelectionState.ariaPressed === String(expectWorkspaceSelectionAttachment)
-      && workspaceSelectionState.disabled === expectWorkspaceSelectionAttachment,
+      && !workspaceSelectionState.disabled,
     `Workspace selection attachment state is wrong: ${JSON.stringify(workspaceSelectionState)}.`,
   );
 
