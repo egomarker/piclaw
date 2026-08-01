@@ -5,6 +5,7 @@ import {
   confirmWorkspaceEntryMove,
   getWorkspaceTouchStartIntent,
   mergeWorkspaceTreeUpdates,
+  shouldFocusWorkspaceTreeAfterActivation,
 } from '../../web/src/components/workspace-explorer.ts';
 
 function createRowTarget(options: { path?: string; type?: string; isDragHandle?: boolean } = {}) {
@@ -60,6 +61,37 @@ test('workspace touch start ignores rows that are being renamed', () => {
   }, '/workspace/demo.md');
 
   expect(intent).toBeNull();
+});
+
+test('Mobile Workspace does not force tree focus after touch activation', () => {
+  expect(shouldFocusWorkspaceTreeAfterActivation({
+    mobileInterface: true,
+    lastTouchActivationAt: 10_000,
+    now: 10_250,
+  })).toBe(false);
+  expect(shouldFocusWorkspaceTreeAfterActivation({
+    mobileInterface: true,
+    event: { sourceCapabilities: { firesTouchEvents: true } },
+  })).toBe(false);
+  expect(shouldFocusWorkspaceTreeAfterActivation({
+    mobileInterface: true,
+    event: { pointerType: 'touch' },
+  })).toBe(false);
+});
+
+test('Workspace preserves focus for Classic and non-touch Mobile activation', () => {
+  expect(shouldFocusWorkspaceTreeAfterActivation({
+    mobileInterface: false,
+    event: { pointerType: 'touch' },
+    lastTouchActivationAt: 10_000,
+    now: 10_250,
+  })).toBe(true);
+  expect(shouldFocusWorkspaceTreeAfterActivation({
+    mobileInterface: true,
+    event: { pointerType: 'mouse' },
+    lastTouchActivationAt: 10_000,
+    now: 11_001,
+  })).toBe(true);
 });
 
 test('workspace move confirmation describes file and folder destinations', () => {
