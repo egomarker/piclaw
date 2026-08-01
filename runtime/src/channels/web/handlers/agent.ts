@@ -234,7 +234,11 @@ function buildErrorOutcomeMarker(
   const providerError = formatProviderError(errorText);
   if (providerError) {
     return buildTurnOutcomeMarker({
-      kind: providerError.category === "network" ? "network" : "provider",
+      kind: providerError.category === "network"
+        ? "network"
+        : providerError.category === "session_corruption"
+          ? "context"
+          : "provider",
       label: providerError.label,
       title: providerError.title,
       detail: providerError.detail,
@@ -1545,8 +1549,9 @@ export async function processChat(
     const inlineDiagnostic = markerKind === "tool_budget"
       || markerClassifier === "tool_history_pressure"
       || markerClassifier === "budget_exhausted";
-    const showDiagnosticWithoutDraft = markerType === "timeout_marker"
-      && markerClassifier === "budget_exhausted";
+    const showDiagnosticWithoutDraft = (markerType === "timeout_marker"
+      && markerClassifier === "budget_exhausted")
+      || markerKind === "context";
     const text = buildFailureVisibleText({
       draftText,
       title,

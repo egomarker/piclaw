@@ -3,6 +3,9 @@ import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 import { sanitizeProviderPayloadItemIds } from "./provider-request-sanitizer.js";
 import { recordProviderResponseDiagnostics } from "./provider-response-diagnostics.js";
+import { createLogger } from "../utils/logger.js";
+
+const log = createLogger("extensions.model-execution-runtime");
 
 export type RuntimeModelExecutor = Pick<ModelRuntime, "streamSimple" | "completeSimple">;
 
@@ -18,6 +21,16 @@ function composeOptions(model: Model<Api>, options: ModelsSimpleStreamOptions = 
       const transformed = callerPayload ? await callerPayload(payload, effectiveModel) : undefined;
       return sanitizeProviderPayloadItemIds(transformed ?? payload, {
         stripConnectionBoundIds: effectiveModel.provider === "github-copilot" && effectiveModel.api === "openai-responses",
+        onOrphanFunctionCallOutputs: (diagnostic) => {
+          log.warn("Removed orphan OpenAI Responses function-call outputs before bundled model execution", {
+            operation: "model_execution_runtime.orphan_function_call_outputs",
+            removedCount: diagnostic.removedCount,
+            callIds: diagnostic.callIds,
+            provider: effectiveModel.provider,
+            modelId: effectiveModel.id,
+            api: effectiveModel.api,
+          });
+        },
       });
     },
     onResponse: async (response, selectedModel) => {

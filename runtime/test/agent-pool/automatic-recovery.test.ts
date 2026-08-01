@@ -214,11 +214,12 @@ test("retries unknown failures without compaction when there is no context press
   expect(decision.strategy).toBe("retry");
 });
 
-test("classifies invalid-request and aborted failures as non-recoverable", () => {
+test("classifies invalid-request, orphan Responses output and aborted failures as non-recoverable", () => {
   expect(isNonRecoverableFailure("invalid_request_error: malformed schema")).toBe(true);
+  expect(isNonRecoverableFailure("OpenAI API error (400): No tool call found for function call output with call_id call_orphan.")).toBe(true);
   expect(isNonRecoverableFailure("Request was aborted")).toBe(true);
 
-  const decision = decideAutomaticRecovery({
+  const abortedDecision = decideAutomaticRecovery({
     config: DEFAULT_AUTOMATIC_RECOVERY_CONFIG,
     errorText: "Request was aborted",
     recoveryAttemptsUsed: 0,
@@ -229,9 +230,40 @@ test("classifies invalid-request and aborted failures as non-recoverable", () =>
     },
   });
 
-  expect(decision.recover).toBe(false);
-  expect(decision.classifier).toBe("non_recoverable");
-  expect(decision.strategy).toBeNull();
+  expect(abortedDecision.recover).toBe(false);
+  expect(abortedDecision.classifier).toBe("non_recoverable");
+  expect(abortedDecision.strategy).toBeNull();
+
+  const orphanOutputDecision = decideAutomaticRecovery({
+    config: DEFAULT_AUTOMATIC_RECOVERY_CONFIG,
+    errorText: "OpenAI API error (400): No tool call found for function call output with call_id call_orphan.",
+    recoveryAttemptsUsed: 0,
+    elapsedMs: 1000,
+    snapshot: {
+      hadToolActivity: false,
+      hadPartialOutput: false,
+    },
+  });
+
+  expect(orphanOutputDecision.recover).toBe(false);
+  expect(orphanOutputDecision.classifier).toBe("session_corruption");
+  expect(orphanOutputDecision.strategy).toBeNull();
+
+  const orphanOutputDuringContextPressure = decideAutomaticRecovery({
+    config: DEFAULT_AUTOMATIC_RECOVERY_CONFIG,
+    errorText: "OpenAI API error (400): No tool call found for function call output with call_id call_orphan.",
+    recoveryAttemptsUsed: 1,
+    elapsedMs: 2000,
+    snapshot: {
+      hadToolActivity: true,
+      hadPartialOutput: false,
+      sawCompactionIntent: true,
+      compactionErrorMessage: "prior recovery compaction",
+    },
+  });
+  expect(orphanOutputDuringContextPressure.recover).toBe(false);
+  expect(orphanOutputDuringContextPressure.classifier).toBe("session_corruption");
+  expect(orphanOutputDuringContextPressure.strategy).toBeNull();
 });
 
 test("preserves a mixed terminal-side-effect and failed-tool outcome", () => {

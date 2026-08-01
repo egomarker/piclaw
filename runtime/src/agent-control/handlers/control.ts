@@ -18,6 +18,7 @@ import { createMedia, getChatCompactionBackoff } from "../../db.js";
 import { getChatJid } from "../../core/chat-context.js";
 import { requestGracefulShutdown } from "../../runtime/shutdown-registry.js";
 import { createLogger, debugSuppressedError } from "../../utils/logger.js";
+import { isOrphanFunctionCallOutputError } from "../../utils/provider-payload-errors.js";
 import { killTrackedProcesses } from "../../utils/process-tracker.js";
 import { abortLiveSshCommand } from "../../extensions/ssh-core.js";
 import { pruneOrphanToolResults } from "../../agent-pool/orphan-tool-results.js";
@@ -236,12 +237,13 @@ function createCompactReportAttachment(
 
 function isSessionCorruptionError(message: string | null | undefined): boolean {
   if (!message) return false;
-  return /invalid_request_error|\b400\b.*(?:image|media_type|content|base64|tool_use_id|tool_result|tool_use)|media_type|image.*source|unexpected [`'\"]?tool_use_id[`'\"]?|tool_result.*corresponding.*tool_use/i.test(message);
+  return isOrphanFunctionCallOutputError(message)
+    || /invalid_request_error|\b400\b.*(?:image|media_type|content|base64|tool_use_id|tool_result|tool_use)|media_type|image.*source|unexpected [`'\"]?tool_use_id[`'\"]?|tool_result.*corresponding.*tool_use/i.test(message);
 }
 
 function formatCompactFailureMessage(message: string): string {
   if (!isSessionCorruptionError(message)) return message;
-  return `⚠️ API error — the session may be corrupted:\n\n\`${message.slice(0, 500)}\`\n\nPiClaw now prunes orphaned tool-result blocks and corrupt image blocks automatically when you use \`/compact\`. If the rewritten session still fails, use \`/new-session\` to start fresh.`;
+  return `⚠️ API error — the session may be corrupted:\n\n\`${message.slice(0, 500)}\`\n\nPiClaw prunes orphaned agent tool results, corrupt image blocks, and orphan OpenAI Responses outputs before the repaired context is sent. Run \`/compact\`; if the rewritten session still fails, use \`/new-session\` to start fresh.`;
 }
 
 function getActiveCompactionBackoffMessage(chatJid: string, now = Date.now()): string | null {

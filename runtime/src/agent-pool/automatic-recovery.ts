@@ -3,6 +3,7 @@
  */
 
 import { getRecoveryPolicyConfig } from "../core/config.js";
+import { isOrphanFunctionCallOutputError } from "../utils/provider-payload-errors.js";
 import type { AgentRecoveryMetadata } from "./contracts.js";
 
 export interface RetryBackoffSettings {
@@ -32,6 +33,7 @@ export type RecoveryClassifier =
   | "auth_config"
   | "recovery_suppressed"
   | "stale_progress_watchdog"
+  | "session_corruption"
   | "non_recoverable"
   | "tool_activity"
   | "completed_turn_output"
@@ -155,7 +157,8 @@ export function isProviderAuthConfigFailure(errorText: string | null | undefined
 
 export function isNonRecoverableFailure(errorText: string | null | undefined): boolean {
   if (!errorText) return false;
-  return /request was aborted|\baborted\b|no model selected|select a model|use \/model|use \/login|model not found|deployment.*not found|policy|safety|blocked by policy|invalid_request_error|malformed|schema|unsupported model|capability mismatch|permission denied|missing required file|file not found/i.test(errorText);
+  return isOrphanFunctionCallOutputError(errorText)
+    || /request was aborted|\baborted\b|no model selected|select a model|use \/model|use \/login|model not found|deployment.*not found|policy|safety|blocked by policy|invalid_request_error|malformed|schema|unsupported model|capability mismatch|permission denied|missing required file|file not found/i.test(errorText);
 }
 
 export interface RecoveryDecisionInput {
@@ -198,6 +201,15 @@ export function decideAutomaticRecovery(input: RecoveryDecisionInput): RecoveryD
       classifier: "stale_progress_watchdog",
       strategy: null,
       reason: "Stale-progress watchdog already interrupted the active run; do not retry automatically.",
+    };
+  }
+
+  if (isOrphanFunctionCallOutputError(errorText)) {
+    return {
+      recover: false,
+      classifier: "session_corruption",
+      strategy: null,
+      reason: "Provider rejected an orphan function-call output; unchanged automatic retries cannot repair the payload.",
     };
   }
 

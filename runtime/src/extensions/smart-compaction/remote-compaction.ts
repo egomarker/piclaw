@@ -4,7 +4,10 @@ import { convertResponsesMessages, convertResponsesTools } from "@earendil-works
 import type { Api, Model, Tool } from "@earendil-works/pi-ai";
 import { convertToLlm, type FileOperations, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { ModelRequestAuth } from "../../utils/model-auth.js";
+import { createLogger } from "../../utils/logger.js";
 import { sanitizeProviderPayloadItemIds } from "../provider-request-sanitizer.js";
+
+const log = createLogger("ext.smart-compaction.remote");
 
 export const REMOTE_COMPACTION_SUMMARY_SENTINEL =
   "[Piclaw provider-native compaction state. The opaque canonical context is injected at request time.]";
@@ -473,6 +476,17 @@ export async function attemptRemoteCompaction(options: {
     ...(options.systemPrompt?.trim() ? { instructions: options.systemPrompt } : {}),
     ...(options.tools?.length ? { tools: convertResponsesTools(options.tools as readonly Tool[], { strict: null }) } : {}),
     parallel_tool_calls: true,
+  }, {
+    onOrphanFunctionCallOutputs: (diagnostic) => {
+      log.warn("Removed orphan OpenAI Responses function-call outputs before remote compaction", {
+        operation: "remote_compaction.orphan_function_call_outputs",
+        removedCount: diagnostic.removedCount,
+        callIds: diagnostic.callIds,
+        provider: options.model.provider,
+        modelId: options.model.id,
+        api: options.model.api,
+      });
+    },
   });
   const combined = createCombinedAbortSignal(options.signal, options.timeoutMs);
   try {
