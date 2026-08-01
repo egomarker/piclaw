@@ -58,7 +58,11 @@ test("session tool-result env limits reject malformed suffixes at module initial
     });
 
     runtime.session.sessionManager.appendMessage(makeAssistantMessage("seed"));
-    runtime.session.sessionManager.appendMessage(makeLargeTextToolResult());
+    const sanitized = await runtime.session.extensionRunner.emitMessageEnd({
+      type: "message_end",
+      message: makeLargeTextToolResult(),
+    });
+    runtime.session.sessionManager.appendMessage(sanitized ?? makeLargeTextToolResult());
 
     const sessionText = readFileSync(runtime.session.sessionFile!, "utf8");
     const context = runtime.session.sessionManager.buildSessionContext();
