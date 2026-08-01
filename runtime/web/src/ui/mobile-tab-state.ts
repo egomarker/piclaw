@@ -1,4 +1,5 @@
 import type { TabState } from '../panes/tab-store.js';
+import { isWorkspaceEditorPath } from './app-extension-ui-browser-actions.js';
 
 export const MOBILE_CHAT_TAB_ID = 'piclaw://chat';
 export const MOBILE_WORKSPACE_TAB_ID = 'piclaw://workspace';
@@ -37,6 +38,28 @@ export interface MobileTabState extends TabState {
   contextMenu?: boolean;
   surface?: 'chat' | 'workspace' | 'pane';
 }
+
+export type MobileAttachToChatActionKind = 'hidden' | 'available' | 'dirty' | 'attached';
+
+export interface MobileAttachToChatActionState {
+  kind: MobileAttachToChatActionKind;
+  path: string | null;
+  label: string | null;
+  title: string | null;
+  ariaLabel: string | null;
+  disabled: boolean;
+  pressed: boolean;
+}
+
+const HIDDEN_MOBILE_ATTACH_TO_CHAT_ACTION: Readonly<MobileAttachToChatActionState> = Object.freeze({
+  kind: 'hidden',
+  path: null,
+  label: null,
+  title: null,
+  ariaLabel: null,
+  disabled: true,
+  pressed: false,
+});
 
 export const MOBILE_CHAT_TAB: Readonly<MobileTabState> = Object.freeze({
   id: MOBILE_CHAT_TAB_ID,
@@ -121,4 +144,89 @@ export function isMobileWorkspaceTabId(id: string | null | undefined): boolean {
 
 export function isMobilePermanentTabId(id: string | null | undefined): boolean {
   return isMobileChatTabId(id) || isMobileWorkspaceTabId(id);
+}
+
+/** Resolve the single Mobile tab-toolbar action from the selected real file tab. */
+export function resolveMobileAttachToChatAction(options: {
+  tabs?: TabState[] | null;
+  activeId?: string | null;
+  fileRefs?: unknown[] | null;
+  detachedTabs?: { has: (id: string) => boolean } | null;
+}): MobileAttachToChatActionState {
+  const activeId = typeof options.activeId === 'string' ? options.activeId.trim() : '';
+  if (!activeId || isMobilePermanentTabId(activeId)) return HIDDEN_MOBILE_ATTACH_TO_CHAT_ACTION;
+
+  const tab = Array.isArray(options.tabs)
+    ? options.tabs.find((candidate) => candidate?.id === activeId)
+    : null;
+  const path = typeof tab?.path === 'string' ? tab.path.trim() : '';
+  if (!tab || !isWorkspaceEditorPath(path)) return HIDDEN_MOBILE_ATTACH_TO_CHAT_ACTION;
+  if (options.detachedTabs?.has?.(tab.id) || options.detachedTabs?.has?.(path)) {
+    return HIDDEN_MOBILE_ATTACH_TO_CHAT_ACTION;
+  }
+
+  const label = typeof tab.label === 'string' && tab.label.trim()
+    ? tab.label.trim()
+    : path.split('/').pop() || path;
+  const attached = Array.isArray(options.fileRefs)
+    && options.fileRefs.some((candidate) => typeof candidate === 'string' && candidate.trim() === path);
+
+  if (attached) {
+    const ariaLabel = `${label} is attached to Chat`;
+    return {
+      kind: 'attached',
+      path,
+      label,
+      title: ariaLabel,
+      ariaLabel,
+      disabled: true,
+      pressed: true,
+    };
+  }
+
+  if (tab.dirty) {
+    const ariaLabel = `Save ${label} before attaching to Chat`;
+    return {
+      kind: 'dirty',
+      path,
+      label,
+      title: ariaLabel,
+      ariaLabel,
+      disabled: true,
+      pressed: false,
+    };
+  }
+
+  const ariaLabel = `Attach ${label} to Chat`;
+  return {
+    kind: 'available',
+    path,
+    label,
+    title: ariaLabel,
+    ariaLabel,
+    disabled: false,
+    pressed: false,
+  };
+}
+
+/** Apply a validated Mobile document attachment before returning to Chat. */
+export function attachMobileDocumentToChat(options: {
+  path: string;
+  addFileRef: (path: string) => void;
+  activateTab: (id: string) => void;
+  focusCompose?: () => void;
+}): boolean {
+  const path = typeof options.path === 'string' ? options.path.trim() : '';
+  if (!isWorkspaceEditorPath(path)) return false;
+  if (typeof options.addFileRef !== 'function' || typeof options.activateTab !== 'function') return false;
+
+  try {
+    options.addFileRef(path);
+    options.activateTab(MOBILE_CHAT_TAB_ID);
+    options.focusCompose?.();
+    return true;
+  } catch (error) {
+    console.warn('[mobile-tabs] failed to attach document to Chat', error);
+    return false;
+  }
 }

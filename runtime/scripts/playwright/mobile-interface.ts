@@ -190,6 +190,80 @@ async function openWorkspaceFile(page: Page, filePath: string) {
   return { fileLabel, paneRect };
 }
 
+async function verifyAttachToChatControl(page: Page, filePath: string, fileLabel: string, exerciseFlow = false) {
+  const action = page.locator('[data-testid="mobile-attach-to-chat"]');
+  await action.waitFor({ state: 'visible', timeout: 15000 });
+
+  // Workspace selection can add a reference before the editor opens. Clear that
+  // setup state so this scenario exercises the explicit tab-toolbar action.
+  if (await action.getAttribute('aria-pressed') === 'true') {
+    await page.locator('#piclaw-mobile-surface-tab-chat').click();
+    const existingPill = page.locator(`.compose-file-pill[title=${JSON.stringify(filePath)}]`);
+    await existingPill.waitFor({ state: 'visible', timeout: 15000 });
+    await existingPill.locator('.compose-file-remove').click();
+    await tabByLabel(page, fileLabel).click();
+    await page.waitForFunction(() => {
+      const control = document.querySelector<HTMLButtonElement>('[data-testid="mobile-attach-to-chat"]');
+      return control && !control.disabled && control.getAttribute('aria-pressed') === 'false';
+    }, undefined, { timeout: 15000 });
+  }
+
+  const initialState = await action.evaluate((element) => {
+    const next = element.nextElementSibling;
+    return {
+      title: element.getAttribute('title'),
+      ariaLabel: element.getAttribute('aria-label'),
+      ariaPressed: element.getAttribute('aria-pressed'),
+      disabled: (element as HTMLButtonElement).disabled,
+      immediatelyBeforeTerminalDock: Boolean(
+        next?.classList.contains('tab-strip-dock-toggle')
+        && !next.classList.contains('tab-strip-attach-to-chat'),
+      ),
+    };
+  });
+  assert(initialState.title === `Attach ${fileLabel} to Chat`,
+    `Attach to Chat has the wrong title: ${JSON.stringify(initialState)}.`);
+  assert(initialState.ariaLabel === initialState.title && initialState.ariaPressed === 'false' && !initialState.disabled,
+    `Attach to Chat has the wrong available state: ${JSON.stringify(initialState)}.`);
+  assert(initialState.immediatelyBeforeTerminalDock,
+    'Attach to Chat is not immediately before Terminal Dock.');
+  assert(await page.locator('.attach-editor-btn').count() === 0,
+    'Mobile still renders the old composer Attach open file action.');
+
+  if (!exerciseFlow) return { initialState };
+
+  await action.click();
+  await page.waitForFunction((path) => {
+    const chat = document.getElementById('piclaw-mobile-surface-tab-chat');
+    const pill = document.querySelector<HTMLElement>('.compose-file-pill');
+    const textarea = document.querySelector<HTMLTextAreaElement>('.compose-box textarea');
+    return chat?.getAttribute('aria-selected') === 'true'
+      && pill?.getAttribute('title') === path
+      && document.activeElement === textarea;
+  }, filePath, { timeout: 15000 });
+  const normalFilePickerVisible = await page.locator('label.icon-btn[title="Attach file"]').isVisible();
+  assert(normalFilePickerVisible, 'The normal Mobile Attach file picker disappeared.');
+
+  await tabByLabel(page, fileLabel).click();
+  await page.waitForFunction((label) => {
+    const action = document.querySelector<HTMLButtonElement>('[data-testid="mobile-attach-to-chat"]');
+    const active = Array.from(document.querySelectorAll<HTMLElement>('[role="tab"]'))
+      .find((tab) => tab.querySelector('.tab-label')?.textContent?.trim() === label);
+    return active?.getAttribute('aria-selected') === 'true'
+      && action?.disabled
+      && action.getAttribute('aria-pressed') === 'true';
+  }, fileLabel, { timeout: 15000 });
+  const attachedState = await action.evaluate((element) => ({
+    title: element.getAttribute('title'),
+    ariaPressed: element.getAttribute('aria-pressed'),
+    disabled: (element as HTMLButtonElement).disabled,
+  }));
+  assert(attachedState.title === `${fileLabel} is attached to Chat`,
+    `Attach to Chat has the wrong attached state: ${JSON.stringify(attachedState)}.`);
+
+  return { initialState, attachedState, normalFilePickerVisible };
+}
+
 async function openTerminalFromMenu(page: Page) {
   const menuButton = page.locator('[data-testid="hamburger"]');
   await menuButton.waitFor({ state: 'visible', timeout: 15000 });
@@ -314,15 +388,23 @@ async function runViewportScenario(
   compactWorkspace: boolean,
   filePath: string,
   verifyTerminalDockControl = false,
+  exerciseAttachToChat = false,
 ) {
   const terminalDockControl = verifyTerminalDockControl
     ? await verifyComposeTerminalDockControl(page)
     : null;
   const workspaceRect = await showWorkspace(page, compactWorkspace);
   const opened = await openWorkspaceFile(page, filePath);
+  const attachToChatControl = await verifyAttachToChatControl(
+    page,
+    filePath,
+    opened.fileLabel,
+    exerciseAttachToChat,
+  );
   return {
     compactWorkspace,
     terminalDockControl,
+    attachToChatControl,
     workspaceRect,
     ...opened,
   };
@@ -332,9 +414,17 @@ async function runKeyboardScenario(page: Page, filePath: string) {
   await showWorkspace(page, true);
   const opened = await openWorkspaceFile(page, filePath);
   const terminalTab = await openTerminalFromMenu(page);
+  // Terminal mount intentionally claims focus. Wait for that lifecycle to settle,
+  // then move focus back to the tab before exercising roving-key navigation.
+  await page.waitForTimeout(100);
   await terminalTab.focus();
+  await page.waitForFunction(() => {
+    const active = document.activeElement as HTMLElement | null;
+    return active?.getAttribute('role') === 'tab'
+      && active.querySelector('.tab-label')?.textContent?.trim() === 'Terminal';
+  }, undefined, { timeout: 15000 });
 
-  await page.keyboard.press('Home');
+  await terminalTab.press('Home');
   await page.waitForFunction(() => {
     const chat = document.getElementById('piclaw-mobile-surface-tab-chat');
     return document.activeElement === chat && chat?.getAttribute('aria-selected') === 'true';
@@ -352,6 +442,8 @@ async function runKeyboardScenario(page: Page, filePath: string) {
     return terminal?.getAttribute('aria-selected') === 'true';
   }, undefined, { timeout: 15000 });
   const terminalState = await collectTabState(page);
+  assert(await page.locator('[data-testid="mobile-attach-to-chat"]').count() === 0,
+    'Attach to Chat remains visible for the synthetic Terminal tab.');
   assert(terminalState.chatPanel?.ariaHidden === 'true' && terminalState.chatPanel?.inert === true,
     `Chat panel remains exposed while Terminal is active: ${JSON.stringify(terminalState.chatPanel)}.`);
   assert(terminalState.panePanel?.ariaHidden === null && terminalState.panePanel?.inert === false,
@@ -411,6 +503,7 @@ async function main() {
           page,
           viewport.compactWorkspace,
           args.filePath,
+          viewport.name === 'phone-portrait',
           viewport.name === 'phone-portrait',
         ),
       }));

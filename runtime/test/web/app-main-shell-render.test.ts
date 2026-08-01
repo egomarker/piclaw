@@ -504,6 +504,83 @@ test('Classic shell does not opt into Mobile tab or panel accessibility behavior
   expect(paneHostVNode?.props.inert).toBeUndefined();
 });
 
+test('only Mobile moves selected-document attachment from ComposeBox to the tab toolbar', () => {
+  const documentTab = {
+    id: 'notes/plan.md',
+    path: 'notes/plan.md',
+    label: 'plan.md',
+    dirty: false,
+    pinned: false,
+  };
+  const addFileRef = mock(() => {});
+  const handleTabActivate = mock(() => {});
+  const attachActiveEditorFile = mock(() => {});
+  const findControls = (overrides: Record<string, unknown>) => {
+    const tree = renderMainShell(createMainShellRenderOptions({
+      chatOnlyMode: false,
+      editorOpen: true,
+      showEditorPaneContainer: true,
+      tabStripTabs: [documentTab],
+      tabStripActiveId: documentTab.id,
+      displayTabStripTabs: [documentTab],
+      displayTabStripActiveId: documentTab.id,
+      addFileRef,
+      handleTabActivate,
+      attachActiveEditorFile,
+      ...overrides,
+    }));
+    let composeVNode: any = null;
+    let tabStripVNode: any = null;
+    walkVNodes(tree, (node) => {
+      if (node.type === ComposeBox) composeVNode = node;
+      if (node.type === TabStrip) tabStripVNode = node;
+    });
+    return { composeVNode, tabStripVNode };
+  };
+
+  const mobile = findControls({ uiMode: 'mobile' });
+  expect(mobile.composeVNode?.props.activeEditorPath).toBeNull();
+  expect(mobile.composeVNode?.props.onAttachEditorFile).toBeUndefined();
+  expect(mobile.tabStripVNode?.props.toolbarAction).toEqual(expect.objectContaining({
+    testId: 'mobile-attach-to-chat',
+    className: 'tab-strip-attach-to-chat',
+    title: 'Attach plan.md to Chat',
+    disabled: false,
+    pressed: false,
+  }));
+  mobile.tabStripVNode.props.toolbarAction.onClick();
+  expect(addFileRef).toHaveBeenCalledWith('notes/plan.md');
+  expect(handleTabActivate).toHaveBeenCalledWith(MOBILE_CHAT_TAB_ID);
+
+  const classic = findControls({ uiMode: 'classic' });
+  expect(classic.composeVNode?.props.activeEditorPath).toBe(documentTab.id);
+  expect(classic.composeVNode?.props.onAttachEditorFile).toBe(attachActiveEditorFile);
+  expect(classic.tabStripVNode?.props.toolbarAction).toBeUndefined();
+});
+
+test('Mobile tab toolbar does not offer document attachment from Chat or synthetic panes', () => {
+  const assertHidden = (tab: any, activeId: string) => {
+    const tree = renderMainShell(createMainShellRenderOptions({
+      chatOnlyMode: false,
+      editorOpen: true,
+      showEditorPaneContainer: true,
+      uiMode: 'mobile',
+      tabStripTabs: tab ? [tab] : [],
+      tabStripActiveId: tab?.id || null,
+      displayTabStripTabs: tab ? [tab] : [],
+      displayTabStripActiveId: activeId,
+    }));
+    let tabStripVNode: any = null;
+    walkVNodes(tree, (node) => {
+      if (node.type === TabStrip) tabStripVNode = node;
+    });
+    expect(tabStripVNode?.props.toolbarAction).toBeUndefined();
+  };
+
+  assertHidden({ id: 'notes/plan.md', path: 'notes/plan.md', label: 'plan.md', dirty: false }, MOBILE_CHAT_TAB_ID);
+  assertHidden({ id: 'piclaw://terminal', path: 'piclaw://terminal', label: 'Terminal', dirty: false }, 'piclaw://terminal');
+});
+
 test('only Mobile exposes the terminal dock control in ComposeBox', () => {
   const toggleDock = mock(() => {});
   const findComposeVNode = (overrides: Record<string, unknown>) => {

@@ -8,9 +8,11 @@ import {
   MOBILE_WORKSPACE_PANEL_ID,
   MOBILE_WORKSPACE_TAB_ELEMENT_ID,
   MOBILE_WORKSPACE_TAB_ID,
+  attachMobileDocumentToChat,
   composeMobileTabStripTabs,
   getMobileSurfacePanelId,
   getMobileSurfaceTabElementId,
+  resolveMobileAttachToChatAction,
   resolveMobileSurfaceAfterClose,
   resolveSurfaceAfterWorkspaceTabDisabled,
 } from '../../web/src/ui/mobile-tab-state.js';
@@ -92,4 +94,90 @@ test('rotating an active Workspace tab into wide mode restores the last valid pr
     surfaceId: 'one',
     openWorkspaceRail: false,
   });
+});
+
+test('Mobile exposes Attach to Chat only for the selected workspace document', () => {
+  const documentTab = {
+    ...tab('notes/plan.md'),
+    label: 'plan.md',
+  };
+
+  expect(resolveMobileAttachToChatAction({
+    tabs: [documentTab],
+    activeId: documentTab.id,
+    fileRefs: [],
+  })).toEqual({
+    kind: 'available',
+    path: 'notes/plan.md',
+    label: 'plan.md',
+    title: 'Attach plan.md to Chat',
+    ariaLabel: 'Attach plan.md to Chat',
+    disabled: false,
+    pressed: false,
+  });
+
+  expect(resolveMobileAttachToChatAction({
+    tabs: [{ ...documentTab, dirty: true }],
+    activeId: documentTab.id,
+    fileRefs: [],
+  })).toEqual(expect.objectContaining({
+    kind: 'dirty',
+    title: 'Save plan.md before attaching to Chat',
+    disabled: true,
+    pressed: false,
+  }));
+
+  expect(resolveMobileAttachToChatAction({
+    tabs: [{ ...documentTab, dirty: true }],
+    activeId: documentTab.id,
+    fileRefs: ['notes/plan.md'],
+  })).toEqual(expect.objectContaining({
+    kind: 'attached',
+    title: 'plan.md is attached to Chat',
+    disabled: true,
+    pressed: true,
+  }));
+});
+
+test('Mobile hides Attach to Chat for permanent, synthetic, missing, and detached tabs', () => {
+  const documentTab = tab('notes/plan.md');
+  const hiddenCases = [
+    { tabs: [documentTab], activeId: MOBILE_CHAT_TAB_ID },
+    { tabs: [documentTab], activeId: MOBILE_WORKSPACE_TAB_ID },
+    { tabs: [tab('piclaw://terminal')], activeId: 'piclaw://terminal' },
+    { tabs: [tab('piclaw://vnc')], activeId: 'piclaw://vnc' },
+    { tabs: [tab('/outside/workspace.md')], activeId: '/outside/workspace.md' },
+    { tabs: [documentTab], activeId: 'missing.md' },
+    { tabs: [documentTab], activeId: documentTab.id, detachedTabs: new Map([[documentTab.id, {}]]) },
+  ];
+
+  for (const options of hiddenCases) {
+    expect(resolveMobileAttachToChatAction(options)).toEqual(expect.objectContaining({
+      kind: 'hidden',
+      path: null,
+    }));
+  }
+});
+
+test('Mobile attaches the selected document before activating and focusing Chat', () => {
+  const calls: string[] = [];
+  expect(attachMobileDocumentToChat({
+    path: 'notes/plan.md',
+    addFileRef: (path) => { calls.push(`attach:${path}`); },
+    activateTab: (id) => { calls.push(`activate:${id}`); },
+    focusCompose: () => { calls.push('focus'); },
+  })).toBe(true);
+  expect(calls).toEqual([
+    'attach:notes/plan.md',
+    `activate:${MOBILE_CHAT_TAB_ID}`,
+    'focus',
+  ]);
+
+  calls.length = 0;
+  expect(attachMobileDocumentToChat({
+    path: 'piclaw://terminal',
+    addFileRef: (path) => { calls.push(`attach:${path}`); },
+    activateTab: (id) => { calls.push(`activate:${id}`); },
+  })).toBe(false);
+  expect(calls).toEqual([]);
 });

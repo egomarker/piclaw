@@ -99,6 +99,15 @@ test('terminal dock menu item is only exposed from the active tab context menu',
   expect(source).toContain("${dockVisible ? 'Hide terminal dock' : 'Show terminal dock'}");
 });
 
+test('the optional contextual toolbar action renders immediately before Terminal Dock', () => {
+  const source = readFileSync(new URL('../../web/src/components/tab-strip.ts', import.meta.url), 'utf8');
+  const actionIndex = source.indexOf('${toolbarAction && html`');
+  const dockIndex = source.indexOf('${onToggleDock && html`', actionIndex);
+  expect(actionIndex).toBeGreaterThan(-1);
+  expect(dockIndex).toBeGreaterThan(actionIndex);
+  expect(source.slice(actionIndex, dockIndex)).toContain('tab-strip-toolbar-action');
+});
+
 test('getStandaloneTabUrl still resolves standalone viewer routes for non-addon files', () => {
   expect(getStandaloneTabUrl('/workspace/report.docx', { hasPopOutTab: true })).toBe(
     '/office-viewer/?url=' + encodeURIComponent('/workspace/raw?path=%2Fworkspace%2Freport.docx') + '&name=report.docx',

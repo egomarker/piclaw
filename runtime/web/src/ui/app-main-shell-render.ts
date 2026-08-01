@@ -16,12 +16,15 @@ import { SystemMetersHud } from '../components/system-meters-hud.js';
 import {
   MOBILE_CHAT_PANEL_ID,
   MOBILE_CHAT_TAB_ELEMENT_ID,
+  MOBILE_CHAT_TAB_ID,
   MOBILE_PANE_PANEL_ID,
   MOBILE_SURFACE_TABLIST_ID,
   MOBILE_WORKSPACE_PANEL_ID,
   MOBILE_WORKSPACE_TAB_ELEMENT_ID,
+  attachMobileDocumentToChat,
   getMobileSurfacePanelId,
   getMobileSurfaceTabElementId,
+  resolveMobileAttachToChatAction,
 } from './mobile-tab-state.js';
 
 export interface MainShellRenderOptions {
@@ -319,6 +322,55 @@ export function renderMainShell(options: MainShellRenderOptions): any {
   const mobilePaneLabelledBy = mobileTabAccessibilityEnabled && tabStripActiveId
     ? getMobileSurfaceTabElementId(tabStripActiveId)
     : undefined;
+  const mobileAttachToChatState = uiMode === 'mobile' && !chatOnlyMode
+    ? resolveMobileAttachToChatAction({
+      tabs: tabStripTabs,
+      activeId: displayTabStripActiveId,
+      fileRefs,
+      detachedTabs,
+    })
+    : null;
+  const focusMobileCompose = () => {
+    const run = () => {
+      if (typeof document === 'undefined') return;
+      const textarea = document.querySelector('.chat-surface-footer .compose-box textarea') as HTMLTextAreaElement | null;
+      if (!textarea) return;
+      try {
+        textarea.focus({ preventScroll: true });
+      } catch {
+        textarea.focus();
+      }
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+    else setTimeout(run, 0);
+  };
+  const mobileAttachToChatAction = mobileAttachToChatState && mobileAttachToChatState.kind !== 'hidden'
+    ? {
+      testId: 'mobile-attach-to-chat',
+      className: 'tab-strip-attach-to-chat',
+      title: mobileAttachToChatState.title || 'Attach selected document to Chat',
+      ariaLabel: mobileAttachToChatState.ariaLabel || 'Attach selected document to Chat',
+      disabled: mobileAttachToChatState.disabled,
+      pressed: mobileAttachToChatState.pressed,
+      onClick: mobileAttachToChatState.kind === 'available' && mobileAttachToChatState.path
+        ? () => attachMobileDocumentToChat({
+          path: mobileAttachToChatState.path || '',
+          addFileRef,
+          activateTab: handleTabActivate,
+          focusCompose: focusMobileCompose,
+        })
+        : undefined,
+      icon: html`
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <path d="M3.25 1.75h5l3.5 3.5v7.5a1.5 1.5 0 0 1-1.5 1.5h-7a1.5 1.5 0 0 1-1.5-1.5v-9.5a1.5 1.5 0 0 1 1.5-1.5z"/>
+          <path d="M8.25 1.75v3.5h3.5"/>
+          ${mobileAttachToChatState.pressed
+            ? html`<polyline points="4.75 9 6.5 10.75 9.75 7.25"/>`
+            : html`<path d="M5 9h4.5M7.25 6.75v4.5"/>`}
+        </svg>
+      `,
+    }
+    : undefined;
 
   const handleComposeFocus = () => {
     if (isIOSDevice()) return;
@@ -426,6 +478,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
               paneOverrides=${tabPaneOverrides}
               detachedTabs=${detachedTabs}
               onReattachTab=${handleReattachPane}
+              toolbarAction=${mobileAttachToChatAction}
               onToggleDock=${hasDockPanes ? toggleDock : undefined}
               dockVisible=${hasDockPanes && dockVisible}
               onToggleZen=${toggleZenMode}
@@ -676,8 +729,8 @@ export function renderMainShell(options: MainShellRenderOptions): any {
           onDeleteSession=${handlePruneCurrentBranch}
           onPurgeArchivedSession=${handlePurgeArchivedBranch}
           onRestoreSession=${handleRestoreBranch}
-          activeEditorPath=${chatOnlyMode ? null : tabStripActiveId}
-          onAttachEditorFile=${chatOnlyMode ? undefined : attachActiveEditorFile}
+          activeEditorPath=${chatOnlyMode || uiMode === 'mobile' ? null : tabStripActiveId}
+          onAttachEditorFile=${chatOnlyMode || uiMode === 'mobile' ? undefined : attachActiveEditorFile}
           onOpenFilePill=${openFileFromPill}
           followupQueueCount=${followupQueueCount}
           followupQueueItems=${followupQueueItems}

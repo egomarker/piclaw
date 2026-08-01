@@ -171,6 +171,20 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     color: var(--accent-color);
 }
 
+/* Keep the Mobile-only attachment state visible when repeat attachment is disabled. */
+.app-shell.mobile-interface .tab-strip-attach-to-chat.active {
+    color: var(--accent-color);
+}
+
+.app-shell.mobile-interface .tab-strip-attach-to-chat:disabled {
+    cursor: default;
+    opacity: 0.58;
+}
+
+.app-shell.mobile-interface .tab-strip-attach-to-chat.active:disabled {
+    opacity: 1;
+}
+
 /* Enlarge close targets only when no mouse or other fine pointer is available. */
 @media (pointer: coarse) and (not (any-pointer: fine)) {
     .app-shell.mobile-interface .tab-close {
