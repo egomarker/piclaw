@@ -253,8 +253,7 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
         grid-column: var(--mobile-content-column);
         grid-row: 2;
         align-self: stretch;
-        margin-right: 16px;
-        width: calc(100% - 16px);
+        width: 100%;
         min-width: 0;
         max-width: none;
         height: auto;
@@ -263,6 +262,10 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
         visibility: visible;
         transform: none;
         pointer-events: auto;
+    }
+
+    .app-shell.mobile-interface.mobile-workspace-active > .workspace-sidebar > .workspace-tree {
+        padding-right: 16px;
     }
 
     .app-shell.mobile-interface > .editor-pane-container > .tab-strip {

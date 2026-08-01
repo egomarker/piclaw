@@ -41,10 +41,12 @@ test('Mobile CSS overlays continuously mounted Chat, Workspace, pane, preview, a
   expect(mobileCss).toContain('grid-row: 6');
 });
 
-test('Mobile uses a full Workspace tab surface except at desktop-width landscape', () => {
+test('Mobile uses a full Workspace tab surface and insets tree content without moving its scrollbar', () => {
   expect(mobileCss).toContain('@media (max-width: 1023.98px), (orientation: portrait)');
-  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface\.mobile-workspace-active > \.workspace-sidebar \{[^}]*display: flex;[^}]*grid-row: 2;[^}]*margin-right: 16px;[^}]*width: calc\(100% - 16px\);/s);
-  expect(mobileCss).not.toMatch(/\.app-shell\.mobile-interface\.mobile-workspace-active > \.workspace-sidebar \{[^}]*margin-top:/s);
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface\.mobile-workspace-active > \.workspace-sidebar \{[^}]*display: flex;[^}]*grid-row: 2;[^}]*width: 100%;/s);
+  expect(mobileCss).not.toMatch(/\.app-shell\.mobile-interface\.mobile-workspace-active > \.workspace-sidebar \{[^}]*margin-(?:top|right):/s);
+  expect(classicWorkspaceCss).toMatch(/\.workspace-tree \{[^}]*overflow: auto;/s);
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface\.mobile-workspace-active > \.workspace-sidebar > \.workspace-tree \{\s*padding-right: 16px;/);
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface > \.workspace-sidebar \{\s*display: none;/);
 });
 
