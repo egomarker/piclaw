@@ -431,7 +431,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
       `}
       ${!chatOnlyMode && html`
         <${WorkspaceExplorer}
-          onFileSelect=${addFileRef}
+          onFileSelect=${workspaceTabMode ? undefined : addFileRef}
           onFolderSelect=${addFolderRef}
           visible=${workspaceVisible}
           active=${workspaceVisible || (!workspaceTabMode && editorOpen)}
