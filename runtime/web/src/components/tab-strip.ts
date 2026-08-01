@@ -36,6 +36,7 @@ import { canTabEditSource, getTabEditSourceLabel } from '../ui/tab-source-editor
  * @param {Map<string, string>} [props.paneOverrides] - Per-tab pane override ids.
  * @param {Map<string, unknown>} [props.detachedTabs] - Tabs currently detached into standalone windows.
  * @param {(id: string) => void} [props.onReattachTab] - Reattach a detached tab to the main window.
+ * @param {{testId?: string, className?: string, title: string, ariaLabel?: string, disabled?: boolean, pressed?: boolean, icon?: unknown, onClick?: () => void}} [props.toolbarAction] - Optional contextual action rendered before the dock control.
  * @param {() => void} [props.onToggleDock] - Toggle terminal dock visibility.
  * @param {boolean} [props.dockVisible] - Whether the terminal dock is currently visible.
  * @param {(id: string, label?: string) => void} [props.onPopOutTab] - Open a tab in a standalone window.
@@ -125,7 +126,7 @@ export function handleRovingTabKeyDown(event, { tabs, currentId, focusTab, onAct
     return true;
 }
 
-export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, onCloseAll, onTogglePin, onTogglePreview, onToggleDiff, onEditSource, previewTabs, diffTabs, paneOverrides, detachedTabs, onReattachTab, onToggleDock, dockVisible, onToggleZen, zenMode, onPopOutTab, rovingFocus = false, restoreFocusAfterClose = false, tabListId, tabListLabel, getTabElementId, getTabPanelId }) {
+export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, onCloseAll, onTogglePin, onTogglePreview, onToggleDiff, onEditSource, previewTabs, diffTabs, paneOverrides, detachedTabs, onReattachTab, toolbarAction, onToggleDock, dockVisible, onToggleZen, zenMode, onPopOutTab, rovingFocus = false, restoreFocusAfterClose = false, tabListId, tabListLabel, getTabElementId, getTabPanelId }) {
     const { t } = useTranslation();
     const [contextMenu, setContextMenu] = useState(null);
     const stripRef = useRef(null);
@@ -376,8 +377,22 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
                     `}
                 </div>
             `)}
+            ${(toolbarAction || onToggleDock) && html`<div class="tab-strip-spacer"></div>`}
+            ${toolbarAction && html`
+                <button
+                    type="button"
+                    class=${`tab-strip-dock-toggle tab-strip-toolbar-action${toolbarAction.className ? ` ${toolbarAction.className}` : ''}${toolbarAction.pressed ? ' active' : ''}`}
+                    data-testid=${toolbarAction.testId}
+                    onClick=${toolbarAction.onClick}
+                    title=${toolbarAction.title}
+                    aria-label=${toolbarAction.ariaLabel || toolbarAction.title}
+                    aria-pressed=${toolbarAction.pressed ? 'true' : 'false'}
+                    disabled=${toolbarAction.disabled === true}
+                >
+                    ${toolbarAction.icon}
+                </button>
+            `}
             ${onToggleDock && html`
-                <div class="tab-strip-spacer"></div>
                 <button
                     class=${`tab-strip-dock-toggle${dockVisible ? ' active' : ''}`}
                     onClick=${onToggleDock}
