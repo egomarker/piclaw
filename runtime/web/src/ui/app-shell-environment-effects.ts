@@ -10,6 +10,7 @@ import { useTimestampRefresh } from './app-helpers.js';
 import { watchReturnToApp, watchStandaloneWebAppMode } from './app-resume.js';
 import { installStandaloneMobileViewportFix } from './mobile-viewport.js';
 import { BTW_SESSION_KEY } from './app-shell-state.js';
+import { formatSessionBrowserTitle } from './browser-title.js';
 
 interface RefBox<T> {
   current: T;
@@ -34,7 +35,8 @@ export interface UseAppShellEnvironmentEffectsOptions {
   activeChatJidRef: RefBox<string>;
   userProfile: any;
   userProfileRef: RefBox<any>;
-  brandingRef: RefBox<{ title: string | null; avatarBase: string | null }>;
+  brandingRef: RefBox<{ title: string | null; agentName: string | null; avatarBase: string | null }>;
+  currentSessionHandle?: unknown;
   panePopoutMode?: boolean;
 }
 
@@ -142,6 +144,7 @@ export function useAppShellEnvironmentEffects(options: UseAppShellEnvironmentEff
     userProfile,
     userProfileRef,
     brandingRef,
+    currentSessionHandle,
     panePopoutMode = false,
   } = options;
 
@@ -227,22 +230,32 @@ export function useAppShellEnvironmentEffects(options: UseAppShellEnvironmentEff
     userProfileRef.current = userProfile || { name: 'You', avatar_url: null, avatar_background: null };
   }, [userProfile, userProfileRef]);
 
+  const applyDocumentTitle = useCallback((agentName: string) => {
+    if (typeof document === 'undefined') return;
+    const title = formatSessionBrowserTitle(agentName, currentSessionHandle);
+    if (brandingRef.current.title === title) return;
+    if (shouldApplyBrandingDocumentTitle({
+      panePopoutMode,
+      search: typeof window !== 'undefined' ? window.location.search : '',
+    })) {
+      document.title = title;
+    }
+    brandingRef.current.title = title;
+  }, [brandingRef, currentSessionHandle, panePopoutMode]);
+
+  useEffect(() => {
+    applyDocumentTitle(brandingRef.current.agentName || 'PiClaw');
+  }, [applyDocumentTitle, brandingRef]);
+
   const applyBranding = useCallback((name: string, avatarUrl: string | null, avatarVersion: string | null = null) => {
     if (typeof document === 'undefined') return;
 
-    const title = (name || '').trim() || 'PiClaw';
-    if (brandingRef.current.title !== title) {
-      if (shouldApplyBrandingDocumentTitle({
-        panePopoutMode,
-        search: typeof window !== 'undefined' ? window.location.search : '',
-      })) {
-        document.title = title;
-        const titleMeta = document.querySelector('meta[name="apple-mobile-web-app-title"]');
-        if (titleMeta && titleMeta.getAttribute('content') !== title) {
-          titleMeta.setAttribute('content', title);
-        }
-      }
-      brandingRef.current.title = title;
+    const agentName = (name || '').trim() || 'PiClaw';
+    brandingRef.current.agentName = agentName;
+    applyDocumentTitle(agentName);
+    const titleMeta = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+    if (titleMeta && titleMeta.getAttribute('content') !== agentName) {
+      titleMeta.setAttribute('content', agentName);
     }
 
     const avatarKey = avatarUrl ? `${avatarUrl}|${avatarVersion || ''}` : '';
@@ -251,7 +264,7 @@ export function useAppShellEnvironmentEffects(options: UseAppShellEnvironmentEff
       const buster = avatarVersion || Date.now();
       applyBrandingIconLinks(document, buster);
     }
-  }, [brandingRef]);
+  }, [applyDocumentTitle, brandingRef]);
 
   return {
     applyBranding,

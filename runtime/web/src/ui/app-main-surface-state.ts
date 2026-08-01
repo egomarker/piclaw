@@ -146,7 +146,7 @@ export function useMainAppSurfaceState(options: {
   const btwAbortRef = useRef<AbortController | null>(null);
   const lastActivityTimerRef = useRef<any>(null);
   const lastActivityTokenRef = useRef(0);
-  const brandingRef = useRef({ title: null as string | null, avatarBase: null as string | null });
+  const brandingRef = useRef({ title: null as string | null, agentName: null as string | null, avatarBase: null as string | null });
   const intentToastTimerRef = useRef<any>(null);
   const renameBranchInFlightRef = useRef(false);
   const [isRenamingBranch, setIsRenamingBranch] = useState(false);
