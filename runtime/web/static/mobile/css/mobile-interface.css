@@ -166,6 +166,16 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     padding-right: 10px;
 }
 
+/* Enlarge close targets only when no mouse or other fine pointer is available. */
+@media (pointer: coarse) and (not (any-pointer: fine)) {
+    .app-shell.mobile-interface .tab-close {
+        width: 30px;
+        height: 30px;
+        min-width: 30px;
+        min-height: 30px;
+    }
+}
+
 /* Reserve the fixed hamburger's hit area whenever it sits over main content. */
 .app-shell.mobile-interface.workspace-collapsed > .editor-pane-container > .tab-strip {
     padding-left: max(44px, calc(env(safe-area-inset-left, 0px) + 44px));
