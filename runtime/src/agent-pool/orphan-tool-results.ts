@@ -26,25 +26,11 @@ interface AgentMessageRecord {
   tool_use_id?: unknown;
 }
 
-interface SessionFileEntryRecord {
-  type?: unknown;
-  id?: unknown;
-  parentId?: unknown;
-  message?: AgentMessageRecord;
-  [key: string]: unknown;
-}
-
-interface SessionWithInternalAgent {
+interface SessionWithAgentState {
   agent?: {
     state?: {
       messages?: AgentMessageRecord[];
     };
-    replaceMessages?: (messages: AgentMessageRecord[]) => void;
-  };
-  sessionManager?: {
-    fileEntries?: SessionFileEntryRecord[];
-    byId?: Map<string, SessionFileEntryRecord>;
-    _rewriteFile?: () => void;
   };
 }
 
@@ -83,20 +69,15 @@ function isToolResultMessage(message: AgentMessageRecord): boolean {
   return message.role === "toolResult" || message.role === "tool_result";
 }
 
-function collectToolCallIds(messages: readonly AgentMessageRecord[], fileEntries: readonly SessionFileEntryRecord[]): Set<string> {
+function collectToolCallIds(messages: readonly AgentMessageRecord[]): Set<string> {
   const toolCallIds = new Set<string>();
-  const scanMessage = (msg: AgentMessageRecord | undefined) => {
-    if (!Array.isArray(msg?.content)) return;
-    for (const block of msg.content) {
+  for (const message of messages) {
+    if (!Array.isArray(message?.content)) continue;
+    for (const block of message.content) {
       const contentBlock = block as AgentContentBlock;
-      if (!contentBlock || typeof contentBlock !== "object") continue;
-      if (!isToolCallBlock(contentBlock)) continue;
+      if (!contentBlock || typeof contentBlock !== "object" || !isToolCallBlock(contentBlock)) continue;
       for (const id of getToolCallIds(contentBlock)) toolCallIds.add(id);
     }
-  };
-  for (const msg of messages) scanMessage(msg);
-  for (const entry of fileEntries) {
-    if (entry?.type === "message") scanMessage(entry.message);
   }
   return toolCallIds;
 }
@@ -131,83 +112,32 @@ function pruneMessageArray(messages: readonly AgentMessageRecord[], toolCallIds:
   return { messages: pruned, prunedCount };
 }
 
-function pruneSessionFileEntries(fileEntries: SessionFileEntryRecord[], byId: Map<string, SessionFileEntryRecord> | undefined, toolCallIds: Set<string>): number {
-  let prunedCount = 0;
-  for (let index = 0; index < fileEntries.length; index += 1) {
-    const entry = fileEntries[index];
-    if (!entry || entry.type !== "message") continue;
-    const message = entry.message;
-    if (!message || typeof message !== "object") continue;
-
-    if (isToolResultMessage(message)) {
-      if (hasKnownToolCallId(message, toolCallIds)) continue;
-      const tombstone: SessionFileEntryRecord = { type: "pruned", id: entry.id, parentId: entry.parentId ?? null };
-      fileEntries[index] = tombstone;
-      if (typeof entry.id === "string") byId?.set(entry.id, tombstone);
-      prunedCount += 1;
-      continue;
-    }
-
-    if (!Array.isArray(message.content)) continue;
-    let contentChanged = false;
-    const filteredContent = message.content.filter((block) => {
-      const contentBlock = block as AgentContentBlock;
-      if (!contentBlock || typeof contentBlock !== "object") return true;
-      if (!isToolResultBlock(contentBlock)) return true;
-      if (hasKnownToolCallId(contentBlock, toolCallIds)) return true;
-      contentChanged = true;
-      prunedCount += 1;
-      return false;
-    });
-    if (!contentChanged) continue;
-    const nextEntry: SessionFileEntryRecord = { ...entry, message: { ...message, content: filteredContent } };
-    fileEntries[index] = nextEntry;
-    if (typeof entry.id === "string") byId?.set(entry.id, nextEntry);
-  }
-  return prunedCount;
-}
-
-/** Remove toolResult entries that no longer correspond to assistant tool calls. */
+/**
+ * Remove tool results that no longer correspond to assistant tool calls from
+ * the live prompt state. Persisted JSONL remains append-only and is repaired
+ * only before a SessionManager opens, never through its private indexes.
+ */
 export function pruneOrphanToolResults(session: AgentSession, chatJid: string): number {
-  const internalSession = session as unknown as SessionWithInternalAgent;
+  const internalSession = session as unknown as SessionWithAgentState;
   const messages = internalSession.agent?.state?.messages;
-  const fileEntries = internalSession.sessionManager?.fileEntries;
-  const hasMessages = Array.isArray(messages) && messages.length > 0;
-  const hasFileEntries = Array.isArray(fileEntries) && fileEntries.length > 0;
-  if (!hasMessages && !hasFileEntries) return 0;
+  if (!Array.isArray(messages) || messages.length === 0) return 0;
 
-  const toolCallIds = collectToolCallIds(hasMessages ? messages : [], hasFileEntries ? fileEntries : []);
-  let prunedCount = 0;
-  let prunedMessages: AgentMessageRecord[] | null = null;
-
-  if (hasMessages) {
-    const result = pruneMessageArray(messages, toolCallIds);
-    prunedMessages = result.messages;
-    prunedCount += result.prunedCount;
-  }
-
-  if (hasFileEntries) {
-    prunedCount += pruneSessionFileEntries(fileEntries, internalSession.sessionManager?.byId, toolCallIds);
-  }
-
-  if (prunedCount === 0) return 0;
+  const result = pruneMessageArray(messages, collectToolCallIds(messages));
+  if (result.prunedCount === 0) return 0;
 
   try {
-    if (prunedMessages) internalSession.agent?.replaceMessages?.(prunedMessages);
-    if (hasFileEntries) internalSession.sessionManager?._rewriteFile?.();
-    log.warn("Pruned orphan tool results from session state", {
+    internalSession.agent!.state!.messages = result.messages;
+    log.warn("Pruned orphan tool results from live agent state", {
       operation: "orphan_tool_results.prune",
       chatJid,
-      prunedCount,
-      prunedAgentMessages: hasMessages ? true : undefined,
-      prunedSessionFileEntries: hasFileEntries ? true : undefined,
+      prunedCount: result.prunedCount,
     });
-    return prunedCount;
+    return result.prunedCount;
   } catch (error) {
-    log.warn("Failed to prune orphan tool results from session state", {
+    log.warn("Failed to prune orphan tool results from live agent state", {
       operation: "orphan_tool_results.prune",
       chatJid,
-      prunedCount,
+      prunedCount: result.prunedCount,
       err: error,
     });
     return 0;

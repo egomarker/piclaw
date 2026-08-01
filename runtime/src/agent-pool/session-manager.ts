@@ -577,18 +577,6 @@ export class AgentSessionManager {
           this.options.onWarn?.("Failed to dispose session persistence resource", { ...details, err });
         }
         closeOpenAICodexWebSocketSessions(sessionId);
-        // C3: Break references to large session data immediately after disposal
-        // so GC can reclaim the fileEntries array and byId Map without waiting
-        // for all closure/reference paths to be collected.
-        try {
-          const sm = runtime.session.sessionManager as unknown as { fileEntries?: unknown[]; byId?: Map<unknown, unknown> };
-          if (sm.fileEntries) sm.fileEntries = [];
-          if (sm.byId) sm.byId.clear();
-          const agent = (runtime.session as unknown as { agent?: { state?: { messages?: unknown[] } } }).agent;
-          if (agent?.state?.messages) agent.state.messages = [];
-        } catch (err) {
-          this.options.onWarn?.("Failed to release disposed session references", { err });
-        }
       }
       return firstError;
     })();
@@ -669,7 +657,11 @@ export class AgentSessionManager {
           });
         }
 
-        forcePersistSessionFile(session);
+        const persistedSessionFile = forcePersistSessionFile(session);
+        if (persistedSessionFile) {
+          const reopened = await runtime.switchSession(persistedSessionFile);
+          if (reopened.cancelled) throw new Error("Deferred branch session could not be reopened after persistence.");
+        }
         finalizeClaimedDeferredBranchSeed(chatJid);
         this.invalidDeferredBranchSeedErrors.delete(chatJid);
         return true;
