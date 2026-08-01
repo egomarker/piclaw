@@ -1,0 +1,331 @@
+{
+  "version": 1,
+  "generatedAt": "2026-08-01T20:02:15.749Z",
+  "host": "unknown",
+  "corpus": {
+    "sourceDirectory": "/workspace/.tmp/session-corpus-bounded",
+    "files": 40,
+    "bytes": 379050096,
+    "largestFirst": true
+  },
+  "timelineCopy": {
+    "source": "/workspace/.piclaw/store/messages.db",
+    "bytes": 554676224
+  },
+  "configuration": {
+    "iterations": 50,
+    "synchronous": "FULL",
+    "journalMode": "WAL",
+    "busyTimeoutMs": 5000
+  },
+  "measurements": [
+    {
+      "layout": "unified",
+      "operation": "startup",
+      "unit": "ms",
+      "summary": {
+        "min": 114.7476230000002,
+        "p50": 114.7476230000002,
+        "p95": 114.7476230000002,
+        "max": 114.7476230000002,
+        "mean": 114.7476230000002
+      }
+    },
+    {
+      "layout": "unified",
+      "operation": "import",
+      "unit": "ms",
+      "summary": {
+        "min": 65132.793953,
+        "p50": 65132.793953,
+        "p95": 65132.793953,
+        "max": 65132.793953,
+        "mean": 65132.793953
+      }
+    },
+    {
+      "layout": "unified",
+      "operation": "rss_after_import",
+      "unit": "bytes",
+      "summary": {
+        "min": 47849472,
+        "p50": 47849472,
+        "p95": 47849472,
+        "max": 47849472,
+        "mean": 47849472
+      }
+    },
+    {
+      "layout": "unified",
+      "operation": "shutdown_drain",
+      "unit": "ms",
+      "summary": {
+        "min": 0.2791809999907855,
+        "p50": 0.2791809999907855,
+        "p95": 0.2791809999907855,
+        "max": 0.2791809999907855,
+        "mean": 0.2791809999907855
+      }
+    },
+    {
+      "layout": "separate",
+      "operation": "startup",
+      "unit": "ms",
+      "summary": {
+        "min": 90.24059100000886,
+        "p50": 90.24059100000886,
+        "p95": 90.24059100000886,
+        "max": 90.24059100000886,
+        "mean": 90.24059100000886
+      }
+    },
+    {
+      "layout": "separate",
+      "operation": "import",
+      "unit": "ms",
+      "summary": {
+        "min": 72290.364665,
+        "p50": 72290.364665,
+        "p95": 72290.364665,
+        "max": 72290.364665,
+        "mean": 72290.364665
+      }
+    },
+    {
+      "layout": "separate",
+      "operation": "rss_after_import",
+      "unit": "bytes",
+      "summary": {
+        "min": 15912960,
+        "p50": 15912960,
+        "p95": 15912960,
+        "max": 15912960,
+        "mean": 15912960
+      }
+    },
+    {
+      "layout": "separate",
+      "operation": "shutdown_drain",
+      "unit": "ms",
+      "summary": {
+        "min": 0.8410529999819119,
+        "p50": 0.8410529999819119,
+        "p95": 0.8410529999819119,
+        "max": 0.8410529999819119,
+        "mean": 0.8410529999819119
+      }
+    },
+    {
+      "layout": "jsonl",
+      "operation": "startup",
+      "unit": "ms",
+      "notes": "read each header",
+      "summary": {
+        "min": 363.2203670000017,
+        "p50": 363.2203670000017,
+        "p95": 363.2203670000017,
+        "max": 363.2203670000017,
+        "mean": 363.2203670000017
+      }
+    },
+    {
+      "layout": "unified",
+      "operation": "branch_read",
+      "unit": "ms",
+      "summary": {
+        "min": 4.20718600001419,
+        "p50": 30.68381399998907,
+        "p95": 59.97390099999029,
+        "max": 94.10560399998212,
+        "mean": 32.95517669999797
+      }
+    },
+    {
+      "layout": "unified",
+      "operation": "compaction_prune_read",
+      "unit": "ms",
+      "summary": {
+        "min": 3.1141979999956675,
+        "p50": 22.278470000019297,
+        "p95": 49.91055000000051,
+        "max": 70.72823100001551,
+        "mean": 26.081632779999055
+      }
+    },
+    {
+      "layout": "unified",
+      "operation": "search",
+      "unit": "ms",
+      "summary": {
+        "min": 288.1057599999767,
+        "p50": 302.7806199999759,
+        "p95": 323.4905499999877,
+        "max": 369.2322339999955,
+        "mean": 306.5284825399995
+      }
+    },
+    {
+      "layout": "unified",
+      "operation": "append",
+      "unit": "ms",
+      "summary": {
+        "min": 9.339682999998331,
+        "p50": 11.322427999984939,
+        "p95": 12.14491099998122,
+        "max": 40.97699100000318,
+        "mean": 11.930488759999863
+      }
+    },
+    {
+      "layout": "separate",
+      "operation": "branch_read",
+      "unit": "ms",
+      "summary": {
+        "min": 4.062115000007907,
+        "p50": 30.401601999998093,
+        "p95": 58.75013800000306,
+        "max": 75.54011699999683,
+        "mean": 32.37168909999949
+      }
+    },
+    {
+      "layout": "separate",
+      "operation": "compaction_prune_read",
+      "unit": "ms",
+      "summary": {
+        "min": 3.02654099999927,
+        "p50": 20.85379299998749,
+        "p95": 57.020558000018355,
+        "max": 73.98314599998412,
+        "mean": 25.931944139999686
+      }
+    },
+    {
+      "layout": "separate",
+      "operation": "search",
+      "unit": "ms",
+      "summary": {
+        "min": 290.0985459999938,
+        "p50": 307.39305099999183,
+        "p95": 329.63275799999246,
+        "max": 404.22200800001156,
+        "mean": 312.4698174599995
+      }
+    },
+    {
+      "layout": "separate",
+      "operation": "append",
+      "unit": "ms",
+      "summary": {
+        "min": 10.826650999981211,
+        "p50": 11.30233400000725,
+        "p95": 11.748289000010118,
+        "max": 39.06057899998268,
+        "mean": 12.128489780001109
+      }
+    },
+    {
+      "layout": "jsonl",
+      "operation": "branch_read",
+      "unit": "ms",
+      "notes": "parse full file",
+      "summary": {
+        "min": 14.753597000002628,
+        "p50": 33.927911000006134,
+        "p95": 53.20756299997447,
+        "max": 67.580008000019,
+        "mean": 33.19755645999976
+      }
+    },
+    {
+      "layout": "jsonl",
+      "operation": "compaction_prune_read",
+      "unit": "ms",
+      "notes": "parse full file",
+      "summary": {
+        "min": 14.775740000011865,
+        "p50": 33.942680000007385,
+        "p95": 53.279209999978775,
+        "max": 67.5816010000126,
+        "mean": 33.21935936000198
+      }
+    },
+    {
+      "layout": "jsonl",
+      "operation": "search",
+      "unit": "ms",
+      "notes": "parse and scan selected file",
+      "summary": {
+        "min": 33.94343399995705,
+        "p50": 91.03101900001639,
+        "p95": 145.28977600001963,
+        "max": 168.7892629999842,
+        "mean": 88.38319346000091
+      }
+    },
+    {
+      "layout": "jsonl",
+      "operation": "append",
+      "unit": "ms",
+      "notes": "append plus fsync",
+      "summary": {
+        "min": 8.259642999997595,
+        "p50": 11.112117999990005,
+        "p95": 12.175719000020763,
+        "max": 12.322629000002053,
+        "mean": 11.081388240001397
+      }
+    }
+  ],
+  "footprint": {
+    "jsonlBytes": 379050096,
+    "unifiedBytes": 1382943784,
+    "separateSessionBytes": 830753136,
+    "timelineBytes": 554676224
+  },
+  "faults": {
+    "busyHandling": {
+      "passed": true,
+      "elapsedMs": 102.69848400002229,
+      "error": "SQLiteError: database is locked"
+    },
+    "crashRecovery": {
+      "passed": true,
+      "childExitCode": null
+    },
+    "partialMigration": {
+      "passed": true
+    },
+    "corruptionIsolation": {
+      "passed": true,
+      "separate": "session corruption rejected while timeline remained healthy",
+      "unified": "one corrupted file made both domains unavailable",
+      "timelineIntegrity": "ok"
+    },
+    "walConcurrencyIsolation": {
+      "passed": true,
+      "unifiedSessionWriteBlockedByTimelineWriter": true,
+      "separateSessionWriteSucceededDuringTimelineWriter": true
+    },
+    "backupConsistency": {
+      "passed": true,
+      "manifest": {
+        "sourcePath": "/workspace/.tmp/sqlite-session-production-benchmark/sessions.db",
+        "destinationPath": "/workspace/.tmp/sqlite-session-production-benchmark/sessions.backup.db",
+        "createdAt": "2026-08-01T20:02:11.961Z",
+        "sourceBytes": 827498496,
+        "backupBytes": 822325248,
+        "integrityCheck": "ok",
+        "applicationId": 0,
+        "userVersion": 0,
+        "tableCount": 8,
+        "indexCount": 6,
+        "triggerCount": 3,
+        "viewCount": 0
+      }
+    },
+    "restore": {
+      "passed": true
+    }
+  }
+}
