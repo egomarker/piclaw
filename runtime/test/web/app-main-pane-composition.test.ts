@@ -2,6 +2,7 @@ import { expect, mock, test } from 'bun:test';
 
 import {
   buildMainAppPaneCompositionResult,
+  createTabClosedFileReferenceHandler,
   resolveMainPaneSurfaceVisibility,
   runMainAppZenToggle,
 } from '../../web/src/ui/app-main-pane-composition.js';
@@ -70,6 +71,34 @@ test('Classic Zen does not alter the active surface', () => {
   });
   expect(activateChatSurface).not.toHaveBeenCalled();
   expect(toggleZenMode).toHaveBeenCalledTimes(1);
+});
+
+test('Mobile tab closure leaves attached composer file references intact', () => {
+  const removeFileRef = mock(() => {});
+  const handler = createTabClosedFileReferenceHandler({
+    uiMode: 'mobile',
+    removeFileRefRef: { current: removeFileRef },
+  });
+
+  expect(handler).toBeUndefined();
+  expect(removeFileRef).not.toHaveBeenCalled();
+});
+
+test('Classic tab closure retains legacy composer file reference cleanup', () => {
+  const removeFileRef = mock(() => {});
+  const removeFileRefRef = { current: removeFileRef };
+  const handler = createTabClosedFileReferenceHandler({
+    uiMode: 'classic',
+    removeFileRefRef,
+  });
+
+  handler?.('notes/plan.md');
+  expect(removeFileRef).toHaveBeenCalledWith('notes/plan.md');
+
+  const replacement = mock(() => {});
+  removeFileRefRef.current = replacement;
+  handler?.('notes/other.md');
+  expect(replacement).toHaveBeenCalledWith('notes/other.md');
 });
 
 test('buildMainAppPaneCompositionResult preserves grouped editor/pane composition outputs', () => {

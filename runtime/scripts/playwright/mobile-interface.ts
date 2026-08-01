@@ -221,13 +221,30 @@ async function openWorkspaceFile(page: Page, filePath: string) {
   return { fileLabel, paneRect, touchPreviewState };
 }
 
-async function verifyAttachToChatControl(page: Page, filePath: string, fileLabel: string, exerciseFlow = false) {
+async function verifyAttachToChatControl(
+  page: Page,
+  filePath: string,
+  fileLabel: string,
+  exerciseFlow = false,
+  expectWorkspaceSelectionAttachment = false,
+) {
   const action = page.locator('[data-testid="mobile-attach-to-chat"]');
   await action.waitFor({ state: 'visible', timeout: 15000 });
 
-  // Workspace selection can add a reference before the editor opens. Clear that
-  // setup state so this scenario exercises the explicit tab-toolbar action.
-  if (await action.getAttribute('aria-pressed') === 'true') {
+  const workspaceSelectionState = await action.evaluate((element) => ({
+    title: element.getAttribute('title'),
+    ariaPressed: element.getAttribute('aria-pressed'),
+    disabled: (element as HTMLButtonElement).disabled,
+  }));
+  assert(
+    workspaceSelectionState.ariaPressed === String(expectWorkspaceSelectionAttachment)
+      && workspaceSelectionState.disabled === expectWorkspaceSelectionAttachment,
+    `Workspace selection attachment state is wrong: ${JSON.stringify(workspaceSelectionState)}.`,
+  );
+
+  // Wide Mobile preserves the Workspace rail's legacy selection behavior. Clear
+  // that setup state so the remaining assertions exercise the explicit action.
+  if (expectWorkspaceSelectionAttachment) {
     await page.locator('#piclaw-mobile-surface-tab-chat').click();
     const existingPill = page.locator(`.compose-file-pill[title=${JSON.stringify(filePath)}]`);
     await existingPill.waitFor({ state: 'visible', timeout: 15000 });
@@ -261,7 +278,7 @@ async function verifyAttachToChatControl(page: Page, filePath: string, fileLabel
   assert(await page.locator('.attach-editor-btn').count() === 0,
     'Mobile still renders the old composer Attach open file action.');
 
-  if (!exerciseFlow) return { initialState };
+  if (!exerciseFlow) return { workspaceSelectionState, initialState };
 
   await action.click();
   await page.waitForFunction((path) => {
@@ -292,7 +309,23 @@ async function verifyAttachToChatControl(page: Page, filePath: string, fileLabel
   assert(attachedState.title === `${fileLabel} is attached to Chat`,
     `Attach to Chat has the wrong attached state: ${JSON.stringify(attachedState)}.`);
 
-  return { initialState, attachedState, normalFilePickerVisible };
+  const fileTab = tabByLabel(page, fileLabel);
+  await fileTab.locator('.tab-close').click();
+  await fileTab.waitFor({ state: 'detached', timeout: 15000 });
+  await page.locator('#piclaw-mobile-surface-tab-chat').click();
+  const retainedPill = page.locator(`.compose-file-pill[title=${JSON.stringify(filePath)}]`);
+  await retainedPill.waitFor({ state: 'visible', timeout: 15000 });
+  const attachmentPersistsAfterTabClose = await retainedPill.isVisible();
+  assert(attachmentPersistsAfterTabClose,
+    `Closing ${fileLabel} detached its Chat file reference.`);
+
+  return {
+    workspaceSelectionState,
+    initialState,
+    attachedState,
+    normalFilePickerVisible,
+    attachmentPersistsAfterTabClose,
+  };
 }
 
 async function openTerminalFromMenu(page: Page) {
@@ -431,6 +464,7 @@ async function runViewportScenario(
     filePath,
     opened.fileLabel,
     exerciseAttachToChat,
+    !compactWorkspace,
   );
   return {
     compactWorkspace,

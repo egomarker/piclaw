@@ -25,6 +25,14 @@ export function runMainAppZenToggle(options: {
   options.toggleZenMode();
 }
 
+export function createTabClosedFileReferenceHandler(options: {
+  uiMode?: 'classic' | 'mobile';
+  removeFileRefRef: { current: any };
+}): ((path: string) => void) | undefined {
+  if (options.uiMode === 'mobile') return undefined;
+  return (path: string) => options.removeFileRefRef.current?.(path);
+}
+
 export function buildMainAppPaneCompositionResult(options: {
   removeFileRefRef: { current: any };
   editorState: Record<string, any>;
@@ -52,7 +60,10 @@ export function useMainAppPaneComposition(options: {
   const removeFileRefRef = useRef<any>(null);
 
   const editorState = useEditorState({
-    onTabClosed: (path) => removeFileRefRef.current?.(path),
+    onTabClosed: createTabClosedFileReferenceHandler({
+      uiMode: options.uiMode,
+      removeFileRefRef,
+    }),
     uiMode: options.uiMode,
     mobileWorkspaceTabEnabled: options.mobileWorkspaceTabEnabled,
     onMobileWorkspacePromotedToRail: options.onMobileWorkspacePromotedToRail,

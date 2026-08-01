@@ -321,6 +321,7 @@ test('renderMainShell groups Chat chrome separately from global overlays', () =>
 });
 
 test('compact Mobile renders Workspace as a permanent surface without rail controls', () => {
+  const addFileRef = mock(() => {});
   const displayTabs = [
     { id: 'piclaw://chat', label: 'Chat', path: 'Chat' },
     { id: 'piclaw://workspace', label: 'Workspace', path: 'Workspace' },
@@ -334,6 +335,7 @@ test('compact Mobile renders Workspace as a permanent surface without rail contr
     mobileChatActive: false,
     displayTabStripTabs: displayTabs,
     displayTabStripActiveId: 'piclaw://workspace',
+    addFileRef,
   }));
 
   let explorerVNode: any = null;
@@ -352,6 +354,7 @@ test('compact Mobile renders Workspace as a permanent surface without rail contr
   expect(explorerVNode?.props.visible).toBe(true);
   expect(explorerVNode?.props.active).toBe(true);
   expect(explorerVNode?.props.mobileInterface).toBe(true);
+  expect(explorerVNode?.props.onFileSelect).toBeUndefined();
   expect(tabStripVNode?.props.tabs).toBe(displayTabs);
   expect(tabStripVNode?.props.activeId).toBe('piclaw://workspace');
   expect(menuVNode?.props.showWorkspaceToggle).toBe(false);
@@ -360,6 +363,26 @@ test('compact Mobile renders Workspace as a permanent surface without rail contr
   expect(classes.has('app-shell workspace-collapsed mobile-interface mobile-workspace-active')).toBe(true);
   expect([...classes].some((value) => value.startsWith('workspace-toggle-tab'))).toBe(false);
   expect(classes.has('workspace-splitter')).toBe(false);
+});
+
+test('wide Mobile Workspace rail preserves its file selection callback', () => {
+  const addFileRef = mock(() => {});
+  const tree = renderMainShell(createMainShellRenderOptions({
+    chatOnlyMode: false,
+    workspaceOpen: true,
+    uiMode: 'mobile',
+    mobileWorkspaceTabEnabled: false,
+    addFileRef,
+  }));
+
+  let explorerVNode: any = null;
+  walkVNodes(tree, (node) => {
+    if (node.type === WorkspaceExplorer) explorerVNode = node;
+  });
+
+  expect(explorerVNode?.props.visible).toBe(true);
+  expect(explorerVNode?.props.mobileInterface).toBe(true);
+  expect(explorerVNode?.props.onFileSelect).toBe(addFileRef);
 });
 
 test('Mobile connects roving tabs to active and inert surface panels', () => {
