@@ -172,14 +172,14 @@ export function resolveMobileAttachToChatAction(options: {
     && options.fileRefs.some((candidate) => typeof candidate === 'string' && candidate.trim() === path);
 
   if (attached) {
-    const ariaLabel = `${label} is attached to Chat`;
+    const ariaLabel = `Detach ${label} from Chat`;
     return {
       kind: 'attached',
       path,
       label,
       title: ariaLabel,
       ariaLabel,
-      disabled: true,
+      disabled: false,
       pressed: true,
     };
   }
@@ -209,24 +209,24 @@ export function resolveMobileAttachToChatAction(options: {
   };
 }
 
-/** Apply a validated Mobile document attachment before returning to Chat. */
-export function attachMobileDocumentToChat(options: {
+/** Toggle a validated Mobile document attachment without changing the active tab. */
+export function toggleMobileDocumentChatAttachment(options: {
   path: string;
+  attached: boolean;
   addFileRef: (path: string) => void;
-  activateTab: (id: string) => void;
-  focusCompose?: () => void;
+  removeFileRef: (path: string) => void;
 }): boolean {
   const path = typeof options.path === 'string' ? options.path.trim() : '';
   if (!isWorkspaceEditorPath(path)) return false;
-  if (typeof options.addFileRef !== 'function' || typeof options.activateTab !== 'function') return false;
+
+  const updateFileRef = options.attached ? options.removeFileRef : options.addFileRef;
+  if (typeof updateFileRef !== 'function') return false;
 
   try {
-    options.addFileRef(path);
-    options.activateTab(MOBILE_CHAT_TAB_ID);
-    options.focusCompose?.();
+    updateFileRef(path);
     return true;
   } catch (error) {
-    console.warn('[mobile-tabs] failed to attach document to Chat', error);
+    console.warn('[mobile-tabs] failed to toggle document Chat attachment', error);
     return false;
   }
 }

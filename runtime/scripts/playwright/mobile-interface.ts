@@ -339,36 +339,68 @@ async function verifyAttachToChatControl(
 
   if (!exerciseFlow) return { workspaceSelectionState, initialState };
 
+  const fileTab = tabByLabel(page, fileLabel);
   await action.click();
-  await page.waitForFunction((path) => {
+  await page.waitForFunction(({ path, label }) => {
     const chat = document.getElementById('piclaw-mobile-surface-tab-chat');
-    const pill = document.querySelector<HTMLElement>('.compose-file-pill');
-    const textarea = document.querySelector<HTMLTextAreaElement>('.compose-box textarea');
-    return chat?.getAttribute('aria-selected') === 'true'
-      && pill?.getAttribute('title') === path
-      && document.activeElement === textarea;
-  }, filePath, { timeout: 15000 });
-  const normalFilePickerVisible = await page.locator('label.icon-btn[title="Attach file"]').isVisible();
-  assert(normalFilePickerVisible, 'The normal Mobile Attach file picker disappeared.');
-
-  await tabByLabel(page, fileLabel).click();
-  await page.waitForFunction((label) => {
-    const action = document.querySelector<HTMLButtonElement>('[data-testid="mobile-attach-to-chat"]');
+    const control = document.querySelector<HTMLButtonElement>('[data-testid="mobile-attach-to-chat"]');
     const active = Array.from(document.querySelectorAll<HTMLElement>('[role="tab"]'))
       .find((tab) => tab.querySelector('.tab-label')?.textContent?.trim() === label);
+    const attached = Array.from(document.querySelectorAll<HTMLElement>('.compose-file-pill'))
+      .some((pill) => pill.getAttribute('title') === path);
     return active?.getAttribute('aria-selected') === 'true'
-      && action?.disabled
-      && action.getAttribute('aria-pressed') === 'true';
-  }, fileLabel, { timeout: 15000 });
+      && chat?.getAttribute('aria-selected') !== 'true'
+      && control?.getAttribute('aria-pressed') === 'true'
+      && !control.disabled
+      && attached;
+  }, { path: filePath, label: fileLabel }, { timeout: 15000 });
   const attachedState = await action.evaluate((element) => ({
     title: element.getAttribute('title'),
     ariaPressed: element.getAttribute('aria-pressed'),
     disabled: (element as HTMLButtonElement).disabled,
   }));
-  assert(attachedState.title === `${fileLabel} is attached to Chat`,
+  assert(attachedState.title === `Detach ${fileLabel} from Chat`
+    && attachedState.ariaPressed === 'true'
+    && !attachedState.disabled,
     `Attach to Chat has the wrong attached state: ${JSON.stringify(attachedState)}.`);
+  const tabSelectionPreservedAfterAttach = await fileTab.getAttribute('aria-selected') === 'true';
+  assert(tabSelectionPreservedAfterAttach,
+    `Attaching ${fileLabel} switched away from its document tab.`);
+  const normalFilePickerPresent = await page.locator('label.icon-btn[title="Attach file"]').count() === 1;
+  assert(normalFilePickerPresent, 'The normal Mobile Attach file picker disappeared.');
 
-  const fileTab = tabByLabel(page, fileLabel);
+  await action.click();
+  await page.waitForFunction(({ path, label }) => {
+    const control = document.querySelector<HTMLButtonElement>('[data-testid="mobile-attach-to-chat"]');
+    const active = Array.from(document.querySelectorAll<HTMLElement>('[role="tab"]'))
+      .find((tab) => tab.querySelector('.tab-label')?.textContent?.trim() === label);
+    const attached = Array.from(document.querySelectorAll<HTMLElement>('.compose-file-pill'))
+      .some((pill) => pill.getAttribute('title') === path);
+    return active?.getAttribute('aria-selected') === 'true'
+      && control?.getAttribute('aria-pressed') === 'false'
+      && !control.disabled
+      && !attached;
+  }, { path: filePath, label: fileLabel }, { timeout: 15000 });
+  const detachedState = await action.evaluate((element) => ({
+    title: element.getAttribute('title'),
+    ariaPressed: element.getAttribute('aria-pressed'),
+    disabled: (element as HTMLButtonElement).disabled,
+  }));
+  assert(detachedState.title === `Attach ${fileLabel} to Chat`
+    && detachedState.ariaPressed === 'false'
+    && !detachedState.disabled,
+    `Attach to Chat has the wrong detached state: ${JSON.stringify(detachedState)}.`);
+
+  // Reattach before closing to preserve coverage for the independent attachment lifecycle.
+  await action.click();
+  await page.waitForFunction((path) => {
+    const control = document.querySelector<HTMLButtonElement>('[data-testid="mobile-attach-to-chat"]');
+    return control?.getAttribute('aria-pressed') === 'true'
+      && !control.disabled
+      && Array.from(document.querySelectorAll<HTMLElement>('.compose-file-pill'))
+        .some((pill) => pill.getAttribute('title') === path);
+  }, filePath, { timeout: 15000 });
+
   await fileTab.locator('.tab-close').click();
   await fileTab.waitFor({ state: 'detached', timeout: 15000 });
   await page.locator('#piclaw-mobile-surface-tab-chat').click();
@@ -382,7 +414,9 @@ async function verifyAttachToChatControl(
     workspaceSelectionState,
     initialState,
     attachedState,
-    normalFilePickerVisible,
+    detachedState,
+    tabSelectionPreservedAfterAttach,
+    normalFilePickerPresent,
     attachmentPersistsAfterTabClose,
   };
 }

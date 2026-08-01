@@ -21,10 +21,10 @@ import {
   MOBILE_SURFACE_TABLIST_ID,
   MOBILE_WORKSPACE_PANEL_ID,
   MOBILE_WORKSPACE_TAB_ELEMENT_ID,
-  attachMobileDocumentToChat,
   getMobileSurfacePanelId,
   getMobileSurfaceTabElementId,
   resolveMobileAttachToChatAction,
+  toggleMobileDocumentChatAttachment,
 } from './mobile-tab-state.js';
 
 export interface MainShellRenderOptions {
@@ -330,20 +330,6 @@ export function renderMainShell(options: MainShellRenderOptions): any {
       detachedTabs,
     })
     : null;
-  const focusMobileCompose = () => {
-    const run = () => {
-      if (typeof document === 'undefined') return;
-      const textarea = document.querySelector('.chat-surface-footer .compose-box textarea') as HTMLTextAreaElement | null;
-      if (!textarea) return;
-      try {
-        textarea.focus({ preventScroll: true });
-      } catch {
-        textarea.focus();
-      }
-    };
-    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
-    else setTimeout(run, 0);
-  };
   const mobileAttachToChatAction = mobileAttachToChatState && mobileAttachToChatState.kind !== 'hidden'
     ? {
       testId: 'mobile-attach-to-chat',
@@ -352,12 +338,13 @@ export function renderMainShell(options: MainShellRenderOptions): any {
       ariaLabel: mobileAttachToChatState.ariaLabel || 'Attach selected document to Chat',
       disabled: mobileAttachToChatState.disabled,
       pressed: mobileAttachToChatState.pressed,
-      onClick: mobileAttachToChatState.kind === 'available' && mobileAttachToChatState.path
-        ? () => attachMobileDocumentToChat({
+      onClick: (mobileAttachToChatState.kind === 'available' || mobileAttachToChatState.kind === 'attached')
+        && mobileAttachToChatState.path
+        ? () => toggleMobileDocumentChatAttachment({
           path: mobileAttachToChatState.path || '',
+          attached: mobileAttachToChatState.kind === 'attached',
           addFileRef,
-          activateTab: handleTabActivate,
-          focusCompose: focusMobileCompose,
+          removeFileRef,
         })
         : undefined,
       icon: html`
