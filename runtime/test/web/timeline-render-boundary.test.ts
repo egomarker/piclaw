@@ -5,6 +5,7 @@ import {
   getLatestTimelineWindow,
   getTimelineWindowAroundIndex,
   haveSameTimelineProps,
+  windowFromScrollOffset,
 } from '../../web/src/components/timeline.js';
 
 test('timeline render boundary ignores parent updates when timeline props retain identity', () => {
@@ -48,4 +49,34 @@ test('timeline height estimate is bounded and accounts for rich content', () => 
   expect(estimateTimelinePostHeight({ data: { content: '' } })).toBe(76);
   expect(estimateTimelinePostHeight({ data: { content: 'x'.repeat(100), media_ids: [1] } })).toBe(318);
   expect(estimateTimelinePostHeight({ data: { content: 'x'.repeat(10000) } })).toBe(1200);
+});
+
+test('windowFromScrollOffset returns null without a scroller, heights, or posts', () => {
+  const root = { scrollTop: 0, scrollHeight: 0, clientHeight: 0 };
+  expect(windowFromScrollOffset(null, [0, 100], 10, true)).toBe(null);
+  expect(windowFromScrollOffset(root, [0], 10, true)).toBe(null);
+  expect(windowFromScrollOffset(root, [0, 100], 0, true)).toBe(null);
+});
+
+test('windowFromScrollOffset seeds the newest window when pinned at the bottom (reverse)', () => {
+  // 120 posts, 100px each: prefix sums 0..12000.
+  const prefix = Array.from({ length: 121 }, (_v, i) => i * 100);
+  const root = { scrollTop: 0, scrollHeight: 12000, clientHeight: 600 };
+  expect(windowFromScrollOffset(root, prefix, 120, true)).toEqual({ start: 104, end: 120 });
+});
+
+test('windowFromScrollOffset keeps a history-scrolled view on OLD posts instead of snapping to newest', () => {
+  const prefix = Array.from({ length: 121 }, (_v, i) => i * 100);
+  // Reverse convention: scrollTop = 0 at the visual bottom (newest); negative going up.
+  // A user who has scrolled deep into history must seed a window around old posts.
+  const root = { scrollTop: -10000, scrollHeight: 12000, clientHeight: 600 };
+  const seeded = windowFromScrollOffset(root, prefix, 120, true);
+  expect(seeded).toEqual({ start: 6, end: 22 });
+  expect(seeded.end).toBeLessThan(120);
+});
+
+test('windowFromScrollOffset maps scrollTop directly in normal (non-reverse) mode', () => {
+  const prefix = Array.from({ length: 121 }, (_v, i) => i * 100);
+  const root = { scrollTop: 1400, scrollHeight: 12000, clientHeight: 600 };
+  expect(windowFromScrollOffset(root, prefix, 120, false)).toEqual({ start: 6, end: 22 });
 });

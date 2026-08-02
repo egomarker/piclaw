@@ -47,6 +47,29 @@ export function findTimelineIndexAtOffset(prefixHeights, offset) {
 }
 
 /**
+ * Resolve the virtualization window for the timeline's CURRENT scroll offset,
+ * mirroring the offset math in TimelineView.handleScroll. Used when windowing
+ * first engages (displayPosts crosses TIMELINE_WINDOW_THRESHOLD): the
+ * non-windowed windowRange spans the whole list and cannot tell where the user
+ * actually is, so without this the first windowed commit snaps to the newest
+ * posts. Seeding from the real scroll offset keeps the row the user scrolled up
+ * to read mounted and the scroll position intact.
+ *
+ * Returns null when the scroller or prefix heights are unavailable.
+ */
+export function windowFromScrollOffset(root, prefixHeights, postCount, reverse) {
+    if (!root || !Array.isArray(prefixHeights) || prefixHeights.length <= 1 || postCount <= 0) {
+        return null;
+    }
+    const { scrollTop, scrollHeight, clientHeight } = root;
+    const contentOffset = reverse
+        ? Math.max(0, scrollHeight - clientHeight + scrollTop)
+        : Math.max(0, scrollTop);
+    const targetIndex = findTimelineIndexAtOffset(prefixHeights, contentOffset);
+    return getTimelineWindowAroundIndex(targetIndex, postCount);
+}
+
+/**
  * Keep high-frequency agent-status/draft updates from walking every rendered post.
  * TimelineView still updates normally when timeline data or one of its callbacks changes.
  */
@@ -124,6 +147,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
     const sentinelRef = useRef(null);
     const timelineContentRef = useRef(null);
     const previousPostsRef = useRef([]);
+    const wasWindowedRef = useRef(false);
     const measuredHeightsRef = useRef(new Map());
     const hasIntersectionObserver = typeof IntersectionObserver !== 'undefined';
     const displayPosts = useMemo(
@@ -177,6 +201,8 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
     useLayoutEffect(() => {
         const previousPosts = previousPostsRef.current;
         previousPostsRef.current = displayPosts;
+        const justEngaged = shouldWindow && !wasWindowedRef.current;
+        wasWindowedRef.current = shouldWindow;
         if (!shouldWindow) {
             setWindowRange({ start: 0, end: displayPosts.length });
             return;
@@ -185,6 +211,21 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         setWindowRange((current) => {
             if (previousPosts.length === 0 || current.end === 0) {
                 return getLatestTimelineWindow(displayPosts.length);
+            }
+            // On the false->true windowing engagement the prior windowRange
+            // always spanned the full list (the non-windowed branch sets
+            // end = length), so the "at newest" heuristic below is unreliable
+            // and would snap to the newest posts even when the user has scrolled
+            // deep into history. Seed the window from the actual scroll offset so
+            // the row they are reading stays mounted and the scroll is preserved.
+            if (justEngaged) {
+                const seeded = windowFromScrollOffset(
+                    timelineRef?.current,
+                    virtualHeights,
+                    displayPosts.length,
+                    reverse,
+                );
+                if (seeded) return seeded;
             }
             const wasAtNewest = current.end >= previousPosts.length;
             if (wasAtNewest) return getLatestTimelineWindow(displayPosts.length);
