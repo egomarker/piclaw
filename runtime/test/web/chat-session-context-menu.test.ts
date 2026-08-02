@@ -1,6 +1,17 @@
 import { expect, test } from 'bun:test';
 
-import { resolveRunningChatSessions } from '../../web/src/components/chat-session-context-menu.js';
+import {
+  formatRunningChatSessionHandle,
+  resolveRunningChatSessions,
+} from '../../web/src/components/chat-session-context-menu.js';
+
+test('Chat context menu labels sessions with only their human-readable handles', () => {
+  expect(formatRunningChatSessionHandle({
+    agent_name: 'Running Other',
+    chat_jid: 'web:running-other',
+  })).toBe('@running-other');
+  expect(formatRunningChatSessionHandle({ chat_jid: 'web:missing-handle' })).toBe('Unnamed session');
+});
 
 test('Chat context menu keeps only distinct sessions that are currently active', () => {
   const active = {

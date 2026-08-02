@@ -911,6 +911,12 @@ async function runChatSessionContextMenuScenario(page: Page) {
   const targetRow = sessionMenu.locator(`[data-chat-jid=${JSON.stringify(targetChatJid)}]`);
   await currentRow.waitFor({ state: 'visible', timeout: 5000 });
   await targetRow.waitFor({ state: 'visible', timeout: 5000 });
+  const visibleSessionLabels = await sessionMenu.locator('.chat-session-menu-label').allTextContents();
+  assert(
+    visibleSessionLabels.join('|') === '@default|@running-other'
+      && visibleSessionLabels.every((label) => !label.includes('web:') && !label.includes('—')),
+    `Session rows did not show handle-only labels: ${JSON.stringify(visibleSessionLabels)}.`,
+  );
   assert(await currentRow.getAttribute('aria-current') === 'page', 'The current running session is not marked current.');
   assert(await sessionMenu.locator('[data-chat-jid="web:idle-resident"]').count() === 0,
     'The Chat context menu included an idle pool-resident session.');
