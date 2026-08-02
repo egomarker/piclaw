@@ -324,6 +324,14 @@ test('terminal toolbar leaves iOS bottom safe-area spacing to the outer shell', 
     expect(toolbarStyles).not.toContain('safe-area-inset-bottom');
 });
 
+test('terminal touch controls hide on mouse-only devices but stay available on hybrids', () => {
+    const source = readFileSync(new URL('../../web/src/panes/terminal-pane.ts', import.meta.url), 'utf8');
+    expect(source).toContain('@media (hover: hover) and (pointer: fine)');
+    expect(source).toContain('@media (any-pointer: coarse)');
+    expect(source).toContain('.terminal-pane-xterm .terminal-toolbar-anchor {\n          display: none;');
+    expect(source).toContain('.terminal-pane-xterm .terminal-toolbar-anchor {\n          display: block;');
+});
+
 test('getOrCreateAnonymousTerminalClientToken persists a stable client token', () => {
     const storage = new Map<string, string>();
     const runtimeWindow = {

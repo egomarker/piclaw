@@ -81,7 +81,7 @@ async function waitForApp(page: Page, baseUrl: string) {
     .waitFor({ state: 'visible', timeout: 30_000 });
 }
 
-async function openConnectedTerminal(page: Page) {
+async function openConnectedTerminal(page: Page, options: { controlsVisible?: boolean } = {}) {
   const visibleRoot = page.locator('.terminal-pane-xterm:visible').first();
   if (!(await visibleRoot.isVisible().catch(() => false))) {
     await page.keyboard.press('Control+Backquote');
@@ -91,7 +91,8 @@ async function openConnectedTerminal(page: Page) {
     const root = document.querySelector('.terminal-pane-xterm');
     return root?.getAttribute('data-connection-status') === 'Connected';
   }, undefined, { timeout: 20_000 });
-  await visibleRoot.locator('[data-testid="terminal-mobile-controls"]').waitFor({ state: 'visible', timeout: 10_000 });
+  const controls = visibleRoot.locator('[data-testid="terminal-mobile-controls"]');
+  await controls.waitFor({ state: options.controlsVisible === false ? 'attached' : 'visible', timeout: 10_000 });
   return visibleRoot;
 }
 
@@ -134,6 +135,27 @@ async function inspectToolbar(root: Locator) {
   }));
   assert(sizes.every(({ width, height }) => width > 0 && height >= 44), `toolbar target size failure: ${JSON.stringify(sizes)}`);
   return { labels, sizes };
+}
+
+async function runMouseOnlyGate(page: Page, baseUrl: string, artifactDir: string) {
+  await waitForApp(page, baseUrl);
+  const root = await openConnectedTerminal(page, { controlsVisible: false });
+  const surface = root.locator('[data-testid="terminal-mobile-controls"]');
+  const buttonCount = await surface.locator('button').count();
+  const surfaceBox = await surface.boundingBox();
+  const media = await page.evaluate(() => ({
+    fineHover: matchMedia('(hover: hover) and (pointer: fine)').matches,
+    anyCoarse: matchMedia('(any-pointer: coarse)').matches,
+  }));
+
+  assert(media.fineHover, `mouse-only context did not expose fine hover media: ${JSON.stringify(media)}`);
+  assert(!media.anyCoarse, `mouse-only context unexpectedly exposed a coarse pointer: ${JSON.stringify(media)}`);
+  assert(await surface.isHidden(), 'touch-control surface should be hidden on a mouse-only device');
+  assert(surfaceBox === null, `hidden touch-control surface retained layout space: ${JSON.stringify(surfaceBox)}`);
+  assert(buttonCount === 13, `expected the hidden surface to retain 12 controls plus clipboard action, found ${buttonCount}`);
+  await page.screenshot({ path: resolve(artifactDir, 'mouse-only-pane.png'), fullPage: true });
+
+  return { media, surfaceHidden: true, surfaceBox, buttonCount };
 }
 
 async function runDesktopPaneAndPopout(page: Page, baseUrl: string, artifactDir: string) {
@@ -287,8 +309,15 @@ async function main() {
     });
 
     results.push(await runScenario(
-      'desktop-pane-and-popout',
+      'mouse-only-hidden',
       () => browser!.newContext({ storageState, viewport: { width: 1280, height: 900 } }),
+      (page) => runMouseOnlyGate(page, args.baseUrl, artifactDir),
+      artifactDir,
+    ));
+
+    results.push(await runScenario(
+      'touch-capable-pane-and-popout',
+      () => browser!.newContext({ storageState, viewport: { width: 1280, height: 900 }, hasTouch: true }),
       (page) => runDesktopPaneAndPopout(page, args.baseUrl, artifactDir),
       artifactDir,
     ));
