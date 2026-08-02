@@ -326,7 +326,7 @@ function injectStyles(ownerDocument = document) {
         grid-auto-rows: 48px;
         gap: 4px;
         width: 100%;
-        padding: 4px 4px max(4px, env(safe-area-inset-bottom));
+        padding: 4px;
         box-sizing: border-box;
         background: var(--bg-secondary, #161b22);
       }
