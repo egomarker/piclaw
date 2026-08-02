@@ -2,7 +2,9 @@ import { expect, test } from 'bun:test';
 import {
   estimateTimelinePostHeight,
   findTimelineIndexAtOffset,
+  getAnchoredTimelineScrollTop,
   getLatestTimelineWindow,
+  getTimelineContentOffset,
   getTimelineWindowAroundIndex,
   haveSameTimelineProps,
   windowFromScrollOffset,
@@ -79,4 +81,22 @@ test('windowFromScrollOffset maps scrollTop directly in normal (non-reverse) mod
   const prefix = Array.from({ length: 121 }, (_v, i) => i * 100);
   const root = { scrollTop: 1400, scrollHeight: 12000, clientHeight: 600 };
   expect(windowFromScrollOffset(root, prefix, 120, false)).toEqual({ start: 6, end: 22 });
+});
+
+test('reverse timeline content offset reaches zero at the history edge', () => {
+  const root = { scrollTop: -11400, scrollHeight: 12000, clientHeight: 600 };
+  expect(getTimelineContentOffset(root, true)).toBe(0);
+  expect(getTimelineContentOffset({ ...root, scrollTop: 0 }, true)).toBe(11400);
+  expect(getTimelineContentOffset({ ...root, scrollTop: -10000 }, true)).toBe(1400);
+});
+
+test('timeline content offset uses positive scrollTop in normal mode', () => {
+  expect(getTimelineContentOffset({ scrollTop: 900, scrollHeight: 12000, clientHeight: 600 }, false)).toBe(900);
+  expect(getTimelineContentOffset(null, false)).toBe(0);
+});
+
+test('timeline anchor correction restores the captured viewport offset', () => {
+  expect(getAnchoredTimelineScrollTop(-5000, 225, 100)).toBe(-4875);
+  expect(getAnchoredTimelineScrollTop(5000, 225, 100)).toBe(5125);
+  expect(getAnchoredTimelineScrollTop(-5000, Number.NaN, 100)).toBe(-5000);
 });

@@ -79,6 +79,7 @@
     "test:e2e:terminal-reopen": "bun run runtime/scripts/playwright/terminal-reopen.ts",
     "test:e2e:markdown-live-preview": "bun run runtime/scripts/playwright/markdown-live-preview-parity.ts",
     "test:e2e:markdown-editor-speed": "bun run runtime/scripts/playwright/markdown-editor-speed-audit.ts",
+    "test:e2e:timeline-virtualization": "bun run runtime/scripts/playwright/timeline-virtualization.ts",
     "check:pack-hygiene": "bun run runtime/scripts/pack-hygiene.ts",
     "check:stale-dist": "cd runtime && bun run scripts/check-stale-dist.ts",
     "check:import-boundaries": "cd runtime && bun run scripts/check-import-boundaries.ts",
