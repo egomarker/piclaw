@@ -10,8 +10,8 @@ import type { PaneCapability, PaneContext, PaneInstance, WebPaneExtension } from
 import { highlightCodeLinesAsHtml, parserForCodeFenceLanguage, normalizeCodeLanguageLabel, extensionToLanguage } from '../utils/code-highlighting.js';
 
 const MARKDOWN_EXTENSIONS = /\.(md|mdx|markdown)$/i;
-const LARGE_PREVIEW_CHARS = 96 * 1024;
-const LARGE_PREVIEW_LINES = 2_500;
+const LARGE_PREVIEW_CHARS = 192 * 1024;
+const LARGE_PREVIEW_LINES = 5_000;
 
 function countLinesUpTo(text: string, limit: number): number {
     let lines = 1;

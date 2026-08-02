@@ -1643,10 +1643,10 @@ export function WorkspaceExplorer({
             });
     }, [selectedPath, selectedIsDir, showHidden, isDarkTheme, folderPreviewDepth]);
 
-    const canEdit = Boolean(preview && preview.kind === 'text' && !selectedIsDir && (!preview.size || preview.size <= 256 * 1024));
+    const canEdit = Boolean(preview && preview.kind === 'text' && !selectedIsDir && (!preview.size || preview.size <= 512 * 1024));
     const editTitle = canEdit
         ? 'Open in editor'
-        : preview?.size > 256 * 1024
+        : preview?.size > 512 * 1024
             ? 'File too large to edit'
             : 'File is not editable';
 

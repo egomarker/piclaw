@@ -1,4 +1,4 @@
-export const MAX_EDITABLE_PREVIEW_BYTES = 256 * 1024;
+export const MAX_EDITABLE_PREVIEW_BYTES = 512 * 1024;
 
 export interface WorkspacePreviewLike {
   kind?: string | null;

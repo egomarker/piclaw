@@ -91,7 +91,7 @@ import {
 // ── Constants ───────────────────────────────────────────────────
 
 const MONO_STACK = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
-const EDITOR_MAX_BYTES = 256 * 1024;
+const EDITOR_MAX_BYTES = 512 * 1024;
 const LARGE_DOCUMENT_CHARS = 48 * 1024;
 const LARGE_DOCUMENT_LINES = 1_000;
 const LARGE_DOCUMENT_LINE_CHARS = 2_000;
