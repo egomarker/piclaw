@@ -14,6 +14,7 @@ import type { AgentSession, SessionContext, SessionEntry, SessionManager } from 
 
 import { seedRotatedSession } from "../session-rotation.js";
 import { ensureSessionDir } from "./session.js";
+import { createSessionManagerPersistencePort, getSessionPersistencePort, type SessionEntryAppendPort, type SessionManagerLike } from "./session-persistence.js";
 
 type LegacyCustomEntry = {
   type: "custom_entry";
@@ -54,16 +55,7 @@ type AppendableAgentMessage = Message | {
   timestamp: number;
 };
 
-type SeedSessionManager = Pick<
-  SessionManager,
-  | "appendMessage"
-  | "appendThinkingLevelChange"
-  | "appendModelChange"
-  | "appendCompaction"
-  | "appendSessionInfo"
-  | "appendCustomMessageEntry"
-  | "appendCustomEntry"
->;
+type SeedSessionManager = SessionEntryAppendPort;
 
 const DEFERRED_BRANCH_SEED_FILE = ".branch-seed.json";
 const CLAIMED_DEFERRED_BRANCH_SEED_FILE = ".branch-seed.claimed.json";
@@ -93,16 +85,14 @@ function isAppendableAgentMessage(message: unknown): message is AppendableAgentM
     || role === "custom";
 }
 
-function getStableForkSeed(sourceSession: AgentSession, stableLeafId: string | null): {
+async function getStableForkSeed(sourceSession: AgentSession, stableLeafId: string | null): Promise<{
   branchEntries: SeedBranchEntry[];
   model: { provider: string; modelId: string } | null;
   thinkingLevel: ThinkingLevel | null;
-} {
+}> {
   const branchEntries = stableLeafId === null
     ? []
-    : (typeof sourceSession.sessionManager?.getBranch === "function"
-        ? sourceSession.sessionManager.getBranch(stableLeafId)
-        : []);
+    : await getSessionPersistencePort(sourceSession).getBranch(stableLeafId);
 
   let model: { provider: string; modelId: string } | null = null;
   let thinkingLevel: ThinkingLevel | null = null;
@@ -125,16 +115,17 @@ function cloneSeedValue<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-export function createDeferredBranchSeed(
+export async function createDeferredBranchSeed(
   sourceSession: AgentSession,
   options: { stableLeafId: string | null; sessionName?: string | null; sourceIsActive: boolean },
-): DeferredBranchSeed {
+): Promise<DeferredBranchSeed> {
+  const persistence = getSessionPersistencePort(sourceSession);
   const stableSeed = options.sourceIsActive
-    ? getStableForkSeed(sourceSession, options.stableLeafId)
+    ? await getStableForkSeed(sourceSession, options.stableLeafId)
     : null;
   const sourceContext = stableSeed
     ? null
-    : sourceSession.sessionManager.buildSessionContext();
+    : await persistence.buildContext();
   const model = stableSeed?.model || sourceContext?.model || (sourceSession.model
     ? { provider: sourceSession.model.provider, modelId: sourceSession.model.id }
     : null);
@@ -153,18 +144,14 @@ export function createDeferredBranchSeed(
   };
 }
 
-function seedSessionManagerFromBranchEntries(
+async function seedSessionManagerFromBranchEntries(
   sessionManager: SeedSessionManager,
   branchEntries: SeedBranchEntry[],
   fallback: { sessionName?: string | null; model?: { provider: string; modelId: string } | null },
-): void {
+): Promise<void> {
   if (!Array.isArray(branchEntries) || branchEntries.length === 0) {
-    if (fallback.sessionName?.trim()) {
-      sessionManager.appendSessionInfo(fallback.sessionName.trim());
-    }
-    if (fallback.model) {
-      sessionManager.appendModelChange(fallback.model.provider, fallback.model.modelId);
-    }
+    if (fallback.sessionName?.trim()) await sessionManager.appendSessionInfo(fallback.sessionName.trim());
+    if (fallback.model) await sessionManager.appendModelChange(fallback.model.provider, fallback.model.modelId);
     return;
   }
 
@@ -172,56 +159,50 @@ function seedSessionManagerFromBranchEntries(
   for (const entry of branchEntries) {
     let newId: string | null = null;
     if (entry?.type === "message" && isAppendableAgentMessage(entry.message)) {
-      newId = sessionManager.appendMessage(entry.message);
+      newId = await sessionManager.appendMessage(entry.message);
     } else if (entry?.type === "thinking_level_change" && typeof entry.thinkingLevel === "string") {
-      newId = sessionManager.appendThinkingLevelChange(entry.thinkingLevel);
+      newId = await sessionManager.appendThinkingLevelChange(entry.thinkingLevel);
     } else if (entry?.type === "model_change" && typeof entry.provider === "string" && typeof entry.modelId === "string") {
-      newId = sessionManager.appendModelChange(entry.provider, entry.modelId);
+      newId = await sessionManager.appendModelChange(entry.provider, entry.modelId);
     } else if (entry?.type === "compaction" && typeof entry.summary === "string") {
       const firstKeptEntryId = sourceToNewId.get(entry.firstKeptEntryId)
         ?? sourceToNewId.get(branchEntries[0]?.id ?? "")
         ?? "rotated-context";
-      newId = sessionManager.appendCompaction(entry.summary, firstKeptEntryId, entry.tokensBefore ?? 0, entry.details, entry.fromHook);
+      newId = await sessionManager.appendCompaction(entry.summary, firstKeptEntryId, entry.tokensBefore ?? 0, entry.details, entry.fromHook);
     } else if (entry?.type === "session_info" && typeof entry.name === "string" && entry.name.trim()) {
-      newId = sessionManager.appendSessionInfo(entry.name.trim());
+      newId = await sessionManager.appendSessionInfo(entry.name.trim());
     } else if (entry?.type === "custom_message" && typeof entry.customType === "string") {
-      newId = sessionManager.appendCustomMessageEntry(entry.customType, entry.content, entry.display, entry.details);
+      newId = await sessionManager.appendCustomMessageEntry(entry.customType, entry.content, entry.display, entry.details);
     } else if (entry?.type === "custom_entry" && typeof entry.customType === "string") {
-      newId = sessionManager.appendCustomEntry(entry.customType, entry.data);
+      newId = await sessionManager.appendCustomEntry(entry.customType, entry.data);
     }
-
-    if (entry?.id && newId) {
-      sourceToNewId.set(entry.id, newId);
-    }
+    if (entry?.id && newId) sourceToNewId.set(entry.id, newId);
   }
 }
 
-export function seedSessionManagerFromDeferredBranchSeed(
-  sessionManager: SeedSessionManager,
+export async function seedSessionManagerFromDeferredBranchSeed(
+  sessionManager: SeedSessionManager | SessionManager,
   seed: DeferredBranchSeed,
-): void {
+): Promise<void> {
+  const persistence: SeedSessionManager = "getEntries" in sessionManager
+    ? createSessionManagerPersistencePort(sessionManager as unknown as SessionManagerLike)
+    : sessionManager as SeedSessionManager;
   if (seed.mode === "stable_branch") {
-    seedSessionManagerFromBranchEntries(sessionManager, seed.branchEntries ?? [], {
+    await seedSessionManagerFromBranchEntries(persistence, seed.branchEntries ?? [], {
       sessionName: seed.sessionName,
       model: seed.model,
     });
     return;
   }
-
   if (seed.context) {
-    seedRotatedSession(sessionManager as SessionManager, seed.context, {
+    await seedRotatedSession(persistence, seed.context, {
       sessionName: seed.sessionName || undefined,
       model: seed.model,
     });
     return;
   }
-
-  if (seed.sessionName?.trim()) {
-    sessionManager.appendSessionInfo(seed.sessionName.trim());
-  }
-  if (seed.model) {
-    sessionManager.appendModelChange(seed.model.provider, seed.model.modelId);
-  }
+  if (seed.sessionName?.trim()) await persistence.appendSessionInfo(seed.sessionName.trim());
+  if (seed.model) await persistence.appendModelChange(seed.model.provider, seed.model.modelId);
 }
 
 function getDeferredBranchSeedPath(chatJid: string): string {

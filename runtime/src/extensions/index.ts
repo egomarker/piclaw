@@ -61,7 +61,7 @@ import { sessionStatus } from "./session-status.js";
 import { providerResponseDiagnostics } from "./provider-response-diagnostics.js";
 import { providerRequestSanitizer } from "./provider-request-sanitizer.js";
 import { llmContextNormalizer } from "./llm-context-normalizer.js";
-import { postCompactionPrune } from "./post-compaction-prune.js";
+import { persistedToolResultSanitizer } from "./persisted-tool-result-sanitizer.js";
 import { createContextPruneExtension } from "./context-prune.js";
 import { mcpTimeoutPatch } from "./mcp-timeout-patch.js";
 import { localLitePromptProfile } from "./local-lite-prompt-profile.js";
@@ -97,7 +97,7 @@ export function createBuiltinExtensionFactories(options?: {
     sessionStatus,
     providerRequestSanitizer,
     providerResponseDiagnostics,
-    postCompactionPrune,
+    persistedToolResultSanitizer,
     createContextPruneExtension({ modelRuntime: options?.modelRuntime }),
     llmContextNormalizer,
     mcpTimeoutPatch,

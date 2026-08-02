@@ -33,6 +33,25 @@ test("runtime executor preserves caller payload transform then sanitizes connect
   expect(transformed).toEqual({ input: [{ type: "message" }], caller: true });
 });
 
+test("runtime executor removes orphan Responses outputs after caller payload transforms", async () => {
+  let options: any;
+  installRuntimeModelExecutor({
+    streamSimple: (_model: any, _context: any, nextOptions: any) => { options = nextOptions; return {} as any; },
+    completeSimple: async () => ({}) as any,
+  } as any);
+  getRuntimeModelExecutor()!.streamSimple(model(), { messages: [] }, {
+    onPayload: async (payload: any) => ({
+      ...payload,
+      input: [
+        ...payload.input,
+        { type: "function_call_output", call_id: "call_orphan", output: "secret" },
+      ],
+    }),
+  });
+  const transformed = await options.onPayload({ input: [{ type: "message", role: "user", content: [] }] }, model());
+  expect(transformed).toEqual({ input: [{ type: "message", role: "user", content: [] }] });
+});
+
 test("runtime executor preserves non-Copilot reasoning while removing duplicate optional IDs", async () => {
   let options: any;
   installRuntimeModelExecutor({

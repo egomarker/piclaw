@@ -18,6 +18,26 @@ test("formatProviderError recognizes output-length stop diagnostics", () => {
   expect(formatted?.detail).toContain("Ask to continue");
 });
 
+test("formatProviderError exposes orphan Responses output errors with session-repair guidance", () => {
+  const raw = 'OpenAI API error (400): {"message":"No tool call found for function call output with call_id call_orphan.","code":"invalid_request_body"}';
+
+  const formatted = formatProviderError(raw);
+
+  expect(formatted).toMatchObject({
+    category: "session_corruption",
+    label: "context",
+    title: "Session context needs repair",
+    severity: "error",
+  });
+  expect(formatted?.detail).toContain("call_orphan");
+  expect(formatted?.detail).toContain("/compact");
+  expect(formatted?.detail).toContain("/new-session");
+
+  const unwrapped = formatProviderError("No tool call found for function call output with call_id call_raw.");
+  expect(unwrapped).toMatchObject({ category: "session_corruption", title: "Session context needs repair" });
+  expect(unwrapped?.detail).toContain("call_raw");
+});
+
 test("formatProviderError does not misclassify context-length pressure as output limit", () => {
   const formatted = formatProviderError("OpenAI API error (400): maximum context length exceeded");
 

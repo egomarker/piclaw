@@ -230,7 +230,15 @@ test("rotateSession emergency fallback archives bloated context when compaction 
       } as any;
       return { cancelled: false };
     },
-    switchSession: async () => ({ cancelled: false }),
+    switchSession: async (path: string) => {
+      const reopened = SessionManager.open(path, sessionDir);
+      runtime.session = {
+        ...runtime.session,
+        sessionManager: reopened,
+        sessionFile: reopened.getSessionFile(),
+      } as any;
+      return { cancelled: false };
+    },
     fork: async () => ({ cancelled: false }),
     importFromJsonl: async () => ({ cancelled: false }),
     dispose: async () => {},

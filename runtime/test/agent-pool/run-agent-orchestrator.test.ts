@@ -3403,6 +3403,57 @@ test("runAgentPrompt surfaces provider error instead of returning null result", 
   expect(result.result).toBeNull();
 });
 
+test("runAgentPrompt does not retry deterministic orphan Responses output errors", async () => {
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    sessionManager = { getLeafId: () => "leaf-orphan-output" };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    promptCalls = 0;
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => { this.listeners = this.listeners.filter((entry) => entry !== listener); };
+    }
+    async prompt() {
+      this.promptCalls += 1;
+      for (const listener of this.listeners) {
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "error",
+            errorMessage: "OpenAI API error (400): No tool call found for function call output with call_id call_orphan.",
+            content: [],
+          },
+        });
+      }
+    }
+    async abort() {}
+  }
+
+  const session = new StubSession();
+  const result = await runAgentPrompt("continue", "web:orphan-output", { timeoutMs: 0 }, {
+    getOrCreateRuntime: async () => createRuntime(session) as any,
+    turnCoordinator: new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} }),
+    clearAttachments: () => {},
+    takeAttachments: () => [],
+    logsDir: createTestLogsDir(),
+    setActiveForkBaseLeaf: () => {},
+    clearActiveForkBaseLeaf: () => {},
+  });
+
+  expect(result.status).toBe("error");
+  expect(result.error).toContain("call_orphan");
+  expect(result.recovery).toEqual(expect.objectContaining({
+    attemptsUsed: 0,
+    exhausted: true,
+    lastClassifier: "session_corruption",
+    strategyHistory: [],
+  }));
+  expect(session.promptCalls).toBe(1);
+});
+
 test("runAgentPrompt treats provider length stop as an error with preserved partial draft", async () => {
   class StubSession {
     private listeners: Array<(event: any) => void> = [];

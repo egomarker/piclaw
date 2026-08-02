@@ -2508,6 +2508,68 @@ test("processChat appends visible diagnostic text to recovered tool-budget draft
   }));
 });
 
+test("processChat persists orphan Responses output errors with visible session-repair guidance", async () => {
+  const ws = createTempWorkspace("piclaw-web-channel-");
+  cleanupWorkspace = ws.cleanup;
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+
+  const db = await import("../../../src/db.js");
+  db.initDatabase();
+  db.getDb().exec("DELETE FROM message_media; DELETE FROM messages; DELETE FROM chats; DELETE FROM chat_cursors;");
+  db.storeChatMetadata("web:default", new Date().toISOString(), "Web");
+  db.storeMessage({
+    id: `msg-${Math.random()}`,
+    chat_jid: "web:default",
+    sender: "user",
+    sender_name: "User",
+    content: "continue",
+    timestamp: new Date().toISOString(),
+    is_from_me: false,
+    is_bot_message: false,
+  });
+
+  const error = 'OpenAI API error (400): {"message":"No tool call found for function call output with call_id call_orphan.","code":"invalid_request_body"}';
+  const webMod = await import("../../../src/channels/web.js");
+  const web = new (webMod.WebChannel as any)({
+    queue: { enqueue: () => {} },
+    agentPool: {
+      setSessionBinder: () => {},
+      runAgent: async () => ({
+        status: "error",
+        error,
+        result: null,
+        attachments: [],
+        recovery: {
+          attemptsUsed: 0,
+          totalElapsedMs: 1000,
+          recovered: false,
+          exhausted: true,
+          lastClassifier: "session_corruption",
+          strategyHistory: [],
+          diagnostics: [],
+        },
+      }),
+      getContextUsageForChat: async () => null,
+    },
+  });
+
+  await web.processChat("web:default", "default");
+
+  const timeline = db.getTimeline("web:default", 10);
+  const botMessages = timeline.filter((item: any) => item.data.type === "agent_response");
+  expect(botMessages).toHaveLength(1);
+  expect(botMessages[0].data.content).toContain("Session context needs repair");
+  expect(botMessages[0].data.content).toContain("call_orphan");
+  expect(botMessages[0].data.content).toContain("/compact");
+  expect(botMessages[0].data.content).toContain("/new-session");
+  expect(botMessages[0].data.content_blocks).toContainEqual(expect.objectContaining({
+    type: "turn_outcome_marker",
+    kind: "context",
+    title: "Session context needs repair",
+    classifier: "session_corruption",
+  }));
+});
+
 test("processChat persists raw abort errors as visible outcome markers", async () => {
   const ws = createTempWorkspace("piclaw-web-channel-");
   cleanupWorkspace = ws.cleanup;

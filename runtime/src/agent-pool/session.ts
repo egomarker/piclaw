@@ -36,6 +36,7 @@ import { SESSIONS_DIR, getRuntimeRoot, getSessionPersistenceConfig, getWorkspace
 import { buildChannelSystemPromptAppendix } from "../channels/formatting.js";
 import { detectChannel } from "../router.js";
 import { createBuiltinExtensionFactories } from "../extensions/index.js";
+import { sanitizePersistedSessionMessage } from "../extensions/persisted-tool-result-sanitizer.js";
 import { freezeExtensionRoutes } from "../channels/web/http/extension-routes.js";
 import { ensureExtensionNodeModulesLink } from "./session-node-modules-link.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
@@ -48,9 +49,7 @@ const AGENT_DIR = getPiclawAgentDir();
 const EMPTY_STRING_ARRAY: string[] = [];
 const BUNDLED_EXTENSION_PATHS_CACHE = new Map<string, string[]>();
 const SESSION_PERSISTENCE_CONFIG = getSessionPersistenceConfig();
-const SESSION_TOOL_RESULT_MAX_PERSIST_BYTES = SESSION_PERSISTENCE_CONFIG.toolResultMaxPersistBytes;
 const SESSION_FILE_PRELOAD_SANITIZE_MIN_BYTES = SESSION_PERSISTENCE_CONFIG.filePreloadSanitizeMinBytes;
-const SESSION_TOOL_RESULT_PREVIEW_CHARS = SESSION_PERSISTENCE_CONFIG.toolResultPreviewChars;
 const CHANNEL_SYSTEM_PROMPT_APPENDIX_CACHE = new Map<string, string>();
 const APPEND_SYSTEM_PROMPT_OVERRIDE_CACHE = new Map<string, (base: string[]) => string[]>();
 let cachedExtensionNodeModulesDir: string | null | undefined;
@@ -308,98 +307,6 @@ function getAppendSystemPromptOverride(channelSystemPromptAppendix: string): ((b
 
 type PersistableSessionMessage = Parameters<SessionManager["appendMessage"]>[0];
 
-type PersistedToolResultSanitizeResult = {
-  message: PersistableSessionMessage;
-  changed: boolean;
-};
-
-function formatBytes(bytes: number): string {
-  if (!(bytes > 0)) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  let value = bytes;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  const digits = value >= 10 || unitIndex === 0 ? 0 : 1;
-  return `${value.toFixed(digits)} ${units[unitIndex]}`;
-}
-
-function truncatePreview(text: string, maxChars = SESSION_TOOL_RESULT_PREVIEW_CHARS): string {
-  if (text.length <= maxChars) return text;
-  const head = text.slice(0, Math.max(0, maxChars - 120));
-  const omitted = text.length - head.length;
-  return `${head}\n\n[... omitted ${omitted} chars for persisted session size ...]`;
-}
-
-function sanitizePersistedSessionMessage(message: PersistableSessionMessage): PersistedToolResultSanitizeResult {
-  if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "toolResult") {
-    return { message, changed: false };
-  }
-
-  const toolResultMessage = message as unknown as { content?: unknown; toolName?: string };
-  const baseMessage = message as unknown as Record<string, unknown>;
-  const serializedSize = Buffer.byteLength(JSON.stringify(message));
-  const originalContent = Array.isArray(toolResultMessage.content)
-    ? ([...toolResultMessage.content] as Array<Record<string, unknown> | null | undefined>)
-    : null;
-
-  let changed = false;
-  let removedImageBlocks = 0;
-  let removedImageBytes = 0;
-  let previewText = "";
-  const sanitizedContent: Array<Record<string, unknown>> = [];
-
-  if (originalContent) {
-    for (const block of originalContent) {
-      if (!block || typeof block !== "object") {
-        continue;
-      }
-      if (block.type === "image") {
-        removedImageBlocks += 1;
-        if (typeof block.data === "string") removedImageBytes += block.data.length;
-        changed = true;
-        continue;
-      }
-      if (!previewText && block.type === "text" && typeof block.text === "string") {
-        previewText = block.text;
-      }
-      sanitizedContent.push(block);
-    }
-  }
-
-  if (removedImageBlocks > 0) {
-    const mimeTypes = originalContent
-      ?.filter((block): block is Record<string, unknown> => !!block && typeof block === "object")
-      .filter((block) => block.type === "image" && typeof block.mimeType === "string")
-      .map((block) => String(block.mimeType)) ?? [];
-    sanitizedContent.push({
-      type: "text",
-      text: `[Persisted tool result sanitized: removed ${removedImageBlocks} inline image block${removedImageBlocks === 1 ? "" : "s"}${mimeTypes.length ? ` (${Array.from(new Set(mimeTypes)).join(", ")})` : ""} totalling ~${formatBytes(removedImageBytes)}.]`,
-    });
-  }
-
-  let sanitizedMessage: PersistableSessionMessage = changed
-    ? ({ ...baseMessage, content: sanitizedContent } as unknown as PersistableSessionMessage)
-    : message;
-
-  const sanitizedSize = Buffer.byteLength(JSON.stringify(sanitizedMessage));
-  if (sanitizedSize > SESSION_TOOL_RESULT_MAX_PERSIST_BYTES) {
-    const fallbackPreview = truncatePreview(previewText || `Tool result for ${toolResultMessage.toolName || "tool"}.`);
-    sanitizedMessage = {
-      ...baseMessage,
-      content: [{
-        type: "text",
-        text: `${fallbackPreview}\n\n[Persisted tool result truncated from ${formatBytes(serializedSize)} to stay within the ${formatBytes(SESSION_TOOL_RESULT_MAX_PERSIST_BYTES)} session-entry budget.]`,
-      }],
-    } as unknown as PersistableSessionMessage;
-    changed = true;
-  }
-
-  return { message: sanitizedMessage, changed };
-}
-
 function getLatestSessionFile(sessionDir: string): string | null {
   if (!existsSync(sessionDir)) return null;
   const latest = readdirSync(sessionDir)
@@ -578,20 +485,6 @@ function trimPreCompactionEntries(sessionDir: string): void {
   }
 }
 
-function installPersistedToolResultSanitizer(runtime: AgentSessionRuntime): void {
-  const sessionManager = runtime.session.sessionManager as SessionManager & {
-    __piclawPersistedToolResultSanitizerInstalled?: boolean;
-    appendMessage: (message: PersistableSessionMessage) => string;
-  };
-  if (sessionManager.__piclawPersistedToolResultSanitizerInstalled) return;
-  const originalAppendMessage = sessionManager.appendMessage.bind(sessionManager);
-  sessionManager.appendMessage = ((message: PersistableSessionMessage) => {
-    const sanitized = sanitizePersistedSessionMessage(message);
-    return originalAppendMessage(sanitized.message);
-  }) as typeof sessionManager.appendMessage;
-  sessionManager.__piclawPersistedToolResultSanitizerInstalled = true;
-}
-
 /** Ensure the session directory exists for a chat and return its path. */
 export function ensureSessionDir(chatJid: string): string {
   const chatSessionDir = join(SESSIONS_DIR, sanitiseJid(chatJid));
@@ -720,14 +613,11 @@ export async function createSessionInDir(
     };
   };
 
-  const runtime = await createAgentSessionRuntime(createRuntime as any, {
+  return await createAgentSessionRuntime(createRuntime as any, {
     cwd: workspaceDir,
     agentDir: AGENT_DIR,
     sessionManager: SessionManager.continueRecent(workspaceDir, sessionDir),
   });
-
-  installPersistedToolResultSanitizer(runtime);
-  return runtime;
 }
 
 export async function createDefaultSession(

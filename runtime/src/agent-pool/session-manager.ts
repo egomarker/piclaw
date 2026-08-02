@@ -20,6 +20,7 @@ import {
 import { getChatBranchByChatJid } from "../db.js";
 import { createDefaultSession, createSessionInDir, ensureNamedSessionDir, ensureSessionDir, lightweightPrewarmSession } from "./session.js";
 import { forcePersistSessionFile, seedRotatedSession } from "../session-rotation.js";
+import { getSessionPersistencePort } from "./session-persistence.js";
 
 /** Cached session entry stored for each chat JID. */
 export interface PoolEntry {
@@ -40,6 +41,7 @@ export interface AgentSessionManagerOptions {
   sidePool: Map<string, PoolEntry>;
   createSession?: (chatJid: string, sessionDir: string) => Promise<AgentSessionRuntime>;
   createSideSession?: (chatJid: string, sessionDir: string) => Promise<AgentSessionRuntime>;
+  disposePersistence?: (runtime: AgentSessionRuntime) => Promise<void> | void;
   modelRuntime: ModelRuntime;
   settingsManager: SettingsManager;
   mainSessionMaxSize?: number | null;
@@ -75,7 +77,7 @@ export class AgentSessionManager {
   private readonly idleSideDisposalsInFlight = new Map<string, Promise<void>>();
   private readonly createSideInFlight = new Map<string, Promise<AgentSessionRuntime>>();
   private readonly invalidDeferredBranchSeedErrors = new Map<string, { error: Error; fingerprint: string | null }>();
-  private readonly runtimeDisposeInFlight = new WeakMap<AgentSessionRuntime, Promise<void>>();
+  private readonly runtimeDisposeInFlight = new WeakMap<AgentSessionRuntime, Promise<unknown | null>>();
   private readonly prewarmInFlight = new Set<string>();
   private readonly queuedPrewarms = new Set<string>();
   private readonly prewarmQueue: Array<{ chatJid: string; mode: "full" | "lightweight" }> = [];
@@ -277,10 +279,10 @@ export class AgentSessionManager {
 
   async syncSideSessionFromMain(mainSession: AgentSession, sideRuntime: AgentSessionRuntime): Promise<void> {
     try {
-      const mainContext = mainSession.sessionManager.buildSessionContext();
+      const mainContext = await getSessionPersistencePort(mainSession).buildContext();
       const result = await sideRuntime.newSession({
         setup: async (sessionManager) => {
-          seedRotatedSession(sessionManager, mainContext, {
+          await seedRotatedSession(sessionManager, mainContext, {
             sessionName: "BTW",
             model: mainContext.model,
           });
@@ -412,21 +414,17 @@ export class AgentSessionManager {
   ): Promise<void> {
     const entry = map.get(chatJid);
     if (!entry) return;
-    const sessionId = entry.runtime.session.sessionId;
     try {
-      await entry.runtime.dispose();
-      this.options.onInfo?.(side ? "Disposed side session" : "Disposed session", {
+      const disposeError = await this.disposeRuntimeOnce(entry.runtime, side ? "Failed to dispose side session" : "Failed to dispose session", {
         operation,
         chatJid,
       });
-    } catch (err) {
-      this.options.onError?.(side ? "Failed to dispose side session" : "Failed to dispose session", {
-        operation,
-        chatJid,
-        err,
-      });
+      if (disposeError) {
+        this.options.onError?.(side ? "Failed to dispose side session" : "Failed to dispose session", { operation, chatJid, err: disposeError });
+      } else {
+        this.options.onInfo?.(side ? "Disposed side session" : "Disposed session", { operation, chatJid });
+      }
     } finally {
-      closeOpenAICodexWebSocketSessions(sessionId);
       map.delete(chatJid);
     }
   }
@@ -546,7 +544,7 @@ export class AgentSessionManager {
     const task = this.disposeRuntimeOnce(entry.runtime, warnMessage, {
       operation,
       chatJid,
-    }).finally(() => {
+    }).then(() => undefined).finally(() => {
       if (pendingDisposals.get(chatJid) === task) {
         pendingDisposals.delete(chatJid);
       }
@@ -559,43 +557,33 @@ export class AgentSessionManager {
     runtime: AgentSessionRuntime,
     warnMessage = "Failed to dispose session",
     details: Record<string, unknown> = {},
-  ): Promise<void> {
+  ): Promise<unknown | null> {
     const pendingDispose = this.runtimeDisposeInFlight.get(runtime);
-    if (pendingDispose) {
-      await pendingDispose;
-      return;
-    }
+    if (pendingDispose) return await pendingDispose;
 
-    const task = (async () => {
+    const task = (async (): Promise<unknown | null> => {
       const sessionId = runtime.session.sessionId;
+      let firstError: unknown | null = null;
       try {
         await runtime.dispose();
       } catch (err) {
-        this.options.onWarn?.(warnMessage, {
-          ...details,
-          err,
-        });
+        firstError = err;
+        this.options.onWarn?.(warnMessage, { ...details, err });
       } finally {
-        closeOpenAICodexWebSocketSessions(sessionId);
-        // C3: Break references to large session data immediately after disposal
-        // so GC can reclaim the fileEntries array and byId Map without waiting
-        // for all closure/reference paths to be collected.
         try {
-          const sm = runtime.session.sessionManager as unknown as { fileEntries?: unknown[]; byId?: Map<unknown, unknown> };
-          if (sm.fileEntries) sm.fileEntries = [];
-          if (sm.byId) sm.byId.clear();
-          const agent = (runtime.session as unknown as { agent?: { state?: { messages?: unknown[] } } }).agent;
-          if (agent?.state?.messages) agent.state.messages = [];
+          await this.options.disposePersistence?.(runtime);
         } catch (err) {
-          this.options.onWarn?.("Failed to release disposed session references", { err });
+          firstError ??= err;
+          this.options.onWarn?.("Failed to dispose session persistence resource", { ...details, err });
         }
+        closeOpenAICodexWebSocketSessions(sessionId);
       }
+      return firstError;
     })();
     this.runtimeDisposeInFlight.set(runtime, task);
-    await task;
-    if (this.runtimeDisposeInFlight.get(runtime) === task) {
-      this.runtimeDisposeInFlight.delete(runtime);
-    }
+    const result = await task;
+    if (this.runtimeDisposeInFlight.get(runtime) === task) this.runtimeDisposeInFlight.delete(runtime);
+    return result;
   }
 
   private async applyDefaultModel(session: AgentSession): Promise<void> {
@@ -631,7 +619,7 @@ export class AgentSessionManager {
         const result = await runtime.newSession({
           ...(seed.parentSession ? { parentSession: seed.parentSession } : {}),
           setup: async (sessionManager) => {
-            seedSessionManagerFromDeferredBranchSeed(sessionManager, seed);
+            await seedSessionManagerFromDeferredBranchSeed(sessionManager, seed);
           },
         });
         if (result.cancelled) {
@@ -669,7 +657,11 @@ export class AgentSessionManager {
           });
         }
 
-        forcePersistSessionFile(session);
+        const persistedSessionFile = forcePersistSessionFile(session);
+        if (persistedSessionFile) {
+          const reopened = await runtime.switchSession(persistedSessionFile);
+          if (reopened.cancelled) throw new Error("Deferred branch session could not be reopened after persistence.");
+        }
         finalizeClaimedDeferredBranchSeed(chatJid);
         this.invalidDeferredBranchSeedErrors.delete(chatJid);
         return true;

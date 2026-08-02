@@ -105,7 +105,11 @@ describe("session persistence sanitizer", () => {
       });
 
       runtime.session.sessionManager.appendMessage(makeAssistantMessage("seed"));
-      runtime.session.sessionManager.appendMessage(makeOversizedReadToolResult());
+      const sanitized = await runtime.session.extensionRunner.emitMessageEnd({
+        type: "message_end",
+        message: makeOversizedReadToolResult(),
+      });
+      runtime.session.sessionManager.appendMessage(sanitized ?? makeOversizedReadToolResult());
 
       const sessionFile = runtime.session.sessionFile;
       expect(sessionFile).toBeTruthy();
