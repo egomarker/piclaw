@@ -474,6 +474,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
               onPopOutTab=${isWebAppMode ? undefined : handlePopOutPane}
               rovingFocus=${mobileTabAccessibilityEnabled || undefined}
               restoreFocusAfterClose=${mobileTabAccessibilityEnabled || undefined}
+              touchContextMenu=${mobileTabAccessibilityEnabled || undefined}
               tabListId=${mobileTabAccessibilityEnabled ? MOBILE_SURFACE_TABLIST_ID : undefined}
               tabListLabel=${mobileTabAccessibilityEnabled ? 'Open surfaces' : undefined}
               getTabElementId=${mobileTabAccessibilityEnabled ? getMobileSurfaceTabElementId : undefined}

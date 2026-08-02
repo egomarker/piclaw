@@ -173,6 +173,10 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     border-top: 1px solid var(--border-color);
 }
 
+.app-shell.mobile-interface .tab-item {
+    -webkit-touch-callout: none;
+}
+
 .app-shell.mobile-interface .tab-item.non-closable {
     padding-right: 10px;
 }

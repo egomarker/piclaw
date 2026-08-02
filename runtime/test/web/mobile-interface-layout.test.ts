@@ -79,6 +79,12 @@ test('Attach to Chat toolbar states remain scoped to Mobile', () => {
   expect(classicEditorCss).not.toContain('tab-strip-attach-to-chat');
 });
 
+test('Mobile suppresses native tab callouts without changing Classic or Visual tabs', () => {
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface \.tab-item \{\s*-webkit-touch-callout: none;/);
+  expect(classicEditorCss).not.toContain('-webkit-touch-callout');
+  expect(visualEditorCss).not.toContain('-webkit-touch-callout');
+});
+
 test('Mobile reveals enlarged tab close targets only for coarse touch-only input', () => {
   const hiddenCloseRule = /\.tab-close \{[^}]*width: 22px;[^}]*height: 22px;[^}]*min-width: 22px;[^}]*min-height: 22px;[^}]*opacity: 0;[^}]*pointer-events: none;/s;
   expect(classicEditorCss).toMatch(hiddenCloseRule);
