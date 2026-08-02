@@ -7,7 +7,7 @@
  * Consumers: agent-control-handlers.ts dispatches to these handlers.
  */
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { AgentSession, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import type { AgentControlCommand, AgentControlResult } from "../agent-control-types.js";
@@ -53,7 +53,13 @@ export async function handleNewSession(session: AgentSession, runtime: AgentSess
   // immediately for session pickers and survives runtime eviction.
   // The SDK defers persistence until the first assistant message, but in
   // web mode the runtime may be evicted before the user sends a follow-up.
-  ensureSessionFileOnDisk(runtime.session);
+  const sessionFile = ensureSessionFileOnDisk(runtime.session);
+  if (sessionFile) {
+    const reopened = await runtime.switchSession(sessionFile);
+    if (reopened.cancelled) {
+      return { status: "error", message: "New session could not be reopened after persistence." };
+    }
+  }
   return { status: "success", message: "Started a new session." };
 }
 
@@ -62,24 +68,29 @@ export async function handleNewSession(session: AgentSession, runtime: AgentSess
  * and any initial entries so the file is discoverable by session pickers
  * and `continueRecent()` after pool eviction.
  *
- * Note: pi-coding-agent 0.76 writes the initial persisted file with `wx`
- * when the first assistant message arrives. If we create the file eagerly, we
- * must also mark the manager as flushed so later SDK appends use append mode
- * instead of trying to exclusively create an already-existing file.
+ * The file is written atomically and then reopened through the public runtime
+ * API so the replacement SessionManager derives its persistence state from
+ * disk instead of Piclaw mutating the manager's private `flushed` flag.
  */
-function ensureSessionFileOnDisk(session: AgentSession): void {
+function ensureSessionFileOnDisk(session: AgentSession): string | null {
   const sm = session.sessionManager;
-  if (!sm || typeof sm.getSessionFile !== "function") return;
-  if (typeof sm.isPersisted === "function" && !sm.isPersisted()) return;
+  if (!sm || typeof sm.getSessionFile !== "function") return null;
+  if (typeof sm.isPersisted === "function" && !sm.isPersisted()) return null;
   const filePath = sm.getSessionFile();
-  if (!filePath || existsSync(filePath)) return;
+  if (!filePath || existsSync(filePath)) return null;
   const header = sm.getHeader();
-  if (!header) return;
+  if (!header) return null;
   const dir = dirname(filePath);
+  const tempPath = `${filePath}.creating-${process.pid}-${Date.now()}.tmp`;
   mkdirSync(dir, { recursive: true });
-  // Write only the header — minimal content for isValidSessionFile() to pass.
-  writeFileSync(filePath, JSON.stringify(header) + "\n");
-  (sm as unknown as { flushed?: boolean }).flushed = true;
+  try {
+    writeFileSync(tempPath, `${JSON.stringify(header)}\n`, { flag: "wx" });
+    renameSync(tempPath, filePath);
+    return filePath;
+  } catch (error) {
+    rmSync(tempPath, { force: true });
+    throw error;
+  }
 }
 
 /** Handle /switch-session: switch to an existing session by path. */

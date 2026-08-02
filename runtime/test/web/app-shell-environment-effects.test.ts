@@ -8,6 +8,7 @@ import {
   shouldApplyBrandingDocumentTitle,
 } from '../../web/src/ui/app-shell-environment-effects.js';
 import { BTW_SESSION_KEY } from '../../web/src/ui/app-shell-state.js';
+import { formatSessionBrowserTitle } from '../../web/src/ui/browser-title.js';
 
 const originalWindow = (globalThis as any).window;
 
@@ -42,6 +43,13 @@ test('persistBtwSession stores normalized side-session payload', () => {
     error: null,
     status: 'running',
   });
+});
+
+test('formatSessionBrowserTitle appends a normalized session handle', () => {
+  expect(formatSessionBrowserTitle('Smith', 'research')).toBe('Smith - @research');
+  expect(formatSessionBrowserTitle(' Smith ', '@research')).toBe('Smith - @research');
+  expect(formatSessionBrowserTitle('Smith', '  ')).toBe('Smith');
+  expect(formatSessionBrowserTitle('', null)).toBe('PiClaw');
 });
 
 test('shouldApplyBrandingDocumentTitle skips title overrides in pane popouts', () => {

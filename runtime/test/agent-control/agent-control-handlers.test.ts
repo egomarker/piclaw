@@ -433,7 +433,16 @@ test("agent control queue, compact, and abort commands", async () => {
   const compactCorruption = await applyControlCommand(runtime as any, registry, { type: "compact", raw: "/compact" });
   expect(compactCorruption.status).toBe("error");
   expect(compactCorruption.message).toContain("⚠️ API error — the session may be corrupted");
-  expect(compactCorruption.message).toContain("prunes orphaned tool-result blocks and corrupt image blocks automatically");
+  expect(compactCorruption.message).toContain("prunes orphaned agent tool results, corrupt image blocks, and orphan OpenAI Responses outputs");
+  db.clearChatCompactionBackoff("web:default");
+  db.clearChatCompactionBackoff("control:/compact");
+
+  session.compactError = new Error("OpenAI API error (400): No tool call found for function call output with call_id call_orphan.");
+  const compactResponsesCorruption = await applyControlCommand(runtime as any, registry, { type: "compact", raw: "/compact" });
+  expect(compactResponsesCorruption.status).toBe("error");
+  expect(compactResponsesCorruption.message).toContain("session may be corrupted");
+  expect(compactResponsesCorruption.message).toContain("call_orphan");
+  expect(compactResponsesCorruption.message).toContain("/new-session");
   session.compactError = null;
 
   const compactBackoffBlocked = await applyControlCommand(runtime as any, registry, { type: "compact", raw: "/compact" });

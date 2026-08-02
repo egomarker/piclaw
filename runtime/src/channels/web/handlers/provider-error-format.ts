@@ -2,7 +2,10 @@
  * web/handlers/provider-error-format.ts — Parse provider error envelopes for user-visible display.
  */
 
+import { isOrphanFunctionCallOutputError } from "../../../utils/provider-payload-errors.js";
+
 export type ProviderErrorCategory =
+  | "session_corruption"
   | "rate_limit"
   | "auth"
   | "quota"
@@ -120,6 +123,7 @@ export function sanitizeProviderErrorDetail(errorText: string | null | undefined
 }
 
 function inferCategory(text: string): ProviderErrorCategory {
+  if (isOrphanFunctionCallOutputError(text)) return "session_corruption";
   if (/\b429\b|rate[ -]?limit|too many requests|retry-after/i.test(text)) return "rate_limit";
   if (/authentication failed|credentials may have expired|no api key(?: found| for provider)?|token refresh failed\s*:\s*401|re-authenticate|unauthorized|\b401\b|\b403\b|invalid.*api.*key|api.*key.*invalid|token.*expired|oauth.*expired|refresh.*token/i.test(text)) return "auth";
   if (OUTPUT_LIMIT_PATTERN.test(text) && !/context(?: window| length)|maximum context length|context_length/i.test(text)) return "output_limit";
@@ -134,6 +138,8 @@ function inferCategory(text: string): ProviderErrorCategory {
 function titleForCategory(category: ProviderErrorCategory, provider: string | null, detail = ""): string {
   const prefix = provider ? `${provider} ` : "Provider ";
   switch (category) {
+    case "session_corruption":
+      return "Session context needs repair";
     case "rate_limit":
       return `${prefix}rate limit`;
     case "auth":
@@ -163,6 +169,8 @@ function titleForCategory(category: ProviderErrorCategory, provider: string | nu
 
 function labelForCategory(category: ProviderErrorCategory): string {
   switch (category) {
+    case "session_corruption":
+      return "context";
     case "rate_limit":
       return "rate limit";
     case "auth":
@@ -242,7 +250,8 @@ export function parseProviderError(errorText: string | null | undefined): Parsed
   const isModelAvailabilityOnly = MODEL_AVAILABILITY_PATTERN.test(raw);
   const isNetworkOnly = NETWORK_ERROR_PATTERN.test(raw);
   const isOutputLimitOnly = OUTPUT_LIMIT_PATTERN.test(raw) && !/context(?: window| length)|maximum context length|context_length/i.test(raw);
-  if (!parsed && !prefixMatch && !isModelAvailabilityOnly && !isNetworkOnly && !isOutputLimitOnly) return null;
+  const isSessionCorruptionOnly = isOrphanFunctionCallOutputError(raw);
+  if (!parsed && !prefixMatch && !isModelAvailabilityOnly && !isNetworkOnly && !isOutputLimitOnly && !isSessionCorruptionOnly) return null;
 
   const nested = asRecord(parsed?.error) || asRecord(parsed?.errors) || null;
   const message = readString(nested?.message, parsed?.message, nested?.error, parsed?.error_description, parsed?.detail)
@@ -284,6 +293,10 @@ export function formatProviderError(errorText: string | null | undefined): Provi
   const category = inferCategory(classificationText || parsed.message);
 
   let detail = buildDetail(parsed);
+  if (category === "session_corruption") {
+    const guidance = "Run /compact to rewrite the session context. If the repaired session still fails, use /new-session to start fresh.";
+    detail = [detail, guidance].filter(Boolean).join(" — ").slice(0, 900);
+  }
   if (category === "network") {
     const guidance = networkGuidance(parsed.message);
     detail = [detail, guidance].filter(Boolean).join(" — ").slice(0, 900);

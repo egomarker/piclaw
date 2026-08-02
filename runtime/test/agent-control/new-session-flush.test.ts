@@ -52,6 +52,12 @@ describe("/new-session JSONL flush", () => {
         newSessionCalled = true;
         return { cancelled: false };
       },
+      switchSession: async (path: string) => {
+        const reopened = SessionManager.open(path, sessionDir);
+        newMockSession.sessionManager = reopened;
+        newMockSession.sessionFile = reopened.getSessionFile();
+        return { cancelled: false };
+      },
     };
 
     const result = await handleNewSession(
@@ -80,21 +86,23 @@ describe("/new-session JSONL flush", () => {
   it("pre-written header does not break SDK persistence when assistant arrives", async () => {
     const sessionDir = join(tempDir, "sessions");
 
-    // Simulate what happens: create SM, write header, then SDK appends
-    const sm = SessionManager.create(tempDir, sessionDir);
-    const filePath = sm.getSessionFile()!;
+    // Simulate what Piclaw does: atomically write the header, then reopen the
+    // file through the public API before the SDK appends more entries.
+    const created = SessionManager.create(tempDir, sessionDir);
+    const filePath = created.getSessionFile()!;
     expect(existsSync(filePath)).toBe(false);
 
-    // Write just the header and mark the SDK manager flushed (what our fix does)
-    const { writeFileSync, mkdirSync } = await import("node:fs");
+    const { writeFileSync, mkdirSync, renameSync } = await import("node:fs");
     const { dirname } = await import("node:path");
-    const header = sm.getHeader();
+    const header = created.getHeader();
     expect(header).toBeTruthy();
     mkdirSync(dirname(filePath), { recursive: true });
-    writeFileSync(filePath, JSON.stringify(header) + "\n");
-    (sm as any).flushed = true;
+    const tempPath = `${filePath}.tmp`;
+    writeFileSync(tempPath, JSON.stringify(header) + "\n", { flag: "wx" });
+    renameSync(tempPath, filePath);
+    const sm = SessionManager.open(filePath, sessionDir);
 
-    // Now the SDK appends messages as it normally would (user + assistant)
+    // Now the reopened manager appends messages as it normally would.
     sm.appendMessage({ role: "user", content: "hello" });
     sm.appendMessage({ role: "assistant", content: "hi" });
 

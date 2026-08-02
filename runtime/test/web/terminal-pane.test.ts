@@ -320,6 +320,18 @@ test('terminal uses native xterm scrollbars but keeps the right gutter theme-col
     expect(source).not.toContain('.xterm-scrollable-element > .scrollbar.vertical');
 });
 
+test('terminal controls stay shared, owner-document scoped, and lifecycle-cleaned', () => {
+    const source = readFileSync(new URL('../../web/src/panes/terminal-pane.ts', import.meta.url), 'utf8');
+    expect(source.match(/return new TerminalPaneInstance\(container, context\);/g)?.length).toBe(2);
+    expect(source).toContain('this.installMobileControls();');
+    expect(source).toContain('this.ownerDocument.addEventListener("keydown", this.modifierKeydownListener, true);');
+    expect(source).toContain('this.ownerDocument.removeEventListener("keydown", this.modifierKeydownListener, true);');
+    expect(source).toContain('this.selectionDisposable?.dispose?.()');
+    expect(source).toContain('this.setModifierMode(null, { focus: false });');
+    expect(source).not.toContain('this.detaching');
+    expect(source).toContain('this.setControlsEnabled(this.socket?.readyState === WebSocket.OPEN && !this.terminalExited);');
+});
+
 test('getOrCreateAnonymousTerminalClientToken persists a stable client token', () => {
     const storage = new Map<string, string>();
     const runtimeWindow = {

@@ -11,6 +11,7 @@ import {
   parseProviderError,
   sanitizeProviderErrorDetail,
 } from "../../../src/channels/web/handlers/provider-error-format.js";
+import { isOrphanFunctionCallOutputError } from "../../../src/utils/provider-payload-errors.js";
 
 // We test through the module's internal functions by importing the file
 // and accessing the exported formatUserVisibleError indirectly.
@@ -64,10 +65,12 @@ describe("provider error classification", () => {
     expect(rateLimitPatterns.test("Retry-After: 30")).toBe(true);
   });
 
-  test("detects session corruption from image and orphaned tool-result errors", () => {
+  test("detects session corruption from image, orphaned tool-result and Responses output errors", () => {
     expect(sessionCorruptionPatterns.test('400 messages.2.content.1.image.source.base64.data: Image format image/png not supported')).toBe(true);
     expect(sessionCorruptionPatterns.test("invalid_request_error")).toBe(true);
     expect(sessionCorruptionPatterns.test('400 messages.2.content.0: unexpected `tool_use_id` found in `tool_result` blocks: toolu_test. Each `tool_result` block must have a corresponding `tool_use` block in the previous message.')).toBe(true);
+    expect(isOrphanFunctionCallOutputError("No tool call found for function call output with call_id call_orphan.")).toBe(true);
+    expect(isOrphanFunctionCallOutputError("invalid_request_body: unrelated malformed request")).toBe(false);
   });
 
   test("detects model config errors", () => {
