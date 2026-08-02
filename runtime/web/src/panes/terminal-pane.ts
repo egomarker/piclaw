@@ -7,6 +7,14 @@
  * available only through the optional ghostty-terminal add-on.
  */
 
+import {
+  isAndroidLikeTerminalPlatform,
+  resolveTerminalModifierAction,
+  shouldShowTerminalMobileControls,
+  TERMINAL_MOBILE_CONTROLS,
+  toggleTerminalModifier,
+} from "./terminal-mobile-controls-runtime.js";
+
 const ASSET_BASE = "/static/common/js/vendor/xterm";
 export const TERMINAL_TAB_PATH = "piclaw://terminal";
 const TERMINAL_ANON_CLIENT_HEADER = "x-piclaw-terminal-client";
@@ -235,7 +243,7 @@ function injectStyles(ownerDocument = document) {
         min-width: 0;
         min-height: 0;
         width: 100%;
-        height: 100%;
+        height: auto;
         overflow: hidden;
         padding: 6px;
         box-sizing: border-box;
@@ -302,6 +310,100 @@ function injectStyles(ownerDocument = document) {
       .terminal-pane-xterm:focus-within .terminal-status {
         opacity: .82;
         transition-delay: 0s;
+      }
+      .terminal-pane-xterm .terminal-toolbar-anchor {
+        flex: 0 0 auto;
+        width: 100%;
+        position: relative;
+        overflow: visible;
+        box-sizing: border-box;
+        background: var(--bg-secondary, #161b22);
+        border-top: 1px solid var(--border-color, rgba(148,163,184,.24));
+      }
+      .terminal-pane-xterm .terminal-mobile-toolbar {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        grid-auto-rows: 48px;
+        gap: 4px;
+        width: 100%;
+        padding: 4px 4px max(4px, env(safe-area-inset-bottom));
+        box-sizing: border-box;
+        background: var(--bg-secondary, #161b22);
+      }
+      .terminal-pane-xterm .terminal-mobile-control {
+        align-self: center;
+        width: 100%;
+        min-width: 0;
+        height: 44px;
+        margin: 0;
+        padding: 0 4px;
+        border: 1px solid var(--border-color, rgba(148,163,184,.3));
+        border-radius: 5px;
+        background: var(--bg-tertiary, var(--bg-hover, #21262d));
+        color: var(--text-primary, #e6edf3);
+        font: 600 13px/1 var(--font-family-ui, system-ui, sans-serif);
+        cursor: pointer;
+        touch-action: manipulation;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .terminal-pane-xterm .terminal-mobile-control:hover:not(:disabled) {
+        background: var(--bg-hover, #30363d);
+      }
+      .terminal-pane-xterm .terminal-mobile-control:active:not(:disabled) {
+        transform: translateY(1px);
+      }
+      .terminal-pane-xterm .terminal-mobile-control.is-active,
+      .terminal-pane-xterm .terminal-mobile-control[aria-pressed="true"] {
+        border-color: var(--accent-color, #1f6feb);
+        background: var(--accent-color, #1f6feb);
+        color: var(--accent-contrast, #fff);
+      }
+      .terminal-pane-xterm .terminal-mobile-control:focus-visible,
+      .terminal-pane-xterm .terminal-clipboard-action:focus-visible {
+        outline: 2px solid var(--accent-color, #1f6feb);
+        outline-offset: 1px;
+      }
+      .terminal-pane-xterm .terminal-mobile-control:disabled,
+      .terminal-pane-xterm .terminal-clipboard-action:disabled {
+        cursor: default;
+        opacity: .45;
+      }
+      .terminal-pane-xterm .terminal-clipboard-action {
+        position: absolute;
+        right: calc(8px + env(safe-area-inset-right));
+        bottom: calc(100% + 8px);
+        z-index: 22;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 56px;
+        height: 56px;
+        margin: 0;
+        padding: 0;
+        border: 1px solid var(--border-color, rgba(148,163,184,.4));
+        border-radius: 999px;
+        background: var(--bg-tertiary, var(--bg-hover, #21262d));
+        color: var(--text-primary, #e6edf3);
+        box-shadow: 0 6px 14px rgba(0, 0, 0, .38);
+        font: 600 11px/1 var(--font-family-ui, system-ui, sans-serif);
+        cursor: pointer;
+        touch-action: manipulation;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .terminal-pane-xterm .terminal-clipboard-action:hover:not(:disabled) {
+        background: var(--bg-hover, #30363d);
+      }
+      .terminal-pane-xterm .terminal-clipboard-action.is-copy-mode {
+        color: var(--success-color, #7ee787);
+        font-size: 24px;
+        font-weight: 500;
+      }
+      .terminal-pane-xterm .terminal-clipboard-action[hidden] {
+        display: none;
       }
       .terminal-placeholder {
         margin: auto;
@@ -625,6 +727,7 @@ class TerminalPaneInstance {
     this.terminalExited = false;
     this.inputDisposable = null;
     this.resizeDisposable = null;
+    this.selectionDisposable = null;
     this.terminal = null;
     this.fitAddon = null;
     this.searchAddon = null;
@@ -639,6 +742,17 @@ class TerminalPaneInstance {
       : null;
     this.standbyHandoffToken = null;
     this.standbyHandoffRequest = null;
+    this.controlsEnabled = false;
+    this.controlButtons = new Map();
+    this.controlsAnchor = null;
+    this.controlsToolbar = null;
+    this.clipboardButton = null;
+    this.hasSelection = false;
+    this.modifierMode = null;
+    this.modifierTextarea = null;
+    this.modifierKeydownListener = null;
+    this.modifierBeforeInputListener = null;
+    this.modifierInputListener = null;
 
     injectStyles(this.ownerDocument);
 
@@ -651,7 +765,9 @@ class TerminalPaneInstance {
     this.status = this.ownerDocument.createElement("span");
     this.status.className = "terminal-status";
     this.status.textContent = "Loading…";
-    this.root.append(this.body, this.status);
+    this.root.appendChild(this.body);
+    this.installMobileControls();
+    this.root.appendChild(this.status);
     container.appendChild(this.root);
 
     void this.bootstrap();
@@ -661,6 +777,199 @@ class TerminalPaneInstance {
     this.status.textContent = message;
     this.root.dataset.connectionStatus = message;
     this.root.setAttribute("aria-label", `Terminal ${message}`);
+    this.setControlsEnabled(message === "Connected");
+  }
+
+  installMobileControls() {
+    if (!shouldShowTerminalMobileControls(this.ownerWindow)) return;
+
+    const anchor = this.ownerDocument.createElement("div");
+    anchor.className = "terminal-toolbar-anchor";
+    anchor.setAttribute("data-testid", "terminal-mobile-controls");
+
+    const clipboardButton = this.ownerDocument.createElement("button");
+    clipboardButton.type = "button";
+    clipboardButton.className = "terminal-clipboard-action";
+    clipboardButton.setAttribute("data-testid", "terminal-clipboard-action");
+    clipboardButton.disabled = true;
+    this.bindControlActivation(clipboardButton, () => this.handleClipboardAction());
+
+    const toolbar = this.ownerDocument.createElement("div");
+    toolbar.className = "terminal-mobile-toolbar";
+    toolbar.setAttribute("role", "toolbar");
+    toolbar.setAttribute("aria-label", "Terminal controls");
+
+    for (const definition of TERMINAL_MOBILE_CONTROLS) {
+      const button = this.ownerDocument.createElement("button");
+      button.type = "button";
+      button.className = "terminal-mobile-control";
+      button.textContent = definition.label;
+      button.title = definition.ariaLabel;
+      button.setAttribute("aria-label", definition.ariaLabel);
+      button.setAttribute("data-terminal-control", definition.id);
+      button.setAttribute("data-testid", `terminal-control-${definition.id}`);
+      button.disabled = true;
+      if (definition.modifier) button.setAttribute("aria-pressed", "false");
+      this.bindControlActivation(button, () => this.handleMobileControl(definition));
+      this.controlButtons.set(definition.id, button);
+      toolbar.appendChild(button);
+    }
+
+    anchor.append(clipboardButton, toolbar);
+    this.controlsAnchor = anchor;
+    this.controlsToolbar = toolbar;
+    this.clipboardButton = clipboardButton;
+    this.root.appendChild(anchor);
+    this.updateModifierButtons();
+    this.updateClipboardAction();
+  }
+
+  bindControlActivation(button, activate) {
+    button.addEventListener("pointerdown", (event) => {
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!button.disabled) activate();
+    });
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      // Pointer activation already ran on pointerdown. A detail of zero is the
+      // keyboard/programmatic activation path required for accessible buttons.
+      if (event.detail === 0 && !button.disabled) activate();
+    });
+  }
+
+  setControlsEnabled(enabled) {
+    const next = Boolean(enabled && !this.disposed && !this.terminalExited);
+    this.controlsEnabled = next;
+    for (const button of this.controlButtons.values()) button.disabled = !next;
+    if (this.clipboardButton) this.clipboardButton.disabled = !next;
+    if (!next) this.setModifierMode(null, { focus: false });
+    this.updateClipboardAction();
+  }
+
+  handleMobileControl(definition) {
+    if (!this.controlsEnabled) return;
+    if (definition.modifier) {
+      this.setModifierMode(toggleTerminalModifier(this.modifierMode, definition.modifier));
+      return;
+    }
+    if (typeof definition.input === "string") this.sendTerminalInput(definition.input);
+    this.focus();
+  }
+
+  getTerminalTextarea() {
+    return this.terminal?.textarea || this.host?.querySelector?.(".xterm-helper-textarea") || null;
+  }
+
+  updateModifierButtons() {
+    for (const modifier of ["ctrl", "alt"]) {
+      const button = this.controlButtons.get(modifier);
+      if (!button) continue;
+      const active = this.modifierMode === modifier;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    }
+  }
+
+  removeModifierInputListeners() {
+    if (this.modifierKeydownListener) {
+      this.ownerDocument.removeEventListener("keydown", this.modifierKeydownListener, true);
+      this.modifierKeydownListener = null;
+    }
+    if (this.modifierTextarea && this.modifierBeforeInputListener) {
+      this.modifierTextarea.removeEventListener("beforeinput", this.modifierBeforeInputListener, true);
+      this.modifierBeforeInputListener = null;
+    }
+    if (this.modifierTextarea && this.modifierInputListener) {
+      this.modifierTextarea.removeEventListener("input", this.modifierInputListener, true);
+      this.modifierInputListener = null;
+    }
+    this.modifierTextarea = null;
+  }
+
+  setModifierMode(mode, options = {}) {
+    this.removeModifierInputListeners();
+    this.modifierMode = mode && this.controlsEnabled ? mode : null;
+    this.updateModifierButtons();
+
+    if (!this.modifierMode) {
+      if (options.focus !== false && !this.disposed) this.focus();
+      return;
+    }
+
+    const textarea = this.getTerminalTextarea();
+    this.modifierTextarea = textarea;
+    this.modifierKeydownListener = (event) => {
+      if (this.modifierTextarea && event.target !== this.modifierTextarea) return;
+      const value = String(event.key || "");
+      if (!value || value === "Process" || value === "Unidentified" || value.length !== 1) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.commitModifierInput(value, Boolean(event.shiftKey));
+    };
+    this.ownerDocument.addEventListener("keydown", this.modifierKeydownListener, true);
+
+    if (textarea) {
+      this.modifierBeforeInputListener = (event) => {
+        const value = typeof event.data === "string" ? event.data : "";
+        if (!value || value.length !== 1) return;
+        event.preventDefault();
+        event.stopPropagation();
+        this.commitModifierInput(value, false);
+      };
+      this.modifierInputListener = (event) => {
+        const target = event.target;
+        const value = String(target?.value || "");
+        if (!value) return;
+        event.preventDefault();
+        event.stopPropagation();
+        target.value = "";
+        this.commitModifierInput(value.slice(-1), false);
+      };
+      textarea.addEventListener("beforeinput", this.modifierBeforeInputListener, true);
+      textarea.addEventListener("input", this.modifierInputListener, true);
+    }
+
+    this.focus();
+  }
+
+  commitModifierInput(value, shiftKey = false) {
+    const mode = this.modifierMode;
+    if (!mode || !value || value.length !== 1) return;
+    const action = resolveTerminalModifierAction(mode, value, {
+      shiftKey,
+      runtimeNavigator: this.ownerWindow.navigator,
+    });
+
+    // Clear before acting so a clipboard paste cannot be consumed by the
+    // modifier's beforeinput fallback.
+    this.setModifierMode(null, { focus: false });
+    if (action.kind === "input") this.sendTerminalInput(action.data);
+    else if (action.kind === "copy") this.copyTerminalSelection();
+    else if (action.kind === "paste") void this.pasteTerminalClipboard();
+    this.focus();
+  }
+
+  updateClipboardAction() {
+    const button = this.clipboardButton;
+    if (!button) return;
+    const copyMode = Boolean(this.hasSelection);
+    button.hidden = isAndroidLikeTerminalPlatform(this.ownerWindow.navigator) && !copyMode;
+    button.classList.toggle("is-copy-mode", copyMode);
+    button.textContent = copyMode ? "⧉" : "Paste";
+    const label = copyMode ? "Copy terminal selection" : "Paste from clipboard";
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.disabled = !this.controlsEnabled;
+  }
+
+  handleClipboardAction() {
+    if (!this.controlsEnabled) return;
+    if (this.hasSelection) this.copyTerminalSelection();
+    else void this.pasteTerminalClipboard();
+    this.focus();
   }
 
   async bootstrap() {
@@ -696,6 +1005,7 @@ class TerminalPaneInstance {
       terminal.open(this.host);
       this.installOutputMirror();
       this.installPostOpenAddons(runtime);
+      this.installMobileControlSelectionSync();
       this.installClipboardAndSearchShortcuts();
       this.installResizeSync();
       this.installThemeSync();
@@ -816,26 +1126,120 @@ class TerminalPaneInstance {
     }
   }
 
+  installMobileControlSelectionSync() {
+    const terminal = this.terminal;
+    if (!terminal?.onSelectionChange) return;
+    this.selectionDisposable = terminal.onSelectionChange(() => {
+      if (this.disposed) return;
+      try {
+        this.hasSelection = Boolean(terminal.hasSelection?.() || terminal.getSelection?.());
+      } catch {
+        this.hasSelection = false;
+      }
+      this.updateClipboardAction();
+    });
+  }
+
+  copyTerminalSelection() {
+    const terminal = this.terminal;
+    if (!terminal || this.disposed) return false;
+    const selectedText = String(terminal.getSelection?.() || "");
+    if (!selectedText) return false;
+
+    try {
+      terminal.focus?.();
+      if (this.ownerDocument.execCommand?.("copy")) return true;
+    } catch (error) {
+      console.debug("[terminal-pane] terminal copy command failed", error);
+    }
+
+    let hiddenTextarea = null;
+    try {
+      hiddenTextarea = this.ownerDocument.createElement("textarea");
+      hiddenTextarea.value = selectedText;
+      hiddenTextarea.setAttribute("readonly", "");
+      hiddenTextarea.style.position = "fixed";
+      hiddenTextarea.style.opacity = "0";
+      hiddenTextarea.style.left = "-9999px";
+      hiddenTextarea.style.top = "0";
+      hiddenTextarea.style.pointerEvents = "none";
+      this.ownerDocument.body?.appendChild(hiddenTextarea);
+      hiddenTextarea.focus();
+      hiddenTextarea.select();
+      hiddenTextarea.setSelectionRange(0, hiddenTextarea.value.length);
+      if (this.ownerDocument.execCommand?.("copy")) return true;
+    } catch (error) {
+      console.debug("[terminal-pane] hidden textarea copy failed", error);
+    } finally {
+      hiddenTextarea?.remove?.();
+      this.focus();
+    }
+
+    if (typeof this.ownerWindow.navigator?.clipboard?.writeText === "function") {
+      void this.ownerWindow.navigator.clipboard.writeText(selectedText)
+        .catch((error) => console.debug("[terminal-pane] clipboard write failed", error));
+      return true;
+    }
+    return false;
+  }
+
+  async pasteTerminalClipboard() {
+    const terminal = this.terminal;
+    if (!terminal || this.disposed) return false;
+    const applyPaste = (text) => {
+      if (this.disposed || !text) return false;
+      terminal.paste?.(text);
+      this.focus();
+      return true;
+    };
+
+    try {
+      const textarea = this.getTerminalTextarea();
+      if (textarea) {
+        textarea.value = "";
+        textarea.focus();
+        if (this.ownerDocument.execCommand?.("paste")) {
+          this.focus();
+          return true;
+        }
+        if (textarea.value && applyPaste(textarea.value)) {
+          textarea.value = "";
+          return true;
+        }
+      }
+    } catch (error) {
+      console.debug("[terminal-pane] native paste command failed", error);
+    }
+
+    if (isAndroidLikeTerminalPlatform(this.ownerWindow.navigator)) {
+      const manualText = this.ownerWindow.prompt?.("Android clipboard access is restricted. Paste text here:");
+      return Boolean(manualText && applyPaste(manualText));
+    }
+
+    try {
+      if (typeof this.ownerWindow.navigator?.clipboard?.readText === "function") {
+        const text = await this.ownerWindow.navigator.clipboard.readText();
+        if (applyPaste(text)) return true;
+      }
+    } catch (error) {
+      console.debug("[terminal-pane] clipboard read failed", error);
+    }
+
+    const manualText = this.ownerWindow.prompt?.("Clipboard paste is blocked in this browser/session. Paste text here:");
+    return Boolean(manualText && applyPaste(manualText));
+  }
+
   installClipboardAndSearchShortcuts() {
     const terminal = this.terminal;
     if (!terminal?.attachCustomKeyEventHandler) return;
     terminal.attachCustomKeyEventHandler((event) => {
       if (isCopyShortcut(event)) {
-        try {
-          const selected = typeof terminal.getSelection === "function" ? String(terminal.getSelection() || "") : "";
-          if (selected) void this.ownerWindow.navigator?.clipboard?.writeText?.(selected);
-        } catch (error) {
-          console.debug("[terminal-pane] copy shortcut failed", error);
-        }
+        this.copyTerminalSelection();
         return true;
       }
       if (isPasteShortcut(event)) {
-        if (typeof this.ownerWindow.navigator?.clipboard?.readText === "function") {
-          void this.ownerWindow.navigator.clipboard.readText().then((text) => {
-            if (!this.disposed && text) terminal.paste?.(text);
-          }).catch((error) => console.debug("[terminal-pane] paste shortcut failed", error));
-          return true;
-        }
+        void this.pasteTerminalClipboard();
+        return true;
       }
       if (isFindShortcut(event)) {
         const query = this.ownerWindow.prompt?.("Find in terminal buffer", "");
@@ -890,6 +1294,7 @@ class TerminalPaneInstance {
       this.resizeObserver.observe(this.container);
       this.resizeObserver.observe(this.root);
       this.resizeObserver.observe(this.body);
+      if (this.controlsAnchor) this.resizeObserver.observe(this.controlsAnchor);
     }
   }
 
@@ -914,6 +1319,14 @@ class TerminalPaneInstance {
     if (!this.terminal) return;
     try { this.fitAddon?.fit?.(); } catch (error) { console.debug("[terminal-pane] fit failed", error); }
     this.sendResize();
+  }
+
+  sendTerminalInput(data) {
+    if (this.disposed || this.terminalExited || typeof data !== "string" || !data) return false;
+    const socket = this.socket;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+    socket.send(JSON.stringify({ type: "input", data }));
+    return true;
   }
 
   sendResize() {
@@ -950,8 +1363,7 @@ class TerminalPaneInstance {
     const terminal = this.terminal;
     if (!terminal || this.inputDisposable || this.resizeDisposable) return;
     this.inputDisposable = terminal.onData((data) => {
-      const socket = this.socket;
-      if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "input", data }));
+      this.sendTerminalInput(data);
     });
     this.resizeDisposable = terminal.onResize(({ cols, rows }) => {
       const socket = this.socket;
@@ -1092,6 +1504,7 @@ class TerminalPaneInstance {
   }
 
   beforeDetachFromHost() {
+    this.setModifierMode(null, { focus: false });
     this.setStatus("Moving…");
   }
 
@@ -1100,6 +1513,7 @@ class TerminalPaneInstance {
       ? context.transferState.handoffToken.trim()
       : null;
     if (token) this.pendingHandoffToken = token;
+    this.setControlsEnabled(this.socket?.readyState === WebSocket.OPEN && !this.terminalExited);
     this.scheduleResize(true);
     this.queueResizeRetries();
     this.ownerWindow.requestAnimationFrame(() => this.focus());
@@ -1138,12 +1552,15 @@ class TerminalPaneInstance {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this.setControlsEnabled(false);
+    this.removeModifierInputListeners();
     if (this.resizeFrame) this.ownerWindow.cancelAnimationFrame(this.resizeFrame);
     this.manualSocketClose = true;
     this.clearHeartbeat();
     this.clearReconnectTimer();
     try { this.inputDisposable?.dispose?.(); } catch (error) { debugTerminalCleanup("input disposable cleanup", error); }
     try { this.resizeDisposable?.dispose?.(); } catch (error) { debugTerminalCleanup("resize disposable cleanup", error); }
+    try { this.selectionDisposable?.dispose?.(); } catch (error) { debugTerminalCleanup("selection disposable cleanup", error); }
     try { this.socket?.close?.(); } catch (error) { debugTerminalCleanup("socket close", error); }
     try { this.resizeObserver?.disconnect?.(); } catch (error) { debugTerminalCleanup("resize observer cleanup", error); }
     try { this.themeObserver?.disconnect?.(); } catch (error) { debugTerminalCleanup("theme observer cleanup", error); }
@@ -1159,6 +1576,10 @@ class TerminalPaneInstance {
     try { this.rendererAddon?.dispose?.(); } catch (error) { debugTerminalCleanup("renderer addon cleanup", error); }
     try { this.fitAddon?.dispose?.(); } catch (error) { debugTerminalCleanup("fit addon cleanup", error); }
     try { this.terminal?.dispose?.(); } catch (error) { debugTerminalCleanup("terminal cleanup", error); }
+    this.controlButtons.clear();
+    this.controlsAnchor = null;
+    this.controlsToolbar = null;
+    this.clipboardButton = null;
     this.root?.remove?.();
   }
 }
