@@ -80,11 +80,11 @@
     "tooling": {
       "referencedNames": 76,
       "directReaderNames": 41,
-      "directReaderOccurrences": 73,
+      "directReaderOccurrences": 78,
       "helperReaderNames": 0,
       "helperReaderOccurrences": 0,
       "semanticReaderNames": 41,
-      "semanticReaderOccurrences": 73
+      "semanticReaderOccurrences": 78
     },
     "docsDeploy": {
       "referencedNames": 122,
@@ -1697,15 +1697,17 @@
       "scopes": {
         "tooling": {
           "referenced": true,
-          "directReaders": 2,
+          "directReaders": 3,
           "helperReaders": 0,
-          "semanticReaders": 2,
+          "semanticReaders": 3,
           "files": [
             "runtime/scripts/playwright/mobile-interface.ts",
+            "runtime/scripts/playwright/mobile-terminal-controls.ts",
             "runtime/scripts/playwright/terminal-reopen.ts"
           ],
           "readerFiles": [
             "runtime/scripts/playwright/mobile-interface.ts",
+            "runtime/scripts/playwright/mobile-terminal-controls.ts",
             "runtime/scripts/playwright/terminal-reopen.ts"
           ]
         }
@@ -1716,15 +1718,17 @@
       "scopes": {
         "tooling": {
           "referenced": true,
-          "directReaders": 2,
+          "directReaders": 3,
           "helperReaders": 0,
-          "semanticReaders": 2,
+          "semanticReaders": 3,
           "files": [
             "runtime/scripts/playwright/mobile-interface.ts",
+            "runtime/scripts/playwright/mobile-terminal-controls.ts",
             "runtime/scripts/playwright/terminal-reopen.ts"
           ],
           "readerFiles": [
             "runtime/scripts/playwright/mobile-interface.ts",
+            "runtime/scripts/playwright/mobile-terminal-controls.ts",
             "runtime/scripts/playwright/terminal-reopen.ts"
           ]
         }
@@ -2191,11 +2195,12 @@
         },
         "tooling": {
           "referenced": true,
-          "directReaders": 5,
+          "directReaders": 6,
           "helperReaders": 0,
-          "semanticReaders": 5,
+          "semanticReaders": 6,
           "files": [
             "runtime/scripts/playwright/mobile-interface.ts",
+            "runtime/scripts/playwright/mobile-terminal-controls.ts",
             "runtime/scripts/playwright/terminal-reopen-multicycle.ts",
             "runtime/scripts/playwright/terminal-reopen-race.ts",
             "runtime/scripts/playwright/terminal-reopen.ts",
@@ -2204,6 +2209,7 @@
           ],
           "readerFiles": [
             "runtime/scripts/playwright/mobile-interface.ts",
+            "runtime/scripts/playwright/mobile-terminal-controls.ts",
             "runtime/scripts/playwright/terminal-reopen-multicycle.ts",
             "runtime/scripts/playwright/terminal-reopen-race.ts",
             "runtime/scripts/playwright/terminal-reopen.ts",
@@ -2960,17 +2966,19 @@
       "scopes": {
         "tooling": {
           "referenced": true,
-          "directReaders": 4,
+          "directReaders": 5,
           "helperReaders": 0,
-          "semanticReaders": 4,
+          "semanticReaders": 5,
           "files": [
             "runtime/scripts/playwright/mobile-interface.ts",
+            "runtime/scripts/playwright/mobile-terminal-controls.ts",
             "runtime/scripts/playwright/terminal-reopen-multicycle.ts",
             "runtime/scripts/playwright/terminal-reopen-race.ts",
             "runtime/scripts/playwright/terminal-reopen.ts"
           ],
           "readerFiles": [
             "runtime/scripts/playwright/mobile-interface.ts",
+            "runtime/scripts/playwright/mobile-terminal-controls.ts",
             "runtime/scripts/playwright/terminal-reopen-multicycle.ts",
             "runtime/scripts/playwright/terminal-reopen-race.ts",
             "runtime/scripts/playwright/terminal-reopen.ts"
@@ -6417,11 +6425,12 @@
         },
         "tooling": {
           "referenced": true,
-          "directReaders": 5,
+          "directReaders": 6,
           "helperReaders": 0,
-          "semanticReaders": 5,
+          "semanticReaders": 6,
           "files": [
             "runtime/scripts/playwright/mobile-interface.ts",
+            "runtime/scripts/playwright/mobile-terminal-controls.ts",
             "runtime/scripts/playwright/terminal-reopen-multicycle.ts",
             "runtime/scripts/playwright/terminal-reopen-race.ts",
             "runtime/scripts/playwright/terminal-reopen.ts",
@@ -6430,6 +6439,7 @@
           ],
           "readerFiles": [
             "runtime/scripts/playwright/mobile-interface.ts",
+            "runtime/scripts/playwright/mobile-terminal-controls.ts",
             "runtime/scripts/playwright/terminal-reopen-multicycle.ts",
             "runtime/scripts/playwright/terminal-reopen-race.ts",
             "runtime/scripts/playwright/terminal-reopen.ts",
