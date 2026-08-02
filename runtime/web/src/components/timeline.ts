@@ -75,6 +75,57 @@ export function windowFromScrollOffset(root, prefixHeights, postCount, reverse) 
 }
 
 /**
+ * Resolve a variable-size window that covers the viewport plus one pixel-based
+ * overscan region on each side. A minimum row count keeps small viewports from
+ * churning while short posts naturally expand the range beyond sixteen rows.
+ */
+export function getTimelineWindowForViewport(prefixHeights, viewportStart, viewportHeight, postCount, overscanPx = viewportHeight) {
+    if (!Array.isArray(prefixHeights) || prefixHeights.length <= 1 || postCount <= 0) {
+        return { start: 0, end: Math.max(0, postCount) };
+    }
+
+    const prefixEnd = Math.min(postCount, prefixHeights.length - 1);
+    const totalHeight = Math.max(0, Number(prefixHeights[prefixEnd]) || 0);
+    const height = Math.max(1, Number(viewportHeight) || 0);
+    const overscan = Math.max(300, Number(overscanPx) || height);
+    const boundedStart = Math.max(0, Math.min(Number(viewportStart) || 0, totalHeight));
+    const startOffset = Math.max(0, boundedStart - overscan);
+    const endOffset = Math.min(totalHeight, boundedStart + height + overscan);
+
+    let start = findTimelineIndexAtOffset(prefixHeights, startOffset);
+    let end = Math.min(postCount, findTimelineIndexAtOffset(prefixHeights, endOffset) + 1);
+    const minimumRows = Math.min(postCount, TIMELINE_WINDOW_SIZE);
+    if (end - start < minimumRows) {
+        const missingRows = minimumRows - (end - start);
+        start = Math.max(0, start - Math.ceil(missingRows / 2));
+        end = Math.min(postCount, start + minimumRows);
+        start = Math.max(0, end - minimumRows);
+    }
+    return { start, end };
+}
+
+function getTimelineViewportWindow(root, prefixHeights, postCount, reverse) {
+    if (!root) return null;
+    return getTimelineWindowForViewport(
+        prefixHeights,
+        getTimelineContentOffset(root, reverse),
+        root.clientHeight,
+        postCount,
+    );
+}
+
+function getTimelineAnchorWindow(root, prefixHeights, postCount, anchorIndex, anchor) {
+    if (!root || !anchor || anchorIndex < 0) return null;
+    const anchorTop = Number(prefixHeights[anchorIndex]) || 0;
+    return getTimelineWindowForViewport(
+        prefixHeights,
+        anchorTop - anchor.offset,
+        root.clientHeight,
+        postCount,
+    );
+}
+
+/**
  * Keep high-frequency agent-status/draft updates from walking every rendered post.
  * TimelineView still updates normally when timeline data or one of its callbacks changes.
  */
@@ -241,6 +292,15 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         () => buildTimelinePrefixHeights(displayPosts, measuredHeightsRef.current),
         [displayPosts, heightRevision],
     );
+    const requestedRange = shouldBootstrapWindow
+        ? getLatestTimelineWindow(displayPosts.length)
+        : windowRange;
+    const effectiveRange = shouldWindow
+        ? {
+            start: Math.max(0, Math.min(requestedRange.start, displayPosts.length)),
+            end: Math.max(requestedRange.start, Math.min(requestedRange.end, displayPosts.length)),
+        }
+        : { start: 0, end: displayPosts.length };
 
     const triggerLoadMore = useCallback(async () => {
         if (!onLoadMore || !hasMore || loadingMore) return;
@@ -257,26 +317,57 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
     const handleScroll = useCallback((event) => {
         if (restoringAnchorRef.current || isAnchorScrolling(event.target)) return;
         const root = event.target;
-        const { scrollTop, clientHeight } = root;
+        const { clientHeight } = root;
         const contentOffset = getTimelineContentOffset(root, reverse);
         if (contentOffset < Math.max(300, clientHeight)) triggerLoadMore();
 
         if (!shouldWindow) return;
-        const targetIndex = findTimelineIndexAtOffset(virtualHeights, contentOffset);
-        let nextWindow = windowRange;
-        if (reverse && scrollTop >= -2) {
-            nextWindow = getLatestTimelineWindow(displayPosts.length);
-        } else if (targetIndex < windowRange.start + 4 || targetIndex >= windowRange.end - 4) {
-            nextWindow = getTimelineWindowAroundIndex(targetIndex, displayPosts.length);
+        const viewportEnd = contentOffset + clientHeight;
+        const rangeStartOffset = virtualHeights[effectiveRange.start] ?? 0;
+        const rangeEndOffset = virtualHeights[effectiveRange.end] ?? rangeStartOffset;
+        const edgeBuffer = Math.max(150, clientHeight * 0.5);
+        const mountedPosts = Array.from(timelineContentRef.current?.querySelectorAll?.(':scope > .post') || []);
+        const rootRect = root.getBoundingClientRect();
+        const firstRect = mountedPosts[0]?.getBoundingClientRect();
+        const lastRect = mountedPosts[mountedPosts.length - 1]?.getBoundingClientRect();
+        const earlierSpacerVisible = effectiveRange.start > 0
+            && Boolean(firstRect && firstRect.top > rootRect.top + 1);
+        const laterSpacerVisible = effectiveRange.end < displayPosts.length
+            && Boolean(lastRect && lastRect.bottom < rootRect.bottom - 1);
+        const needsEarlierRows = effectiveRange.start > 0
+            && (contentOffset < rangeStartOffset + edgeBuffer || earlierSpacerVisible);
+        const needsLaterRows = effectiveRange.end < displayPosts.length
+            && (viewportEnd > rangeEndOffset - edgeBuffer || laterSpacerVisible);
+        if (!needsEarlierRows && !needsLaterRows) return;
+
+        let nextWindow = getTimelineWindowForViewport(
+            virtualHeights,
+            contentOffset,
+            clientHeight,
+            displayPosts.length,
+        );
+        if (haveSameTimelineWindow(windowRange, nextWindow)
+            && (earlierSpacerVisible || laterSpacerVisible)) {
+            nextWindow = {
+                start: earlierSpacerVisible
+                    ? Math.max(0, effectiveRange.start - TIMELINE_WINDOW_SIZE)
+                    : effectiveRange.start,
+                end: laterSpacerVisible
+                    ? Math.min(displayPosts.length, effectiveRange.end + TIMELINE_WINDOW_SIZE)
+                    : effectiveRange.end,
+            };
         }
         if (haveSameTimelineWindow(windowRange, nextWindow)) return;
 
-        if (!(reverse && scrollTop >= -2)) {
-            const anchor = captureTimelineViewportAnchor(root, timelineContentRef.current);
-            if (anchor) pendingAnchorRef.current = anchor;
-        }
+        const anchor = captureTimelineViewportAnchor(root, timelineContentRef.current);
+        const anchorIndex = anchor
+            ? displayPosts.findIndex((post) => String(post.id) === anchor.id)
+            : -1;
+        pendingAnchorRef.current = anchorIndex >= nextWindow.start && anchorIndex < nextWindow.end
+            ? anchor
+            : null;
         setWindowRange(nextWindow);
-    }, [displayPosts.length, reverse, shouldWindow, triggerLoadMore, virtualHeights, windowRange]);
+    }, [displayPosts, effectiveRange.end, effectiveRange.start, reverse, shouldWindow, triggerLoadMore, virtualHeights, windowRange]);
 
     useLayoutEffect(() => {
         const previousPosts = previousPostsRef.current;
@@ -308,10 +399,14 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             const anchorIndex = capturedAnchor
                 ? displayPosts.findIndex((post) => String(post.id) === capturedAnchor.id)
                 : -1;
-            const nextWindow = anchorIndex >= 0
-                ? getTimelineWindowAroundIndex(anchorIndex, displayPosts.length)
-                : windowFromScrollOffset(root, measuredPrefix, displayPosts.length, reverse)
-                    || getLatestTimelineWindow(displayPosts.length);
+            const nextWindow = getTimelineAnchorWindow(
+                root,
+                measuredPrefix,
+                displayPosts.length,
+                anchorIndex,
+                capturedAnchor,
+            ) || getTimelineViewportWindow(root, measuredPrefix, displayPosts.length, reverse)
+                || getLatestTimelineWindow(displayPosts.length);
 
             if (capturedAnchor) pendingAnchorRef.current = capturedAnchor;
             setHeightRevision((value) => value + 1);
@@ -322,30 +417,42 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
 
         const loadAnchor = loadAnchorRef.current;
         loadAnchorRef.current = null;
+        const root = timelineRef?.current;
+        const currentPrefix = buildTimelinePrefixHeights(displayPosts, measuredHeightsRef.current);
         setWindowRange((current) => {
             if (loadAnchor) {
                 const anchorIndex = displayPosts.findIndex((post) => String(post.id) === loadAnchor.id);
                 if (anchorIndex >= 0) {
                     pendingAnchorRef.current = loadAnchor;
-                    const anchoredWindow = getTimelineWindowAroundIndex(anchorIndex, displayPosts.length);
+                    const anchoredWindow = getTimelineAnchorWindow(
+                        root,
+                        currentPrefix,
+                        displayPosts.length,
+                        anchorIndex,
+                        loadAnchor,
+                    ) || getTimelineWindowAroundIndex(anchorIndex, displayPosts.length);
                     return haveSameTimelineWindow(current, anchoredWindow) ? current : anchoredWindow;
                 }
             }
             if (previousPosts.length === 0 || current.end === 0) {
-                return getLatestTimelineWindow(displayPosts.length);
+                return getTimelineViewportWindow(root, currentPrefix, displayPosts.length, reverse)
+                    || getLatestTimelineWindow(displayPosts.length);
             }
 
-            const root = timelineRef?.current;
             const wasPinnedToNewest = current.end >= previousPosts.length
                 && (!reverse || (root && root.scrollTop >= -2));
-            if (wasPinnedToNewest) return getLatestTimelineWindow(displayPosts.length);
+            if (wasPinnedToNewest) {
+                return getTimelineViewportWindow(root, currentPrefix, displayPosts.length, reverse)
+                    || getLatestTimelineWindow(displayPosts.length);
+            }
 
             const firstWindowId = previousPosts[current.start]?.id;
             const preservedStart = displayPosts.findIndex((post) => post.id === firstWindowId);
             if (preservedStart < 0) return getLatestTimelineWindow(displayPosts.length);
+            const preservedLength = Math.max(TIMELINE_WINDOW_SIZE, current.end - current.start);
             const preservedWindow = {
                 start: preservedStart,
-                end: Math.min(displayPosts.length, preservedStart + TIMELINE_WINDOW_SIZE),
+                end: Math.min(displayPosts.length, preservedStart + preservedLength),
             };
             return haveSameTimelineWindow(current, preservedWindow) ? current : preservedWindow;
         });
@@ -357,8 +464,53 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         const content = timelineContentRef.current;
         if (!root || !content) return;
 
+        const existingAnchor = pendingAnchorRef.current;
+        if (existingAnchor && !findTimelinePostElement(content, existingAnchor.id)) {
+            pendingAnchorRef.current = null;
+        }
         if (measureTimelinePostHeights(content, measuredHeightsRef.current)) {
+            if (!pendingAnchorRef.current) {
+                pendingAnchorRef.current = captureTimelineViewportAnchor(root, content);
+            }
             setHeightRevision((value) => value + 1);
+        }
+
+        const postElements = Array.from(content.querySelectorAll(':scope > .post'));
+        const firstPost = postElements[0];
+        const lastPost = postElements[postElements.length - 1];
+        if (firstPost && lastPost) {
+            const rootRect = root.getBoundingClientRect();
+            const firstRect = firstPost.getBoundingClientRect();
+            const lastRect = lastPost.getBoundingClientRect();
+            const needsEarlierRows = effectiveRange.start > 0 && firstRect.top > rootRect.top + 1;
+            const needsLaterRows = effectiveRange.end < displayPosts.length && lastRect.bottom < rootRect.bottom - 1;
+            if (needsEarlierRows || needsLaterRows) {
+                const guardAnchor = captureTimelineViewportAnchor(root, content);
+                if (guardAnchor) pendingAnchorRef.current = guardAnchor;
+                const measuredPrefix = buildTimelinePrefixHeights(displayPosts, measuredHeightsRef.current);
+                const viewportWindow = getTimelineViewportWindow(
+                    root,
+                    measuredPrefix,
+                    displayPosts.length,
+                    reverse,
+                );
+                const nextWindow = {
+                    start: needsEarlierRows
+                        ? Math.max(0, Math.min(
+                            effectiveRange.start - TIMELINE_WINDOW_SIZE,
+                            viewportWindow?.start ?? effectiveRange.start,
+                        ))
+                        : effectiveRange.start,
+                    end: needsLaterRows
+                        ? Math.min(displayPosts.length, Math.max(
+                            effectiveRange.end + TIMELINE_WINDOW_SIZE,
+                            viewportWindow?.end ?? effectiveRange.end,
+                        ))
+                        : effectiveRange.end,
+                };
+                if (!haveSameTimelineWindow(windowRange, nextWindow)) setWindowRange(nextWindow);
+                return;
+            }
         }
 
         const anchor = pendingAnchorRef.current;
@@ -386,7 +538,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             cancelAnimationFrame(restoreFramesRef.current.second);
             restoringAnchorRef.current = false;
         };
-    }, [displayPosts, heightRevision, shouldWindow, timelineRef, windowRange.start, windowRange.end]);
+    }, [displayPosts, effectiveRange.end, effectiveRange.start, heightRevision, reverse, shouldWindow, timelineRef, windowRange]);
 
     useEffect(() => {
         if (!shouldWindow || typeof ResizeObserver === 'undefined') return;
@@ -408,6 +560,9 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             if (changed && !updateFrame) {
                 updateFrame = requestAnimationFrame(() => {
                     updateFrame = 0;
+                    const root = timelineRef?.current;
+                    const anchor = captureTimelineViewportAnchor(root, content);
+                    if (anchor) pendingAnchorRef.current = anchor;
                     setHeightRevision((value) => value + 1);
                 });
             }
@@ -417,7 +572,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             observer.disconnect();
             if (updateFrame) cancelAnimationFrame(updateFrame);
         };
-    }, [shouldWindow, windowRange.start, windowRange.end, displayPosts]);
+    }, [displayPosts, shouldWindow, timelineRef, windowRange.start, windowRange.end]);
 
     useEffect(() => {
         const reveal = (event) => {
@@ -426,12 +581,19 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             const index = displayPosts.findIndex((post) => String(post.id) === targetId);
             if (index >= 0) {
                 pendingAnchorRef.current = null;
-                setWindowRange(getTimelineWindowAroundIndex(index, displayPosts.length));
+                const viewportHeight = timelineRef?.current?.clientHeight || 1;
+                const targetTop = virtualHeights[index] ?? 0;
+                setWindowRange(getTimelineWindowForViewport(
+                    virtualHeights,
+                    targetTop - viewportHeight / 2,
+                    viewportHeight,
+                    displayPosts.length,
+                ));
             }
         };
         window.addEventListener(TIMELINE_REVEAL_EVENT, reveal);
         return () => window.removeEventListener(TIMELINE_REVEAL_EVENT, reveal);
-    }, [displayPosts, shouldWindow]);
+    }, [displayPosts, shouldWindow, timelineRef, virtualHeights]);
 
     useEffect(() => {
         if (!hasIntersectionObserver) return;
@@ -485,15 +647,6 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         `;
     }
 
-    const requestedRange = shouldBootstrapWindow
-        ? getLatestTimelineWindow(displayPosts.length)
-        : windowRange;
-    const effectiveRange = shouldWindow
-        ? {
-            start: Math.max(0, Math.min(requestedRange.start, displayPosts.length)),
-            end: Math.max(requestedRange.start, Math.min(requestedRange.end, displayPosts.length)),
-        }
-        : { start: 0, end: displayPosts.length };
     const visiblePosts = displayPosts.slice(effectiveRange.start, effectiveRange.end);
     const topSpacerHeight = shouldWindow ? virtualHeights[effectiveRange.start] : 0;
     const bottomSpacerHeight = shouldWindow
