@@ -20,6 +20,7 @@ test('deriveSteerQueuedState only marks steering active for the current turn', (
 });
 
 test('composeRenderedMainAppOptions builds final shell options from grouped app namespaces', () => {
+  const getActiveChatAgents = async () => ({ chats: [] });
   const result = composeRenderedMainAppOptions({
     routeState: {
       branchLoaderMode: false,
@@ -114,6 +115,7 @@ test('composeRenderedMainAppOptions builds final shell options from grouped app 
       messageRefs: [],
       followupQueueCount: 0,
       activeChatAgents: [],
+      getActiveChatAgents,
       connectionStatus: 'connected',
       activeModel: null,
       activeModelUsage: null,
@@ -165,6 +167,7 @@ test('composeRenderedMainAppOptions builds final shell options from grouped app 
   expect(result.panePopoutMode).toBe(true);
   expect(result.mainShellOptions.workspaceOpen).toBe(true);
   expect(result.mainShellOptions.connectionStatus).toBe('connected');
+  expect(result.mainShellOptions.getActiveChatAgents).toBe(getActiveChatAgents);
   expect(result.mainShellOptions.steerQueued).toBe(true);
   expect(result.mainShellOptions.currentHashtag).toBe('tag');
   expect(result.mainShellOptions.searchQuery).toBe('hello');

@@ -630,6 +630,7 @@ function MainApp({ locationParams, navigate }) {
         timeline,
         surface: {
             ...surface,
+            getActiveChatAgents,
             oobePanelState,
             composePrefillRequest,
             requestComposePrefill,
