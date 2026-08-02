@@ -5,6 +5,10 @@ interface RefBox<T> {
   current: T;
 }
 
+function isTimelineTouchScrolling(container: HTMLElement | null | undefined): boolean {
+  return container?.dataset?.timelineTouchScrolling === 'true';
+}
+
 export function shouldAutoScrollToBottom(scrollTop: number, threshold = 150): boolean {
   return Math.abs(scrollTop) <= threshold;
 }
@@ -22,7 +26,7 @@ export function useTimelineScrollOrchestration(options: {
 
   const scrollToBottom = useCallback(() => {
     const el = timelineRef.current;
-    if (!el) return;
+    if (!el || isTimelineTouchScrolling(el)) return;
     if (shouldAutoScrollToBottom(el.scrollTop)) {
       el.scrollTop = 0;
     }
@@ -44,7 +48,7 @@ export function useTimelineScrollOrchestration(options: {
 
     requestAnimationFrame(() => {
       const target = timelineRef.current;
-      if (!target) return;
+      if (!target || isTimelineTouchScrolling(target)) return;
       if (reverseTimeline) {
         const nextTop = Math.max(target.scrollHeight - anchor, 0);
         target.scrollTop = nextTop;
@@ -66,7 +70,7 @@ export function useTimelineScrollOrchestration(options: {
     mutate();
     requestAnimationFrame(() => {
       const target = timelineRef.current;
-      if (!target) return;
+      if (!target || isTimelineTouchScrolling(target)) return;
       const maxScroll = Math.max(target.scrollHeight - target.clientHeight, 0);
       target.scrollTop = Math.min(anchor, maxScroll);
     });

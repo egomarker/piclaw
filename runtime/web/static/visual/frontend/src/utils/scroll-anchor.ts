@@ -170,6 +170,10 @@ export function attachHeaderAnchor(
 
     const compensate = () => {
         if (!state.marked || state.abandoned) return;
+        if (scroller.dataset.timelineTouchScrolling === 'true') {
+            state.abandoned = true;
+            return;
+        }
         // A change in the scroller's width means a reflow (orientation change,
         // window/keyboard resize) re-wrapped unrelated messages too, so the
         // whole-scrollHeight delta no longer reflects only the panel - bail and
