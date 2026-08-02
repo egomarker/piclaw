@@ -332,6 +332,13 @@ test('terminal controls stay shared, owner-document scoped, and lifecycle-cleane
     expect(source).toContain('this.setControlsEnabled(this.socket?.readyState === WebSocket.OPEN && !this.terminalExited);');
 });
 
+test('terminal toolbar leaves iOS bottom safe-area spacing to the outer shell', () => {
+    const source = readFileSync(new URL('../../web/src/panes/terminal-pane.ts', import.meta.url), 'utf8');
+    const toolbarStyles = source.match(/\.terminal-pane-xterm \.terminal-mobile-toolbar \{([\s\S]*?)\n\s*\}/)?.[1] || '';
+    expect(toolbarStyles).toContain('padding: 4px;');
+    expect(toolbarStyles).not.toContain('safe-area-inset-bottom');
+});
+
 test('getOrCreateAnonymousTerminalClientToken persists a stable client token', () => {
     const storage = new Map<string, string>();
     const runtimeWindow = {
