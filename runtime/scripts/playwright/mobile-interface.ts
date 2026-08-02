@@ -280,6 +280,164 @@ async function openWorkspaceFile(page: Page, filePath: string) {
   return { fileLabel, paneRect, touchPreviewState };
 }
 
+async function verifyTouchTabContextMenu(page: Page, filePath: string, fileLabel: string) {
+  const chatTab = page.locator('#piclaw-mobile-surface-tab-chat');
+  const fileTab = tabByLabel(page, fileLabel);
+  const menu = page.locator('[data-testid="tab-context-menu"]');
+  const point = await fileTab.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      x: Math.round(rect.left + Math.min(rect.width / 2, 28)),
+      y: Math.round(rect.top + (rect.height / 2)),
+    };
+  });
+  const pointer = (type: 'pointerdown' | 'pointermove' | 'pointerup', pointerId: number, x = point.x, y = point.y) => fileTab.dispatchEvent(type, {
+    pointerType: 'touch',
+    pointerId,
+    isPrimary: true,
+    button: 0,
+    buttons: type === 'pointerup' ? 0 : 1,
+    clientX: x,
+    clientY: y,
+  });
+  const compatibilityMouseDown = () => fileTab.dispatchEvent('mousedown', {
+    button: 0,
+    buttons: 1,
+    clientX: point.x,
+    clientY: point.y,
+  });
+  const compatibilityClick = () => fileTab.dispatchEvent('click', {
+    button: 0,
+    buttons: 0,
+    detail: 1,
+    clientX: point.x,
+    clientY: point.y,
+  });
+  const readSelection = async () => ({
+    chat: await chatTab.getAttribute('aria-selected'),
+    file: await fileTab.getAttribute('aria-selected'),
+  });
+
+  await chatTab.click();
+  await page.waitForFunction(() => document.getElementById('piclaw-mobile-surface-tab-chat')?.getAttribute('aria-selected') === 'true');
+
+  // A drag must cancel the timer and must not activate the held background tab.
+  await pointer('pointerdown', 71);
+  await compatibilityMouseDown();
+  await pointer('pointermove', 71, point.x + 24, point.y);
+  await page.waitForTimeout(600);
+  assert(await menu.count() === 0, 'Moving a touch press opened a tab context menu.');
+  await pointer('pointerup', 71, point.x + 24, point.y);
+  await compatibilityClick();
+  const afterDrag = await readSelection();
+  assert(afterDrag.chat === 'true' && afterDrag.file === 'false',
+    `A moved touch press activated the background tab: ${JSON.stringify(afterDrag)}.`);
+
+  // Holding the close target must neither start the fallback timer nor bubble a native context menu.
+  const closeButton = fileTab.locator('.tab-close');
+  const closePoint = await closeButton.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return { x: Math.round(rect.left + (rect.width / 2)), y: Math.round(rect.top + (rect.height / 2)) };
+  });
+  await closeButton.dispatchEvent('pointerdown', {
+    pointerType: 'touch', pointerId: 74, isPrimary: true, button: 0, buttons: 1,
+    clientX: closePoint.x, clientY: closePoint.y,
+  });
+  await closeButton.dispatchEvent('contextmenu', {
+    button: 2, clientX: closePoint.x, clientY: closePoint.y,
+  });
+  await page.waitForTimeout(600);
+  assert(await menu.count() === 0, 'Holding a Mobile tab close target opened the tab context menu.');
+  await closeButton.dispatchEvent('pointerup', {
+    pointerType: 'touch', pointerId: 74, isPrimary: true, button: 0, buttons: 0,
+    clientX: closePoint.x, clientY: closePoint.y,
+  });
+
+  // A short touch still activates normally even though its compatibility mouse events are suppressed.
+  await pointer('pointerdown', 72);
+  await compatibilityMouseDown();
+  await page.waitForTimeout(50);
+  await pointer('pointerup', 72);
+  await compatibilityClick();
+  await page.waitForFunction((label) => {
+    const tab = Array.from(document.querySelectorAll<HTMLElement>('[role="tab"]'))
+      .find((candidate) => candidate.querySelector('.tab-label')?.textContent?.trim() === label);
+    return tab?.getAttribute('aria-selected') === 'true';
+  }, fileLabel);
+
+  await chatTab.click();
+  await page.waitForFunction(() => document.getElementById('piclaw-mobile-surface-tab-chat')?.getAttribute('aria-selected') === 'true');
+
+  // A recognized long press opens the held tab's menu without activating it.
+  await pointer('pointerdown', 73);
+  await compatibilityMouseDown();
+  await page.waitForTimeout(600);
+  await menu.waitFor({ state: 'visible', timeout: 15000 });
+  assert(await menu.count() === 1, `Long press rendered ${await menu.count()} context menus.`);
+  const longPressState = {
+    ...(await readSelection()),
+    targetId: await menu.getAttribute('data-tab-id'),
+  };
+  assert(
+    longPressState.chat === 'true'
+      && longPressState.file === 'false'
+      && longPressState.targetId === filePath,
+    `Long press targeted or activated the wrong tab: ${JSON.stringify(longPressState)}.`,
+  );
+
+  await pointer('pointerup', 73);
+  await compatibilityClick();
+  assert(await menu.isVisible(), 'The compatibility click dismissed the recognized long-press menu.');
+  const afterRelease = await readSelection();
+  assert(afterRelease.chat === 'true' && afterRelease.file === 'false',
+    `Long-press release activated the background tab: ${JSON.stringify(afterRelease)}.`);
+
+  await chatTab.click();
+  await menu.waitFor({ state: 'detached', timeout: 15000 });
+
+  // Android can emit native contextmenu before the fallback timer. It must reuse
+  // the same menu state and cancel the pending fallback rather than rendering twice.
+  await pointer('pointerdown', 75);
+  await compatibilityMouseDown();
+  await page.waitForTimeout(100);
+  await fileTab.dispatchEvent('contextmenu', {
+    button: 2,
+    clientX: point.x,
+    clientY: point.y,
+  });
+  await page.waitForTimeout(600);
+  await menu.waitFor({ state: 'visible', timeout: 15000 });
+  const nativeMenuCount = await menu.count();
+  assert(nativeMenuCount === 1, `Native contextmenu plus fallback rendered ${nativeMenuCount} menus.`);
+  assert(await menu.getAttribute('data-tab-id') === filePath,
+    `Native contextmenu targeted ${String(await menu.getAttribute('data-tab-id'))} instead of ${filePath}.`);
+  const afterNativeContextMenu = await readSelection();
+  assert(afterNativeContextMenu.chat === 'true' && afterNativeContextMenu.file === 'false',
+    `Native contextmenu activated the background tab: ${JSON.stringify(afterNativeContextMenu)}.`);
+  await pointer('pointerup', 75);
+  await compatibilityClick();
+  assert(await menu.isVisible(), 'Native contextmenu was dismissed by its compatibility click.');
+  await chatTab.click();
+  await menu.waitFor({ state: 'detached', timeout: 15000 });
+
+  await fileTab.click();
+  await page.waitForFunction((label) => {
+    const tab = Array.from(document.querySelectorAll<HTMLElement>('[role="tab"]'))
+      .find((candidate) => candidate.querySelector('.tab-label')?.textContent?.trim() === label);
+    return tab?.getAttribute('aria-selected') === 'true';
+  }, fileLabel);
+
+  return {
+    movementCancelled: true,
+    closeTargetExcluded: true,
+    shortTouchActivated: true,
+    backgroundTabStayedInactive: true,
+    targetId: longPressState.targetId,
+    compatibilityClickSuppressed: true,
+    nativeContextMenuDeduplicated: true,
+  };
+}
+
 async function verifyAttachToChatControl(
   page: Page,
   filePath: string,
@@ -572,6 +730,9 @@ async function runViewportScenario(
       && replyAvatarWithClosableTab.flexBasis === '28px',
     `Closable tab changed reply avatar geometry: ${JSON.stringify(replyAvatarWithClosableTab)}.`,
   );
+  const touchTabContextMenu = exerciseAttachToChat
+    ? await verifyTouchTabContextMenu(page, filePath, opened.fileLabel)
+    : null;
   const attachToChatControl = await verifyAttachToChatControl(
     page,
     filePath,
@@ -582,6 +743,7 @@ async function runViewportScenario(
   return {
     compactWorkspace,
     terminalDockControl,
+    touchTabContextMenu,
     attachToChatControl,
     replyAvatarWithoutClosableTab,
     replyAvatarWithClosableTab,

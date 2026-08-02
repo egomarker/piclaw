@@ -5,11 +5,15 @@ import {
   getStandaloneTabUrl,
   handleRovingTabKeyDown,
   hasTabContextMenu,
+  hasTouchTabPressMoved,
+  isPrimaryTouchTabPointer,
   isTabClosable,
   resolveRovingTabIndex,
   resolveTabFocusAfterClose,
   resolveTabKeyboardTargetId,
   shouldQueueTabFocusAfterClose,
+  TOUCH_TAB_CONTEXT_MENU_DELAY_MS,
+  TOUCH_TAB_CONTEXT_MENU_MOVE_TOLERANCE_PX,
 } from '../../web/src/components/tab-strip.js';
 import {
   registerAddonStandaloneTabUrlResolver,
@@ -25,6 +29,19 @@ test('tab capabilities can make a synthetic tab permanent and menu-free', () => 
   expect(hasTabContextMenu({ id: 'file' })).toBe(true);
   expect(isTabClosable({ id: 'chat', closable: false })).toBe(false);
   expect(hasTabContextMenu({ id: 'chat', contextMenu: false })).toBe(false);
+});
+
+test('Mobile long-press helpers accept only primary touch and cancel beyond the movement tolerance', () => {
+  expect(TOUCH_TAB_CONTEXT_MENU_DELAY_MS).toBe(500);
+  expect(TOUCH_TAB_CONTEXT_MENU_MOVE_TOLERANCE_PX).toBe(10);
+  expect(isPrimaryTouchTabPointer({ pointerType: 'touch', isPrimary: true, button: 0 })).toBe(true);
+  expect(isPrimaryTouchTabPointer({ pointerType: 'touch', isPrimary: false, button: 0 })).toBe(false);
+  expect(isPrimaryTouchTabPointer({ pointerType: 'mouse', isPrimary: true, button: 0 })).toBe(false);
+  expect(isPrimaryTouchTabPointer({ pointerType: 'touch', isPrimary: true, button: 2 })).toBe(false);
+  expect(hasTouchTabPressMoved(10, 20, 16, 28)).toBe(false);
+  expect(hasTouchTabPressMoved(10, 20, 17, 28)).toBe(true);
+  expect(hasTouchTabPressMoved(10, 20, 13, 24, 5)).toBe(false);
+  expect(hasTouchTabPressMoved(10, 20, 14, 24, 5)).toBe(true);
 });
 
 test('roving tab navigation wraps and supports Home and End', () => {

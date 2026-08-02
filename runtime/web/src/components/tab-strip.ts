@@ -42,6 +42,7 @@ import { canTabEditSource, getTabEditSourceLabel } from '../ui/tab-source-editor
  * @param {(id: string, label?: string) => void} [props.onPopOutTab] - Open a tab in a standalone window.
  * @param {boolean} [props.rovingFocus] - Enable one-tab-stop keyboard navigation.
  * @param {boolean} [props.restoreFocusAfterClose] - Restore focus to the replacement active tab after closing the active tab.
+ * @param {boolean} [props.touchContextMenu] - Enable Mobile touch long-press context menus.
  * @param {string} [props.tabListId] - Stable id for the tablist.
  * @param {string} [props.tabListLabel] - Accessible name for the tablist.
  * @param {(id: string) => string} [props.getTabElementId] - Resolve a stable DOM id for a tab.
@@ -58,6 +59,22 @@ export function isTabClosable(tab) {
 
 export function hasTabContextMenu(tab) {
     return Boolean(tab) && tab.contextMenu !== false;
+}
+
+export const TOUCH_TAB_CONTEXT_MENU_DELAY_MS = 500;
+export const TOUCH_TAB_CONTEXT_MENU_MOVE_TOLERANCE_PX = 10;
+
+export function isPrimaryTouchTabPointer(event) {
+    return event?.pointerType === 'touch'
+        && event?.isPrimary !== false
+        && Number(event?.button ?? 0) === 0;
+}
+
+export function hasTouchTabPressMoved(startX, startY, clientX, clientY, tolerance = TOUCH_TAB_CONTEXT_MENU_MOVE_TOLERANCE_PX) {
+    const dx = Number(clientX) - Number(startX);
+    const dy = Number(clientY) - Number(startY);
+    const limit = Number.isFinite(Number(tolerance)) ? Math.max(0, Number(tolerance)) : TOUCH_TAB_CONTEXT_MENU_MOVE_TOLERANCE_PX;
+    return ((dx * dx) + (dy * dy)) > (limit * limit);
 }
 
 export function getStandaloneTabUrl(path, { hasPopOutTab = false } = {}) {
@@ -126,11 +143,43 @@ export function handleRovingTabKeyDown(event, { tabs, currentId, focusTab, onAct
     return true;
 }
 
-export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, onCloseAll, onTogglePin, onTogglePreview, onToggleDiff, onEditSource, previewTabs, diffTabs, paneOverrides, detachedTabs, onReattachTab, toolbarAction, onToggleDock, dockVisible, onToggleZen, zenMode, onPopOutTab, rovingFocus = false, restoreFocusAfterClose = false, tabListId, tabListLabel, getTabElementId, getTabPanelId }) {
+export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, onCloseAll, onTogglePin, onTogglePreview, onToggleDiff, onEditSource, previewTabs, diffTabs, paneOverrides, detachedTabs, onReattachTab, toolbarAction, onToggleDock, dockVisible, onToggleZen, zenMode, onPopOutTab, rovingFocus = false, restoreFocusAfterClose = false, touchContextMenu = false, tabListId, tabListLabel, getTabElementId, getTabPanelId }) {
     const { t } = useTranslation();
     const [contextMenu, setContextMenu] = useState(null);
     const stripRef = useRef(null);
     const pendingFocusAfterCloseRef = useRef(null);
+    const touchPressRef = useRef(null);
+    const touchActivationSuppressionRef = useRef(null);
+
+    const clearTouchPressTimer = useCallback((press = touchPressRef.current) => {
+        if (press?.timerId == null) return;
+        press.ownerWindow?.clearTimeout?.(press.timerId);
+        press.timerId = null;
+    }, []);
+
+    const getTouchActivationSuppression = useCallback((id) => {
+        const suppression = touchActivationSuppressionRef.current;
+        if (!suppression) return null;
+        if (suppression.until < Date.now()) {
+            touchActivationSuppressionRef.current = null;
+            return null;
+        }
+        return suppression.id === id ? suppression : null;
+    }, []);
+
+    const suppressTouchActivation = useCallback((id, preventClick) => {
+        touchActivationSuppressionRef.current = {
+            id,
+            preventClick: Boolean(preventClick),
+            until: Date.now() + 500,
+        };
+    }, []);
+
+    const openTabContextMenu = useCallback((tab, clientX, clientY) => {
+        if (!hasTabContextMenu(tab)) return false;
+        setContextMenu({ id: tab.id, x: Math.round(Number(clientX) || 0), y: Math.round(Number(clientY) || 0) });
+        return true;
+    }, []);
 
     const focusTabById = useCallback((id) => {
         if (!rovingFocus || !stripRef.current) return;
@@ -163,6 +212,15 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
         pendingFocusAfterCloseRef.current = null;
         focusTabById(focusTargetId);
     }, [activeId, focusTabById, restoreFocusAfterClose, rovingFocus, tabs]);
+
+    useEffect(() => {
+        if (!touchContextMenu) return;
+        return () => {
+            clearTouchPressTimer();
+            touchPressRef.current = null;
+            touchActivationSuppressionRef.current = null;
+        };
+    }, [clearTouchPressTimer, touchContextMenu]);
 
     // Close context menu on outside click or Escape
     useEffect(() => {
@@ -216,9 +274,78 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
         return () => document.removeEventListener('keydown', onKeyDown);
     }, [tabs, activeId, focusTabById, onActivate, requestTabClose, rovingFocus]);
 
+    const handleTabTouchPointerDown = useCallback((event, tab) => {
+        if (!touchContextMenu || !isPrimaryTouchTabPointer(event)) return;
+        if (event.target?.closest?.('.tab-close') || !hasTabContextMenu(tab)) return;
+
+        clearTouchPressTimer();
+        const ownerWindow = event.currentTarget?.ownerDocument?.defaultView || window;
+        const press = {
+            id: tab.id,
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            clientX: event.clientX,
+            clientY: event.clientY,
+            cancelled: false,
+            menuOpened: false,
+            ownerWindow,
+            timerId: null,
+        };
+        press.timerId = ownerWindow.setTimeout(() => {
+            if (touchPressRef.current !== press || press.cancelled) return;
+            press.menuOpened = openTabContextMenu(tab, press.clientX, press.clientY);
+            if (press.menuOpened) suppressTouchActivation(tab.id, true);
+        }, TOUCH_TAB_CONTEXT_MENU_DELAY_MS);
+        touchPressRef.current = press;
+    }, [clearTouchPressTimer, openTabContextMenu, suppressTouchActivation, touchContextMenu]);
+
+    const handleTabTouchPointerMove = useCallback((event, tab) => {
+        const press = touchPressRef.current;
+        if (!press || press.id !== tab.id || press.pointerId !== event.pointerId || press.cancelled) return;
+        press.clientX = event.clientX;
+        press.clientY = event.clientY;
+        if (!hasTouchTabPressMoved(press.startX, press.startY, event.clientX, event.clientY)) return;
+        press.cancelled = true;
+        clearTouchPressTimer(press);
+    }, [clearTouchPressTimer]);
+
+    const handleTabTouchPointerUp = useCallback((event, tab) => {
+        const press = touchPressRef.current;
+        if (!press || press.id !== tab.id || press.pointerId !== event.pointerId) return;
+        clearTouchPressTimer(press);
+        touchPressRef.current = null;
+
+        if (press.menuOpened || press.cancelled) {
+            suppressTouchActivation(tab.id, true);
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+        }
+
+        suppressTouchActivation(tab.id, false);
+        if (rovingFocus) event.currentTarget?.focus?.({ preventScroll: true });
+        onActivate?.(tab.id);
+    }, [clearTouchPressTimer, onActivate, rovingFocus, suppressTouchActivation]);
+
+    const handleTabTouchPointerCancel = useCallback((event, tab) => {
+        const press = touchPressRef.current;
+        if (!press || press.id !== tab.id || press.pointerId !== event.pointerId) return;
+        clearTouchPressTimer(press);
+        touchPressRef.current = null;
+        suppressTouchActivation(tab.id, true);
+    }, [clearTouchPressTimer, suppressTouchActivation]);
+
     const handleTabMouseDown = useCallback((e, tab) => {
         // Skip if the press landed on the close button — let close handle it.
         if (e.target?.closest?.('.tab-close')) return;
+        if (e.button === 0 && touchContextMenu) {
+            const touchPress = touchPressRef.current;
+            if (touchPress?.id === tab.id || getTouchActivationSuppression(tab.id)) {
+                e.preventDefault();
+                return;
+            }
+        }
         // Activate on press instead of waiting for click. Some embedded panes
         // and touch/pointer paths can swallow the synthetic click, but the
         // tab should still come to the front as soon as the primary press lands.
@@ -232,7 +359,7 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
             e.preventDefault();
             requestTabClose(tab.id);
         }
-    }, [onActivate, requestTabClose, rovingFocus]);
+    }, [getTouchActivationSuppression, onActivate, requestTabClose, rovingFocus, touchContextMenu]);
 
     const handleTabKeyDown = useCallback((event, tab) => {
         if (!rovingFocus || event.target !== event.currentTarget) return;
@@ -245,18 +372,36 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
     }, [focusTabById, onActivate, rovingFocus, tabs]);
 
     const handleTabClick = useCallback((e, id) => {
+        const suppression = getTouchActivationSuppression(id);
+        if (suppression) {
+            touchActivationSuppressionRef.current = null;
+            e.preventDefault();
+            if (suppression.preventClick) e.stopPropagation();
+            return;
+        }
         if (e.defaultPrevented) return;
         if (e.target?.closest?.('.tab-close')) return;
         if (e.button === 0) {
             onActivate?.(id);
         }
-    }, [onActivate]);
+    }, [getTouchActivationSuppression, onActivate]);
 
     const handleContextMenu = useCallback((e, tab) => {
         e.preventDefault();
-        if (!hasTabContextMenu(tab)) return;
-        setContextMenu({ id: tab.id, x: e.clientX, y: e.clientY });
-    }, []);
+        if (e.target?.closest?.('.tab-close') || !hasTabContextMenu(tab)) return;
+        const press = touchContextMenu && touchPressRef.current?.id === tab.id
+            ? touchPressRef.current
+            : null;
+        if (press) {
+            clearTouchPressTimer(press);
+            press.menuOpened = true;
+            suppressTouchActivation(tab.id, true);
+        }
+        const rect = e.currentTarget?.getBoundingClientRect?.();
+        const x = e.clientX || press?.clientX || ((rect?.left || 0) + 8);
+        const y = e.clientY || press?.clientY || (rect?.bottom || 0);
+        openTabContextMenu(tab, x, y);
+    }, [clearTouchPressTimer, openTabContextMenu, suppressTouchActivation, touchContextMenu]);
 
     const handleClosePointerDown = useCallback((e) => {
         // Keep close-button pointer presses isolated from the parent tab so the
@@ -340,6 +485,10 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
                     aria-controls=${rovingFocus ? getTabPanelId?.(tab.id) : undefined}
                     tabIndex=${rovingFocus ? resolveRovingTabIndex(tabs, activeId, tab.id) : undefined}
                     title=${tab.path}
+                    onPointerDown=${touchContextMenu ? (e) => handleTabTouchPointerDown(e, tab) : undefined}
+                    onPointerMove=${touchContextMenu ? (e) => handleTabTouchPointerMove(e, tab) : undefined}
+                    onPointerUp=${touchContextMenu ? (e) => handleTabTouchPointerUp(e, tab) : undefined}
+                    onPointerCancel=${touchContextMenu ? (e) => handleTabTouchPointerCancel(e, tab) : undefined}
                     onMouseDown=${(e) => handleTabMouseDown(e, tab)}
                     onClick=${(e) => handleTabClick(e, tab.id)}
                     onKeyDown=${rovingFocus ? (e) => handleTabKeyDown(e, tab) : undefined}
@@ -425,7 +574,12 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
             `}
         </div>
         ${contextMenu && html`
-            <div class="tab-context-menu" style=${{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }}>
+            <div
+                class="tab-context-menu"
+                data-testid="tab-context-menu"
+                data-tab-id=${contextMenu.id}
+                style=${{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }}
+            >
                 <button onClick=${() => { requestTabClose(contextMenu.id); setContextMenu(null); }}>${t('tab.close')}</button>
                 <button onClick=${() => { onCloseOthers?.(contextMenu.id); setContextMenu(null); }}>${t('tab.closeOthers')}</button>
                 <button onClick=${() => { onCloseAll?.(); setContextMenu(null); }}>${t('tab.closeAll')}</button>
