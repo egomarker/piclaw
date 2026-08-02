@@ -340,6 +340,16 @@ function injectStyles(ownerDocument = document) {
         background: var(--bg-secondary, #161b22);
         border-top: 1px solid var(--border-color, rgba(148,163,184,.24));
       }
+      @media (hover: hover) and (pointer: fine) {
+        .terminal-pane-xterm .terminal-toolbar-anchor {
+          display: none;
+        }
+      }
+      @media (any-pointer: coarse) {
+        .terminal-pane-xterm .terminal-toolbar-anchor {
+          display: block;
+        }
+      }
       .terminal-pane-xterm .terminal-mobile-toolbar {
         display: grid;
         grid-template-columns: repeat(6, minmax(0, 1fr));
