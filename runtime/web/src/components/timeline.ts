@@ -273,6 +273,9 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
     const pendingAnchorRef = useRef(null);
     const restoringAnchorRef = useRef(false);
     const restoreFramesRef = useRef({ first: 0, second: 0 });
+    const scrollWindowFrameRef = useRef(0);
+    const updateWindowForScrollRef = useRef(null);
+    const measuredWidthRef = useRef(0);
     const hasIntersectionObserver = typeof IntersectionObserver !== 'undefined';
     const displayPosts = useMemo(
         () => Array.isArray(posts) ? posts.slice().sort((a, b) => a.id - b.id) : [],
@@ -314,18 +317,26 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         }
     }, [hasMore, loadingMore, onLoadMore, timelineRef]);
 
-    const handleScroll = useCallback((event) => {
-        if (restoringAnchorRef.current || isAnchorScrolling(event.target)) return;
-        const root = event.target;
+    const updateWindowForScroll = useCallback((root) => {
+        if (!root || restoringAnchorRef.current || isAnchorScrolling(root) || !shouldWindow) return;
         const { clientHeight } = root;
         const contentOffset = getTimelineContentOffset(root, reverse);
-        if (contentOffset < Math.max(300, clientHeight)) triggerLoadMore();
-
-        if (!shouldWindow) return;
         const viewportEnd = contentOffset + clientHeight;
         const rangeStartOffset = virtualHeights[effectiveRange.start] ?? 0;
         const rangeEndOffset = virtualHeights[effectiveRange.end] ?? rangeStartOffset;
         const edgeBuffer = Math.max(150, clientHeight * 0.5);
+        const desiredWindow = getTimelineWindowForViewport(
+            virtualHeights,
+            contentOffset,
+            clientHeight,
+            displayPosts.length,
+        );
+        const extraRows = Math.max(0, desiredWindow.start - effectiveRange.start)
+            + Math.max(0, effectiveRange.end - desiredWindow.end);
+        const canCompact = desiredWindow.start >= effectiveRange.start
+            && desiredWindow.end <= effectiveRange.end
+            && extraRows >= TIMELINE_WINDOW_SIZE;
+
         const mountedPosts = Array.from(timelineContentRef.current?.querySelectorAll?.(':scope > .post') || []);
         const rootRect = root.getBoundingClientRect();
         const firstRect = mountedPosts[0]?.getBoundingClientRect();
@@ -338,14 +349,9 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             && (contentOffset < rangeStartOffset + edgeBuffer || earlierSpacerVisible);
         const needsLaterRows = effectiveRange.end < displayPosts.length
             && (viewportEnd > rangeEndOffset - edgeBuffer || laterSpacerVisible);
-        if (!needsEarlierRows && !needsLaterRows) return;
+        if (!needsEarlierRows && !needsLaterRows && !canCompact) return;
 
-        let nextWindow = getTimelineWindowForViewport(
-            virtualHeights,
-            contentOffset,
-            clientHeight,
-            displayPosts.length,
-        );
+        let nextWindow = desiredWindow;
         if (haveSameTimelineWindow(windowRange, nextWindow)
             && (earlierSpacerVisible || laterSpacerVisible)) {
             nextWindow = {
@@ -367,7 +373,26 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             ? anchor
             : null;
         setWindowRange(nextWindow);
-    }, [displayPosts, effectiveRange.end, effectiveRange.start, reverse, shouldWindow, triggerLoadMore, virtualHeights, windowRange]);
+    }, [displayPosts, effectiveRange.end, effectiveRange.start, reverse, shouldWindow, virtualHeights, windowRange]);
+
+    updateWindowForScrollRef.current = updateWindowForScroll;
+
+    const handleScroll = useCallback((event) => {
+        if (restoringAnchorRef.current || isAnchorScrolling(event.target)) return;
+        const root = event.target;
+        const contentOffset = getTimelineContentOffset(root, reverse);
+        if (contentOffset < Math.max(300, root.clientHeight)) triggerLoadMore();
+        if (!shouldWindow || scrollWindowFrameRef.current) return;
+        scrollWindowFrameRef.current = requestAnimationFrame(() => {
+            scrollWindowFrameRef.current = 0;
+            updateWindowForScrollRef.current?.(root);
+        });
+    }, [reverse, shouldWindow, triggerLoadMore]);
+
+    useEffect(() => () => {
+        cancelAnimationFrame(scrollWindowFrameRef.current);
+        scrollWindowFrameRef.current = 0;
+    }, []);
 
     useLayoutEffect(() => {
         const previousPosts = previousPostsRef.current;
@@ -387,6 +412,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         if (!windowingActive) {
             const root = timelineRef?.current;
             const content = timelineContentRef.current;
+            measuredWidthRef.current = root?.clientWidth || 0;
             measureTimelinePostHeights(content, measuredHeightsRef.current, true);
             const measuredPrefix = buildTimelinePrefixHeights(displayPosts, measuredHeightsRef.current);
             const loadAnchor = loadAnchorRef.current;
@@ -546,7 +572,16 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         if (!content) return;
         let updateFrame = 0;
         const observer = new ResizeObserver((entries) => {
+            const root = timelineRef?.current;
+            const measuredWidth = root?.clientWidth || 0;
             let changed = false;
+            if (measuredWidthRef.current > 0
+                && measuredWidth > 0
+                && Math.abs(measuredWidthRef.current - measuredWidth) > 1) {
+                measuredHeightsRef.current.clear();
+                changed = true;
+            }
+            if (measuredWidth > 0) measuredWidthRef.current = measuredWidth;
             for (const entry of entries) {
                 const id = getTimelinePostId(entry.target);
                 if (!id) continue;
@@ -562,7 +597,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
                     updateFrame = 0;
                     const root = timelineRef?.current;
                     const anchor = captureTimelineViewportAnchor(root, content);
-                    if (anchor) pendingAnchorRef.current = anchor;
+                    if (anchor && !pendingAnchorRef.current) pendingAnchorRef.current = anchor;
                     setHeightRevision((value) => value + 1);
                 });
             }
