@@ -21,7 +21,7 @@ import { canTabEditSource, getTabEditSourceLabel } from '../ui/tab-source-editor
  * TabStrip — horizontal tab bar for open editor files.
  *
  * @param {Object} props
- * @param {(import('../panes/tab-store.js').TabState & { closable?: boolean, contextMenu?: boolean })[]} props.tabs
+ * @param {(import('../panes/tab-store.js').TabState & { closable?: boolean, contextMenu?: boolean|string })[]} props.tabs
  * @param {string|null} props.activeId
  * @param {(id: string) => void} props.onActivate
  * @param {(id: string) => void} props.onClose
@@ -43,6 +43,7 @@ import { canTabEditSource, getTabEditSourceLabel } from '../ui/tab-source-editor
  * @param {boolean} [props.rovingFocus] - Enable one-tab-stop keyboard navigation.
  * @param {boolean} [props.restoreFocusAfterClose] - Restore focus to the replacement active tab after closing the active tab.
  * @param {boolean} [props.touchContextMenu] - Enable Mobile touch long-press context menus.
+ * @param {(tab: unknown, controls: {close: () => void, openToken: number}) => unknown} [props.renderContextMenu] - Render content for a string-identified custom menu kind.
  * @param {string} [props.tabListId] - Stable id for the tablist.
  * @param {string} [props.tabListLabel] - Accessible name for the tablist.
  * @param {(id: string) => string} [props.getTabElementId] - Resolve a stable DOM id for a tab.
@@ -59,6 +60,10 @@ export function isTabClosable(tab) {
 
 export function hasTabContextMenu(tab) {
     return Boolean(tab) && tab.contextMenu !== false;
+}
+
+export function hasCustomTabContextMenu(tab) {
+    return Boolean(tab) && typeof tab.contextMenu === 'string' && Boolean(tab.contextMenu.trim());
 }
 
 export const TOUCH_TAB_CONTEXT_MENU_DELAY_MS = 500;
@@ -143,11 +148,12 @@ export function handleRovingTabKeyDown(event, { tabs, currentId, focusTab, onAct
     return true;
 }
 
-export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, onCloseAll, onTogglePin, onTogglePreview, onToggleDiff, onEditSource, previewTabs, diffTabs, paneOverrides, detachedTabs, onReattachTab, toolbarAction, onToggleDock, dockVisible, onToggleZen, zenMode, onPopOutTab, rovingFocus = false, restoreFocusAfterClose = false, touchContextMenu = false, tabListId, tabListLabel, getTabElementId, getTabPanelId }) {
+export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, onCloseAll, onTogglePin, onTogglePreview, onToggleDiff, onEditSource, previewTabs, diffTabs, paneOverrides, detachedTabs, onReattachTab, toolbarAction, onToggleDock, dockVisible, onToggleZen, zenMode, onPopOutTab, rovingFocus = false, restoreFocusAfterClose = false, touchContextMenu = false, renderContextMenu, tabListId, tabListLabel, getTabElementId, getTabPanelId }) {
     const { t } = useTranslation();
     const [contextMenu, setContextMenu] = useState(null);
     const stripRef = useRef(null);
     const pendingFocusAfterCloseRef = useRef(null);
+    const contextMenuOpenTokenRef = useRef(0);
     const touchPressRef = useRef(null);
     const touchActivationSuppressionRef = useRef(null);
 
@@ -177,7 +183,16 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
 
     const openTabContextMenu = useCallback((tab, clientX, clientY) => {
         if (!hasTabContextMenu(tab)) return false;
-        setContextMenu({ id: tab.id, x: Math.round(Number(clientX) || 0), y: Math.round(Number(clientY) || 0) });
+        const requestedX = Math.round(Number(clientX) || 0);
+        const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 0;
+        const customMenuMaxX = viewportWidth > 0 ? Math.max(8, viewportWidth - Math.min(340, viewportWidth - 16) - 8) : requestedX;
+        contextMenuOpenTokenRef.current += 1;
+        setContextMenu({
+            id: tab.id,
+            x: hasCustomTabContextMenu(tab) ? Math.max(8, Math.min(requestedX, customMenuMaxX)) : requestedX,
+            y: Math.round(Number(clientY) || 0),
+            openToken: contextMenuOpenTokenRef.current,
+        });
         return true;
     }, []);
 
@@ -392,15 +407,18 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
         const press = touchContextMenu && touchPressRef.current?.id === tab.id
             ? touchPressRef.current
             : null;
+        const menuAlreadyOpened = Boolean(press?.menuOpened);
         if (press) {
             clearTouchPressTimer(press);
             press.menuOpened = true;
             suppressTouchActivation(tab.id, true);
         }
-        const rect = e.currentTarget?.getBoundingClientRect?.();
-        const x = e.clientX || press?.clientX || ((rect?.left || 0) + 8);
-        const y = e.clientY || press?.clientY || (rect?.bottom || 0);
-        openTabContextMenu(tab, x, y);
+        if (!menuAlreadyOpened) {
+            const rect = e.currentTarget?.getBoundingClientRect?.();
+            const x = e.clientX || press?.clientX || ((rect?.left || 0) + 8);
+            const y = e.clientY || press?.clientY || (rect?.bottom || 0);
+            openTabContextMenu(tab, x, y);
+        }
     }, [clearTouchPressTimer, openTabContextMenu, suppressTouchActivation, touchContextMenu]);
 
     const handleClosePointerDown = useCallback((e) => {
@@ -463,6 +481,14 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
         const supportsCompare = canTabCompareToSaved(tabId, getPaneOverride(tabId), (context) => paneRegistry.resolve(context));
         return supportsCompare && Boolean(tab.dirty || contextMenuDiffOpen);
     }, [contextMenu?.id, contextMenuDiffOpen, getPaneOverride, tabs]);
+    const contextMenuIsCustom = hasCustomTabContextMenu(contextMenuTab);
+    const closeContextMenu = () => setContextMenu(null);
+    const renderedCustomContextMenu = contextMenuIsCustom && typeof renderContextMenu === 'function'
+        ? renderContextMenu(contextMenuTab, {
+            close: closeContextMenu,
+            openToken: contextMenu?.openToken || 0,
+        })
+        : null;
 
     if (!tabs.length) return null;
 
@@ -575,11 +601,15 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
         </div>
         ${contextMenu && html`
             <div
-                class="tab-context-menu"
+                class=${`tab-context-menu${contextMenuIsCustom ? ' custom-tab-context-menu' : ''}`}
                 data-testid="tab-context-menu"
                 data-tab-id=${contextMenu.id}
+                data-menu-kind=${contextMenuTab?.contextMenu || 'pane'}
                 style=${{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }}
             >
+                ${contextMenuIsCustom
+                    ? (renderedCustomContextMenu || html`<div class="custom-tab-context-menu-unavailable" role="status">No actions available.</div>`)
+                    : html`<div class="default-tab-context-menu">
                 <button onClick=${() => { requestTabClose(contextMenu.id); setContextMenu(null); }}>${t('tab.close')}</button>
                 <button onClick=${() => { onCloseOthers?.(contextMenu.id); setContextMenu(null); }}>${t('tab.closeOthers')}</button>
                 <button onClick=${() => { onCloseAll?.(); setContextMenu(null); }}>${t('tab.closeAll')}</button>
@@ -639,6 +669,7 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
                         }}>${t('tab.openInNewTab')}</button>
                     `;
                 })()}
+                </div>`}
             </div>
         `}
     `;

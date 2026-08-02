@@ -35,7 +35,7 @@ export function getMobileSurfacePanelId(id: string): string {
 
 export interface MobileTabState extends TabState {
   closable?: boolean;
-  contextMenu?: boolean;
+  contextMenu?: boolean | 'chat-sessions';
   surface?: 'chat' | 'workspace' | 'pane';
 }
 
@@ -68,7 +68,7 @@ export const MOBILE_CHAT_TAB: Readonly<MobileTabState> = Object.freeze({
   dirty: false,
   pinned: false,
   closable: false,
-  contextMenu: false,
+  contextMenu: 'chat-sessions',
   surface: 'chat',
 });
 

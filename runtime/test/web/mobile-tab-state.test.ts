@@ -47,7 +47,7 @@ test('Mobile keeps Chat conditional in wide mode and adds permanent Chat and Wor
     'two',
   ]);
   expect(narrowTabs.slice(0, 2)).toEqual([
-    expect.objectContaining({ label: 'Chat', closable: false, contextMenu: false }),
+    expect.objectContaining({ label: 'Chat', closable: false, contextMenu: 'chat-sessions' }),
     expect.objectContaining({ label: 'Workspace', closable: false, contextMenu: false }),
   ]);
   expect(composeMobileTabStripTabs(panes, false, true)).toBe(panes);

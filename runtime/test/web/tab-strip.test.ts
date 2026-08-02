@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   getStandaloneTabUrl,
   handleRovingTabKeyDown,
+  hasCustomTabContextMenu,
   hasTabContextMenu,
   hasTouchTabPressMoved,
   isPrimaryTouchTabPointer,
@@ -24,11 +25,14 @@ afterEach(() => {
   resetAddonWebRegistriesForTests();
 });
 
-test('tab capabilities can make a synthetic tab permanent and menu-free', () => {
+test('tab capabilities distinguish default, disabled, and custom context menus', () => {
   expect(isTabClosable({ id: 'file' })).toBe(true);
   expect(hasTabContextMenu({ id: 'file' })).toBe(true);
+  expect(hasCustomTabContextMenu({ id: 'file' })).toBe(false);
   expect(isTabClosable({ id: 'chat', closable: false })).toBe(false);
   expect(hasTabContextMenu({ id: 'chat', contextMenu: false })).toBe(false);
+  expect(hasTabContextMenu({ id: 'chat', contextMenu: 'chat-sessions' })).toBe(true);
+  expect(hasCustomTabContextMenu({ id: 'chat', contextMenu: 'chat-sessions' })).toBe(true);
 });
 
 test('Mobile long-press helpers accept only primary touch and cancel beyond the movement tolerance', () => {
