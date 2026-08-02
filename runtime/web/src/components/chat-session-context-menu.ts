@@ -1,5 +1,9 @@
 import { html, useEffect, useState } from '../vendor/preact-htm.js';
-import { formatBranchPickerBaseLabel } from '../ui/branch-lifecycle.js';
+import { normalizeHandle } from '../ui/branch-lifecycle.js';
+
+export function formatRunningChatSessionHandle(chat: any): string {
+  return normalizeHandle(chat?.agent_name) || 'Unnamed session';
+}
 
 export function resolveRunningChatSessions(chats: unknown): any[] {
   const seen = new Set<string>();
@@ -86,7 +90,7 @@ export function ChatSessionContextMenu({
         const statusLabel = typeof chat.activity_label === 'string' && chat.activity_label.trim()
           ? chat.activity_label.trim()
           : 'Active';
-        const label = formatBranchPickerBaseLabel(chat);
+        const label = formatRunningChatSessionHandle(chat);
         return html`
           <button
             key=${chatJid}
