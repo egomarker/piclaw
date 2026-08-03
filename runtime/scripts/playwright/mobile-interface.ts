@@ -215,6 +215,51 @@ async function showWorkspace(page: Page, compactWorkspace: boolean) {
   return { ...rect, treeSizing };
 }
 
+async function verifyWorkspaceStandaloneSafeArea(page: Page) {
+  const result = await page.evaluate((safeBottom) => {
+    const root = document.documentElement;
+    const shell = document.querySelector<HTMLElement>('.app-shell.mobile-interface');
+    const sidebar = document.querySelector<HTMLElement>('.workspace-sidebar');
+    if (!shell || !sidebar) return null;
+
+    const hadMarker = root.hasAttribute('data-iphone-standalone-compose-inset');
+    const previousInset = root.style.getPropertyValue('--iphone-standalone-compose-safe-area-bottom');
+    const previousPriority = root.style.getPropertyPriority('--iphone-standalone-compose-safe-area-bottom');
+    root.setAttribute('data-iphone-standalone-compose-inset', '1');
+    root.style.setProperty('--iphone-standalone-compose-safe-area-bottom', `${safeBottom}px`);
+
+    const shellRect = shell.getBoundingClientRect();
+    const sidebarRect = sidebar.getBoundingClientRect();
+    const shellPaddingBottom = Number.parseFloat(getComputedStyle(shell).paddingBottom) || 0;
+    const shellUsableBottom = shellRect.bottom - shellPaddingBottom;
+    const measurement = {
+      safeBottom,
+      shellBottom: shellRect.bottom,
+      shellPaddingBottom,
+      shellUsableBottom,
+      workspaceBottom: sidebarRect.bottom,
+      bottomDeltaPx: sidebarRect.bottom - shellUsableBottom,
+      workspaceHeight: sidebarRect.height,
+      workspaceComputedHeight: getComputedStyle(sidebar).height,
+    };
+
+    if (hadMarker) root.setAttribute('data-iphone-standalone-compose-inset', '1');
+    else root.removeAttribute('data-iphone-standalone-compose-inset');
+    if (previousInset) {
+      root.style.setProperty('--iphone-standalone-compose-safe-area-bottom', previousInset, previousPriority);
+    } else {
+      root.style.removeProperty('--iphone-standalone-compose-safe-area-bottom');
+    }
+    return measurement;
+  }, 34);
+
+  assert(result && result.shellPaddingBottom === result.safeBottom,
+    `Standalone safe-area marker did not inset the Mobile shell: ${JSON.stringify(result)}.`);
+  assert(Math.abs(result.bottomDeltaPx) <= 1,
+    `Workspace extends into the standalone lower safe area: ${JSON.stringify(result)}.`);
+  return result;
+}
+
 async function dispatchWorkspaceTouch(
   target: Locator,
   type: 'touchstart' | 'touchmove' | 'touchend' | 'touchcancel',
@@ -822,6 +867,7 @@ async function runViewportScenario(
     ? await verifyComposeTerminalDockControl(page)
     : null;
   const workspaceRect = await showWorkspace(page, compactWorkspace);
+  const workspaceStandaloneSafeArea = await verifyWorkspaceStandaloneSafeArea(page);
   const workspaceTouchDragLongPress = exerciseAttachToChat
     ? await verifyWorkspaceTouchDragLongPress(page, filePath)
     : null;
@@ -855,6 +901,7 @@ async function runViewportScenario(
     replyAvatarWithoutClosableTab,
     replyAvatarWithClosableTab,
     workspaceRect,
+    workspaceStandaloneSafeArea,
     workspaceTouchDragLongPress,
     ...opened,
   };

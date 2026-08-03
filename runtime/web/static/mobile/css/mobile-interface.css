@@ -37,10 +37,16 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     justify-self: stretch;
 }
 
-/* Keep the existing explorer as an independent left rail. */
+/*
+ * Keep the existing explorer as an independent left rail. Let the shell grid
+ * own its height so standalone-PWA safe-area padding also bounds the rail.
+ */
 .app-shell.mobile-interface > .workspace-sidebar {
     grid-column: 1;
     grid-row: 1 / -1;
+    align-self: stretch;
+    height: auto;
+    min-height: 0;
 }
 
 /* Keep the comfortable explorer rail compact, but give its full tab larger touch targets. */
@@ -377,12 +383,9 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
         display: flex;
         grid-column: var(--mobile-content-column);
         grid-row: 2;
-        align-self: stretch;
         width: 100%;
         min-width: 0;
         max-width: none;
-        height: auto;
-        min-height: 0;
         opacity: 1;
         visibility: visible;
         transform: none;
