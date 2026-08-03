@@ -1,9 +1,12 @@
 import { expect, test } from 'bun:test';
 
 import {
+  WORKSPACE_TOUCH_DRAG_DELAY_MS,
+  WORKSPACE_TOUCH_DRAG_MOVE_TOLERANCE_PX,
   buildWorkspaceMoveConfirmationMessage,
   confirmWorkspaceEntryMove,
   getWorkspaceTouchStartIntent,
+  hasWorkspaceTouchDragMoved,
   mergeWorkspaceTreeUpdates,
   shouldFocusWorkspaceTreeAfterActivation,
 } from '../../web/src/components/workspace-explorer.ts';
@@ -52,6 +55,14 @@ test('workspace touch start still enables drag mode from explicit drag handles',
   });
 
   expect(intent?.dragPath).toBe('/workspace/demo.md');
+});
+
+test('workspace touch drag uses a long-press delay and movement tolerance', () => {
+  expect(WORKSPACE_TOUCH_DRAG_DELAY_MS).toBe(350);
+  expect(WORKSPACE_TOUCH_DRAG_MOVE_TOLERANCE_PX).toBe(8);
+  expect(hasWorkspaceTouchDragMoved(10, 15, 18, 23)).toBe(false);
+  expect(hasWorkspaceTouchDragMoved(10, 15, 19, 15)).toBe(true);
+  expect(hasWorkspaceTouchDragMoved(10, 15, 10, 24)).toBe(true);
 });
 
 test('workspace touch start ignores rows that are being renamed', () => {

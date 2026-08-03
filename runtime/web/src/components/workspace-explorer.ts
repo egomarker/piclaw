@@ -45,6 +45,28 @@ import {
 import { getRecentFiles } from '../ui/recent-files.js';
 
 const WORKSPACE_TOUCH_ACTIVATION_WINDOW_MS = 1000;
+export const WORKSPACE_TOUCH_DRAG_DELAY_MS = 350;
+export const WORKSPACE_TOUCH_DRAG_MOVE_TOLERANCE_PX = 8;
+
+export function hasWorkspaceTouchDragMoved(startX, startY, clientX, clientY) {
+    return Math.abs(clientX - startX) > WORKSPACE_TOUCH_DRAG_MOVE_TOLERANCE_PX
+        || Math.abs(clientY - startY) > WORKSPACE_TOUCH_DRAG_MOVE_TOLERANCE_PX;
+}
+
+function createIdleWorkspaceTouchDragState() {
+    return {
+        path: null,
+        dragging: false,
+        moved: false,
+        cancelled: false,
+        startX: 0,
+        startY: 0,
+        clientX: 0,
+        clientY: 0,
+        timer: 0,
+        ownerWindow: null,
+    };
+}
 
 const isHiddenNode = (node) => {
     if (!node || !node.name) return false;
@@ -761,7 +783,7 @@ export function WorkspaceExplorer({
     const uploadTargetRef = useRef('.');
     const uploadProgressTimerRef = useRef(0);
     const touchFocusRestoreTimerRef = useRef(0);
-    const touchDragRef     = useRef({ path: null, dragging: false, startX: 0, startY: 0 });
+    const touchDragRef     = useRef(createIdleWorkspaceTouchDragState());
     const mouseDragRef     = useRef({ path: null, dragging: false, startX: 0, startY: 0 });
     const dragExpandRef    = useRef({ path: null, timer: 0 });
     const suppressClickRef = useRef(false);
@@ -814,6 +836,12 @@ export function WorkspaceExplorer({
         touchFocusRestoreTimerRef.current = 0;
     }, []);
 
+    const clearWorkspaceTouchDragTimer = useCallback((dragState = touchDragRef.current) => {
+        if (!dragState?.timer) return;
+        dragState.ownerWindow?.clearTimeout?.(dragState.timer);
+        dragState.timer = 0;
+    }, []);
+
     const restoreWorkspaceTreeTabStop = useCallback(() => {
         clearTouchFocusRestoreTimer();
         treeListRef.current?.setAttribute?.('tabindex', '0');
@@ -840,7 +868,8 @@ export function WorkspaceExplorer({
     useEffect(() => () => {
         clearUploadProgressTimer();
         clearTouchFocusRestoreTimer();
-    }, [clearUploadProgressTimer, clearTouchFocusRestoreTimer]);
+        clearWorkspaceTouchDragTimer();
+    }, [clearUploadProgressTimer, clearTouchFocusRestoreTimer, clearWorkspaceTouchDragTimer]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return undefined;
@@ -2018,28 +2047,52 @@ export function WorkspaceExplorer({
     }, [clearSelection, deleteFileAtPath, expanded, rows, scrollRowIntoView, selectedPath]);
 
     const handleRowTouchStart = useCallback((event) => {
+        clearWorkspaceTouchDragTimer();
+        touchDragRef.current = createIdleWorkspaceTouchDragState();
+
         const intent = getWorkspaceTouchStartIntent(event, renamingPathRef.current);
         if (!intent) return;
 
         lastTouchActivationAtRef.current = Date.now();
         suppressWorkspaceTreeTouchFocus();
-        touchDragRef.current = {
+
+        const ownerWindow = event?.currentTarget?.ownerDocument?.defaultView || null;
+        const dragState = {
+            ...createIdleWorkspaceTouchDragState(),
             path: intent.dragPath,
-            dragging: false,
             startX: intent.startX,
             startY: intent.startY,
+            clientX: intent.startX,
+            clientY: intent.startY,
+            ownerWindow,
         };
-    }, [suppressWorkspaceTreeTouchFocus]);
+        touchDragRef.current = dragState;
+        if (!dragState.path || !ownerWindow) return;
 
-    const handleRowTouchEnd = useCallback(() => {
+        dragState.timer = ownerWindow.setTimeout(() => {
+            dragState.timer = 0;
+            if (touchDragRef.current !== dragState || dragState.cancelled || !dragState.path) return;
+
+            dragState.dragging = true;
+            suppressClickRef.current = true;
+            setDragActive(true);
+            setDragMode('move');
+            startDragGhost(dragState.path);
+            updateDragGhostPosition(dragState.clientX, dragState.clientY);
+        }, WORKSPACE_TOUCH_DRAG_DELAY_MS);
+    }, [clearWorkspaceTouchDragTimer, startDragGhost, suppressWorkspaceTreeTouchFocus, updateDragGhostPosition]);
+
+    const finishWorkspaceTouchDrag = useCallback((drop) => {
         const dragState = touchDragRef.current;
-        if (dragState?.dragging && dragState.path) {
+        clearWorkspaceTouchDragTimer(dragState);
+
+        if (drop && dragState?.dragging && dragState.moved && dragState.path) {
             const target = dropTargetRef.current || resolveDropTargetPath();
             const mover = moveEntryToTargetRef.current;
             if (typeof mover === 'function') mover(dragState.path, target);
         }
 
-        touchDragRef.current = { path: null, dragging: false, startX: 0, startY: 0 };
+        touchDragRef.current = createIdleWorkspaceTouchDragState();
         dragDepthRef.current = 0;
         setDragActive(false);
         setDragMode(null);
@@ -2047,33 +2100,54 @@ export function WorkspaceExplorer({
         clearDragExpandTimer();
         clearDragGhost();
         scheduleWorkspaceTreeTabStopRestore();
-    }, [resolveDropTargetPath, clearDragGhost, updateDropTarget, clearDragExpandTimer, scheduleWorkspaceTreeTabStopRestore]);
+
+        if (dragState?.dragging) {
+            dragState.ownerWindow?.setTimeout?.(() => {
+                suppressClickRef.current = false;
+            }, 0);
+        }
+    }, [clearWorkspaceTouchDragTimer, resolveDropTargetPath, clearDragGhost, updateDropTarget, clearDragExpandTimer, scheduleWorkspaceTreeTabStopRestore]);
+
+    const handleRowTouchEnd = useCallback(() => {
+        finishWorkspaceTouchDrag(true);
+    }, [finishWorkspaceTouchDrag]);
+
+    const handleRowTouchCancel = useCallback(() => {
+        finishWorkspaceTouchDrag(false);
+    }, [finishWorkspaceTouchDrag]);
 
     const handleRowTouchMove = useCallback((event) => {
         const dragState = touchDragRef.current;
         const touch = event?.touches?.[0];
-        if (!touch || !dragState?.path) return;
+        if (!touch || !dragState?.path || dragState.cancelled) return;
 
-        const dx = Math.abs(touch.clientX - dragState.startX);
-        const dy = Math.abs(touch.clientY - dragState.startY);
-        const moved = dx > 8 || dy > 8;
+        dragState.clientX = touch.clientX;
+        dragState.clientY = touch.clientY;
+        const moved = hasWorkspaceTouchDragMoved(
+            dragState.startX,
+            dragState.startY,
+            touch.clientX,
+            touch.clientY,
+        );
 
-        if (!dragState.dragging && moved) {
-            dragState.dragging = true;
-            setDragActive(true);
-            setDragMode('move');
-            startDragGhost(dragState.path);
+        if (!dragState.dragging) {
+            if (moved) {
+                dragState.cancelled = true;
+                clearWorkspaceTouchDragTimer(dragState);
+            }
+            return;
         }
 
-        if (dragState.dragging) {
-            event.preventDefault();
-            updateDragGhostPosition(touch.clientX, touch.clientY);
-            const el = document.elementFromPoint(touch.clientX, touch.clientY);
-            const target = resolveDropTargetFromElement(el) || resolveDropTargetPath();
-            if (dropTargetRef.current !== target) updateDropTarget(target);
-            scheduleDragExpand(target);
-        }
-    }, [resolveDropTargetFromElement, resolveDropTargetPath, startDragGhost, updateDragGhostPosition, updateDropTarget, scheduleDragExpand]);
+        event.preventDefault();
+        updateDragGhostPosition(touch.clientX, touch.clientY);
+        if (!moved) return;
+
+        dragState.moved = true;
+        const el = document.elementFromPoint(touch.clientX, touch.clientY);
+        const target = resolveDropTargetFromElement(el) || resolveDropTargetPath();
+        if (dropTargetRef.current !== target) updateDropTarget(target);
+        scheduleDragExpand(target);
+    }, [clearWorkspaceTouchDragTimer, resolveDropTargetFromElement, resolveDropTargetPath, updateDragGhostPosition, updateDropTarget, scheduleDragExpand]);
 
     // ── Preview-pane vertical resize — zero re-renders ────────────────────────
     const handlePreviewSplitterMouseDown = useRef((e) => {
@@ -2671,7 +2745,7 @@ export function WorkspaceExplorer({
                         onTouchStart=${handleRowTouchStart}
                         onTouchEnd=${handleRowTouchEnd}
                         onTouchMove=${handleRowTouchMove}
-                        onTouchCancel=${handleRowTouchEnd}
+                        onTouchCancel=${handleRowTouchCancel}
                     >
                         ${rows.map(({ node, depth }) => {
                             const isDir     = node.type === 'dir';
