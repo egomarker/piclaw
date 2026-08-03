@@ -50,9 +50,9 @@ import {
 
 const WORKSPACE_TOUCH_ACTIVATION_WINDOW_MS = 1000;
 const WORKSPACE_MOUSE_DRAG_GHOST_OFFSET_PX = 12;
-export const WORKSPACE_TOUCH_DRAG_DELAY_MS = 350;
+export const WORKSPACE_TOUCH_DRAG_DELAY_MS = 700;
 export const WORKSPACE_TOUCH_DRAG_MOVE_TOLERANCE_PX = 8;
-export const WORKSPACE_TOUCH_DRAG_GHOST_GAP_PX = 24;
+export const WORKSPACE_TOUCH_DRAG_GHOST_GAP_PX = 50;
 export const WORKSPACE_DRAG_GHOST_VIEWPORT_PADDING_PX = 8;
 
 export function hasWorkspaceTouchDragMoved(startX, startY, clientX, clientY) {
