@@ -2,7 +2,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Locator, type Page } from 'playwright';
 
 import { bootstrapE2EStorageState } from './web-auth-bootstrap.ts';
 
@@ -213,6 +213,82 @@ async function showWorkspace(page: Page, compactWorkspace: boolean) {
   );
 
   return { ...rect, treeSizing };
+}
+
+async function dispatchWorkspaceTouch(
+  target: Locator,
+  type: 'touchstart' | 'touchmove' | 'touchend' | 'touchcancel',
+  identifier: number,
+  x: number,
+  y: number,
+) {
+  await target.evaluate((element, touchInit) => {
+    const touch = new Touch({
+      identifier: touchInit.identifier,
+      target: element,
+      clientX: touchInit.x,
+      clientY: touchInit.y,
+      pageX: touchInit.x,
+      pageY: touchInit.y,
+      screenX: touchInit.x,
+      screenY: touchInit.y,
+      radiusX: 1,
+      radiusY: 1,
+      force: 0.5,
+    });
+    const touches = touchInit.type === 'touchend' || touchInit.type === 'touchcancel' ? [] : [touch];
+    element.dispatchEvent(new TouchEvent(touchInit.type, {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      touches,
+      targetTouches: touches,
+      changedTouches: [touch],
+    }));
+  }, { type, identifier, x, y });
+}
+
+async function verifyWorkspaceTouchDragLongPress(page: Page, filePath: string) {
+  const row = page.locator(`.workspace-row[data-path=${JSON.stringify(filePath)}]`);
+  const label = row.locator('.workspace-label-text');
+  await label.waitFor({ state: 'visible', timeout: 20000 });
+  const point = await label.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      x: Math.round(rect.left + Math.min(rect.width / 2, 24)),
+      y: Math.round(rect.top + (rect.height / 2)),
+    };
+  });
+  const ghost = page.locator('.workspace-drag-ghost');
+  const sidebar = page.locator('.workspace-sidebar');
+
+  await dispatchWorkspaceTouch(label, 'touchstart', 201, point.x, point.y);
+  await page.waitForTimeout(50);
+  await dispatchWorkspaceTouch(label, 'touchmove', 201, point.x, point.y + 16);
+  await page.waitForTimeout(400);
+  assert(await ghost.count() === 0 && !(await sidebar.evaluate((element) => element.classList.contains('workspace-drop-active'))),
+    'Workspace touch movement before the long-press delay started a drag instead of preserving scroll intent.');
+  await dispatchWorkspaceTouch(label, 'touchend', 201, point.x, point.y + 16);
+
+  await dispatchWorkspaceTouch(label, 'touchstart', 202, point.x, point.y);
+  await page.waitForTimeout(200);
+  assert(await ghost.count() === 0,
+    'Workspace touch drag activated before the 350ms long-press delay elapsed.');
+  await ghost.waitFor({ state: 'visible', timeout: 1500 });
+  const active = await sidebar.evaluate((element) => element.classList.contains('workspace-drop-active'));
+  assert(active, 'Workspace long press rendered a drag ghost without entering active drag mode.');
+  await dispatchWorkspaceTouch(label, 'touchcancel', 202, point.x, point.y);
+  await ghost.waitFor({ state: 'detached', timeout: 1500 });
+  assert(!(await sidebar.evaluate((element) => element.classList.contains('workspace-drop-active'))),
+    'Workspace touch cancel left drag mode active.');
+
+  return {
+    delayMs: 350,
+    preDelayMovementPx: 16,
+    preDelayMovementCancelledDrag: true,
+    longPressActivatedDrag: true,
+    touchCancelClearedDrag: true,
+  };
 }
 
 async function openWorkspaceFile(page: Page, filePath: string) {
@@ -719,6 +795,9 @@ async function runViewportScenario(
     ? await verifyComposeTerminalDockControl(page)
     : null;
   const workspaceRect = await showWorkspace(page, compactWorkspace);
+  const workspaceTouchDragLongPress = exerciseAttachToChat
+    ? await verifyWorkspaceTouchDragLongPress(page, filePath)
+    : null;
   const opened = await openWorkspaceFile(page, filePath);
   const replyAvatarWithClosableTab = await readReplyAvatarProbe(page);
   assert(
@@ -749,6 +828,7 @@ async function runViewportScenario(
     replyAvatarWithoutClosableTab,
     replyAvatarWithClosableTab,
     workspaceRect,
+    workspaceTouchDragLongPress,
     ...opened,
   };
 }
@@ -873,7 +953,7 @@ async function runChatSessionContextMenuScenario(page: Page) {
   await page.route('**/agent/active-chats', async (route) => {
     requestCount += 1;
     if (responseMode === 'error') {
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 150));
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 500));
       await route.fulfill({
         status: 503,
         contentType: 'application/json',

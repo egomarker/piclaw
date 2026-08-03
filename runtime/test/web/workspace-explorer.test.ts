@@ -1,10 +1,13 @@
 import { expect, test } from 'bun:test';
 
 import {
+  WORKSPACE_TOUCH_DRAG_DELAY_MS,
+  WORKSPACE_TOUCH_DRAG_MOVE_TOLERANCE_PX,
   buildWorkspaceMoveConfirmationMessage,
   buildWorkspaceRowActionTarget,
   confirmWorkspaceEntryMove,
   getWorkspaceTouchStartIntent,
+  hasWorkspaceTouchDragMoved,
   mergeWorkspaceTreeUpdates,
   shouldFocusWorkspaceTreeAfterActivation,
 } from '../../web/src/components/workspace-explorer.ts';
@@ -80,6 +83,14 @@ test('workspace row action targets normalize tree metadata for add-ons', () => {
     type: 'dir',
     depth: 0,
   });
+});
+
+test('workspace touch drag uses a long-press delay and movement tolerance', () => {
+  expect(WORKSPACE_TOUCH_DRAG_DELAY_MS).toBe(350);
+  expect(WORKSPACE_TOUCH_DRAG_MOVE_TOLERANCE_PX).toBe(8);
+  expect(hasWorkspaceTouchDragMoved(10, 15, 18, 23)).toBe(false);
+  expect(hasWorkspaceTouchDragMoved(10, 15, 19, 15)).toBe(true);
+  expect(hasWorkspaceTouchDragMoved(10, 15, 10, 24)).toBe(true);
 });
 
 test('workspace touch start ignores rows that are being renamed', () => {
