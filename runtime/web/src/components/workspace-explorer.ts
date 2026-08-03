@@ -49,12 +49,50 @@ import {
 } from '../ui/workspace-row-actions.js';
 
 const WORKSPACE_TOUCH_ACTIVATION_WINDOW_MS = 1000;
+const WORKSPACE_MOUSE_DRAG_GHOST_OFFSET_PX = 12;
 export const WORKSPACE_TOUCH_DRAG_DELAY_MS = 350;
 export const WORKSPACE_TOUCH_DRAG_MOVE_TOLERANCE_PX = 8;
+export const WORKSPACE_TOUCH_DRAG_GHOST_GAP_PX = 24;
+export const WORKSPACE_DRAG_GHOST_VIEWPORT_PADDING_PX = 8;
 
 export function hasWorkspaceTouchDragMoved(startX, startY, clientX, clientY) {
     return Math.abs(clientX - startX) > WORKSPACE_TOUCH_DRAG_MOVE_TOLERANCE_PX
         || Math.abs(clientY - startY) > WORKSPACE_TOUCH_DRAG_MOVE_TOLERANCE_PX;
+}
+
+export function resolveWorkspaceDragGhostPosition({
+    clientX = 0,
+    clientY = 0,
+    ghostWidth = 0,
+    ghostHeight = 0,
+    viewportWidth = Number.POSITIVE_INFINITY,
+    inputType = 'mouse',
+} = {}) {
+    if (inputType !== 'touch') {
+        return {
+            x: clientX + WORKSPACE_MOUSE_DRAG_GHOST_OFFSET_PX,
+            y: clientY + WORKSPACE_MOUSE_DRAG_GHOST_OFFSET_PX,
+        };
+    }
+
+    const desiredX = clientX - (ghostWidth / 2);
+    const maxX = Number.isFinite(viewportWidth)
+        ? Math.max(
+            WORKSPACE_DRAG_GHOST_VIEWPORT_PADDING_PX,
+            viewportWidth - ghostWidth - WORKSPACE_DRAG_GHOST_VIEWPORT_PADDING_PX,
+        )
+        : Number.POSITIVE_INFINITY;
+
+    return {
+        x: Math.min(
+            Math.max(desiredX, WORKSPACE_DRAG_GHOST_VIEWPORT_PADDING_PX),
+            maxX,
+        ),
+        y: Math.max(
+            WORKSPACE_DRAG_GHOST_VIEWPORT_PADDING_PX,
+            clientY - ghostHeight - WORKSPACE_TOUCH_DRAG_GHOST_GAP_PX,
+        ),
+    };
 }
 
 function createIdleWorkspaceTouchDragState() {
@@ -823,7 +861,7 @@ export function WorkspaceExplorer({
     const dragActiveRef   = useRef(dragActive);
     const dragModeRef     = useRef(dragMode);
     const dragGhostRef    = useRef(null);
-    const dragGhostPosRef = useRef({ x: 0, y: 0 });
+    const dragGhostPosRef = useRef({ x: 0, y: 0, inputType: 'mouse' });
     const dragGhostRafRef = useRef(0);
     const moveEntryToTargetRef = useRef(null);
     const selectedPathRef = useRef(selectedPath);
@@ -1303,15 +1341,24 @@ export function WorkspaceExplorer({
         dragExpandRef.current = { path: targetPath, timer };
     }, [clearDragExpandTimer]);
 
-    const updateDragGhostPosition = useCallback((x, y) => {
-        dragGhostPosRef.current = { x, y };
+    const updateDragGhostPosition = useCallback((x, y, inputType = 'mouse') => {
+        dragGhostPosRef.current = { x, y, inputType };
         if (dragGhostRafRef.current) return;
         dragGhostRafRef.current = requestAnimationFrame(() => {
             dragGhostRafRef.current = 0;
             const el = dragGhostRef.current;
             if (!el) return;
             const pos = dragGhostPosRef.current;
-            el.style.transform = `translate(${pos.x + 12}px, ${pos.y + 12}px)`;
+            const rect = el.getBoundingClientRect();
+            const next = resolveWorkspaceDragGhostPosition({
+                clientX: pos.x,
+                clientY: pos.y,
+                ghostWidth: rect.width,
+                ghostHeight: rect.height,
+                viewportWidth: el.ownerDocument?.defaultView?.innerWidth,
+                inputType: pos.inputType,
+            });
+            el.style.transform = `translate(${next.x}px, ${next.y}px)`;
         });
     }, []);
 
@@ -2116,7 +2163,7 @@ export function WorkspaceExplorer({
             setDragActive(true);
             setDragMode('move');
             startDragGhost(dragState.path);
-            updateDragGhostPosition(dragState.clientX, dragState.clientY);
+            updateDragGhostPosition(dragState.clientX, dragState.clientY, 'touch');
         }, WORKSPACE_TOUCH_DRAG_DELAY_MS);
     }, [clearWorkspaceTouchDragTimer, startDragGhost, suppressWorkspaceTreeTouchFocus, updateDragGhostPosition]);
 
@@ -2177,7 +2224,7 @@ export function WorkspaceExplorer({
         }
 
         event.preventDefault();
-        updateDragGhostPosition(touch.clientX, touch.clientY);
+        updateDragGhostPosition(touch.clientX, touch.clientY, 'touch');
         if (!moved) return;
 
         dragState.moved = true;
