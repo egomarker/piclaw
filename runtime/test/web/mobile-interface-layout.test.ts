@@ -104,6 +104,8 @@ test('Mobile applies the standalone bottom inset to every grid surface without d
   expect(classicEditorCss).toMatch(/html\[data-iphone-standalone-compose-inset="1"\] \.container \{\s*padding-bottom: var\(--iphone-standalone-compose-safe-area-bottom, 0px\);/);
   expect(mobileCss).toMatch(/html\[data-iphone-standalone-compose-inset="1"\] \.app-shell\.mobile-interface \{\s*padding-bottom: var\(--iphone-standalone-compose-safe-area-bottom, 0px\);/);
   expect(mobileCss).toMatch(/html\[data-iphone-standalone-compose-inset="1"\] \.app-shell\.mobile-interface > \.container \{\s*padding-bottom: 0;/);
+  expect(classicWorkspaceCss).toMatch(/\.workspace-sidebar \{[^}]*height: var\(--app-height, 100dvh\);/s);
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface > \.workspace-sidebar \{[^}]*grid-row: 1 \/ -1;[^}]*align-self: stretch;[^}]*height: auto;[^}]*min-height: 0;/s);
 });
 
 test('Mobile Zen is Chat-only and the phone strip reserves the menu hit target', () => {
