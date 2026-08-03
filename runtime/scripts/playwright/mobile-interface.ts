@@ -277,6 +277,28 @@ async function verifyWorkspaceTouchDragLongPress(page: Page, filePath: string) {
   await ghost.waitFor({ state: 'visible', timeout: 1500 });
   const active = await sidebar.evaluate((element) => element.classList.contains('workspace-drop-active'));
   assert(active, 'Workspace long press rendered a drag ghost without entering active drag mode.');
+  await page.waitForTimeout(50);
+  const ghostPosition = await ghost.evaluate((element, contactPoint) => {
+    const rect = element.getBoundingClientRect();
+    const desiredLeft = contactPoint.x - (rect.width / 2);
+    const expectedLeft = Math.min(
+      Math.max(desiredLeft, 8),
+      Math.max(8, window.innerWidth - rect.width - 8),
+    );
+    return {
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+      expectedLeft,
+      horizontalCenterDeltaPx: (rect.left + (rect.width / 2)) - contactPoint.x,
+      gapAboveFingerPx: contactPoint.y - rect.bottom,
+    };
+  }, point);
+  assert(Math.abs(ghostPosition.left - ghostPosition.expectedLeft) <= 1,
+    `Touch drag ghost was not horizontally centered or edge-clamped: ${JSON.stringify(ghostPosition)}.`);
+  assert(Math.abs(ghostPosition.gapAboveFingerPx - 24) <= 1,
+    `Touch drag ghost was not positioned 24px above the finger: ${JSON.stringify(ghostPosition)}.`);
   await dispatchWorkspaceTouch(label, 'touchcancel', 202, point.x, point.y);
   await ghost.waitFor({ state: 'detached', timeout: 1500 });
   assert(!(await sidebar.evaluate((element) => element.classList.contains('workspace-drop-active'))),
@@ -287,6 +309,11 @@ async function verifyWorkspaceTouchDragLongPress(page: Page, filePath: string) {
     preDelayMovementPx: 16,
     preDelayMovementCancelledDrag: true,
     longPressActivatedDrag: true,
+    touchGhostPosition: {
+      horizontalCenterDeltaPx: ghostPosition.horizontalCenterDeltaPx,
+      gapAboveFingerPx: ghostPosition.gapAboveFingerPx,
+      edgePaddingPx: 8,
+    },
     touchCancelClearedDrag: true,
   };
 }

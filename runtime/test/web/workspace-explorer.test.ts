@@ -1,13 +1,16 @@
 import { expect, test } from 'bun:test';
 
 import {
+  WORKSPACE_DRAG_GHOST_VIEWPORT_PADDING_PX,
   WORKSPACE_TOUCH_DRAG_DELAY_MS,
+  WORKSPACE_TOUCH_DRAG_GHOST_GAP_PX,
   WORKSPACE_TOUCH_DRAG_MOVE_TOLERANCE_PX,
   buildWorkspaceMoveConfirmationMessage,
   confirmWorkspaceEntryMove,
   getWorkspaceTouchStartIntent,
   hasWorkspaceTouchDragMoved,
   mergeWorkspaceTreeUpdates,
+  resolveWorkspaceDragGhostPosition,
   shouldFocusWorkspaceTreeAfterActivation,
 } from '../../web/src/components/workspace-explorer.ts';
 
@@ -63,6 +66,46 @@ test('workspace touch drag uses a long-press delay and movement tolerance', () =
   expect(hasWorkspaceTouchDragMoved(10, 15, 18, 23)).toBe(false);
   expect(hasWorkspaceTouchDragMoved(10, 15, 19, 15)).toBe(true);
   expect(hasWorkspaceTouchDragMoved(10, 15, 10, 24)).toBe(true);
+});
+
+test('workspace touch drag ghost is centered above the finger and clamped to the viewport', () => {
+  expect(WORKSPACE_TOUCH_DRAG_GHOST_GAP_PX).toBe(24);
+  expect(WORKSPACE_DRAG_GHOST_VIEWPORT_PADDING_PX).toBe(8);
+  expect(resolveWorkspaceDragGhostPosition({
+    clientX: 160,
+    clientY: 240,
+    ghostWidth: 80,
+    ghostHeight: 28,
+    viewportWidth: 320,
+    inputType: 'touch',
+  })).toEqual({ x: 120, y: 188 });
+  expect(resolveWorkspaceDragGhostPosition({
+    clientX: 20,
+    clientY: 40,
+    ghostWidth: 80,
+    ghostHeight: 28,
+    viewportWidth: 320,
+    inputType: 'touch',
+  })).toEqual({ x: 8, y: 8 });
+  expect(resolveWorkspaceDragGhostPosition({
+    clientX: 310,
+    clientY: 240,
+    ghostWidth: 80,
+    ghostHeight: 28,
+    viewportWidth: 320,
+    inputType: 'touch',
+  })).toEqual({ x: 232, y: 188 });
+});
+
+test('workspace mouse drag ghost keeps its existing lower-right offset', () => {
+  expect(resolveWorkspaceDragGhostPosition({
+    clientX: 160,
+    clientY: 240,
+    ghostWidth: 80,
+    ghostHeight: 28,
+    viewportWidth: 320,
+    inputType: 'mouse',
+  })).toEqual({ x: 172, y: 252 });
 });
 
 test('workspace touch start ignores rows that are being renamed', () => {
