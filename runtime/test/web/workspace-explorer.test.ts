@@ -61,7 +61,7 @@ test('workspace touch start still enables drag mode from explicit drag handles',
 });
 
 test('workspace touch drag uses a long-press delay and movement tolerance', () => {
-  expect(WORKSPACE_TOUCH_DRAG_DELAY_MS).toBe(350);
+  expect(WORKSPACE_TOUCH_DRAG_DELAY_MS).toBe(700);
   expect(WORKSPACE_TOUCH_DRAG_MOVE_TOLERANCE_PX).toBe(8);
   expect(hasWorkspaceTouchDragMoved(10, 15, 18, 23)).toBe(false);
   expect(hasWorkspaceTouchDragMoved(10, 15, 19, 15)).toBe(true);
@@ -69,7 +69,7 @@ test('workspace touch drag uses a long-press delay and movement tolerance', () =
 });
 
 test('workspace touch drag ghost is centered above the finger and clamped to the viewport', () => {
-  expect(WORKSPACE_TOUCH_DRAG_GHOST_GAP_PX).toBe(24);
+  expect(WORKSPACE_TOUCH_DRAG_GHOST_GAP_PX).toBe(50);
   expect(WORKSPACE_DRAG_GHOST_VIEWPORT_PADDING_PX).toBe(8);
   expect(resolveWorkspaceDragGhostPosition({
     clientX: 160,
@@ -78,7 +78,7 @@ test('workspace touch drag ghost is centered above the finger and clamped to the
     ghostHeight: 28,
     viewportWidth: 320,
     inputType: 'touch',
-  })).toEqual({ x: 120, y: 188 });
+  })).toEqual({ x: 120, y: 162 });
   expect(resolveWorkspaceDragGhostPosition({
     clientX: 20,
     clientY: 40,
@@ -94,7 +94,7 @@ test('workspace touch drag ghost is centered above the finger and clamped to the
     ghostHeight: 28,
     viewportWidth: 320,
     inputType: 'touch',
-  })).toEqual({ x: 232, y: 188 });
+  })).toEqual({ x: 232, y: 162 });
 });
 
 test('workspace mouse drag ghost keeps its existing lower-right offset', () => {
