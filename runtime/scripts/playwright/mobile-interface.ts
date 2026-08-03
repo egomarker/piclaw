@@ -318,7 +318,7 @@ async function verifyWorkspaceTouchDragLongPress(page: Page, filePath: string) {
   await dispatchWorkspaceTouch(label, 'touchstart', 202, point.x, point.y);
   await page.waitForTimeout(200);
   assert(await ghost.count() === 0,
-    'Workspace touch drag activated before the 700ms long-press delay elapsed.');
+    'Workspace touch drag activated before the 500ms long-press delay elapsed.');
   await ghost.waitFor({ state: 'visible', timeout: 1500 });
   const active = await sidebar.evaluate((element) => element.classList.contains('workspace-drop-active'));
   assert(active, 'Workspace long press rendered a drag ghost without entering active drag mode.');
@@ -350,7 +350,7 @@ async function verifyWorkspaceTouchDragLongPress(page: Page, filePath: string) {
     'Workspace touch cancel left drag mode active.');
 
   return {
-    delayMs: 700,
+    delayMs: 500,
     preDelayMovementPx: 16,
     preDelayMovementCancelledDrag: true,
     longPressActivatedDrag: true,
