@@ -88,7 +88,7 @@ describe("session persistence sanitizer", () => {
     }
   });
 
-  test("createSessionInDir sanitizes oversized future tool results on append", async () => {
+  test("future tool results stay visual in live context while persistence remains sanitized", async () => {
     console.warn = () => {};
     const tempRoot = mkdtempSync(join(tmpdir(), "piclaw-session-sanitize-append-"));
     const sessionDir = join(tempRoot, "session");
@@ -105,22 +105,35 @@ describe("session persistence sanitizer", () => {
       });
 
       runtime.session.sessionManager.appendMessage(makeAssistantMessage("seed"));
+      const original = makeOversizedReadToolResult();
       const sanitized = await runtime.session.extensionRunner.emitMessageEnd({
         type: "message_end",
-        message: makeOversizedReadToolResult(),
+        message: original,
       });
-      runtime.session.sessionManager.appendMessage(sanitized ?? makeOversizedReadToolResult());
+      expect(sanitized).toBeTruthy();
+      expect(original.content.some((block: any) => block?.type === "image")).toBe(true);
+      expect((sanitized as any).content.some((block: any) => block?.type === "image")).toBe(false);
 
+      const liveContext = await runtime.session.extensionRunner.emitContext([sanitized as any]);
+      const liveToolResult = liveContext[0] as any;
+      expect(liveToolResult.content.some((block: any) => block?.type === "image")).toBe(true);
+      expect(liveToolResult.content.some((block: any) => block?.type === "text" && String(block.text || "").includes("Persisted tool result sanitized"))).toBe(false);
+
+      runtime.session.sessionManager.appendMessage(sanitized as any);
       const sessionFile = runtime.session.sessionFile;
       expect(sessionFile).toBeTruthy();
       const sessionText = readFileSync(sessionFile!, "utf8");
       const context = runtime.session.sessionManager.buildSessionContext();
-      const toolResult = context.messages.find((message: any) => message.role === "toolResult") as any;
+      const persistedToolResult = context.messages.find((message: any) => message.role === "toolResult") as any;
 
       expect(sessionText).not.toContain('"type":"image"');
-      expect(toolResult).toBeTruthy();
-      expect(toolResult.content.some((block: any) => block?.type === "image")).toBe(false);
-      expect(toolResult.content.some((block: any) => block?.type === "text" && String(block.text || "").includes("Persisted tool result sanitized"))).toBe(true);
+      expect(persistedToolResult).toBeTruthy();
+      expect(persistedToolResult.content.some((block: any) => block?.type === "image")).toBe(false);
+      expect(persistedToolResult.content.some((block: any) => block?.type === "text" && String(block.text || "").includes("Persisted tool result sanitized"))).toBe(true);
+
+      await runtime.session.extensionRunner.emit({ type: "agent_end", messages: [] });
+      const afterAgentEnd = await runtime.session.extensionRunner.emitContext([sanitized as any]);
+      expect((afterAgentEnd[0] as any).content.some((block: any) => block?.type === "image")).toBe(false);
 
       await runtime.dispose();
     } finally {
