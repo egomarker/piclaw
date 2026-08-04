@@ -7,9 +7,11 @@
  * (queue drain → session dispose → web stop → process.exit) that SIGINT uses.
  *
  * For agent-initiated exits (exit_process tool), the actual shutdown is
- * **deferred** until the current turn completes and is persisted to the DB.
- * Call markPendingShutdown() during a tool call, then checkPendingShutdown()
- * from finalizeSuccessfulRun() after the response is committed.
+ * **deferred** until the current turn completes and is persisted/delivered.
+ * Call markPendingShutdown() during a tool call, then
+ * finalizePendingShutdownAfterTurn() from every channel's terminal turn path.
+ * A bounded fallback prevents a missed channel finalizer from leaving the
+ * runtime permanently stuck in the pending state.
  *
  * isPendingShutdown() returns true while the flag is set, so the run-agent
  * orchestrator can abort the session immediately after the exit_process tool
@@ -23,10 +25,29 @@ const log = createLogger("runtime.shutdown-registry");
 type ShutdownFn = (signal: string) => Promise<void>;
 type PreShutdownHook = () => void | Promise<void>;
 
+const TURN_FINALIZATION_FLUSH_DELAY_MS = 1_500;
+const PENDING_SHUTDOWN_FALLBACK_DELAY_MS = 15_000;
+
 let registeredShutdown: ShutdownFn | null = null;
 let pendingShutdownReason: string | null = null;
+let pendingShutdownFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 const preShutdownHooks = new Set<PreShutdownHook>();
 let preShutdownHooksRan = false;
+
+function clearPendingShutdownFallback(): void {
+  if (!pendingShutdownFallbackTimer) return;
+  clearTimeout(pendingShutdownFallbackTimer);
+  pendingShutdownFallbackTimer = null;
+}
+
+function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
+  const candidate = timer as ReturnType<typeof setTimeout> & { unref?: () => void };
+  candidate.unref?.();
+}
+
+function hasTestExitScheduler(): boolean {
+  return typeof (globalThis as { __PICLAW_EXIT_SCHEDULER__?: () => void }).__PICLAW_EXIT_SCHEDULER__ === "function";
+}
 
 /**
  * Register the graceful shutdown handler.
@@ -91,11 +112,38 @@ export function requestGracefulShutdown(reason: string, delayMs = 800): void {
 
 /**
  * Mark that a graceful shutdown should happen after the current turn
- * completes and is persisted. Called by the exit_process tool.
+ * completes and is persisted/delivered. Called by the exit_process tool.
+ *
+ * The optional fallback delay is exposed for focused tests; production callers
+ * use the bounded default so a missed channel finalizer cannot stall forever.
  */
-export function markPendingShutdown(reason: string): void {
+export function markPendingShutdown(
+  reason: string,
+  fallbackDelayMs = PENDING_SHUTDOWN_FALLBACK_DELAY_MS,
+): void {
+  clearPendingShutdownFallback();
   pendingShutdownReason = reason;
-  log.info("Pending shutdown marked", { operation: "mark_pending", reason });
+
+  const normalizedFallbackDelayMs = Number.isFinite(fallbackDelayMs)
+    ? Math.max(0, fallbackDelayMs)
+    : PENDING_SHUTDOWN_FALLBACK_DELAY_MS;
+  pendingShutdownFallbackTimer = setTimeout(() => {
+    pendingShutdownFallbackTimer = null;
+    if (!pendingShutdownReason) return;
+    log.warn("Pending shutdown fallback elapsed", {
+      operation: "pending_fallback.elapsed",
+      reason: pendingShutdownReason,
+      fallbackDelayMs: normalizedFallbackDelayMs,
+    });
+    finalizePendingShutdown("fallback", 0);
+  }, normalizedFallbackDelayMs);
+  unrefTimer(pendingShutdownFallbackTimer);
+
+  log.info("Pending shutdown marked", {
+    operation: "mark_pending",
+    reason,
+    fallbackDelayMs: normalizedFallbackDelayMs,
+  });
 }
 
 /**
@@ -107,20 +155,47 @@ export function isPendingShutdown(): boolean {
   return pendingShutdownReason !== null;
 }
 
-/**
- * Check if a pending shutdown was requested. If so, execute it after a brief
- * delay. Called from finalizeSuccessfulRun() after the response is committed
- * to the DB and broadcast to connected clients.
- *
- * The delay gives the SSE transport time to flush the final "done" status and
- * stored message events to connected web clients before the server tears down.
- * Without it the client may miss the agent's final reply even though it is
- * already persisted in the DB.
- */
-export function checkPendingShutdown(): void {
-  if (!pendingShutdownReason) return;
+function finalizePendingShutdown(source: string, delayMs: number): boolean {
+  if (!pendingShutdownReason) return false;
+
   const reason = pendingShutdownReason;
   pendingShutdownReason = null;
-  log.info("Pending shutdown: delaying 1.5s for SSE flush", { operation: "check_pending.delay", reason });
-  setTimeout(() => requestGracefulShutdown(reason), 1500);
+  clearPendingShutdownFallback();
+  log.info("Pending shutdown finalized", {
+    operation: "finalize_pending",
+    reason,
+    source,
+    delayMs,
+  });
+
+  // Existing shutdown tests install this hook to intercept process exit. Skip
+  // real-time flush delays in that environment while preserving production
+  // scheduling semantics.
+  if (hasTestExitScheduler() || delayMs <= 0) {
+    requestGracefulShutdown(reason);
+    return true;
+  }
+
+  setTimeout(() => requestGracefulShutdown(reason), delayMs);
+  return true;
+}
+
+/**
+ * Complete a pending shutdown after a channel has persisted and delivered its
+ * terminal turn outcome.
+ *
+ * The brief delay gives SSE transports time to flush final status and message
+ * events before teardown. Non-web channels call the same function after their
+ * outbound delivery has settled.
+ */
+export function finalizePendingShutdownAfterTurn(source = "turn-finalization"): boolean {
+  return finalizePendingShutdown(source, TURN_FINALIZATION_FLUSH_DELAY_MS);
+}
+
+/**
+ * Compatibility alias for older call sites. New channel finalizers should call
+ * finalizePendingShutdownAfterTurn() directly.
+ */
+export function checkPendingShutdown(): void {
+  finalizePendingShutdownAfterTurn("legacy-check");
 }

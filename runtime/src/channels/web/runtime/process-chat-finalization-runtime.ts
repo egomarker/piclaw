@@ -1,6 +1,6 @@
 import { getIdentityConfig } from "../../../core/config.js";
 import { endChatRun, getChatCursor, getMessagesSince } from "../../../db.js";
-import { checkPendingShutdown } from "../../../runtime/shutdown-registry.js";
+import { finalizePendingShutdownAfterTurn } from "../../../runtime/shutdown-registry.js";
 import { createLogger } from "../../../utils/logger.js";
 import type { WebChannelLike } from "../core/web-channel-contracts.js";
 import type { AgentEventEmitter } from "../sse/agent-events.js";
@@ -80,7 +80,7 @@ export async function finalizeSuccessfulProcessChatRun(options: ProcessChatFinal
   }
 
   await materializeDeferredFollowups({ channel: channel as WebChannelLike, chatJid, agentId: options.agentId });
-  checkPendingShutdown();
+  finalizePendingShutdownAfterTurn("web");
 }
 
 export interface PersistIntermediateTurnOptions {

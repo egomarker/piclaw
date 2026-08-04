@@ -7,6 +7,11 @@ import {
   resetChannelTransportRegistryForTests,
 } from "../../src/runtime/channel-transport-registry.js";
 import { registerChannelDetector } from "../../src/router.js";
+import {
+  finalizePendingShutdownAfterTurn,
+  isPendingShutdown,
+  markPendingShutdown,
+} from "../../src/runtime/shutdown-registry.js";
 
 import { importFresh, withTempWorkspaceEnv } from "../helpers.js";
 
@@ -14,6 +19,11 @@ const noopSendMessage = async () => {};
 
 afterEach(() => {
   resetChannelTransportRegistryForTests();
+  if (isPendingShutdown()) {
+    (globalThis as any).__PICLAW_EXIT_SCHEDULER__ = () => {};
+    finalizePendingShutdownAfterTurn("test-cleanup");
+  }
+  delete (globalThis as any).__PICLAW_EXIT_SCHEDULER__;
 });
 
 function makeMessage(chatJid: string, content: string, timestamp: string) {
@@ -262,6 +272,54 @@ test("processMessages suppresses visible aborted non-web agent failures but pers
     expect(sent).toEqual([]);
     expect(state.lastAgentTimestamp[chatJid]).toBe(timestamp);
     expect(saveCalls).toBe(1);
+  });
+});
+
+test("processMessages finalizes a pending shutdown after a silent Telegram abort without web activity", async () => {
+  await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
+    const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
+    const loop = await importFresh<typeof import("../../src/runtime/message-loop.js")>("../src/runtime/message-loop.js");
+    db.initDatabase();
+
+    const chatJid = "telegram:pending-shutdown";
+    const timestamp = "2026-04-17T01:05:50.000Z";
+    db.storeMessage(makeMessage(chatJid, "verify restart", timestamp));
+
+    let shutdownRequests = 0;
+    (globalThis as any).__PICLAW_EXIT_SCHEDULER__ = () => {
+      shutdownRequests += 1;
+    };
+    markPendingShutdown("telegram restart test", 1_000);
+
+    const state = {
+      lastAgentTimestamp: {} as Record<string, string>,
+      wasCommandProcessed: () => false,
+      markCommandProcessed: () => {},
+      saveTimestamps: () => {},
+    };
+    const sent: string[] = [];
+
+    const ok = await loop.processMessages(chatJid, {
+      state: state as any,
+      assistantName: "Pi",
+      triggerPattern: /@Pi/i,
+      agentPool: {
+        runAgent: async () => ({
+          status: "error",
+          result: null,
+          error: "Request was aborted",
+        }),
+      } as any,
+      sendMessage: async (_jid: string, text: string) => {
+        sent.push(text);
+      },
+    }, { forcePrompt: true });
+
+    expect(ok).toBe(true);
+    expect(sent).toEqual([]);
+    expect(state.lastAgentTimestamp[chatJid]).toBe(timestamp);
+    expect(shutdownRequests).toBe(1);
+    expect(isPendingShutdown()).toBe(false);
   });
 });
 

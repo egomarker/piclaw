@@ -2,6 +2,11 @@ import { describe, expect, test } from "bun:test";
 
 import { finalizeSuccessfulProcessChatRun, persistIntermediateProcessChatTurn } from "../../../../src/channels/web/runtime/process-chat-finalization-runtime.js";
 import { getChatCursor, initDatabase, setChatCursor, storeChatMetadata } from "../../../../src/db.js";
+import {
+  finalizePendingShutdownAfterTurn,
+  isPendingShutdown,
+  markPendingShutdown,
+} from "../../../../src/runtime/shutdown-registry.js";
 import { withTempWorkspaceEnv } from "../../../helpers.js";
 
 function emitter(statuses: Array<Record<string, unknown>>) {
@@ -30,6 +35,36 @@ describe("process chat finalization runtime", () => {
       await finalizeSuccessfulProcessChatRun({ channel, emitter: emitter(statuses) as any, chatJid, agentId: "default", turnId: "turn-1", threadId: 1, prevCursor: getChatCursor(chatJid), recovery: null });
       expect(calls).toEqual(["save", "context", "consume-queue"]);
       expect(statuses).toEqual([expect.objectContaining({ type: "done", context_usage: { tokens: 10, contextWindow: 100, percent: 10 } })]);
+    });
+  });
+
+  test("finalizes a pending shutdown through the shared web turn finalizer", async () => {
+    await withTempWorkspaceEnv("process-chat-finalize-", {}, async () => {
+      initDatabase();
+      const chatJid = "web:pending-shutdown";
+      storeChatMetadata(chatJid, "2026-01-01T00:00:00.000Z", "Web");
+      setChatCursor(chatJid, "2026-01-01T00:00:00.000Z");
+      const channel: any = {
+        agentPool: { getContextUsageForChat: async () => null },
+        consumePendingSteering: () => [], saveState() {}, setContextUsage() {},
+        resumeChat() {}, consumeQueuedFollowupItem: () => null,
+        prependQueuedFollowupItem() {}, storeMessage() { return null; }, broadcastEvent() {}, sendMessage: async () => {}, updateAgentStatus() {}, retryFailedOnModelSwitch: () => false,
+      };
+
+      let shutdownRequests = 0;
+      (globalThis as any).__PICLAW_EXIT_SCHEDULER__ = () => {
+        shutdownRequests += 1;
+      };
+      markPendingShutdown("web restart test", 1_000);
+
+      try {
+        await finalizeSuccessfulProcessChatRun({ channel, emitter: emitter([]) as any, chatJid, agentId: "default", turnId: "turn-pending", threadId: 1, prevCursor: getChatCursor(chatJid), recovery: null });
+        expect(shutdownRequests).toBe(1);
+        expect(isPendingShutdown()).toBe(false);
+      } finally {
+        if (isPendingShutdown()) finalizePendingShutdownAfterTurn("test-cleanup");
+        delete (globalThis as any).__PICLAW_EXIT_SCHEDULER__;
+      }
     });
   });
 

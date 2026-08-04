@@ -38,6 +38,7 @@ import {
   isAllowedNonWebControlCommand,
   isAllowedNonWebSlashCommand,
 } from "./non-web-command-policy.js";
+import { finalizePendingShutdownAfterTurn } from "./shutdown-registry.js";
 import type { RuntimeState } from "./state.js";
 
 const log = createLogger("runtime.message-loop");
@@ -510,6 +511,10 @@ export async function processMessages(
   }
 
   const recoverySummary = formatRecoverySummary(output.recovery);
+  const finalizeDeliveredAgentTurn = () => {
+    commitLastAgentTimestamp();
+    finalizePendingShutdownAfterTurn("runtime-message-loop");
+  };
 
   if (output.recovery?.recovered) {
     log.info("Agent run recovered before outbound delivery", {
@@ -545,7 +550,7 @@ export async function processMessages(
       });
     }
 
-    commitLastAgentTimestamp();
+    finalizeDeliveredAgentTurn();
     return true;
   }
 
@@ -565,7 +570,7 @@ export async function processMessages(
     await progressReporter?.remove();
   }
 
-  commitLastAgentTimestamp();
+  finalizeDeliveredAgentTurn();
   return true;
 }
 
