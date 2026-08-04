@@ -49,7 +49,34 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   if (shouldBypassServiceWorkerFetch(request, url)) return;
 
-  event.respondWith(fetch(request));
+  event.respondWith((async () => {
+    // Navigations may hit a restarting backend; retry briefly before giving up.
+    const isNavigation = request.mode === 'navigate';
+    const attempts = isNavigation ? 3 : 1;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await fetch(request);
+      } catch (err) {
+        if (attempt >= attempts) {
+          if (isNavigation) {
+            return new Response(
+              '<!doctype html><html><head><meta charset="utf-8"><title>PiClaw</title>' +
+              '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+              '<style>body{font-family:system-ui,-apple-system,sans-serif;background:#0f172a;color:#e2e8f0;' +
+              'display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center}' +
+              'h1{font-size:1.4rem}p{color:#94a3b8}</style></head><body>' +
+              '<div><h1>PiClaw is unreachable</h1>' +
+              '<p>The server did not answer (it may be restarting).<br>Please try reloading in a moment.</p></div>' +
+              '</body></html>',
+              { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+            );
+          }
+          return new Response('Network error', { status: 504 });
+        }
+        await new Promise((resolve) => setTimeout(resolve, 750));
+      }
+    }
+  })());
 });
 
 self.addEventListener('push', (event) => {

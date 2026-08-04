@@ -4,11 +4,62 @@ import type { ExtensionFactory, SessionManager } from "@earendil-works/pi-coding
 import { getSessionPersistenceConfig } from "../core/config.js";
 
 type PersistableSessionMessage = Parameters<SessionManager["appendMessage"]>[0];
+type MessageContentBlock = Record<string, unknown>;
+type TransientImageBlock = {
+  index: number;
+  block: MessageContentBlock;
+};
+
+const IMAGE_SANITIZE_NOTICE_PREFIX = "[Persisted tool result sanitized: removed ";
 
 export type PersistedToolResultSanitizeResult = {
   message: PersistableSessionMessage;
   changed: boolean;
 };
+
+function getToolResultCallId(message: unknown): string | null {
+  if (!message || typeof message !== "object") return null;
+  const candidate = message as { role?: unknown; toolCallId?: unknown };
+  if (candidate.role !== "toolResult" || typeof candidate.toolCallId !== "string") return null;
+  return candidate.toolCallId;
+}
+
+function collectTransientImageBlocks(message: unknown): TransientImageBlock[] {
+  if (!message || typeof message !== "object") return [];
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) return [];
+
+  const images: TransientImageBlock[] = [];
+  for (let index = 0; index < content.length; index++) {
+    const block = content[index];
+    if (block && typeof block === "object" && block.type === "image") {
+      images.push({ index, block: block as MessageContentBlock });
+    }
+  }
+  return images;
+}
+
+function isImageSanitizeNotice(block: unknown): boolean {
+  return !!block
+    && typeof block === "object"
+    && (block as { type?: unknown }).type === "text"
+    && typeof (block as { text?: unknown }).text === "string"
+    && String((block as { text: string }).text).startsWith(IMAGE_SANITIZE_NOTICE_PREFIX);
+}
+
+function rehydrateTransientImages(message: AgentMessage, images: TransientImageBlock[]): AgentMessage {
+  if (message.role !== "toolResult") return message;
+  const content = Array.isArray(message.content)
+    ? (message.content as unknown as MessageContentBlock[]).filter((block) => !isImageSanitizeNotice(block))
+    : [];
+  if (content.some((block) => block?.type === "image")) return message;
+
+  const rehydrated = [...content];
+  for (const image of images) {
+    rehydrated.splice(Math.min(image.index, rehydrated.length), 0, { ...image.block });
+  }
+  return { ...message, content: rehydrated as unknown as typeof message.content };
+}
 
 function formatBytes(bytes: number): string {
   if (!(bytes > 0)) return "0 B";
@@ -97,10 +148,36 @@ export function sanitizePersistedSessionMessage(message: PersistableSessionMessa
   return { message: sanitizedMessage, changed };
 }
 
-/** Sanitize finalized messages before AgentSession persists them. */
+/**
+ * Sanitize finalized messages before AgentSession persists them while retaining
+ * tool-returned images only in the active agent run's provider context.
+ */
 export const persistedToolResultSanitizer: ExtensionFactory = (pi) => {
+  const transientImagesByToolCallId = new Map<string, TransientImageBlock[]>();
+
   pi.on("message_end", (event) => {
+    const toolCallId = getToolResultCallId(event.message);
+    const transientImages = toolCallId ? collectTransientImageBlocks(event.message) : [];
     const result = sanitizePersistedSessionMessage(event.message as PersistableSessionMessage);
+    if (result.changed && toolCallId && transientImages.length > 0) {
+      transientImagesByToolCallId.set(toolCallId, transientImages);
+    }
     return result.changed ? { message: result.message as AgentMessage } : undefined;
+  });
+
+  pi.on("context", (event) => {
+    let changed = false;
+    const messages = event.messages.map((message) => {
+      const toolCallId = getToolResultCallId(message);
+      const transientImages = toolCallId ? transientImagesByToolCallId.get(toolCallId) : undefined;
+      if (!transientImages?.length) return message;
+      changed = true;
+      return rehydrateTransientImages(message, transientImages);
+    });
+    return changed ? { messages } : undefined;
+  });
+
+  pi.on("agent_end", () => {
+    transientImagesByToolCallId.clear();
   });
 };
