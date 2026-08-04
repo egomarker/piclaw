@@ -3,9 +3,16 @@ import { EventEmitter } from 'node:events';
 
 import {
   beginTrackedPhase,
+  endTrackedPhase,
+  flushProgressWatchdogState,
+  heartbeatTrackedPhase,
+  registerProgressWatchdogAborter,
   resetProgressWatchdogForTests,
+  scanForStalls,
+  setProgressWatchdogTerminationHook,
   setProgressWatchdogTimeoutForTests,
 } from '../../src/runtime/progress-watchdog.js';
+import { evaluateProgressWatchdogSnapshot } from '../../src/runtime/progress-watchdog-monitor.js';
 import {
   resetProgressWatchdogSupervisorForTests,
   setProgressWatchdogMonitorSpawnForTests,
@@ -15,11 +22,14 @@ import {
 } from '../../src/runtime/progress-watchdog-supervisor.js';
 
 let restoreSupervisorEnv: (() => void) | null = null;
+let restoreTerminationHook: (() => void) | null = null;
 let restoreTimeoutOverride: (() => void) | null = null;
 
 afterEach(async () => {
   restoreSupervisorEnv?.();
   restoreSupervisorEnv = null;
+  restoreTerminationHook?.();
+  restoreTerminationHook = null;
   restoreTimeoutOverride?.();
   restoreTimeoutOverride = null;
   await stopExternalProgressWatchdogMonitor();
@@ -125,4 +135,64 @@ test('startExternalProgressWatchdogMonitor spawns a helper process with a heartb
   await stopExternalProgressWatchdogMonitor();
   expect(child.stdin.writableEnded).toBe(true);
   expect(child.killSignals).toEqual([]);
+});
+
+test('successful soft abort clears the stale snapshot without interrupting a healthy chat', async () => {
+  const originalDateNow = Date.now;
+  const previousEscalate = process.env.PICLAW_PROGRESS_WATCHDOG_ESCALATE_ON_STALL;
+  let now = 1_000_000;
+  Date.now = () => now;
+  process.env.PICLAW_PROGRESS_WATCHDOG_ESCALATE_ON_STALL = 'false';
+
+  try {
+    restoreSupervisorEnv = setProgressWatchdogSupervisorEnvironmentForTests({
+      disabled: false,
+      dbInMemory: false,
+    });
+    restoreTimeoutOverride = setProgressWatchdogTimeoutForTests(1_000);
+    const terminations: string[] = [];
+    restoreTerminationHook = setProgressWatchdogTerminationHook((stall) => {
+      terminations.push(stall.chatJid);
+    });
+
+    const child = new FakeChild();
+    setProgressWatchdogMonitorSpawnForTests(() => child as any);
+
+    let staleAbortCount = 0;
+    let healthyAbortCount = 0;
+    beginTrackedPhase('telegram:stale', 'prompt', { source: 'test' });
+    registerProgressWatchdogAborter('telegram:stale', async () => {
+      staleAbortCount += 1;
+      endTrackedPhase('telegram:stale');
+    });
+    beginTrackedPhase('web:healthy', 'prompt', { source: 'test' });
+    registerProgressWatchdogAborter('web:healthy', async () => {
+      healthyAbortCount += 1;
+    });
+
+    expect(startExternalProgressWatchdogMonitor()).toBe(true);
+
+    now += 1_001;
+    heartbeatTrackedPhase('web:healthy', 'streaming', { eventType: 'message_update' });
+    flushProgressWatchdogState();
+    expect(scanForStalls(now).map((stall) => stall.chatJid)).toEqual(['telegram:stale']);
+    await Bun.sleep(0);
+
+    expect(staleAbortCount).toBe(1);
+    expect(healthyAbortCount).toBe(0);
+    expect(terminations).toEqual([]);
+
+    now = 1_061_001;
+    heartbeatTrackedPhase('web:healthy', 'streaming', { eventType: 'message_update' });
+    flushProgressWatchdogState();
+    const latestSnapshot = JSON.parse(child.stdin.writes.at(-1)!.trim());
+
+    expect(latestSnapshot.entries.map((entry: { chatJid: string }) => entry.chatJid)).toEqual(['web:healthy']);
+    expect(evaluateProgressWatchdogSnapshot(latestSnapshot, now).stalledEntry).toBeNull();
+    expect(child.killSignals).toEqual([]);
+  } finally {
+    Date.now = originalDateNow;
+    if (previousEscalate === undefined) delete process.env.PICLAW_PROGRESS_WATCHDOG_ESCALATE_ON_STALL;
+    else process.env.PICLAW_PROGRESS_WATCHDOG_ESCALATE_ON_STALL = previousEscalate;
+  }
 });

@@ -10,6 +10,11 @@ import {
   markProgressWatchdogShuttingDown,
   setProgressWatchdogSnapshotPublisher,
 } from "./progress-watchdog.js";
+import {
+  getProgressWatchdogHardTimeoutMs,
+  PROGRESS_WATCHDOG_HARD_ABORT_DELAY_MS,
+  PROGRESS_WATCHDOG_SCAN_INTERVAL_MS,
+} from "./progress-watchdog-policy.js";
 import { registerPreShutdownHook } from "./shutdown-registry.js";
 
 const log = createLogger("runtime.progress-watchdog-supervisor");
@@ -118,6 +123,9 @@ export function startExternalProgressWatchdogMonitor(): boolean {
     operation: "progress_watchdog_supervisor.start",
     pid: child.pid,
     timeoutMs,
+    hardTimeoutMs: getProgressWatchdogHardTimeoutMs(timeoutMs),
+    hardAbortDelayMs: PROGRESS_WATCHDOG_HARD_ABORT_DELAY_MS,
+    scanMs: PROGRESS_WATCHDOG_SCAN_INTERVAL_MS,
     transport: "pipe",
   });
   return true;

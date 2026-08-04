@@ -1,10 +1,14 @@
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
 import { parsePositiveIntStrict } from "../utils/strict-int.js";
+import {
+  getProgressWatchdogHardTimeoutMs,
+  PROGRESS_WATCHDOG_HARD_ABORT_DELAY_MS,
+  PROGRESS_WATCHDOG_SCAN_INTERVAL_MS,
+} from "./progress-watchdog-policy.js";
 import type { ProgressWatchdogEntry, ProgressWatchdogSnapshot } from "./progress-watchdog.js";
 
 const log = createLogger("runtime.progress-watchdog-monitor");
 const DEFAULT_MONITOR_GRACE_MS = 5_000;
-const DEFAULT_MONITOR_SCAN_MS = 2_000;
 
 export interface ProgressWatchdogMonitorArgs {
   parentPid: number;
@@ -15,6 +19,7 @@ export interface ProgressWatchdogMonitorArgs {
 export interface ProgressWatchdogMonitorEvaluation {
   stalledEntry: ProgressWatchdogEntry | null;
   timeoutMs: number;
+  hardTimeoutMs: number;
 }
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
@@ -46,19 +51,20 @@ export function evaluateProgressWatchdogSnapshot(
   now = Date.now(),
 ): ProgressWatchdogMonitorEvaluation {
   if (!snapshot || snapshot.shuttingDown) {
-    return { stalledEntry: null, timeoutMs: 0 };
+    return { stalledEntry: null, timeoutMs: 0, hardTimeoutMs: 0 };
   }
   const timeoutMs = Number.isFinite(snapshot.timeoutMs) ? Math.max(0, Number(snapshot.timeoutMs)) : 0;
+  const hardTimeoutMs = getProgressWatchdogHardTimeoutMs(timeoutMs);
   if (timeoutMs <= 0) {
-    return { stalledEntry: null, timeoutMs };
+    return { stalledEntry: null, timeoutMs, hardTimeoutMs };
   }
   const entries = Array.isArray(snapshot.entries) ? snapshot.entries : [];
   const stalledEntry = entries.find((entry) => {
     const lastProgressAt = Number(entry?.lastProgressAt);
     if (!Number.isFinite(lastProgressAt)) return false;
-    return now - lastProgressAt > timeoutMs;
+    return now - lastProgressAt > hardTimeoutMs;
   }) ?? null;
-  return { stalledEntry, timeoutMs };
+  return { stalledEntry, timeoutMs, hardTimeoutMs };
 }
 
 async function terminateParentProcess(parentPid: number, graceMs: number): Promise<void> {
@@ -92,7 +98,7 @@ async function terminateParentProcess(parentPid: number, graceMs: number): Promi
 
 export function parseProgressWatchdogMonitorArgs(args = process.argv.slice(2)): ProgressWatchdogMonitorArgs {
   let parentPid = Number.NaN;
-  let scanMs = DEFAULT_MONITOR_SCAN_MS;
+  let scanMs = PROGRESS_WATCHDOG_SCAN_INTERVAL_MS;
   let graceMs = DEFAULT_MONITOR_GRACE_MS;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -107,12 +113,12 @@ export function parseProgressWatchdogMonitorArgs(args = process.argv.slice(2)): 
       continue;
     }
     if (arg === "--scan-ms" && typeof args[index + 1] === "string") {
-      scanMs = parsePositiveInt(args[index + 1], DEFAULT_MONITOR_SCAN_MS);
+      scanMs = parsePositiveInt(args[index + 1], PROGRESS_WATCHDOG_SCAN_INTERVAL_MS);
       index += 1;
       continue;
     }
     if (arg.startsWith("--scan-ms=")) {
-      scanMs = parsePositiveInt(arg.slice("--scan-ms=".length), DEFAULT_MONITOR_SCAN_MS);
+      scanMs = parsePositiveInt(arg.slice("--scan-ms=".length), PROGRESS_WATCHDOG_SCAN_INTERVAL_MS);
       continue;
     }
     if (arg === "--grace-ms" && typeof args[index + 1] === "string") {
@@ -185,6 +191,8 @@ export async function runProgressWatchdogMonitorFromArgs(args = process.argv.sli
         chatJid: evaluation.stalledEntry.chatJid,
         phase: evaluation.stalledEntry.phase,
         timeoutMs: evaluation.timeoutMs,
+        hardTimeoutMs: evaluation.hardTimeoutMs,
+        hardAbortDelayMs: PROGRESS_WATCHDOG_HARD_ABORT_DELAY_MS,
         startedAt: new Date(evaluation.stalledEntry.startedAt).toISOString(),
         lastProgressAt: new Date(evaluation.stalledEntry.lastProgressAt).toISOString(),
         metadata: evaluation.stalledEntry.metadata,

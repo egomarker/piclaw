@@ -6,7 +6,7 @@ import {
   parseProgressWatchdogSnapshotLine,
 } from '../../src/runtime/progress-watchdog-monitor.js';
 
-test('evaluateProgressWatchdogSnapshot returns a stalled entry when heartbeat age exceeds timeout', () => {
+test('evaluateProgressWatchdogSnapshot waits through the one-minute hard-abort delay', () => {
   const now = Date.now();
   const evaluation = evaluateProgressWatchdogSnapshot({
     pid: 123,
@@ -16,13 +16,35 @@ test('evaluateProgressWatchdogSnapshot returns a stalled entry when heartbeat ag
     entries: [{
       chatJid: 'web:test',
       phase: 'streaming',
-      startedAt: now - 60_000,
-      lastProgressAt: now - 31_000,
+      startedAt: now - 89_999,
+      lastProgressAt: now - 89_999,
       metadata: { source: 'test' },
     }],
   }, now);
 
   expect(evaluation.timeoutMs).toBe(30_000);
+  expect(evaluation.hardTimeoutMs).toBe(90_000);
+  expect(evaluation.stalledEntry).toBeNull();
+});
+
+test('evaluateProgressWatchdogSnapshot returns a stalled entry after timeout plus one minute', () => {
+  const now = Date.now();
+  const evaluation = evaluateProgressWatchdogSnapshot({
+    pid: 123,
+    updatedAt: new Date(now).toISOString(),
+    timeoutMs: 30_000,
+    shuttingDown: false,
+    entries: [{
+      chatJid: 'web:test',
+      phase: 'streaming',
+      startedAt: now - 90_001,
+      lastProgressAt: now - 90_001,
+      metadata: { source: 'test' },
+    }],
+  }, now);
+
+  expect(evaluation.timeoutMs).toBe(30_000);
+  expect(evaluation.hardTimeoutMs).toBe(90_000);
   expect(evaluation.stalledEntry).toEqual(expect.objectContaining({
     chatJid: 'web:test',
     phase: 'streaming',
@@ -76,7 +98,7 @@ test('parseProgressWatchdogMonitorArgs rejects malformed timing suffixes and pre
     '--grace-ms', '7000oops',
   ])).toEqual({
     parentPid: 4321,
-    scanMs: 2000,
+    scanMs: 20_000,
     graceMs: 5000,
   });
 

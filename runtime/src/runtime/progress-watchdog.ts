@@ -9,6 +9,7 @@
 
 import { getCompactionRuntimeConfig, getProgressWatchdogConfig } from "../core/config.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
+import { PROGRESS_WATCHDOG_SCAN_INTERVAL_MS } from "./progress-watchdog-policy.js";
 
 const log = createLogger("runtime.progress-watchdog");
 
@@ -40,8 +41,6 @@ export interface ProgressWatchdogSnapshot {
   entries: ProgressWatchdogEntry[];
 }
 
-const MIN_SCAN_INTERVAL_MS = 1_000;
-const MAX_SCAN_INTERVAL_MS = 5_000;
 const SNAPSHOT_PUBLISH_DEBOUNCE_MS = 250;
 
 const activeByChat = new Map<string, ProgressWatchdogEntry & { stallReported?: boolean; abortAttempted?: boolean }>();
@@ -57,11 +56,6 @@ let progressWatchdogTimeoutOverrideMs: number | null = null;
 
 function shouldEscalateProgressWatchdogStall(): boolean {
   return getProgressWatchdogConfig().escalateOnStall;
-}
-
-function getProgressWatchdogScanIntervalMs(timeoutMs: number): number {
-  if (timeoutMs <= 0) return 0;
-  return Math.max(MIN_SCAN_INTERVAL_MS, Math.min(MAX_SCAN_INTERVAL_MS, Math.floor(timeoutMs / 4)));
 }
 
 export function getProgressWatchdogTimeoutMs(): number {
@@ -140,10 +134,9 @@ function ensureScanLoop(): void {
   if (scanTimer || activeByChat.size === 0) return;
   const timeoutMs = getProgressWatchdogTimeoutMs();
   if (timeoutMs <= 0) return;
-  const intervalMs = getProgressWatchdogScanIntervalMs(timeoutMs);
   scanTimer = setInterval(() => {
     scanForStalls();
-  }, intervalMs);
+  }, PROGRESS_WATCHDOG_SCAN_INTERVAL_MS);
   if (typeof scanTimer.unref === "function") scanTimer.unref();
 }
 
