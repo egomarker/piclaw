@@ -805,6 +805,7 @@ async function runScenario(options: {
   artifactDir: string;
   name: string;
   viewport: { width: number; height: number };
+  beforeGoto?: (page: Page) => Promise<void>;
   run: (page: Page) => Promise<ScenarioResult>;
 }) {
   const scenario = await createScenarioContext(options.browser, options.storageState, options.viewport);
@@ -814,6 +815,7 @@ async function runScenario(options: {
   await scenario.context.tracing.start({ screenshots: true, snapshots: true, sources: true });
 
   try {
+    await options.beforeGoto?.(scenario.page);
     await scenario.page.goto(options.baseUrl, { waitUntil: 'domcontentloaded' });
     await assertMobileShell(scenario.page);
     const result = await options.run(scenario.page);
@@ -989,6 +991,196 @@ async function runKeyboardScenario(page: Page, filePath: string) {
     chatState,
     terminalState,
     afterCloseState,
+  };
+}
+
+const activeSessionsIndicatorFixtureChats = [
+  {
+    chat_jid: 'web:default',
+    agent_name: 'default',
+    is_active: true,
+    activity_status: 'working',
+    activity_label: 'Working',
+    archived_at: null,
+  },
+  {
+    chat_jid: 'web:running-other',
+    agent_name: 'running-other',
+    is_active: true,
+    activity_status: 'bash_running',
+    activity_label: 'Running shell',
+    archived_at: null,
+  },
+  {
+    chat_jid: 'web:idle-resident',
+    agent_name: 'idle-resident',
+    is_active: false,
+    activity_status: 'idle',
+    activity_label: 'Idle',
+    archived_at: null,
+  },
+];
+
+async function installActiveSessionsIndicatorFixture(page: Page) {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('piclaw_system_meters_enabled', 'true');
+    window.localStorage.setItem('piclaw_system_meters_collapsed', 'false');
+  });
+  await page.route('**/agent/active-chats', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ chats: activeSessionsIndicatorFixtureChats }),
+    });
+  });
+}
+
+async function runActiveSessionsIndicatorScenario(page: Page) {
+  const indicator = page.locator('[data-testid="active-sessions-indicator"]');
+  const trigger = page.locator('[data-testid="active-sessions-indicator-trigger"]');
+  const panel = page.locator('[data-testid="active-sessions-indicator-panel"]');
+  await page.waitForFunction(() => {
+    const root = document.querySelector<HTMLElement>('[data-testid="active-sessions-indicator"]');
+    return root?.getAttribute('data-active-session-count') === '2'
+      && root.classList.contains('is-visible')
+      && Number.parseFloat(getComputedStyle(root).opacity) > 0.99;
+  }, undefined, { timeout: 20000 });
+
+  const circleState = await indicator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const control = element.querySelector<HTMLButtonElement>('[data-testid="active-sessions-indicator-trigger"]');
+    return {
+      classes: element.className,
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      borderRadius: style.borderRadius,
+      count: element.getAttribute('data-active-session-count'),
+      ariaExpanded: control?.getAttribute('aria-expanded'),
+      title: control?.getAttribute('title'),
+    };
+  });
+  assert(
+    Math.abs(circleState.width - 34) <= 1
+      && Math.abs(circleState.height - 34) <= 1
+      && circleState.count === '2'
+      && circleState.ariaExpanded === 'false'
+      && circleState.title === '2 active sessions',
+    `Active sessions circle has the wrong initial state: ${JSON.stringify(circleState)}.`,
+  );
+  const hudLayout = await page.evaluate(() => {
+    const hud = document.querySelector<HTMLElement>('.mobile-top-right-hud');
+    const indicatorRoot = hud?.querySelector<HTMLElement>(':scope > .active-sessions-indicator');
+    const meters = hud?.querySelector<HTMLElement>(':scope > .system-meters-hud-overlay');
+    const read = (element?: HTMLElement | null) => {
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+        bottom: Math.round(rect.bottom),
+        position: style.position,
+        marginTop: style.marginTop,
+      };
+    };
+    return {
+      hud: read(hud),
+      hudDisplay: hud ? getComputedStyle(hud).display : null,
+      hudDirection: hud ? getComputedStyle(hud).flexDirection : null,
+      indicator: read(indicatorRoot),
+      meters: read(meters),
+    };
+  });
+  assert(
+    !hudLayout.meters
+      || !hudLayout.indicator
+      || hudLayout.meters.y >= hudLayout.indicator.bottom + 7,
+    `Active sessions indicator overlaps the system meters: ${JSON.stringify(hudLayout)}.`,
+  );
+
+  await trigger.click();
+  await panel.waitFor({ state: 'visible', timeout: 15000 });
+  const menu = panel.locator('[data-testid="chat-session-menu"]');
+  await menu.waitFor({ state: 'visible', timeout: 15000 });
+  const sessionItems = menu.locator('[data-testid="chat-session-menu-item"]');
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="active-sessions-indicator-panel"] [data-testid="chat-session-menu-item"]').length === 2);
+  const sessionItemCount = await sessionItems.count();
+  await page.waitForTimeout(250);
+
+  const openState = await indicator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const control = element.querySelector<HTMLButtonElement>('[data-testid="active-sessions-indicator-trigger"]');
+    return {
+      classes: element.className,
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      opacity: style.opacity,
+      ariaExpanded: control?.getAttribute('aria-expanded'),
+      menuLabels: Array.from(element.querySelectorAll<HTMLElement>('.chat-session-menu-label'))
+        .map((label) => label.textContent?.trim()),
+    };
+  });
+  assert(
+    openState.classes.includes('tab-context-menu')
+      && openState.classes.includes('custom-tab-context-menu')
+      && openState.classes.includes('is-open')
+      && openState.width >= 280
+      && openState.width <= 340
+      && openState.height > 34
+      && openState.ariaExpanded === 'true'
+      && openState.menuLabels.join('|') === '@default|@running-other',
+    `Active sessions panel does not match the Chat session menu: ${JSON.stringify(openState)}.`,
+  );
+
+  await page.waitForTimeout(3500);
+  await panel.dispatchEvent('pointermove', { pointerType: 'mouse', clientX: 20, clientY: 20 });
+  await page.waitForTimeout(3500);
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(6000);
+  assert(await indicator.evaluate((element) => element.classList.contains('is-open')),
+    'Active sessions panel did not reset its timeout after pointer and keyboard interaction.');
+  await page.waitForFunction(() => {
+    const root = document.querySelector('[data-testid="active-sessions-indicator"]');
+    return root && !root.classList.contains('is-open');
+  }, undefined, { timeout: 6000 });
+  const autoCollapsed = await trigger.getAttribute('aria-expanded') === 'false';
+  assert(autoCollapsed, 'Active sessions panel did not collapse ten seconds after its last interaction.');
+
+  const workspaceTab = page.locator('#piclaw-mobile-surface-tab-workspace');
+  const chatTab = page.locator('#piclaw-mobile-surface-tab-chat');
+  await workspaceTab.click();
+  await page.waitForFunction(() => document.getElementById('piclaw-mobile-surface-tab-workspace')?.getAttribute('aria-selected') === 'true');
+  assert(await indicator.getAttribute('aria-hidden') === 'true',
+    'Active sessions indicator remained exposed away from the timeline surface.');
+  await chatTab.click();
+  await page.waitForFunction(() => {
+    const root = document.querySelector('[data-testid="active-sessions-indicator"]');
+    return document.getElementById('piclaw-mobile-surface-tab-chat')?.getAttribute('aria-selected') === 'true'
+      && root?.classList.contains('is-visible');
+  });
+
+  await trigger.click();
+  await panel.waitFor({ state: 'visible', timeout: 15000 });
+  const targetRow = panel.locator('[data-chat-jid="web:running-other"]');
+  await targetRow.waitFor({ state: 'visible', timeout: 15000 });
+  await targetRow.click();
+  await page.waitForURL((url) => url.searchParams.get('chat_jid') === 'web:running-other', { timeout: 15000 });
+
+  return {
+    countIncludesCurrentSession: true,
+    circleState,
+    hudLayout,
+    openState,
+    pointerInteractionResetTimeout: true,
+    keyboardInteractionResetTimeout: true,
+    autoCollapseMs: 10000,
+    hiddenOffTimeline: true,
+    switchedTo: 'web:running-other',
+    sessionItemCount,
   };
 }
 
@@ -1186,6 +1378,17 @@ async function main() {
       name: 'keyboard-navigation-and-close-focus',
       viewport: { width: 390, height: 664 },
       run: (page) => runKeyboardScenario(page, args.filePath),
+    }));
+
+    results.push(await runScenario({
+      browser,
+      storageState,
+      baseUrl: args.baseUrl,
+      artifactDir,
+      name: 'active-sessions-indicator',
+      viewport: { width: 390, height: 664 },
+      beforeGoto: installActiveSessionsIndicatorFixture,
+      run: runActiveSessionsIndicatorScenario,
     }));
 
     results.push(await runScenario({

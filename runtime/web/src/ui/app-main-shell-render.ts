@@ -9,6 +9,7 @@ import { TimelineQuickActions } from '../components/timeline-quick-actions.js';
 import { TimelineMenu } from '../components/timeline-menu.js';
 import { AgentRequestModal, AgentStatus } from '../components/status.js';
 import { Timeline } from '../components/timeline.js';
+import { ActiveSessionsIndicator } from '../components/active-sessions-indicator.js';
 import { WorkspaceExplorer } from '../components/workspace-explorer.js';
 import { TabStrip } from '../components/tab-strip.js';
 import { ChatSessionContextMenu } from '../components/chat-session-context-menu.js';
@@ -320,6 +321,8 @@ export function renderMainShell(options: MainShellRenderOptions): any {
   const mobileWorkspacePanelEnabled = mobileTabAccessibilityEnabled && workspaceTabMode;
   const mobileWorkspaceSurfaceInactive = mobileWorkspacePanelEnabled && !mobileWorkspaceActive;
   const mobilePaneSurfaceInactive = mobileTabAccessibilityEnabled && (mobileChatActive || mobileWorkspaceActive);
+  const mobileTimelineActive = uiMode === 'mobile'
+    && (chatOnlyMode || mobileChatActive || (!editorOpen && !mobileWorkspaceActive));
   const mobileTerminalDockControlEnabled = uiMode === 'mobile' && hasDockPanes && !chatOnlyMode;
   const mobilePaneLabelledBy = mobileTabAccessibilityEnabled && tabStripActiveId
     ? getMobileSurfaceTabElementId(tabStripActiveId)
@@ -368,7 +371,20 @@ export function renderMainShell(options: MainShellRenderOptions): any {
 
   return html`
     <div class=${buildMainShellClassName({ workspaceOpen: workspaceRailOpen, editorOpen, chatOnlyMode, zenMode, uiMode, mobileChatActive, mobileWorkspaceActive })} ref=${appShellRef}>
-      <${SystemMetersHud} mode="overlay" />
+      ${uiMode === 'mobile'
+        ? html`
+          <div class="mobile-top-right-hud">
+            <${ActiveSessionsIndicator}
+              chats=${activeChatAgents}
+              surfaceActive=${mobileTimelineActive}
+              loadActiveChats=${getActiveChatAgents}
+              currentChatJid=${currentChatJid}
+              onSwitchChat=${handleBranchPickerChange}
+            />
+            <${SystemMetersHud} mode="overlay" />
+          </div>
+        `
+        : html`<${SystemMetersHud} mode="overlay" />`}
       ${isRenameBranchFormOpen && html`
         <div class="rename-branch-overlay" onPointerDown=${(event: any) => {
           if (event.target === event.currentTarget) {
