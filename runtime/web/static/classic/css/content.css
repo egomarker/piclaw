@@ -4,13 +4,13 @@
  * Keep selector names/order stable in this first move-only tranche.
  */
 
-/* Timeline - uses column-reverse for natural scroll anchoring when prepending */
+/* Timeline - column-reverse with one JS anchoring owner across browser engines. */
 .timeline {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    overflow-anchor: auto;
+    overflow-anchor: none;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
     display: flex;
