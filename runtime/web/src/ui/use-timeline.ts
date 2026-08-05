@@ -44,7 +44,7 @@ export function mergeFreshTimelinePosts(currentPosts, freshPosts) {
   return dedupePosts([...freshArray, ...olderCached]);
 }
 
-export function useTimeline({ preserveTimelineScroll, preserveTimelineScrollTop, chatJid = null, currentHashtag = null, searchQuery = null }) {
+export function useTimeline({ preserveTimelineScroll, preserveTimelineScrollTop, waitForTimelineScrollIdle = null, chatJid = null, currentHashtag = null, searchQuery = null }) {
   const [posts, setPostsState] = useState(null);
   const [hasMore, setHasMoreState] = useState(false);
   const hasMoreRef = useRef(false);
@@ -205,11 +205,17 @@ export function useTimeline({ preserveTimelineScroll, preserveTimelineScrollTop,
     try {
       const result = await getTimeline(10, oldestId, chatJid);
       if (token !== chatTokenRef.current) return;
+      const deferredForTouchScroll = typeof waitForTimelineScrollIdle === 'function'
+        ? await waitForTimelineScrollIdle()
+        : false;
+      if (token !== chatTokenRef.current) return;
       if (result.posts.length > 0) {
-        applyUpdate(() => {
+        const commitPage = () => {
           const nextPosts = dedupePosts([...result.posts, ...(postsRef.current || [])]);
           setTimelineState(nextPosts, result.has_more);
-        });
+        };
+        if (deferredForTouchScroll) commitPage();
+        else applyUpdate(commitPage);
       } else {
         setTimelineState(postsRef.current || [], false);
       }
@@ -221,7 +227,7 @@ export function useTimeline({ preserveTimelineScroll, preserveTimelineScrollTop,
         loadingMoreRef.current = false;
       }
     }
-  }, [chatJid, preserveTimelineScroll, preserveTimelineScrollTop, setTimelineState]);
+  }, [chatJid, preserveTimelineScroll, preserveTimelineScrollTop, setTimelineState, waitForTimelineScrollIdle]);
 
   useEffect(() => {
     loadMoreRef.current = loadMore;
