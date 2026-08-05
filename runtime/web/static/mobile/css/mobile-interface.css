@@ -209,8 +209,8 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
 /* Keep Mobile's top-right overlays in one safe-area-aware stack. */
 .app-shell.mobile-interface > .mobile-top-right-hud {
     position: absolute;
-    top: calc(env(safe-area-inset-top, 0px) + 10px);
-    right: 12px;
+    top: calc(env(safe-area-inset-top, 0px) + 18px);
+    right: 22px;
     z-index: 50;
     display: flex;
     flex-direction: column;
@@ -310,11 +310,11 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     right: auto;
     left: auto;
     z-index: 1;
-    width: 34px;
-    min-width: 34px;
-    max-width: 34px;
-    min-height: 34px;
-    max-height: 34px;
+    width: 44px;
+    min-width: 44px;
+    max-width: 44px;
+    min-height: 44px;
+    max-height: 44px;
     overflow: hidden;
     padding: 0;
     border-radius: 999px;
@@ -354,10 +354,10 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     right: 0;
     z-index: 2;
     display: flex;
-    width: 32px;
-    height: 32px;
-    min-width: 32px;
-    min-height: 32px;
+    width: 42px;
+    height: 42px;
+    min-width: 42px;
+    min-height: 42px;
     align-items: center;
     justify-content: center;
     padding: 0;
@@ -365,7 +365,7 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     border-radius: 50%;
     background: color-mix(in srgb, var(--accent-color) 82%, var(--bg-primary));
     color: var(--accent-text, #fff);
-    font-size: 12px;
+    font-size: 16px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
     line-height: 1;
@@ -433,8 +433,8 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
 
 @media (max-width: 600px) {
     .app-shell.mobile-interface > .mobile-top-right-hud {
-        top: max(10px, calc(env(safe-area-inset-top, 0px) + 8px));
-        right: max(8px, calc(env(safe-area-inset-right, 0px) + 8px));
+        top: max(18px, calc(env(safe-area-inset-top, 0px) + 16px));
+        right: max(18px, calc(env(safe-area-inset-right, 0px) + 18px));
     }
 }
 

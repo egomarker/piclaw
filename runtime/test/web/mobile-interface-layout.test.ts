@@ -88,7 +88,7 @@ test('Chat session context-menu sizing and touch targets remain scoped to Mobile
 
 test('Mobile active-session indicator morphs within the shared top-right HUD', () => {
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface > \.mobile-top-right-hud \{[^}]*position: absolute;[^}]*flex-direction: column;[^}]*align-items: flex-end;/s);
-  expect(mobileCss).toMatch(/\.tab-context-menu\.custom-tab-context-menu\.active-sessions-indicator \{[^}]*width: 34px;[^}]*min-height: 34px;[^}]*max-height: 34px;[^}]*border-radius: 999px;[^}]*opacity: 1;/s);
+  expect(mobileCss).toMatch(/\.tab-context-menu\.custom-tab-context-menu\.active-sessions-indicator \{[^}]*width: 44px;[^}]*min-height: 44px;[^}]*max-height: 44px;[^}]*border-radius: 999px;[^}]*opacity: 1;/s);
   expect(mobileCss).toMatch(/\.active-sessions-indicator\.is-open \{[^}]*width: var\(--active-sessions-panel-width\);[^}]*max-height: min\(/s);
   expect(mobileCss).toMatch(/\.active-sessions-indicator:not\(\.is-visible\) \{[^}]*min-height: 0;[^}]*max-height: 0;[^}]*opacity: 0;[^}]*pointer-events: none;/s);
   expect(mobileCss).toMatch(/\.active-sessions-indicator\.is-visible \+ \.system-meters-hud-overlay \{\s*margin-top: 8px;/);
