@@ -31,8 +31,8 @@ test('tab capabilities distinguish default, disabled, and custom context menus',
   expect(hasCustomTabContextMenu({ id: 'file' })).toBe(false);
   expect(isTabClosable({ id: 'chat', closable: false })).toBe(false);
   expect(hasTabContextMenu({ id: 'chat', contextMenu: false })).toBe(false);
-  expect(hasTabContextMenu({ id: 'chat', contextMenu: 'chat-sessions' })).toBe(true);
-  expect(hasCustomTabContextMenu({ id: 'chat', contextMenu: 'chat-sessions' })).toBe(true);
+  expect(hasTabContextMenu({ id: 'custom', contextMenu: 'custom-actions' })).toBe(true);
+  expect(hasCustomTabContextMenu({ id: 'custom', contextMenu: 'custom-actions' })).toBe(true);
 });
 
 test('Mobile long-press helpers accept only primary touch and cancel beyond the movement tolerance', () => {

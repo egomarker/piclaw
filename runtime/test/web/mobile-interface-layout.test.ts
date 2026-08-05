@@ -79,7 +79,7 @@ test('Attach to Chat toolbar states remain scoped to Mobile', () => {
   expect(classicEditorCss).not.toContain('tab-strip-attach-to-chat');
 });
 
-test('Chat session context-menu sizing and touch targets remain scoped to Mobile', () => {
+test('Active-session menu sizing and touch targets remain scoped to Mobile', () => {
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface \.tab-context-menu\.custom-tab-context-menu \{[^}]*width: min\(340px, calc\(100vw - 16px\)\);[^}]*max-height: min\(420px, calc\(100vh - 16px\)\);[^}]*overflow-y: auto;/s);
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface \.chat-session-menu-item \{[^}]*display: flex;[^}]*min-height: 44px;/s);
   expect(classicEditorCss).not.toContain('chat-session-menu');

@@ -235,7 +235,7 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     margin-top: 8px;
 }
 
-/* The Chat tab's dynamic session menu is shared by right-click and long-press. */
+/* Running-session menu content used by the active-sessions panel. */
 .app-shell.mobile-interface .tab-context-menu.custom-tab-context-menu {
     width: min(340px, calc(100vw - 16px));
     min-width: min(280px, calc(100vw - 16px));

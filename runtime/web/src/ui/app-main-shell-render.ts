@@ -12,7 +12,6 @@ import { Timeline } from '../components/timeline.js';
 import { ActiveSessionsIndicator } from '../components/active-sessions-indicator.js';
 import { WorkspaceExplorer } from '../components/workspace-explorer.js';
 import { TabStrip } from '../components/tab-strip.js';
-import { ChatSessionContextMenu } from '../components/chat-session-context-menu.js';
 import { MarkdownPreview } from '../components/markdown-preview.js';
 import { SystemMetersHud } from '../components/system-meters-hud.js';
 import {
@@ -493,16 +492,6 @@ export function renderMainShell(options: MainShellRenderOptions): any {
               rovingFocus=${mobileTabAccessibilityEnabled || undefined}
               restoreFocusAfterClose=${mobileTabAccessibilityEnabled || undefined}
               touchContextMenu=${mobileTabAccessibilityEnabled || undefined}
-              renderContextMenu=${mobileTabAccessibilityEnabled ? (tab, { close, openToken }) => {
-                if (tab?.id !== MOBILE_CHAT_TAB_ID || tab?.contextMenu !== 'chat-sessions') return null;
-                return html`<${ChatSessionContextMenu}
-                  key=${openToken}
-                  loadActiveChats=${getActiveChatAgents}
-                  currentChatJid=${currentChatJid}
-                  onSwitchChat=${handleBranchPickerChange}
-                  onClose=${close}
-                />`;
-              } : undefined}
               tabListId=${mobileTabAccessibilityEnabled ? MOBILE_SURFACE_TABLIST_ID : undefined}
               tabListLabel=${mobileTabAccessibilityEnabled ? 'Open surfaces' : undefined}
               getTabElementId=${mobileTabAccessibilityEnabled ? getMobileSurfaceTabElementId : undefined}
