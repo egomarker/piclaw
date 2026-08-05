@@ -348,6 +348,29 @@ describe("SSE client cap", () => {
     }
   });
 
+  test("broadcastEvent delivers active chat changes to every chat-scoped client", () => {
+    const seenA: Uint8Array[] = [];
+    const seenB: Uint8Array[] = [];
+    const channel: SseClientContainer = {
+      clients: new Set<PendingClient>([
+        { controller: { enqueue: (bytes: Uint8Array) => { seenA.push(bytes); } } as any, heartbeat: setTimeout(() => {}, 0) as any, chatJid: "web:a" },
+        { controller: { enqueue: (bytes: Uint8Array) => { seenB.push(bytes); } } as any, heartbeat: setTimeout(() => {}, 0) as any, chatJid: "web:b" },
+      ]),
+    };
+
+    expect(requiresChatScopedDelivery("active_chats_changed")).toBe(false);
+    broadcastEvent(channel, "active_chats_changed", {
+      changed_chat_jid: "web:a",
+      active: true,
+    });
+    expect(seenA.length).toBe(1);
+    expect(seenB.length).toBe(1);
+
+    for (const client of channel.clients) {
+      clearTimeout(client.heartbeat);
+    }
+  });
+
   test("broadcastEvent delivers instance-wide ui_theme events without chat_jid", () => {
     const seenA: Uint8Array[] = [];
     const seenB: Uint8Array[] = [];

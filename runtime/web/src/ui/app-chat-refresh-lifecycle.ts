@@ -25,6 +25,7 @@ import {
 } from './app-perf-tracing.js';
 import { prewarmTimelineSnapshots, resolveRecentTimelinePrewarmChatJids } from './app-timeline-cache.js';
 import { getTimeline } from '../api.js';
+import { applyActiveChatActivityChange, type ActiveChatActivityChange } from './app-chat-agents.js';
 import {
   noteAppChatActivation,
   runCoalescedAppRefresh,
@@ -321,7 +322,13 @@ export function useChatRefreshLifecycle(options: UseChatRefreshLifecycleOptions)
   const refreshActiveChatAgents = useCallback((options?: {
     prewarmRecent?: boolean;
     prewarmLimit?: number;
+    activityChange?: ActiveChatActivityChange;
   }) => {
+    if (options?.activityChange) {
+      setActiveChatAgents((rows) => applyActiveChatActivityChange(rows, options.activityChange, currentChatJid));
+      return Promise.resolve([]);
+    }
+
     const prewarmRecent = Boolean(options?.prewarmRecent);
     const prewarmLimit = Number.isFinite(options?.prewarmLimit) ? Number(options?.prewarmLimit) : 5;
     return runCoalescedAppRefresh({

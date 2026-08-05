@@ -62,6 +62,8 @@ function getAgentPeerMessageRelayService(
 }
 
 export class WebChannelLifecycleSpecialSurfaceService {
+  private unsubscribeActivityChanges: (() => void) | null = null;
+
   constructor(
     private readonly channel: WebChannelLifecycleSpecialSurfaceChannel,
     private readonly defaults: WebChannelLifecycleSpecialSurfaceDefaults,
@@ -73,9 +75,20 @@ export class WebChannelLifecycleSpecialSurfaceService {
 
   async start(): Promise<void> {
     await this.channel.serverLifecycleGateway.start();
+    if (!this.unsubscribeActivityChanges && this.channel.agentPool && this.channel.broadcastEvent) {
+      this.unsubscribeActivityChanges = this.channel.agentPool.subscribeActivityChanges((change) => {
+        this.channel.broadcastEvent?.("active_chats_changed", {
+          changed_chat_jid: change.chatJid,
+          active: change.active,
+          chat: change.chat,
+        });
+      });
+    }
   }
 
   async stop(): Promise<void> {
+    this.unsubscribeActivityChanges?.();
+    this.unsubscribeActivityChanges = null;
     await this.channel.serverLifecycleGateway.stop();
   }
 

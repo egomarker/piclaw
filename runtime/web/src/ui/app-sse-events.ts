@@ -99,7 +99,7 @@ export interface HandleAppSseEventDependencies {
   showLastActivity: (payload: any) => void;
   refreshTimeline: () => Promise<void> | void;
   refreshModelAndQueueState: () => void;
-  refreshActiveChatAgents: () => Promise<unknown> | void;
+  refreshActiveChatAgents: (options?: { activityChange?: any }) => Promise<unknown> | void;
   refreshCurrentChatBranches: () => Promise<unknown> | void;
   notifyForFinalResponse: (turnId: string | null | undefined) => void;
   setContextUsage: StateSetter<any>;
@@ -194,6 +194,11 @@ export function handleAppSseEvent(
   } = deps;
 
   const { turnId, isCurrentChatEvent } = resolveSseEventRoutingContext(eventType, data, currentChatJid);
+
+  if (eventType === 'active_chats_changed') {
+    void refreshActiveChatAgents({ activityChange: data });
+    return;
+  }
 
   if (isCurrentChatEvent) {
     updateAgentProfile(data);

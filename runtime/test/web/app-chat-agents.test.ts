@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import {
+  applyActiveChatActivityChange,
   mergeActiveAndBranchChats,
   normalizeActiveChatRows,
   normalizeCurrentRootBranchRows,
@@ -33,6 +34,49 @@ test('normalizeCurrentRootBranchRows only requires string payload fields', () =>
       { chat_jid: null, agent_name: '@gamma' },
     ]),
   ).toEqual([withEmptyHandle, withHandle]);
+});
+
+test('applyActiveChatActivityChange updates existing rows and adds newly active chats without fetching', () => {
+  const rows = [
+    { chat_jid: 'chat:current', agent_name: '@current', is_active: false },
+    { chat_jid: 'chat:background', agent_name: '@background', is_active: false, branchOnly: true },
+  ];
+
+  const started = applyActiveChatActivityChange(rows, {
+    changed_chat_jid: 'chat:background',
+    active: true,
+    chat: {
+      chat_jid: 'chat:background',
+      agent_name: '@background',
+      is_active: true,
+      activity_status: 'streaming',
+    },
+  }, 'chat:current');
+
+  expect(started.map((chat) => chat.chat_jid)).toEqual(['chat:current', 'chat:background']);
+  expect(started[1]).toMatchObject({
+    is_active: true,
+    activity_status: 'streaming',
+    branchOnly: true,
+  });
+
+  const added = applyActiveChatActivityChange(started, {
+    changed_chat_jid: 'chat:new',
+    active: true,
+    chat: { chat_jid: 'chat:new', agent_name: '@new', is_active: true },
+  }, 'chat:current');
+  expect(added.map((chat) => chat.chat_jid)).toEqual(['chat:current', 'chat:background', 'chat:new']);
+
+  const stopped = applyActiveChatActivityChange(added, {
+    changed_chat_jid: 'chat:background',
+    active: false,
+    chat: { chat_jid: 'chat:background', agent_name: '@background', is_active: false, activity_status: 'idle' },
+  }, 'chat:current');
+  expect(stopped.find((chat) => chat.chat_jid === 'chat:background')).toMatchObject({
+    is_active: false,
+    activity_status: 'idle',
+    branchOnly: true,
+  });
 });
 
 test('mergeActiveAndBranchChats returns active list unchanged when no branch rows are present', () => {

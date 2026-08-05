@@ -1171,6 +1171,7 @@ export class SSEClient {
         bindJsonEvent('interaction_updated');
         bindJsonEvent('interaction_deleted');
         bindJsonEvent('agent_status');
+        bindJsonEvent('active_chats_changed');
         bindJsonEvent('agent_steer_queued');
         bindJsonEvent('agent_followup_queued');
         bindJsonEvent('agent_followup_consumed');
