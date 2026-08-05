@@ -210,7 +210,7 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
 .app-shell.mobile-interface > .mobile-top-right-hud {
     position: absolute;
     top: calc(env(safe-area-inset-top, 0px) + 38px);
-    right: 18px;
+    right: 20px;
     z-index: 50;
     display: flex;
     flex-direction: column;
@@ -220,7 +220,7 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
 
 .app-shell.mobile-interface.zen-mode > .mobile-top-right-hud,
 .app-shell.mobile-interface:not(:has(> .editor-pane-container > .tab-strip)) > .mobile-top-right-hud {
-    top: calc(env(safe-area-inset-top, 0px) + 18px);
+    top: calc(env(safe-area-inset-top, 0px) + 10px);
 }
 
 .app-shell.mobile-interface > .mobile-top-right-hud > .system-meters-hud-overlay {
@@ -439,12 +439,12 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
 @media (max-width: 600px) {
     .app-shell.mobile-interface > .mobile-top-right-hud {
         top: max(38px, calc(env(safe-area-inset-top, 0px) + 36px));
-        right: max(14px, calc(env(safe-area-inset-right, 0px) + 14px));
+        right: max(16px, calc(env(safe-area-inset-right, 0px) + 16px));
     }
 
     .app-shell.mobile-interface.zen-mode > .mobile-top-right-hud,
     .app-shell.mobile-interface:not(:has(> .editor-pane-container > .tab-strip)) > .mobile-top-right-hud {
-        top: max(18px, calc(env(safe-area-inset-top, 0px) + 16px));
+        top: max(10px, calc(env(safe-area-inset-top, 0px) + 8px));
     }
 }
 
