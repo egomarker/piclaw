@@ -220,7 +220,7 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
 
 .app-shell.mobile-interface.zen-mode > .mobile-top-right-hud,
 .app-shell.mobile-interface:not(:has(> .editor-pane-container > .tab-strip)) > .mobile-top-right-hud {
-    top: calc(env(safe-area-inset-top, 0px) + 10px);
+    top: calc(env(safe-area-inset-top, 0px) + 6px);
 }
 
 .app-shell.mobile-interface > .mobile-top-right-hud > .system-meters-hud-overlay {
@@ -444,7 +444,7 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
 
     .app-shell.mobile-interface.zen-mode > .mobile-top-right-hud,
     .app-shell.mobile-interface:not(:has(> .editor-pane-container > .tab-strip)) > .mobile-top-right-hud {
-        top: max(10px, calc(env(safe-area-inset-top, 0px) + 8px));
+        top: max(6px, calc(env(safe-area-inset-top, 0px) + 4px));
     }
 }
 
