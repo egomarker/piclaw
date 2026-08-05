@@ -1,7 +1,7 @@
 import { html, useCallback, useEffect, useMemo, useRef, useState } from '../vendor/preact-htm.js';
 import { ChatSessionContextMenu, resolveRunningChatSessions } from './chat-session-context-menu.js';
 
-export const ACTIVE_SESSIONS_AUTO_COLLAPSE_MS = 10_000;
+export const ACTIVE_SESSIONS_AUTO_COLLAPSE_MS = 5_000;
 export const ACTIVE_SESSIONS_INDICATOR_PANEL_ID = 'piclaw-active-sessions-panel';
 
 export function resolveActiveSessionsIndicatorState(chats: unknown, surfaceActive = true): {
@@ -104,6 +104,11 @@ export function ActiveSessionsIndicator({
 
     const handleOutsidePointer = (event: PointerEvent) => {
       if (root.contains(event.target as Node)) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.matches?.('textarea[data-testid="compose-input"]')) {
+        // Keep iOS keyboard activation inside the original trusted tap.
+        target.focus({ preventScroll: true });
+      }
       collapse(false);
     };
     const handleEscape = (event: KeyboardEvent) => {

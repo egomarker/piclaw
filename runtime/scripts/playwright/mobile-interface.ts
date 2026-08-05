@@ -1136,19 +1136,19 @@ async function runActiveSessionsIndicatorScenario(page: Page) {
     `Active sessions panel does not match the Chat session menu: ${JSON.stringify(openState)}.`,
   );
 
-  await page.waitForTimeout(3500);
+  await page.waitForTimeout(1750);
   await panel.dispatchEvent('pointermove', { pointerType: 'mouse', clientX: 20, clientY: 20 });
-  await page.waitForTimeout(3500);
+  await page.waitForTimeout(1750);
   await page.keyboard.press('ArrowDown');
-  await page.waitForTimeout(6000);
+  await page.waitForTimeout(3000);
   assert(await indicator.evaluate((element) => element.classList.contains('is-open')),
     'Active sessions panel did not reset its timeout after pointer and keyboard interaction.');
   await page.waitForFunction(() => {
     const root = document.querySelector('[data-testid="active-sessions-indicator"]');
     return root && !root.classList.contains('is-open');
-  }, undefined, { timeout: 6000 });
+  }, undefined, { timeout: 3000 });
   const autoCollapsed = await trigger.getAttribute('aria-expanded') === 'false';
-  assert(autoCollapsed, 'Active sessions panel did not collapse ten seconds after its last interaction.');
+  assert(autoCollapsed, 'Active sessions panel did not collapse five seconds after its last interaction.');
 
   const workspaceTab = page.locator('#piclaw-mobile-surface-tab-workspace');
   const chatTab = page.locator('#piclaw-mobile-surface-tab-chat');
@@ -1177,7 +1177,7 @@ async function runActiveSessionsIndicatorScenario(page: Page) {
     openState,
     pointerInteractionResetTimeout: true,
     keyboardInteractionResetTimeout: true,
-    autoCollapseMs: 10000,
+    autoCollapseMs: 5000,
     hiddenOffTimeline: true,
     switchedTo: 'web:running-other',
     sessionItemCount,
