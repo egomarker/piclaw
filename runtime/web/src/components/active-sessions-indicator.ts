@@ -37,6 +37,7 @@ export function ActiveSessionsIndicator({
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
   const autoCollapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastFrequentInteractionAtRef = useRef(0);
 
   const clearAutoCollapseTimer = useCallback(() => {
     if (autoCollapseTimerRef.current === null) return;
@@ -119,6 +120,18 @@ export function ActiveSessionsIndicator({
     };
   }, [collapse, open]);
 
+  const noteInteraction = useCallback(() => {
+    if (open) restartAutoCollapseTimer();
+  }, [open, restartAutoCollapseTimer]);
+
+  const noteFrequentInteraction = useCallback(() => {
+    if (!open) return;
+    const now = Date.now();
+    if (now - lastFrequentInteractionAtRef.current < 250) return;
+    lastFrequentInteractionAtRef.current = now;
+    restartAutoCollapseTimer();
+  }, [open, restartAutoCollapseTimer]);
+
   const countLabel = `${count} active ${count === 1 ? 'session' : 'sessions'}`;
   const className = [
     'tab-context-menu',
@@ -135,6 +148,11 @@ export function ActiveSessionsIndicator({
       data-testid="active-sessions-indicator"
       data-active-session-count=${count}
       aria-hidden=${visible ? undefined : 'true'}
+      onPointerDown=${noteInteraction}
+      onPointerMove=${noteFrequentInteraction}
+      onWheel=${noteFrequentInteraction}
+      onKeyDown=${noteInteraction}
+      onFocusIn=${noteInteraction}
     >
       <button
         ref=${triggerRef}
