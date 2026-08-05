@@ -2,10 +2,6 @@ import { Component, h, html, useCallback, useEffect, useLayoutEffect, useMemo, u
 import { Post } from './post.js';
 import { isAnchorScrolling } from '../ui/scroll-anchor.js';
 import { getAgentAvatarUrl, getAgentName } from '../ui/agent-utils.js';
-import {
-    isAndroidTimelinePlatform,
-    TIMELINE_TOUCH_SCROLL_IDLE_EVENT,
-} from '../ui/timeline-scroll-state.js';
 
 export const TIMELINE_WINDOW_SIZE = 16;
 export const TIMELINE_WINDOW_THRESHOLD = 100;
@@ -309,7 +305,6 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
     const pendingTouchLoadRef = useRef(false);
     const paginationLockedRef = useRef(false);
     const supportsOverflowAnchorRef = useRef(browserSupportsOverflowAnchor());
-    const androidTouchPlatformRef = useRef(isAndroidTimelinePlatform());
     const measuredWidthRef = useRef(0);
     const touchScrollActiveRef = useRef(false);
     const touchContactRef = useRef(false);
@@ -355,7 +350,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
 
     const triggerLoadMore = useCallback(async (force = false) => {
         const touchScrolling = touchScrollActiveRef.current;
-        if ((androidTouchPlatformRef.current || supportsOverflowAnchorRef.current) && touchScrolling) {
+        if (supportsOverflowAnchorRef.current && touchScrolling) {
             if (onLoadMore && hasMore) pendingTouchLoadRef.current = true;
             return;
         }
@@ -375,11 +370,9 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
                 && (windowingActive
                     || displayPosts.length + TIMELINE_PAGE_SIZE > TIMELINE_WINDOW_THRESHOLD);
             await onLoadMore({
-                preserveScroll: androidTouchPlatformRef.current
-                    ? false
-                    : (supportsOverflowAnchorRef.current
-                        ? !virtualizingAfterLoad
-                        : !touchScrolling),
+                preserveScroll: supportsOverflowAnchorRef.current
+                    ? !virtualizingAfterLoad
+                    : !touchScrolling,
                 preserveMode: 'top',
             });
         } finally {
@@ -464,27 +457,19 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         touchScrollIdleTimerRef.current = 0;
 
         const root = touchScrollerRef.current || timelineRef?.current;
-        const deferredCommitPending = root?.dataset?.timelinePageCommitPending === 'true';
         if (root?.dataset) delete root.dataset.timelineTouchScrolling;
         touchScrollerRef.current = null;
         const loadAfterScroll = pendingTouchLoadRef.current;
         pendingTouchLoadRef.current = false;
-        if (androidTouchPlatformRef.current
-            && (loadAfterScroll || loadingMore || deferredCommitPending)) {
-            paginationLockedRef.current = true;
-        }
         if (loadAfterScroll) {
             paginationLockedRef.current = true;
-            if (!loadingMore && !deferredCommitPending) {
+            if (!loadingMore) {
                 clearTimeout(deferredLoadTimerRef.current);
                 deferredLoadTimerRef.current = setTimeout(() => {
                     deferredLoadTimerRef.current = 0;
                     triggerLoadMoreRef.current?.(true);
                 }, TIMELINE_POST_SCROLL_LOAD_DELAY_MS);
             }
-        }
-        if (root && typeof root.dispatchEvent === 'function' && typeof Event !== 'undefined') {
-            root.dispatchEvent(new Event(TIMELINE_TOUCH_SCROLL_IDLE_EVENT));
         }
         const content = timelineContentRef.current;
         const anchor = captureTimelineViewportAnchor(root, content);
@@ -543,13 +528,11 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         if (!touchScrollActiveRef.current) return;
         clearTimeout(touchScrollIdleTimerRef.current);
         const root = touchScrollerRef.current;
-        const delay = androidTouchPlatformRef.current
-            ? TIMELINE_NATIVE_SCROLL_IDLE_MS
-            : (supportsOverflowAnchorRef.current
-                ? (root && 'onscrollend' in root
-                    ? TIMELINE_NATIVE_SCROLLEND_WATCHDOG_MS
-                    : TIMELINE_NATIVE_SCROLL_IDLE_MS)
-                : TIMELINE_TOUCH_SCROLL_IDLE_MS);
+        const delay = supportsOverflowAnchorRef.current
+            ? (root && 'onscrollend' in root
+                ? TIMELINE_NATIVE_SCROLLEND_WATCHDOG_MS
+                : TIMELINE_NATIVE_SCROLL_IDLE_MS)
+            : TIMELINE_TOUCH_SCROLL_IDLE_MS;
         touchScrollIdleTimerRef.current = setTimeout(() => {
             touchScrollIdleTimerRef.current = 0;
             finishTouchScrollRef.current?.();
@@ -626,13 +609,10 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
     useEffect(() => {
         const root = timelineRef?.current;
         if (!root) return;
-        const onScrollEnd = () => {
-            if (androidTouchPlatformRef.current) scheduleTouchScrollEnd();
-            else finishTouchScrollRef.current?.();
-        };
+        const onScrollEnd = () => finishTouchScrollRef.current?.();
         root.addEventListener('scrollend', onScrollEnd, { passive: true });
         return () => root.removeEventListener('scrollend', onScrollEnd);
-    }, [displayPosts.length, scheduleTouchScrollEnd, timelineRef]);
+    }, [displayPosts.length, timelineRef]);
 
     useEffect(() => () => {
         cancelAnimationFrame(scrollWindowFrameRef.current);
