@@ -209,7 +209,7 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
 /* Keep Mobile's top-right overlays in one safe-area-aware stack. */
 .app-shell.mobile-interface > .mobile-top-right-hud {
     position: absolute;
-    top: calc(env(safe-area-inset-top, 0px) + 18px);
+    top: calc(env(safe-area-inset-top, 0px) + 38px);
     right: 22px;
     z-index: 50;
     display: flex;
@@ -433,7 +433,7 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
 
 @media (max-width: 600px) {
     .app-shell.mobile-interface > .mobile-top-right-hud {
-        top: max(18px, calc(env(safe-area-inset-top, 0px) + 16px));
+        top: max(38px, calc(env(safe-area-inset-top, 0px) + 36px));
         right: max(18px, calc(env(safe-area-inset-right, 0px) + 18px));
     }
 }
