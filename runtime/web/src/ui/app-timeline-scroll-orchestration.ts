@@ -1,6 +1,5 @@
 import { useCallback } from '../vendor/preact-htm.js';
 import { filterQueuedTimelinePosts } from './app-followup-queue.js';
-import { scrollerNativelyAnchors } from './scroll-anchor.js';
 
 interface RefBox<T> {
   current: T;
@@ -49,7 +48,7 @@ export function useTimelineScrollOrchestration(options: {
 
     requestAnimationFrame(() => {
       const target = timelineRef.current;
-      if (!target || isTimelineTouchScrolling(target) || scrollerNativelyAnchors(target)) return;
+      if (!target || isTimelineTouchScrolling(target)) return;
       if (reverseTimeline) {
         const nextTop = Math.max(target.scrollHeight - anchor, 0);
         target.scrollTop = nextTop;
@@ -71,7 +70,7 @@ export function useTimelineScrollOrchestration(options: {
     mutate();
     requestAnimationFrame(() => {
       const target = timelineRef.current;
-      if (!target || isTimelineTouchScrolling(target) || scrollerNativelyAnchors(target)) return;
+      if (!target || isTimelineTouchScrolling(target)) return;
       const maxScroll = Math.max(target.scrollHeight - target.clientHeight, 0);
       target.scrollTop = Math.min(anchor, maxScroll);
     });
