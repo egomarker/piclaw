@@ -8,6 +8,12 @@ export interface ChatAgentRowLike {
   [key: string]: unknown;
 }
 
+export interface ActiveChatActivityChange {
+  changed_chat_jid?: unknown;
+  active?: unknown;
+  chat?: unknown;
+}
+
 function hasString(value: unknown): value is string {
   return typeof value === 'string';
 }
@@ -34,6 +40,45 @@ export function normalizeCurrentRootBranchRows<T extends ChatAgentRowLike>(rows:
   return rows.filter(
     (chat): chat is T => hasString(chat?.chat_jid) && hasString(chat?.agent_name),
   );
+}
+
+export function applyActiveChatActivityChange<T extends ChatAgentRowLike>(
+  rows: T[] | null | undefined,
+  change: ActiveChatActivityChange | null | undefined,
+  targetChatJid: string | null | undefined,
+): T[] {
+  const chatJid = hasTrimmedString(change?.changed_chat_jid)
+    ? change.changed_chat_jid.trim()
+    : '';
+  if (!chatJid) return Array.isArray(rows) ? rows : [];
+
+  const incoming = change?.chat && typeof change.chat === 'object'
+    ? change.chat as T
+    : null;
+  const isActive = typeof change?.active === 'boolean'
+    ? change.active
+    : Boolean(incoming?.is_active);
+  let found = false;
+  const next = (Array.isArray(rows) ? rows : []).map((row) => {
+    if (row.chat_jid !== chatJid) return row;
+    found = true;
+    return {
+      ...row,
+      ...(incoming ?? {}),
+      chat_jid: chatJid,
+      is_active: isActive,
+    } as T;
+  });
+
+  if (!found && incoming && hasTrimmedString(incoming.agent_name)) {
+    next.push({
+      ...incoming,
+      chat_jid: chatJid,
+      is_active: isActive,
+    } as T);
+  }
+
+  return mergeActiveAndBranchChats([], next, targetChatJid);
 }
 
 export function mergeActiveAndBranchChats<T extends ChatAgentRowLike>(

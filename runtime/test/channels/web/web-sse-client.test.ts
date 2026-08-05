@@ -92,6 +92,7 @@ test("SSEClient no longer registers stale agent_request listeners", () => {
     expect(seenEvents).not.toContain("agent_request");
     expect(seenEvents).not.toContain("agent_request_timeout");
     expect(seenEvents).toContain("agent_status");
+    expect(seenEvents).toContain("active_chats_changed");
     expect(seenEvents).toContain("new_post");
     expect(seenEvents).toContain("workspace_update");
     expect(seenEvents).toContain("extension_ui_request");

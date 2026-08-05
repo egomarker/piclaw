@@ -32,6 +32,6 @@ test('active sessions indicator stays hidden off the timeline or without running
   expect(resolveActiveSessionsIndicatorState([], true)).toEqual({ count: 0, visible: false });
 });
 
-test('active sessions panel collapses ten seconds after its last interaction', () => {
+test('active sessions panel collapses ten seconds after opening', () => {
   expect(ACTIVE_SESSIONS_AUTO_COLLAPSE_MS).toBe(10_000);
 });

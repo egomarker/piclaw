@@ -295,7 +295,7 @@ interface ComposeRealtimeLifecycleOptionsInput {
   showLastActivity: (payload: any) => void;
   refreshTimeline: () => Promise<void>;
   refreshModelAndQueueState: () => void;
-  refreshActiveChatAgents: () => void;
+  refreshActiveChatAgents: (options?: { activityChange?: any }) => void;
   refreshCurrentChatBranches: () => void;
   notifyForFinalResponse: (turnId: string | null | undefined) => void;
   setContextUsage: StateSetter<any>;

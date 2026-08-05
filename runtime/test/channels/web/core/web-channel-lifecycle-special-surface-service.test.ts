@@ -71,6 +71,55 @@ describe("web channel lifecycle/special surface service", () => {
     ]);
   });
 
+  test("broadcasts agent activity globally and removes the pool listener on stop", async () => {
+    let activityListener: ((change: any) => void) | null = null;
+    let unsubscribeCalls = 0;
+    const broadcasts: Array<{ eventType: string; payload: any }> = [];
+    const service = createWebChannelLifecycleSpecialSurfaceService(
+      {
+        serverLifecycleGateway: {
+          server: null,
+          start: async () => undefined,
+          stop: async () => undefined,
+        },
+        agentPool: {
+          subscribeActivityChanges: (listener: (change: any) => void) => {
+            activityListener = listener;
+            return () => {
+              unsubscribeCalls += 1;
+              activityListener = null;
+            };
+          },
+        } as any,
+        broadcastEvent: (eventType: string, payload: any) => {
+          broadcasts.push({ eventType, payload });
+        },
+      },
+      { defaultChatJid: "web:default", defaultAgentId: "default" },
+    );
+
+    await service.start();
+    activityListener?.({
+      chatJid: "web:background",
+      active: true,
+      chat: { chat_jid: "web:background", agent_name: "@background", is_active: true },
+    });
+
+    expect(broadcasts).toEqual([{
+      eventType: "active_chats_changed",
+      payload: {
+        changed_chat_jid: "web:background",
+        active: true,
+        chat: { chat_jid: "web:background", agent_name: "@background", is_active: true },
+      },
+    }]);
+    expect(broadcasts[0]?.payload.chat_jid).toBeUndefined();
+
+    await service.stop();
+    expect(unsubscribeCalls).toBe(1);
+    expect(activityListener).toBeNull();
+  });
+
   test("reuses a pre-wired lifecycle/special surface service when present", () => {
     const existing = { kind: "existing" } as unknown as ReturnType<typeof getWebChannelLifecycleSpecialSurfaceService>;
     const carrier = {

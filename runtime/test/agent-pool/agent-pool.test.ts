@@ -113,6 +113,65 @@ test("agent pool aggregates streamed text and writes logs", async () => {
   expect(matchingContent).toBeDefined();
 });
 
+test("agent pool publishes one active and one idle transition around a run", async () => {
+  const ws = getTestWorkspace();
+  restoreEnv = setEnv({ PICLAW_WORKSPACE: ws.workspace, PICLAW_STORE: ws.store, PICLAW_DATA: ws.data });
+
+  const { initDatabase } = await importFresh<typeof import("../src/db.js")>("../src/db.js");
+  initDatabase();
+  const { AgentPool } = await importFresh<typeof import("../src/agent-pool.js")>("../src/agent-pool.js");
+
+  class ActivitySession {
+    isStreaming = false;
+    sessionId = "activity-session";
+    sessionName = "activity";
+    private listeners: Array<(event: any) => void> = [];
+
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => {
+        this.listeners = this.listeners.filter((entry) => entry !== listener);
+      };
+    }
+
+    async prompt() {
+      this.isStreaming = true;
+      for (const listener of this.listeners) {
+        listener({
+          type: "message_update",
+          assistantMessageEvent: { type: "text_delta", delta: "done" },
+        });
+      }
+      this.isStreaming = false;
+    }
+
+    async abort() {}
+    dispose() {}
+  }
+
+  const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
+    createSession: async () => createRuntime(new ActivitySession()) as any,
+  });
+  const changes: any[] = [];
+  const unsubscribe = pool.subscribeActivityChanges((change) => changes.push(change));
+
+  const result = await pool.runAgent("test", "web:default");
+
+  expect(result.status).toBe("success");
+  expect(changes.map((change) => ({ chatJid: change.chatJid, active: change.active }))).toEqual([
+    { chatJid: "web:default", active: true },
+    { chatJid: "web:default", active: false },
+  ]);
+  expect(changes[0]?.chat).toMatchObject({ chat_jid: "web:default", is_active: true });
+  expect(changes[1]?.chat).toMatchObject({ chat_jid: "web:default", is_active: false });
+
+  unsubscribe();
+  await pool.runAgent("again", "web:default");
+  expect(changes).toHaveLength(2);
+  await pool.shutdown();
+});
+
 test("agent pool aggregates recovery counters into memory instrumentation", async () => {
   const ws = getTestWorkspace();
   restoreEnv = setEnv({

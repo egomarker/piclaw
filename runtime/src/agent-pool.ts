@@ -145,6 +145,13 @@ export interface AgentPoolMemoryInstrumentationSnapshot {
   recovery: AgentPoolRecoveryInstrumentationSnapshot;
 }
 
+export interface AgentPoolActivityChange {
+  chatJid: string;
+  active: boolean;
+  chat: ActiveChatAgent | null;
+}
+
+export type AgentPoolActivityChangeListener = (change: AgentPoolActivityChange) => void;
 
 const DEFAULT_PROVIDER_RATE_LIMIT_MAX_RETRIES = 5;
 const DEFAULT_PROVIDER_RATE_LIMIT_BASE_DELAY_MS = 5000;
@@ -168,6 +175,7 @@ export class AgentPool {
     recoveredRuns: 0,
     exhaustedRuns: 0,
   };
+  private activityChangeListeners = new Set<AgentPoolActivityChangeListener>();
 
   // Shared across all sessions (expensive to create, safe to reuse)
   private credentialStore: PiclawCredentialStore;
@@ -301,8 +309,21 @@ export class AgentPool {
     // Acquire before session lookup: the cleanup timer can run after getOrCreate
     // returns but before AgentSession flips isStreaming at prompt start.
     const releaseEvictionProtection = this.sessionManager.acquireEvictionProtection(chatJid);
+    let activityStarted = false;
+    const originalOnEvent = options.onEvent;
+    const runOptions: RunAgentOptions = {
+      ...options,
+      onEvent: (event) => {
+        if (!activityStarted) {
+          activityStarted = true;
+          this.emitActivityChange(chatJid, true);
+        }
+        originalOnEvent?.(event);
+      },
+    };
+
     try {
-      const output = await runAgentPrompt(prompt, chatJid, options, {
+      const output = await runAgentPrompt(prompt, chatJid, runOptions, {
         getOrCreateRuntime: (nextChatJid) => this.getOrCreateRuntime(nextChatJid),
         turnCoordinator: this.turnCoordinator,
         clearAttachments: (nextChatJid) => this.attachments.clear(nextChatJid),
@@ -326,6 +347,9 @@ export class AgentPool {
 
       return output;
     } finally {
+      if (activityStarted) {
+        this.emitActivityChange(chatJid, false);
+      }
       releaseEvictionProtection();
     }
   }
@@ -580,6 +604,13 @@ export class AgentPool {
     return this.branchManager.listActiveChats();
   }
 
+  subscribeActivityChanges(listener: AgentPoolActivityChangeListener): () => void {
+    this.activityChangeListeners.add(listener);
+    return () => {
+      this.activityChangeListeners.delete(listener);
+    };
+  }
+
   listKnownChats(
     rootChatJid?: string | null,
     options?: { includeArchived?: boolean }
@@ -656,6 +687,7 @@ export class AgentPool {
   /** Gracefully shut down all sessions. */
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
+    this.activityChangeListeners.clear();
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
@@ -669,6 +701,40 @@ export class AgentPool {
   }
 
   // ── internal ────────────────────────────────────────────
+
+  private emitActivityChange(chatJid: string, active: boolean): void {
+    if (this.activityChangeListeners.size === 0) return;
+    const currentChat = this.listActiveChats()
+      .find((candidate) => candidate.chat_jid === chatJid) ?? null;
+    const chat: ActiveChatAgent | null = currentChat
+      ? active
+        ? {
+            ...currentChat,
+            is_active: true,
+            is_streaming: currentChat.activity_status === "idle" || currentChat.is_streaming,
+            activity_status: currentChat.activity_status === "idle" ? "streaming" : currentChat.activity_status,
+            activity_label: currentChat.activity_status === "idle" ? "Streaming" : currentChat.activity_label,
+          }
+        : {
+            ...currentChat,
+            is_active: false,
+            is_streaming: false,
+            is_compacting: false,
+            is_retrying: false,
+            is_bash_running: false,
+            activity_status: "idle",
+            activity_label: "Idle",
+          }
+      : null;
+    const change: AgentPoolActivityChange = { chatJid, active, chat };
+    for (const listener of this.activityChangeListeners) {
+      try {
+        listener(change);
+      } catch (error) {
+        log.warn("Agent activity listener failed", { error, chatJid, active });
+      }
+    }
+  }
 
   private async getOrCreateRuntime(chatJid: string): Promise<AgentSessionRuntime> {
     const runtime = await this.sessionManager.getOrCreate(chatJid);

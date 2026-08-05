@@ -24,6 +24,7 @@ function createDeps() {
   ];
   const toastCalls: Array<[string, string | null | undefined, string | undefined, number | undefined]> = [];
   const clearQueueCalls: number[] = [];
+  const refreshActiveChatAgentCalls: any[] = [];
   let refreshQueueCalls = 0;
   let agentStatus: any = null;
   let agentDraft: any = { text: '', totalLines: 0 };
@@ -77,7 +78,9 @@ function createDeps() {
     showLastActivity: () => undefined,
     refreshTimeline: () => undefined,
     refreshModelAndQueueState: () => undefined,
-    refreshActiveChatAgents: () => undefined,
+    refreshActiveChatAgents: (options) => {
+      refreshActiveChatAgentCalls.push(options);
+    },
     refreshCurrentChatBranches: () => undefined,
     notifyForFinalResponse: () => undefined,
     setContextUsage: () => undefined,
@@ -122,6 +125,7 @@ function createDeps() {
     getToastCalls: () => toastCalls,
     getClearQueueCalls: () => clearQueueCalls,
     getRefreshQueueCalls: () => refreshQueueCalls,
+    getRefreshActiveChatAgentCalls: () => refreshActiveChatAgentCalls,
     getAgentStatusState: () => agentStatus,
     getAgentDraftState: () => agentDraft,
     getAgentThoughtState: () => agentThought,
@@ -137,6 +141,19 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
+
+test('handleAppSseEvent applies global activity transitions through the shared chat-agent state', () => {
+  const state = createDeps();
+  const change = {
+    changed_chat_jid: 'chat:beta',
+    active: true,
+    chat: { chat_jid: 'chat:beta', agent_name: '@beta', is_active: true },
+  };
+
+  handleAppSseEvent('active_chats_changed', change, state.deps);
+
+  expect(state.getRefreshActiveChatAgentCalls()).toEqual([{ activityChange: change }]);
+});
 
 test('handleAppSseEvent routes status-panel widget events and clears finished pending actions', () => {
   const state = createDeps();
