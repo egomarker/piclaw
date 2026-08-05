@@ -1,5 +1,6 @@
 import { expect, mock, test } from 'bun:test';
 
+import { ActiveSessionsIndicator } from '../../web/src/components/active-sessions-indicator.js';
 import { ComposeBox, QueuedFollowupStack } from '../../web/src/components/compose-box.js';
 import { MarkdownPreview } from '../../web/src/components/markdown-preview.js';
 import { TabStrip } from '../../web/src/components/tab-strip.js';
@@ -288,6 +289,7 @@ function createMainShellRenderOptions(overrides: Record<string, unknown> = {}) {
     handleComposeSubmitError: noop,
     isComposeBoxAgentActive: false,
     activeChatAgents: [],
+    getActiveChatAgents: async () => ({ chats: [] }),
     connectionStatus: 'connected',
     stateAccessFailed: false,
     activeModel: null,
@@ -318,6 +320,48 @@ test('renderMainShell groups Chat chrome separately from global overlays', () =>
 
   expect(classes.has('chat-surface-main')).toBe(true);
   expect(classes.has('chat-surface-footer')).toBe(true);
+});
+
+test('only Mobile renders the active sessions indicator for the timeline surface', () => {
+  const activeChatAgents = [
+    { chat_jid: 'web:default', agent_name: 'default', is_active: true },
+    { chat_jid: 'web:other', agent_name: 'other', is_active: true },
+  ];
+  const getActiveChatAgents = async () => ({ chats: activeChatAgents });
+  const onSwitchChat = mock(() => {});
+  const renderIndicator = (overrides: Record<string, unknown>) => {
+    const tree = renderMainShell(createMainShellRenderOptions({
+      chatOnlyMode: false,
+      activeChatAgents,
+      getActiveChatAgents,
+      handleBranchPickerChange: onSwitchChat,
+      ...overrides,
+    }));
+    let indicatorVNode: any = null;
+    const classes = new Set<string>();
+    walkVNodes(tree, (node) => {
+      if (node.type === ActiveSessionsIndicator) indicatorVNode = node;
+      if (typeof node.props?.class === 'string') classes.add(node.props.class);
+    });
+    return { indicatorVNode, classes };
+  };
+
+  const mobileTimeline = renderIndicator({ uiMode: 'mobile', mobileChatActive: true });
+  expect(mobileTimeline.indicatorVNode?.props).toEqual(expect.objectContaining({
+    chats: activeChatAgents,
+    surfaceActive: true,
+    loadActiveChats: getActiveChatAgents,
+    currentChatJid: 'web:default',
+    onSwitchChat,
+  }));
+  expect(mobileTimeline.classes.has('mobile-top-right-hud')).toBe(true);
+
+  const mobilePane = renderIndicator({ uiMode: 'mobile', editorOpen: true, mobileChatActive: false });
+  expect(mobilePane.indicatorVNode?.props.surfaceActive).toBe(false);
+
+  const classic = renderIndicator({ uiMode: 'classic' });
+  expect(classic.indicatorVNode).toBeNull();
+  expect(classic.classes.has('mobile-top-right-hud')).toBe(false);
 });
 
 test('compact Mobile renders Workspace as a permanent surface without rail controls', () => {

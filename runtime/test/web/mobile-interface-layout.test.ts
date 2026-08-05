@@ -86,6 +86,16 @@ test('Chat session context-menu sizing and touch targets remain scoped to Mobile
   expect(visualEditorCss).not.toContain('chat-session-menu');
 });
 
+test('Mobile active-session indicator morphs within the shared top-right HUD', () => {
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface > \.mobile-top-right-hud \{[^}]*position: absolute;[^}]*flex-direction: column;[^}]*align-items: flex-end;/s);
+  expect(mobileCss).toMatch(/\.tab-context-menu\.custom-tab-context-menu\.active-sessions-indicator \{[^}]*width: 34px;[^}]*min-height: 34px;[^}]*max-height: 34px;[^}]*border-radius: 999px;[^}]*opacity: 1;/s);
+  expect(mobileCss).toMatch(/\.active-sessions-indicator\.is-open \{[^}]*width: var\(--active-sessions-panel-width\);[^}]*max-height: min\(/s);
+  expect(mobileCss).toMatch(/\.active-sessions-indicator:not\(\.is-visible\) \{[^}]*min-height: 0;[^}]*max-height: 0;[^}]*opacity: 0;[^}]*pointer-events: none;/s);
+  expect(mobileCss).toMatch(/\.active-sessions-indicator\.is-visible \+ \.system-meters-hud-overlay \{\s*margin-top: 8px;/);
+  expect(classicEditorCss).not.toContain('active-sessions-indicator');
+  expect(visualEditorCss).not.toContain('active-sessions-indicator');
+});
+
 test('Mobile suppresses native tab callouts without changing Classic or Visual tabs', () => {
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface \.tab-item \{\s*-webkit-touch-callout: none;/);
   expect(classicEditorCss).not.toContain('-webkit-touch-callout');

@@ -206,6 +206,30 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     opacity: 1;
 }
 
+/* Keep Mobile's top-right overlays in one safe-area-aware stack. */
+.app-shell.mobile-interface > .mobile-top-right-hud {
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0px) + 10px);
+    right: 12px;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    pointer-events: none;
+}
+
+.app-shell.mobile-interface > .mobile-top-right-hud > .system-meters-hud-overlay {
+    position: static;
+    top: auto;
+    right: auto;
+    z-index: auto;
+    transition: margin-top 180ms ease;
+}
+
+.app-shell.mobile-interface > .mobile-top-right-hud > .active-sessions-indicator.is-visible + .system-meters-hud-overlay {
+    margin-top: 8px;
+}
+
 /* The Chat tab's dynamic session menu is shared by right-click and long-press. */
 .app-shell.mobile-interface .tab-context-menu.custom-tab-context-menu {
     width: min(340px, calc(100vw - 16px));
@@ -273,6 +297,154 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
 .app-shell.mobile-interface .chat-session-menu-retry {
     color: var(--accent-color);
     font-weight: 600;
+}
+
+/* Morph the active-session count into the same surface as Chat's context menu. */
+.app-shell.mobile-interface .tab-context-menu.custom-tab-context-menu.active-sessions-indicator {
+    --active-sessions-panel-width: min(
+        340px,
+        calc(100vw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - 16px)
+    );
+    position: relative;
+    top: auto;
+    right: auto;
+    left: auto;
+    z-index: 1;
+    width: 34px;
+    min-width: 34px;
+    max-width: 34px;
+    min-height: 34px;
+    max-height: 34px;
+    overflow: hidden;
+    padding: 0;
+    border-radius: 999px;
+    opacity: 1;
+    transform: scale(1);
+    transform-origin: top right;
+    pointer-events: auto;
+    will-change: width, max-height, opacity, transform;
+    transition:
+        width 180ms ease,
+        min-width 180ms ease,
+        max-width 180ms ease,
+        max-height 220ms ease,
+        padding 180ms ease,
+        border-radius 180ms ease,
+        border-width 160ms ease,
+        opacity 160ms ease,
+        transform 180ms ease;
+}
+
+.app-shell.mobile-interface .tab-context-menu.custom-tab-context-menu.active-sessions-indicator.is-open {
+    width: var(--active-sessions-panel-width);
+    min-width: min(280px, var(--active-sessions-panel-width));
+    max-width: var(--active-sessions-panel-width);
+    max-height: min(
+        420px,
+        calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 20px)
+    );
+    overflow-y: auto;
+    padding: 4px 0;
+    border-radius: var(--radius-md);
+}
+
+.app-shell.mobile-interface .active-sessions-indicator-trigger {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 2;
+    display: flex;
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--accent-color) 82%, var(--bg-primary));
+    color: var(--accent-text, #fff);
+    font-size: 12px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    text-align: center;
+    opacity: 1;
+    transform: scale(1);
+    transition: opacity 120ms ease, transform 160ms ease, background-color 140ms ease;
+}
+
+.app-shell.mobile-interface .active-sessions-indicator-trigger:hover {
+    background: color-mix(in srgb, var(--accent-color) 92%, var(--bg-primary));
+}
+
+.app-shell.mobile-interface .active-sessions-indicator-trigger:focus-visible {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 2px;
+}
+
+.app-shell.mobile-interface .active-sessions-indicator-count {
+    display: inline-flex;
+    min-width: 1ch;
+    align-items: center;
+    justify-content: center;
+}
+
+.app-shell.mobile-interface .active-sessions-indicator-panel {
+    min-width: 0;
+    opacity: 0;
+    visibility: hidden;
+    transform: scale(0.94) translateY(-4px);
+    transform-origin: top right;
+    pointer-events: none;
+    transition:
+        opacity 140ms ease,
+        transform 180ms ease,
+        visibility 0s linear 180ms;
+}
+
+.app-shell.mobile-interface .active-sessions-indicator.is-open > .active-sessions-indicator-trigger {
+    opacity: 0;
+    transform: scale(0.72);
+    pointer-events: none;
+}
+
+.app-shell.mobile-interface .active-sessions-indicator.is-open > .active-sessions-indicator-panel {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    pointer-events: auto;
+    transition-delay: 40ms, 0s, 0s;
+}
+
+.app-shell.mobile-interface .tab-context-menu.custom-tab-context-menu.active-sessions-indicator:not(.is-visible) {
+    width: 0;
+    min-width: 0;
+    max-width: 0;
+    min-height: 0;
+    max-height: 0;
+    padding: 0;
+    border-width: 0;
+    opacity: 0;
+    transform: scale(0.78);
+    pointer-events: none;
+}
+
+@media (max-width: 600px) {
+    .app-shell.mobile-interface > .mobile-top-right-hud {
+        top: max(10px, calc(env(safe-area-inset-top, 0px) + 8px));
+        right: max(8px, calc(env(safe-area-inset-right, 0px) + 8px));
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-shell.mobile-interface .active-sessions-indicator,
+    .app-shell.mobile-interface .active-sessions-indicator-trigger,
+    .app-shell.mobile-interface .active-sessions-indicator-panel,
+    .app-shell.mobile-interface > .mobile-top-right-hud > .system-meters-hud-overlay {
+        transition-duration: 1ms;
+    }
 }
 
 /* Enlarge and reveal close targets only when no mouse or other fine pointer is available. */
