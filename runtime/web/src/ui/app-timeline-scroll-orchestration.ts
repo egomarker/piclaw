@@ -1,12 +1,12 @@
 import { useCallback } from '../vendor/preact-htm.js';
 import { filterQueuedTimelinePosts } from './app-followup-queue.js';
+import {
+  isTimelineTouchScrolling,
+  waitForAndroidTimelineScrollIdle,
+} from './timeline-scroll-state.js';
 
 interface RefBox<T> {
   current: T;
-}
-
-function isTimelineTouchScrolling(container: HTMLElement | null | undefined): boolean {
-  return container?.dataset?.timelineTouchScrolling === 'true';
 }
 
 export function shouldAutoScrollToBottom(scrollTop: number, threshold = 150): boolean {
@@ -76,6 +76,10 @@ export function useTimelineScrollOrchestration(options: {
     });
   }, [timelineRef]);
 
+  const waitForTimelineScrollIdle = useCallback(() => (
+    waitForAndroidTimelineScrollIdle(timelineRef.current)
+  ), [timelineRef]);
+
   const filterQueuedPosts = useCallback((items: any[] | null) => {
     return filterQueuedTimelinePosts(items, followupQueueRowIdsRef.current);
   }, [followupQueueRowIdsRef]);
@@ -84,6 +88,7 @@ export function useTimelineScrollOrchestration(options: {
     scrollToBottom,
     preserveTimelineScroll,
     preserveTimelineScrollTop,
+    waitForTimelineScrollIdle,
     filterQueuedPosts,
   };
 }
