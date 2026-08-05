@@ -210,7 +210,7 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
 .app-shell.mobile-interface > .mobile-top-right-hud {
     position: absolute;
     top: calc(env(safe-area-inset-top, 0px) + 38px);
-    right: 13px;
+    right: 5px;
     z-index: 50;
     display: flex;
     flex-direction: column;
@@ -439,7 +439,7 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
 @media (max-width: 600px) {
     .app-shell.mobile-interface > .mobile-top-right-hud {
         top: max(38px, calc(env(safe-area-inset-top, 0px) + 36px));
-        right: max(9px, calc(env(safe-area-inset-right, 0px) + 9px));
+        right: max(1px, calc(env(safe-area-inset-right, 0px) + 1px));
     }
 
     .app-shell.mobile-interface.zen-mode > .mobile-top-right-hud,
