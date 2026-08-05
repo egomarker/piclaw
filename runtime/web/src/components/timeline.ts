@@ -7,7 +7,11 @@ export const TIMELINE_WINDOW_SIZE = 16;
 export const TIMELINE_WINDOW_THRESHOLD = 100;
 export const TIMELINE_REVEAL_EVENT = 'piclaw:reveal-timeline-post';
 const TIMELINE_TOUCH_OVERSCAN_VIEWPORTS = 4;
+const TIMELINE_PAGE_SIZE = 10;
+const TIMELINE_POST_SCROLL_LOAD_DELAY_MS = 50;
 const TIMELINE_TOUCH_SCROLL_IDLE_MS = 200;
+const TIMELINE_NATIVE_SCROLL_IDLE_MS = 500;
+const TIMELINE_NATIVE_SCROLLEND_WATCHDOG_MS = 1500;
 
 export function haveSameTimelineProps(currentProps, nextProps) {
     if (currentProps === nextProps) return true;
@@ -125,6 +129,13 @@ function getTimelineAnchorWindow(root, prefixHeights, postCount, anchorIndex, an
         root.clientHeight,
         postCount,
     );
+}
+
+function browserSupportsOverflowAnchor() {
+    return typeof window !== 'undefined'
+        && !!window.CSS
+        && typeof window.CSS.supports === 'function'
+        && window.CSS.supports('overflow-anchor', 'auto');
 }
 
 /**
@@ -288,6 +299,11 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
     const restoreFramesRef = useRef({ first: 0, second: 0 });
     const scrollWindowFrameRef = useRef(0);
     const updateWindowForScrollRef = useRef(null);
+    const triggerLoadMoreRef = useRef(null);
+    const deferredLoadTimerRef = useRef(0);
+    const pendingTouchLoadRef = useRef(false);
+    const paginationLockedRef = useRef(false);
+    const supportsOverflowAnchorRef = useRef(browserSupportsOverflowAnchor());
     const measuredWidthRef = useRef(0);
     const touchScrollActiveRef = useRef(false);
     const touchContactRef = useRef(false);
@@ -328,20 +344,36 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         }
         : { start: 0, end: displayPosts.length };
 
-    const triggerLoadMore = useCallback(async () => {
-        if (!onLoadMore || !hasMore || loadingMore) return;
+    const triggerLoadMore = useCallback(async (force = false) => {
         const touchScrolling = touchScrollActiveRef.current;
+        if (supportsOverflowAnchorRef.current && touchScrolling) {
+            if (onLoadMore && hasMore) pendingTouchLoadRef.current = true;
+            return;
+        }
+        if (!force && paginationLockedRef.current) return;
+        if (!onLoadMore || !hasMore || loadingMore) return;
+        pendingTouchLoadRef.current = false;
         const anchor = touchScrolling
             ? null
-            : captureTimelineViewportAnchor(timelineRef?.current, timelineContentRef.current);
+            : captureTimelineViewportAnchor(
+                timelineRef?.current,
+                timelineContentRef.current,
+            );
         loadAnchorRef.current = anchor;
         setLoadingMore(true);
         try {
-            await onLoadMore({ preserveScroll: !touchScrolling, preserveMode: 'top' });
+            const virtualizingAfterLoad = windowingActive
+                || displayPosts.length + TIMELINE_PAGE_SIZE > TIMELINE_WINDOW_THRESHOLD;
+            await onLoadMore({
+                preserveScroll: supportsOverflowAnchorRef.current
+                    ? !virtualizingAfterLoad
+                    : !touchScrolling,
+                preserveMode: 'top',
+            });
         } finally {
             setLoadingMore(false);
         }
-    }, [hasMore, loadingMore, onLoadMore, timelineRef]);
+    }, [displayPosts.length, hasMore, loadingMore, onLoadMore, timelineRef, windowingActive]);
 
     const updateWindowForScroll = useCallback((root) => {
         if (!root || restoringAnchorRef.current || isAnchorScrolling(root) || !shouldWindow) return;
@@ -422,6 +454,18 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         const root = touchScrollerRef.current || timelineRef?.current;
         if (root?.dataset) delete root.dataset.timelineTouchScrolling;
         touchScrollerRef.current = null;
+        const loadAfterScroll = pendingTouchLoadRef.current;
+        pendingTouchLoadRef.current = false;
+        if (loadAfterScroll) {
+            paginationLockedRef.current = true;
+            if (!loadingMore) {
+                clearTimeout(deferredLoadTimerRef.current);
+                deferredLoadTimerRef.current = setTimeout(() => {
+                    deferredLoadTimerRef.current = 0;
+                    triggerLoadMoreRef.current?.(true);
+                }, TIMELINE_POST_SCROLL_LOAD_DELAY_MS);
+            }
+        }
         const content = timelineContentRef.current;
         const anchor = captureTimelineViewportAnchor(root, content);
         loadAnchorRef.current = null;
@@ -470,7 +514,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         setWindowRange((current) => (
             haveSameTimelineWindow(current, compactWindow) ? current : compactWindow
         ));
-    }, [displayPosts, reverse, timelineRef, windowingActive]);
+    }, [displayPosts, loadingMore, reverse, timelineRef, windowingActive]);
 
     finishTouchScrollRef.current = finishTouchScroll;
     updateWindowForScrollRef.current = updateWindowForScroll;
@@ -478,14 +522,24 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
     const scheduleTouchScrollEnd = useCallback(() => {
         if (!touchScrollActiveRef.current) return;
         clearTimeout(touchScrollIdleTimerRef.current);
+        const root = touchScrollerRef.current;
+        const delay = supportsOverflowAnchorRef.current
+            ? (root && 'onscrollend' in root
+                ? TIMELINE_NATIVE_SCROLLEND_WATCHDOG_MS
+                : TIMELINE_NATIVE_SCROLL_IDLE_MS)
+            : TIMELINE_TOUCH_SCROLL_IDLE_MS;
         touchScrollIdleTimerRef.current = setTimeout(() => {
             touchScrollIdleTimerRef.current = 0;
             finishTouchScrollRef.current?.();
-        }, TIMELINE_TOUCH_SCROLL_IDLE_MS);
+        }, delay);
     }, []);
 
     const handleTouchStart = useCallback((event) => {
         const root = event.currentTarget;
+        paginationLockedRef.current = false;
+        pendingTouchLoadRef.current = false;
+        clearTimeout(deferredLoadTimerRef.current);
+        deferredLoadTimerRef.current = 0;
         touchContactRef.current = true;
         touchScrollActiveRef.current = true;
         touchScrollerRef.current = root;
@@ -520,9 +574,19 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         scheduleTouchScrollEnd();
     }, [scheduleTouchScrollEnd]);
 
+    const handleWheel = useCallback(() => {
+        paginationLockedRef.current = false;
+    }, []);
+
     const handleScroll = useCallback((event) => {
         if (restoringAnchorRef.current || isAnchorScrolling(event.target)) return;
         const root = event.target;
+        loadAnchorRef.current = null;
+        if (supportsOverflowAnchorRef.current) {
+            pendingAnchorRef.current = null;
+            cancelAnimationFrame(restoreFramesRef.current.first);
+            cancelAnimationFrame(restoreFramesRef.current.second);
+        }
         const touchScrolling = touchScrollActiveRef.current;
         if (touchScrolling && !touchContactRef.current) scheduleTouchScrollEnd();
         const contentOffset = getTimelineContentOffset(root, reverse);
@@ -548,6 +612,10 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
     useEffect(() => () => {
         cancelAnimationFrame(scrollWindowFrameRef.current);
         scrollWindowFrameRef.current = 0;
+        clearTimeout(deferredLoadTimerRef.current);
+        deferredLoadTimerRef.current = 0;
+        pendingTouchLoadRef.current = false;
+        paginationLockedRef.current = false;
         clearTimeout(touchScrollIdleTimerRef.current);
         touchScrollIdleTimerRef.current = 0;
         if (touchScrollerRef.current?.dataset) {
@@ -744,20 +812,38 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
 
         cancelAnimationFrame(restoreFramesRef.current.first);
         cancelAnimationFrame(restoreFramesRef.current.second);
-        restoringAnchorRef.current = true;
         const restore = () => {
             if (pendingAnchorRef.current !== anchor) return false;
             return restoreTimelineViewportAnchor(root, content, anchor);
         };
-        restore();
-        restoreFramesRef.current.first = requestAnimationFrame(() => {
-            restore();
-            restoreFramesRef.current.second = requestAnimationFrame(() => {
-                restore();
-                if (pendingAnchorRef.current === anchor) pendingAnchorRef.current = null;
-                restoringAnchorRef.current = false;
+
+        if (supportsOverflowAnchorRef.current) {
+            // Chromium/Firefox have their native timeline anchoring disabled in
+            // CSS. Let layout settle, then perform one correction only; any real
+            // scroll before this point clears the pending anchor and cancels it.
+            restoreFramesRef.current.first = requestAnimationFrame(() => {
+                restoreFramesRef.current.second = requestAnimationFrame(() => {
+                    if (pendingAnchorRef.current !== anchor) return;
+                    restoringAnchorRef.current = true;
+                    restore();
+                    if (pendingAnchorRef.current === anchor) pendingAnchorRef.current = null;
+                    restoringAnchorRef.current = false;
+                });
             });
-        });
+        } else {
+            // Preserve the existing WebKit path exactly: it has no native scroll
+            // anchoring and needs retries while asynchronous row layout settles.
+            restoringAnchorRef.current = true;
+            restore();
+            restoreFramesRef.current.first = requestAnimationFrame(() => {
+                restore();
+                restoreFramesRef.current.second = requestAnimationFrame(() => {
+                    restore();
+                    if (pendingAnchorRef.current === anchor) pendingAnchorRef.current = null;
+                    restoringAnchorRef.current = false;
+                });
+            });
+        }
 
         return () => {
             cancelAnimationFrame(restoreFramesRef.current.first);
@@ -873,7 +959,6 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         return () => observer.disconnect();
     }, [hasIntersectionObserver, hasMore, onLoadMore, timelineRef, triggerLoadMore]);
 
-    const triggerLoadMoreRef = useRef(triggerLoadMore);
     triggerLoadMoreRef.current = triggerLoadMore;
 
     useEffect(() => {
@@ -921,6 +1006,8 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             class="timeline ${reverse ? 'reverse' : 'normal'}"
             ref=${timelineRef}
             onScroll=${handleScroll}
+            onWheel=${handleWheel}
+            onPointerDown=${handleWheel}
             onTouchStart=${handleTouchStart}
             onTouchEnd=${handleTouchEnd}
             onTouchCancel=${handleTouchEnd}
