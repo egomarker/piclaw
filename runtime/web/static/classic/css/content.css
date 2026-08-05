@@ -87,14 +87,12 @@
     height: 1px;
     flex: 0 0 1px;
     pointer-events: none;
-    overflow-anchor: none;
 }
 
 .timeline-virtual-spacer {
     width: 100%;
     flex: 0 0 auto;
     pointer-events: none;
-    overflow-anchor: none;
 }
 
 .load-more-btn {
