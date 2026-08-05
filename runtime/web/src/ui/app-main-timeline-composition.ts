@@ -48,7 +48,6 @@ export function useMainAppTimelineComposition(options: {
     scrollToBottom,
     preserveTimelineScroll,
     preserveTimelineScrollTop,
-    waitForTimelineScrollIdle,
     filterQueuedPosts,
   } = useTimelineScrollOrchestration({
     timelineRef,
@@ -73,7 +72,6 @@ export function useMainAppTimelineComposition(options: {
   } = useTimeline({
     preserveTimelineScroll,
     preserveTimelineScrollTop,
-    waitForTimelineScrollIdle,
     chatJid: currentChatJid,
     currentHashtag,
     searchQuery,
