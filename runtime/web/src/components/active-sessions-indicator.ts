@@ -127,7 +127,7 @@ export function ActiveSessionsIndicator({
   const noteFrequentInteraction = useCallback(() => {
     if (!open) return;
     const now = Date.now();
-    if (now - lastFrequentInteractionAtRef.current < 250) return;
+    if (now - lastFrequentInteractionAtRef.current < 500) return;
     lastFrequentInteractionAtRef.current = now;
     restartAutoCollapseTimer();
   }, [open, restartAutoCollapseTimer]);

@@ -1061,8 +1061,8 @@ async function runActiveSessionsIndicatorScenario(page: Page) {
     };
   });
   assert(
-    Math.abs(circleState.width - 34) <= 1
-      && Math.abs(circleState.height - 34) <= 1
+    Math.abs(circleState.width - 44) <= 1
+      && Math.abs(circleState.height - 44) <= 1
       && circleState.count === '2'
       && circleState.ariaExpanded === 'false'
       && circleState.title === '2 active sessions',
@@ -1130,7 +1130,7 @@ async function runActiveSessionsIndicatorScenario(page: Page) {
       && openState.classes.includes('is-open')
       && openState.width >= 280
       && openState.width <= 340
-      && openState.height > 34
+      && openState.height > 44
       && openState.ariaExpanded === 'true'
       && openState.menuLabels.join('|') === '@default|@running-other',
     `Active sessions panel does not match the Chat session menu: ${JSON.stringify(openState)}.`,
