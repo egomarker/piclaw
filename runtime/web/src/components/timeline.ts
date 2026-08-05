@@ -5,6 +5,7 @@ import { getAgentAvatarUrl, getAgentName } from '../ui/agent-utils.js';
 
 export const TIMELINE_WINDOW_SIZE = 16;
 export const TIMELINE_WINDOW_THRESHOLD = 100;
+export const TIMELINE_VIRTUALIZATION_ENABLED = false;
 export const TIMELINE_REVEAL_EVENT = 'piclaw:reveal-timeline-post';
 const TIMELINE_TOUCH_OVERSCAN_VIEWPORTS = 4;
 const TIMELINE_PAGE_SIZE = 10;
@@ -318,7 +319,10 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         () => Array.isArray(posts) ? posts.slice().sort((a, b) => a.id - b.id) : [],
         [posts],
     );
-    const canWindow = reverse && hasIntersectionObserver && displayPosts.length > TIMELINE_WINDOW_THRESHOLD;
+    const canWindow = TIMELINE_VIRTUALIZATION_ENABLED
+        && reverse
+        && hasIntersectionObserver
+        && displayPosts.length > TIMELINE_WINDOW_THRESHOLD;
     const previousPostCount = previousPostsRef.current.length;
     const shouldBootstrapWindow = canWindow && !windowingActive
         && (previousPostCount === 0
@@ -362,8 +366,9 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         loadAnchorRef.current = anchor;
         setLoadingMore(true);
         try {
-            const virtualizingAfterLoad = windowingActive
-                || displayPosts.length + TIMELINE_PAGE_SIZE > TIMELINE_WINDOW_THRESHOLD;
+            const virtualizingAfterLoad = TIMELINE_VIRTUALIZATION_ENABLED
+                && (windowingActive
+                    || displayPosts.length + TIMELINE_PAGE_SIZE > TIMELINE_WINDOW_THRESHOLD);
             await onLoadMore({
                 preserveScroll: supportsOverflowAnchorRef.current
                     ? !virtualizingAfterLoad

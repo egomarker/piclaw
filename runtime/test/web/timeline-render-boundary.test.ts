@@ -7,6 +7,7 @@ import {
   getTimelineContentOffset,
   getTimelineWindowAroundIndex,
   haveSameTimelineProps,
+  TIMELINE_VIRTUALIZATION_ENABLED,
   windowFromScrollOffset,
 } from '../../web/src/components/timeline.js';
 
@@ -28,6 +29,10 @@ test('timeline render boundary updates for changed timeline data or callbacks', 
   expect(haveSameTimelineProps(current, { ...current, hasMore: false })).toBe(false);
   expect(haveSameTimelineProps(current, { ...current, onLoadMore: () => {} })).toBe(false);
   expect(haveSameTimelineProps(current, { ...current, searchQuery: null })).toBe(false);
+});
+
+test('timeline virtualization remains disabled', () => {
+  expect(TIMELINE_VIRTUALIZATION_ENABLED).toBe(false);
 });
 
 test('timeline window stays bounded at the newest posts', () => {
