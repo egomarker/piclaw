@@ -114,7 +114,7 @@ test('settings dialog keys are translated across peer locales', () => {
   expect(translate('settings.placeholder.keychain', undefined, 'zh-CN')).toBe('筛选条目…');
   expect(translate('settings.section.addons', undefined, 'en')).toBe('Add-ons');
   expect(translate('settings.title', undefined, 'ru')).toBe('Настройки');
-  expect(translate('settings.section.keychain', undefined, 'ru')).toBe('Хранилище ключей');
+  expect(translate('settings.section.keychain', undefined, 'ru')).toBe('Связка ключей');
 });
 
 test('compose and workspace keys are translated across peer locales', () => {
