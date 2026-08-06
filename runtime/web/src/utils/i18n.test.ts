@@ -50,6 +50,9 @@ test('normalizeLocale maps loose codes to the locked locale set', () => {
   expect(normalizeLocale('zh-Hans')).toBe('zh-CN');
   expect(normalizeLocale('ja')).toBe('ja');
   expect(normalizeLocale('ja-JP')).toBe('ja');
+  expect(normalizeLocale('ru')).toBe('ru');
+  expect(normalizeLocale('ru-RU')).toBe('ru');
+  expect(normalizeLocale('ru_UA')).toBe('ru');
   expect(normalizeLocale('en')).toBe('en');
   expect(normalizeLocale('en-GB')).toBe('en');
   expect(normalizeLocale('fr-FR')).toBe(DEFAULT_LOCALE);
@@ -110,6 +113,8 @@ test('settings dialog keys are translated across peer locales', () => {
   expect(translate('settings.section.models', undefined, 'ja')).toBe('モデル');
   expect(translate('settings.placeholder.keychain', undefined, 'zh-CN')).toBe('筛选条目…');
   expect(translate('settings.section.addons', undefined, 'en')).toBe('Add-ons');
+  expect(translate('settings.title', undefined, 'ru')).toBe('Настройки');
+  expect(translate('settings.section.keychain', undefined, 'ru')).toBe('Хранилище ключей');
 });
 
 test('compose and workspace keys are translated across peer locales', () => {
@@ -118,6 +123,8 @@ test('compose and workspace keys are translated across peer locales', () => {
   expect(translate('workspace.uploadFiles', undefined, 'zh-CN')).toBe('上传文件');
   expect(translate('workspace.deleteSelectedFile', undefined, 'ja')).toBe('選択したファイルを削除');
   expect(translate('workspace.downloadZip', undefined, 'en')).toBe('Download folder as zip');
+  expect(translate('compose.send', undefined, 'ru')).toBe('Отправить');
+  expect(translate('workspace.title', undefined, 'ru')).toBe('Рабочая область');
 });
 
 test('menu keys are translated across all peer locales', () => {

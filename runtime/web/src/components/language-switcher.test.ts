@@ -21,4 +21,5 @@ test('buildLanguageOptions exposes human-readable labels', () => {
   expect(labels.en).toBe('English');
   expect(labels['zh-CN']).toBe('简体中文');
   expect(labels.ja).toBe('日本語');
+  expect(labels.ru).toBe('Русский');
 });
