@@ -11,7 +11,7 @@ export function resolveActiveSessionsIndicatorState(chats: unknown, surfaceActiv
   const count = resolveRunningChatSessions(chats).length;
   return {
     count,
-    visible: Boolean(surfaceActive && count > 0),
+    visible: Boolean(surfaceActive),
   };
 }
 
@@ -24,7 +24,7 @@ export function ActiveSessionsIndicator({
 }: {
   chats?: unknown;
   surfaceActive?: boolean;
-  loadActiveChats?: () => Promise<{ chats?: unknown[] } | unknown[]>;
+  loadActiveChats?: () => Promise<{ chats?: unknown[]; recent_chats?: unknown[] } | unknown[]>;
   currentChatJid?: string | null;
   onSwitchChat?: (chatJid: string) => void;
 }) {
@@ -137,12 +137,15 @@ export function ActiveSessionsIndicator({
     restartAutoCollapseTimer();
   }, [open, restartAutoCollapseTimer]);
 
-  const countLabel = `${count} active ${count === 1 ? 'session' : 'sessions'}`;
+  const countLabel = count > 0
+    ? `${count} active ${count === 1 ? 'session' : 'sessions'}`
+    : 'No active sessions';
   const className = [
     'tab-context-menu',
     'custom-tab-context-menu',
     'active-sessions-indicator',
     visible ? 'is-visible' : '',
+    count === 0 ? 'is-idle' : '',
     open ? 'is-open' : '',
   ].filter(Boolean).join(' ');
 
@@ -165,14 +168,16 @@ export function ActiveSessionsIndicator({
         class="active-sessions-indicator-trigger"
         data-testid="active-sessions-indicator-trigger"
         title=${countLabel}
-        aria-label=${`${countLabel}. Show running sessions.`}
+        aria-label=${`${countLabel}. Show active and recent sessions.`}
         aria-haspopup="menu"
         aria-expanded=${open ? 'true' : 'false'}
         aria-controls=${ACTIVE_SESSIONS_INDICATOR_PANEL_ID}
         tabIndex=${visible && !open ? 0 : -1}
         onClick=${() => setOpen(true)}
       >
-        <span class="active-sessions-indicator-count" aria-hidden="true">${count}</span>
+        ${count > 0
+          ? html`<span class="active-sessions-indicator-count" aria-hidden="true">${count}</span>`
+          : html`<span class="active-sessions-indicator-check" aria-hidden="true">✓</span>`}
       </button>
       <div
         ref=${panelRef}

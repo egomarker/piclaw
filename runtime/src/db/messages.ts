@@ -164,6 +164,45 @@ export function listRecentChatJids(limit = 10, options?: { excludeChatJids?: str
     .filter(Boolean);
 }
 
+export interface RecentChatActivity {
+  chat_jid: string;
+  agent_name: string;
+  last_activity_at: string;
+}
+
+/** List non-archived chats with persisted message activity after an ISO cutoff. */
+export function listRecentChatActivity(since: string, limit = 100): RecentChatActivity[] {
+  const normalizedSince = typeof since === "string" ? since.trim() : "";
+  if (!normalizedSince || !Number.isFinite(Date.parse(normalizedSince))) return [];
+
+  const maxRows = Math.max(1, Math.min(200, Math.trunc(limit) || 100));
+  const rows = getDb().prepare(
+    `SELECT c.jid AS chat_jid,
+            COALESCE(NULLIF(TRIM(b.agent_name), ''), NULLIF(TRIM(c.name), ''), c.jid) AS agent_name,
+            c.last_message_time AS last_activity_at
+       FROM chats c
+       LEFT JOIN chat_branches b ON b.chat_jid = c.jid
+      WHERE c.last_message_time > ?
+        AND (b.chat_jid IS NULL OR b.archived_at IS NULL)
+      ORDER BY c.last_message_time DESC, c.jid ASC
+      LIMIT ?`
+  ).all(normalizedSince, maxRows) as Array<{
+    chat_jid: string | null | undefined;
+    agent_name: string | null | undefined;
+    last_activity_at: string | null | undefined;
+  }>;
+
+  return rows.flatMap((row) => {
+    const chatJid = typeof row.chat_jid === "string" ? row.chat_jid.trim() : "";
+    const lastActivityAt = typeof row.last_activity_at === "string" ? row.last_activity_at.trim() : "";
+    if (!chatJid || !lastActivityAt) return [];
+    const agentName = typeof row.agent_name === "string" && row.agent_name.trim()
+      ? row.agent_name.trim()
+      : chatJid;
+    return [{ chat_jid: chatJid, agent_name: agentName, last_activity_at: lastActivityAt }];
+  });
+}
+
 /**
  * Persist a message into the `messages` table.
  * Returns the SQLite rowid of the inserted row (used as the interaction id

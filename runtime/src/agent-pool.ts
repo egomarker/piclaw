@@ -58,12 +58,14 @@ import { installLegacySessionAffinityCompatibility } from "./agent-pool/session-
 import {
   type ChatBranchRecord,
   type MergeChatBranchIntoParentResult,
+  type RecentChatActivity,
   type SshConfig,
   type SshConfigApplyTiming,
   type SshConfigClearResult,
   type SshConfigSetResult,
   deleteSshConfig,
   getSshConfig,
+  listRecentChatActivity,
   listRecentChatJids,
   pruneOldTokenUsage,
   reclaimFreelistPages,
@@ -602,6 +604,10 @@ export class AgentPool {
 
   listActiveChats(): ActiveChatAgent[] {
     return this.branchManager.listActiveChats();
+  }
+
+  listRecentChats(since: string, limit = 100): RecentChatActivity[] {
+    return listRecentChatActivity(since, limit);
   }
 
   subscribeActivityChanges(listener: AgentPoolActivityChangeListener): () => void {

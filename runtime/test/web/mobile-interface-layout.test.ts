@@ -82,6 +82,7 @@ test('Attach to Chat toolbar states remain scoped to Mobile', () => {
 test('Active-session menu sizing and touch targets remain scoped to Mobile', () => {
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface \.tab-context-menu\.custom-tab-context-menu \{[^}]*width: min\(340px, calc\(100vw - 16px\)\);[^}]*max-height: min\(420px, calc\(100vh - 16px\)\);[^}]*overflow-y: auto;/s);
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface \.chat-session-menu-item \{[^}]*display: flex;[^}]*min-height: 44px;/s);
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface \.chat-session-menu-recent-title \{[^}]*border-top: 1px solid var\(--border-color\);/s);
   expect(classicEditorCss).not.toContain('chat-session-menu');
   expect(visualEditorCss).not.toContain('chat-session-menu');
 });
@@ -90,6 +91,8 @@ test('Mobile active-session indicator morphs within the shared top-right HUD', (
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface > \.mobile-top-right-hud \{[^}]*position: absolute;[^}]*flex-direction: column;[^}]*align-items: flex-end;/s);
   expect(mobileCss).toMatch(/\.tab-context-menu\.custom-tab-context-menu\.active-sessions-indicator \{[^}]*width: 44px;[^}]*min-height: 44px;[^}]*max-height: 44px;[^}]*border-radius: 999px;[^}]*opacity: 1;/s);
   expect(mobileCss).toMatch(/\.active-sessions-indicator\.is-open \{[^}]*width: var\(--active-sessions-panel-width\);[^}]*max-height: min\(/s);
+  expect(mobileCss).toMatch(/\.active-sessions-indicator\.is-idle > \.active-sessions-indicator-trigger \{[^}]*var\(--success-color, #00ba7c\)/s);
+  expect(mobileCss).toMatch(/\.active-sessions-indicator-check \{[^}]*font-size: 20px;/s);
   expect(mobileCss).toMatch(/\.active-sessions-indicator:not\(\.is-visible\) \{[^}]*min-height: 0;[^}]*max-height: 0;[^}]*opacity: 0;[^}]*pointer-events: none;/s);
   expect(mobileCss).toMatch(/\.active-sessions-indicator\.is-visible \+ \.system-meters-hud-overlay \{\s*margin-top: 8px;/);
   expect(classicEditorCss).not.toContain('active-sessions-indicator');

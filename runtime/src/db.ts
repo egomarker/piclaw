@@ -31,6 +31,7 @@ export {
 export {
   storeChatMetadata,
   listRecentChatJids,
+  listRecentChatActivity,
   storeMessage,
   getMessageByRowId,
   getMessageByAnyRowId,
@@ -179,6 +180,7 @@ export {
   deleteAllWebSessions,
 } from "./db/web-sessions.js";
 export type { MergeChatBranchIntoParentResult } from "./db/chat-branches.js";
+export type { RecentChatActivity } from "./db/messages.js";
 export type {
   ChatBranchRecord,
   InteractionRow,

@@ -1027,10 +1027,19 @@ async function installActiveSessionsIndicatorFixture(page: Page) {
     window.localStorage.setItem('piclaw_system_meters_collapsed', 'false');
   });
   await page.route('**/agent/active-chats', async (route) => {
+    const now = Date.now();
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ chats: activeSessionsIndicatorFixtureChats }),
+      body: JSON.stringify({
+        chats: activeSessionsIndicatorFixtureChats,
+        recent_chats: [
+          { chat_jid: 'web:running-other', agent_name: 'running-other', last_activity_at: new Date(now - 60_000).toISOString() },
+          { chat_jid: 'web:idle-resident', agent_name: 'idle-resident', last_activity_at: new Date(now - (3 * 60_000)).toISOString() },
+          { chat_jid: 'web:recent-other', agent_name: 'recent-other', last_activity_at: new Date(now - (21 * 60_000)).toISOString() },
+          { chat_jid: 'web:stale', agent_name: 'stale', last_activity_at: new Date(now - (46 * 60_000)).toISOString() },
+        ],
+      }),
     });
   });
 }
@@ -1106,7 +1115,7 @@ async function runActiveSessionsIndicatorScenario(page: Page) {
   const menu = panel.locator('[data-testid="chat-session-menu"]');
   await menu.waitFor({ state: 'visible', timeout: 15000 });
   const sessionItems = menu.locator('[data-testid="chat-session-menu-item"]');
-  await page.waitForFunction(() => document.querySelectorAll('[data-testid="active-sessions-indicator-panel"] [data-testid="chat-session-menu-item"]').length === 2);
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="active-sessions-indicator-panel"] [data-testid="chat-session-menu-item"]').length === 4);
   const sessionItemCount = await sessionItems.count();
   await page.waitForTimeout(250);
 
@@ -1122,6 +1131,8 @@ async function runActiveSessionsIndicatorScenario(page: Page) {
       ariaExpanded: control?.getAttribute('aria-expanded'),
       menuLabels: Array.from(element.querySelectorAll<HTMLElement>('.chat-session-menu-label'))
         .map((label) => label.textContent?.trim()),
+      menuStatuses: Array.from(element.querySelectorAll<HTMLElement>('.chat-session-menu-meta > span:first-child'))
+        .map((label) => label.textContent?.trim()),
     };
   });
   assert(
@@ -1132,7 +1143,8 @@ async function runActiveSessionsIndicatorScenario(page: Page) {
       && openState.width <= 340
       && openState.height > 44
       && openState.ariaExpanded === 'true'
-      && openState.menuLabels.join('|') === '@default|@running-other',
+      && openState.menuLabels.join('|') === '@default|@running-other|@idle-resident|@recent-other'
+      && openState.menuStatuses.join('|') === 'Working|Running shell|3 min|21 min',
     `Active sessions panel does not match the Chat session menu: ${JSON.stringify(openState)}.`,
   );
 

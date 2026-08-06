@@ -324,7 +324,7 @@ export async function saveEnvironmentOverride(payload) {
 }
 
 /**
- * List currently active chat agents/branches known to the backend session pool.
+ * List active chat agents plus recently active persisted sessions.
  */
 export async function getActiveChatAgents() {
     return request('/agent/active-chats');

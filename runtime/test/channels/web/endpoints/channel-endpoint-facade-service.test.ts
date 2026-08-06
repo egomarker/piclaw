@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentPool } from "../../../../src/agent-pool.js";
 import {
+  ACTIVE_CHATS_RECENT_WINDOW_MINUTES,
   WebChannelEndpointFacadeService,
   type WebChannelEndpointFacadeOptions,
 } from "../../../../src/channels/web/endpoints/channel-endpoint-facade-service.js";
@@ -76,6 +77,8 @@ function createFacade(getIdentitySnapshot: () => WebChannelIdentitySnapshot) {
   const scheduledWarmups: Array<{ limit?: number; excludeChatJids?: string[] }> = [];
   const scheduledPriorityWarmups: string[] = [];
   const activeChats = [{ chat_jid: "web:default", agent_name: "Pi" }];
+  const recentChats = [{ chat_jid: "web:recent", agent_name: "Recent", last_activity_at: "2026-08-06T08:00:00.000Z" }];
+  const recentChatCalls: Array<{ since: string; limit?: number }> = [];
   const knownChats = [{ chat_jid: "web:branch", agent_name: "Branch" }];
   const options: WebChannelEndpointFacadeOptions = {
     endpointContexts: contexts,
@@ -102,6 +105,10 @@ function createFacade(getIdentitySnapshot: () => WebChannelIdentitySnapshot) {
       return new Response(JSON.stringify({ ok: true, chat_jid: chatJid, is_reply: isReply }), { status: 201 });
     },
     listActiveChats: () => activeChats,
+    listRecentChats: (since, limit) => {
+      recentChatCalls.push({ since, limit });
+      return recentChats;
+    },
     listKnownChats: () => knownChats,
   };
 
@@ -112,6 +119,8 @@ function createFacade(getIdentitySnapshot: () => WebChannelIdentitySnapshot) {
     scheduledWarmups,
     scheduledPriorityWarmups,
     activeChats,
+    recentChats,
+    recentChatCalls,
     knownChats,
   };
 }
@@ -183,12 +192,20 @@ describe("web channel endpoint facade service", () => {
     ]);
   });
 
-  test("serves active chats and known branches through facade helpers", async () => {
-    const { facade, activeChats, knownChats } = createFacade(() => createIdentitySnapshot());
+  test("serves active and recent chats plus known branches through facade helpers", async () => {
+    const { facade, activeChats, recentChats, recentChatCalls, knownChats } = createFacade(() => createIdentitySnapshot());
 
+    const beforeRequest = Date.now();
     const activeResponse = facade.handleAgentActiveChats();
+    const afterRequest = Date.now();
     expect(activeResponse.status).toBe(200);
-    expect(await activeResponse.json()).toEqual({ chats: activeChats });
+    expect(await activeResponse.json()).toEqual({ chats: activeChats, recent_chats: recentChats });
+    expect(recentChatCalls).toHaveLength(1);
+    expect(recentChatCalls[0]?.limit).toBe(100);
+    const cutoffMs = Date.parse(recentChatCalls[0]?.since || "");
+    const windowMs = ACTIVE_CHATS_RECENT_WINDOW_MINUTES * 60_000;
+    expect(cutoffMs).toBeGreaterThanOrEqual(beforeRequest - windowMs);
+    expect(cutoffMs).toBeLessThanOrEqual(afterRequest - windowMs);
 
     const branchesResponse = facade.handleAgentBranches(
       new Request("https://example.com/agent/branches?root_chat_jid=web%3Aroot&include_archived=1")

@@ -361,6 +361,7 @@ export function createWebChannelConstructorFactory(
     broadcastEvent: (eventType, data) => channel.broadcastEvent(eventType, data),
     handlePostRequest: (req, isReply, chatJid) => deps.handlePostRequest(channel, req, isReply, chatJid),
     listActiveChats: () => channel.agentPool.listActiveChats(),
+    listRecentChats: (since, limit) => channel.agentPool.listRecentChats(since, limit),
     listKnownChats: resolveListKnownChats(channel.agentPool),
     getSessionTreeForChat: (chatJid: string) =>
       (channel.agentPool as { getSessionTreeForChat?: (chatJid: string) => { leafId: string | null; nodes: unknown[] } | null }).getSessionTreeForChat?.(chatJid) ?? null,
