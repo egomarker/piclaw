@@ -25,11 +25,11 @@ test('active sessions indicator counts the current running session and other run
   ])).toEqual({ count: 2, visible: true });
 });
 
-test('active sessions indicator stays hidden off the timeline or without running sessions', () => {
+test('active sessions indicator stays visible without active sessions and hides off the timeline', () => {
   const running = [{ chat_jid: 'web:default', agent_name: 'default', is_active: true }];
 
   expect(resolveActiveSessionsIndicatorState(running, false)).toEqual({ count: 1, visible: false });
-  expect(resolveActiveSessionsIndicatorState([], true)).toEqual({ count: 0, visible: false });
+  expect(resolveActiveSessionsIndicatorState([], true)).toEqual({ count: 0, visible: true });
 });
 
 test('active sessions panel collapses five seconds after its last interaction', () => {

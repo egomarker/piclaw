@@ -38,6 +38,10 @@ import type {
 /** Dependencies required by the extracted endpoint facade. */
 import type { AgentPool } from "../../../agent-pool.js";
 
+export const ACTIVE_CHATS_RECENT_WINDOW_MINUTES = 45;
+const ACTIVE_CHATS_RECENT_WINDOW_MS = ACTIVE_CHATS_RECENT_WINDOW_MINUTES * 60_000;
+const ACTIVE_CHATS_RECENT_LIMIT = 100;
+
 export interface WebChannelEndpointFacadeOptions {
   endpointContexts: WebChannelEndpointContexts;
   defaultChatJid: string;
@@ -48,6 +52,7 @@ export interface WebChannelEndpointFacadeOptions {
   broadcastEvent(eventType: string, data: unknown): void;
   handlePostRequest(req: Request, isReply: boolean, chatJid: string): Promise<Response>;
   listActiveChats(): unknown[];
+  listRecentChats?(since: string, limit?: number): unknown[];
   listKnownChats?(rootChatJid?: string | null, options?: { includeArchived?: boolean }): unknown[];
   getSessionTreeForChat?(chatJid: string): { leafId: string | null; nodes: unknown[]; flat?: boolean; total?: number; capped?: boolean } | null;
 }
@@ -194,7 +199,16 @@ export class WebChannelEndpointFacadeService {
   }
 
   handleAgentActiveChats(): Response {
-    const { result, durationMs } = measureSync(() => this.options.json({ chats: this.options.listActiveChats() }, 200));
+    const { result, durationMs } = measureSync(() => {
+      const recentCutoff = new Date(Date.now() - ACTIVE_CHATS_RECENT_WINDOW_MS).toISOString();
+      const recentChats = typeof this.options.listRecentChats === "function"
+        ? this.options.listRecentChats(recentCutoff, ACTIVE_CHATS_RECENT_LIMIT)
+        : [];
+      return this.options.json({
+        chats: this.options.listActiveChats(),
+        recent_chats: recentChats,
+      }, 200);
+    });
     return appendServerTiming(result, {
       name: "agent_active_chats",
       durationMs,

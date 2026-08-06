@@ -109,6 +109,7 @@ describe("web channel constructor wiring factory", () => {
       } as WebChannelConstructorFactoryChannel["queue"],
       agentPool: {
         listActiveChats: () => ["web:default"],
+        listRecentChats: (since: string, limit?: number) => [since, limit ?? null],
         listKnownChats: (rootChatJid?: string | null, options?: { includeArchived?: boolean }) => [
           rootChatJid ?? null,
           Boolean(options?.includeArchived),
@@ -402,6 +403,10 @@ describe("web channel constructor wiring factory", () => {
     expect(endpointContextOptions?.defaultAgentId).toBe("default");
     expect(endpointFacadeOptions?.endpointContexts).toBe(endpointContexts);
     expect(endpointFacadeOptions?.listActiveChats()).toEqual(["web:default"]);
+    expect(endpointFacadeOptions?.listRecentChats?.("2026-08-06T08:00:00.000Z", 100)).toEqual([
+      "2026-08-06T08:00:00.000Z",
+      100,
+    ]);
     expect(endpointFacadeOptions?.listKnownChats?.("web:root", { includeArchived: true })).toEqual(["web:root", true]);
     const handlePostRequest = endpointFacadeOptions?.handlePostRequest;
     expect(handlePostRequest).toBeDefined();

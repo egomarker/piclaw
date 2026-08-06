@@ -254,6 +254,12 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     text-transform: uppercase;
 }
 
+.app-shell.mobile-interface .chat-session-menu-recent-title {
+    margin-top: 4px;
+    padding-top: 9px;
+    border-top: 1px solid var(--border-color);
+}
+
 .app-shell.mobile-interface .chat-session-menu-status,
 .app-shell.mobile-interface .custom-tab-context-menu-unavailable {
     padding: 10px 12px;
@@ -384,16 +390,34 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     background: color-mix(in srgb, var(--accent-color) 92%, var(--bg-primary));
 }
 
+.app-shell.mobile-interface .active-sessions-indicator.is-idle > .active-sessions-indicator-trigger {
+    background: color-mix(in srgb, var(--success-color, #00ba7c) 82%, var(--bg-primary));
+}
+
+.app-shell.mobile-interface .active-sessions-indicator.is-idle > .active-sessions-indicator-trigger:hover {
+    background: color-mix(in srgb, var(--success-color, #00ba7c) 92%, var(--bg-primary));
+}
+
 .app-shell.mobile-interface .active-sessions-indicator-trigger:focus-visible {
     outline: 2px solid var(--accent-color);
     outline-offset: 2px;
 }
 
-.app-shell.mobile-interface .active-sessions-indicator-count {
+.app-shell.mobile-interface .active-sessions-indicator.is-idle > .active-sessions-indicator-trigger:focus-visible {
+    outline-color: var(--success-color, #00ba7c);
+}
+
+.app-shell.mobile-interface .active-sessions-indicator-count,
+.app-shell.mobile-interface .active-sessions-indicator-check {
     display: inline-flex;
     min-width: 1ch;
     align-items: center;
     justify-content: center;
+}
+
+.app-shell.mobile-interface .active-sessions-indicator-check {
+    font-size: 20px;
+    line-height: 1;
 }
 
 .app-shell.mobile-interface .active-sessions-indicator-panel {

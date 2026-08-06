@@ -89,6 +89,29 @@ test("chat branch registry creates first-class branch rows with unique agent han
   expect(db.getChatBranchByAgentName(childB.agent_name)?.chat_jid).toBe(childB.chat_jid);
 });
 
+test("recent chat activity uses persisted message timestamps and excludes stale or archived sessions", () => {
+  const prefix = `web:test-recent-${Date.now()}`;
+  const baseMs = Date.now() + 86_400_000;
+  const recentJid = `${prefix}:recent`;
+  const olderJid = `${prefix}:older`;
+  const staleJid = `${prefix}:stale`;
+  const archivedJid = `${prefix}:archived`;
+
+  db.storeChatMetadata(recentJid, new Date(baseMs - (3 * 60_000)).toISOString(), "Recent");
+  db.storeChatMetadata(olderJid, new Date(baseMs - (44 * 60_000)).toISOString(), "Older");
+  db.storeChatMetadata(staleJid, new Date(baseMs - (46 * 60_000)).toISOString(), "Stale");
+  db.storeChatMetadata(archivedJid, new Date(baseMs - 60_000).toISOString(), "Archived");
+  db.archiveChatBranch(archivedJid);
+
+  const rows = db.listRecentChatActivity(
+    new Date(baseMs - (45 * 60_000)).toISOString(),
+    20,
+  ).filter((row) => row.chat_jid.startsWith(prefix));
+
+  expect(rows.map((row) => row.chat_jid)).toEqual([recentJid, olderJid]);
+  expect(rows.every((row) => row.agent_name && row.last_activity_at)).toBe(true);
+});
+
 test("chat branch registry supports deliberate branch renames", () => {
   const rootChatJid = `web:test-rename-${Date.now()}`;
   db.storeChatMetadata(rootChatJid, new Date().toISOString(), "Root");
