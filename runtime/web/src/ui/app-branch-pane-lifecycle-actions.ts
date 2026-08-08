@@ -46,6 +46,23 @@ function restoreMissingRowsByChatJid<T extends { chat_jid?: string | null }>(row
   return missingRows.length ? [...currentRows, ...missingRows] : currentRows;
 }
 
+export interface SessionArchivePickerMutationOptions {
+  confirmed?: boolean;
+  navigateOnSuccess?: boolean;
+  keepArchivedInList?: boolean;
+}
+
+export function resolveSessionArchivePickerMutation(options?: SessionArchivePickerMutationOptions): {
+  keepArchivedInList: boolean;
+  removeOptimistically: boolean;
+} {
+  const keepArchivedInList = options?.keepArchivedInList === true;
+  return {
+    keepArchivedInList,
+    removeOptimistically: Boolean(options?.confirmed && !keepArchivedInList),
+  };
+}
+
 interface RefBox<T> {
   current: T;
 }
@@ -743,13 +760,16 @@ export function useBranchPaneLifecycle(options: UseBranchPaneLifecycleOptions) {
 
   const handlePruneCurrentBranch = useCallback(async (
     targetChatJid: string | null = null,
-    options?: { confirmed?: boolean; navigateOnSuccess?: boolean },
+    options?: SessionArchivePickerMutationOptions,
   ) => {
     const target = typeof targetChatJid === 'string' && targetChatJid.trim()
       ? targetChatJid.trim()
       : currentBranchRecord?.chat_jid || currentChatJid;
-    const removalSnapshot = options?.confirmed && target ? optimisticallyRemoveSessionRows(target) : null;
-    if (options?.confirmed && target && !removalSnapshot) return false;
+    const archiveMutation = resolveSessionArchivePickerMutation(options);
+    const removalSnapshot = archiveMutation.removeOptimistically && target
+      ? optimisticallyRemoveSessionRows(target)
+      : null;
+    if (archiveMutation.removeOptimistically && target && !removalSnapshot) return false;
     let pruned = false;
     try {
       pruned = await pruneCurrentBranchAction({
@@ -770,7 +790,7 @@ export function useBranchPaneLifecycle(options: UseBranchPaneLifecycleOptions) {
     } finally {
       finishOptimisticSessionRemoval(target, pruned, removalSnapshot);
     }
-    if (pruned && target) {
+    if (pruned && target && !archiveMutation.keepArchivedInList) {
       setActiveChatAgents((prev) => filterRowsByChatJid(prev, target));
       setCurrentChatBranches((prev) => filterRowsByChatJid(prev, target));
     }

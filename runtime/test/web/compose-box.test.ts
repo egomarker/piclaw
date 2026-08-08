@@ -260,15 +260,17 @@ test('session popup scroll helpers preserve the exact menu scrollTop', () => {
   expect(restoreSessionPopupScrollTop(null, 10)).toBe(false);
 });
 
-test('session rows render an in-place Archive to check-or-cancel control', () => {
+test('session rows render an in-place Archive to the shared OK confirmation control', () => {
   const source = readFileSync(join(import.meta.dir, '../../web/src/components/compose-box.ts'), 'utf8');
   const css = readFileSync(join(import.meta.dir, '../../web/static/classic/css/chat.css'), 'utf8');
   expect(source).toContain('class="compose-session-archive-request"');
   expect(source).toContain('>Archive</button>');
-  expect(source).toContain('>✓</button>');
-  expect(source).toContain('>×</button>');
-  expect(source).toContain('{ confirmed: true, navigateOnSuccess }');
+  expect(source).toContain('data-delete-kind="archive"');
+  expect(source).toContain('<span class="compose-model-popup-item-delete-confirm">OK</span>');
+  expect(source).toContain('keepArchivedInList,');
+  expect(source).not.toContain('compose-session-archive-confirm');
   expect(css).toContain('flex: 0 0 58px;');
+  expect(css).toContain('.compose-session-archive-control.confirming .compose-model-popup-item-delete');
 });
 
 test('resolveSessionPopupInitialIndex prefers the current session over the first alphabetical row', () => {

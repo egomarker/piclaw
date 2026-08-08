@@ -4,10 +4,30 @@ import {
   applyStoredPaneLayoutAction,
   handleBranchPickerChangeAction,
   renameCurrentBranchAction,
+  resolveSessionArchivePickerMutation,
   runBranchLoaderModeEffect,
   toggleWorkspaceVisibility,
   watchPaneOpenEventBridge,
 } from '../../web/src/ui/app-branch-pane-lifecycle-actions.js';
+
+test('resolveSessionArchivePickerMutation keeps refreshed archived rows for in-place archives', () => {
+  expect(resolveSessionArchivePickerMutation({
+    confirmed: true,
+    navigateOnSuccess: false,
+    keepArchivedInList: true,
+  })).toEqual({
+    keepArchivedInList: true,
+    removeOptimistically: false,
+  });
+  expect(resolveSessionArchivePickerMutation({ confirmed: true })).toEqual({
+    keepArchivedInList: false,
+    removeOptimistically: true,
+  });
+  expect(resolveSessionArchivePickerMutation()).toEqual({
+    keepArchivedInList: false,
+    removeOptimistically: false,
+  });
+});
 
 test('toggleWorkspaceVisibility flips boolean state via setter callback', () => {
   let value = true;

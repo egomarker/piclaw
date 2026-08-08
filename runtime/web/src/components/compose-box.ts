@@ -1656,17 +1656,23 @@ export function ComposeBox({
         }
     };
 
-    const hideSessionRowWhileDeleting = useCallback((chatJid) => {
+    const lockSessionRowWhileDeleting = useCallback((chatJid) => {
         const target = typeof chatJid === 'string' ? chatJid.trim() : '';
         if (!target || deletingSessionChatJidsRef.current.has(target)) return false;
         deletingSessionChatJidsRef.current.add(target);
+        return true;
+    }, []);
+
+    const hideSessionRowWhileDeleting = useCallback((chatJid) => {
+        const target = typeof chatJid === 'string' ? chatJid.trim() : '';
+        if (!lockSessionRowWhileDeleting(target)) return false;
         setHiddenSessionChatJids((prev) => {
             const next = new Set(prev instanceof Set ? prev : []);
             next.add(target);
             return next;
         });
         return true;
-    }, []);
+    }, [lockSessionRowWhileDeleting]);
 
     const finishSessionRowDelete = useCallback((chatJid, succeeded) => {
         const target = typeof chatJid === 'string' ? chatJid.trim() : '';
@@ -1690,29 +1696,53 @@ export function ComposeBox({
         };
     }, []);
 
+    const scheduleSessionPopupScrollRestore = useCallback(() => {
+        const popup = sessionPopupRef.current;
+        const preserved = sessionPopupScrollRestoreRef.current;
+        if (!popup || !preserved) return false;
+        const restoreIfCurrent = () => {
+            if (sessionPopupScrollRestoreRef.current?.token !== preserved.token) return;
+            restoreSessionPopupScrollTop(popup, preserved.scrollTop);
+        };
+        popup.focus?.({ preventScroll: true });
+        restoreIfCurrent();
+        requestAnimationFrame(() => {
+            restoreIfCurrent();
+            requestAnimationFrame(() => {
+                restoreIfCurrent();
+                if (sessionPopupScrollRestoreRef.current?.token === preserved.token) {
+                    sessionPopupScrollRestoreRef.current = null;
+                }
+            });
+        });
+        return true;
+    }, []);
+
     const confirmSessionRowArchive = useCallback(async (chat) => {
         const chatJid = typeof chat?.chat_jid === 'string' ? chat.chat_jid.trim() : '';
         if (!chatJid || typeof onDeleteSession !== 'function') return;
         const navigateOnSuccess = shouldNavigateAfterSessionArchive(chatJid, currentChatJid);
-        preserveSessionPopupScrollTop();
-        if (!hideSessionRowWhileDeleting(chatJid)) {
-            sessionPopupScrollRestoreRef.current = null;
-            return;
-        }
-        setPendingArchiveChatJid(null);
+        const keepArchivedInList = !navigateOnSuccess;
+        if (!lockSessionRowWhileDeleting(chatJid)) return;
+        if (keepArchivedInList) preserveSessionPopupScrollTop();
         let succeeded = false;
         try {
-            const archived = await onDeleteSession(chatJid, { confirmed: true, navigateOnSuccess });
+            const archived = await onDeleteSession(chatJid, {
+                confirmed: true,
+                navigateOnSuccess,
+                keepArchivedInList,
+            });
             succeeded = archived !== false;
         } catch (error) {
             console.warn('Failed to archive session:', error);
         }
-        if (!succeeded) preserveSessionPopupScrollTop();
         finishSessionRowDelete(chatJid, succeeded);
+        setPendingArchiveChatJid(null);
+        if (keepArchivedInList) scheduleSessionPopupScrollRestore();
         if (succeeded && navigateOnSuccess) {
             setShowSessionPopup(false);
         }
-    }, [currentChatJid, finishSessionRowDelete, hideSessionRowWhileDeleting, onDeleteSession, preserveSessionPopupScrollTop]);
+    }, [currentChatJid, finishSessionRowDelete, lockSessionRowWhileDeleting, onDeleteSession, preserveSessionPopupScrollTop, scheduleSessionPopupScrollRestore]);
 
     const confirmSessionRowDelete = useCallback(async (chat) => {
         const chatJid = typeof chat?.chat_jid === 'string' ? chat.chat_jid.trim() : '';
@@ -1745,6 +1775,10 @@ export function ComposeBox({
             const chatJid = typeof button.dataset?.chatJid === 'string' ? button.dataset.chatJid.trim() : '';
             if (!chatJid) return;
             const chat = sessionPopupChatsRef.current.find((row) => row?.chat_jid === chatJid) || { chat_jid: chatJid };
+            if (button.dataset?.deleteKind === 'archive') {
+                void confirmSessionRowArchive(chat);
+                return;
+            }
             void confirmSessionRowDelete(chat);
         };
         document.addEventListener('pointerdown', handleConfirmDeletePointer, true);
@@ -1755,7 +1789,7 @@ export function ComposeBox({
             document.removeEventListener('mousedown', handleConfirmDeletePointer, true);
             document.removeEventListener('touchstart', handleConfirmDeletePointer, true);
         };
-    }, [confirmSessionRowDelete, showSessionPopup]);
+    }, [confirmSessionRowArchive, confirmSessionRowDelete, showSessionPopup]);
 
     const sessionPopupEntries = useMemo(() => {
         const entries = [];
@@ -2964,29 +2998,11 @@ export function ComposeBox({
     useEffect(() => {
         if (!showSessionPopup) return;
         const popup = sessionPopupRef.current;
-        const preserved = sessionPopupScrollRestoreRef.current;
-        if (preserved) {
-            const restoreIfCurrent = () => {
-                if (sessionPopupScrollRestoreRef.current?.token !== preserved.token) return;
-                restoreSessionPopupScrollTop(popup, preserved.scrollTop);
-            };
-            popup?.focus?.({ preventScroll: true });
-            restoreIfCurrent();
-            requestAnimationFrame(() => {
-                restoreIfCurrent();
-                requestAnimationFrame(() => {
-                    restoreIfCurrent();
-                    if (sessionPopupScrollRestoreRef.current?.token === preserved.token) {
-                        sessionPopupScrollRestoreRef.current = null;
-                    }
-                });
-            });
-            return;
-        }
+        if (scheduleSessionPopupScrollRestore()) return;
         popup?.focus?.();
         const active = popup?.querySelector?.('.compose-model-popup-item.active');
         active?.scrollIntoView?.({ block: 'nearest' });
-    }, [showSessionPopup, sessionPopupIndex, sessionPopupEntries.length]);
+    }, [showSessionPopup, sessionPopupIndex, sessionPopupEntries.length, scheduleSessionPopupScrollRestore]);
 
     useEffect(() => {
         if (!showMention || !mentionRef.current) return;
@@ -3508,29 +3524,29 @@ export function ComposeBox({
                                                     ${archiveConfirming
                                                         ? html`
                                                             <button
+                                                                key=${`${chat.chat_jid}:archive-confirm`}
                                                                 type="button"
-                                                                class="compose-session-archive-confirm confirm"
+                                                                class="compose-model-popup-item-delete confirming"
+                                                                data-chat-jid=${chat.chat_jid}
+                                                                data-delete-kind="archive"
                                                                 title="Confirm archive"
                                                                 aria-label=${isRoot
                                                                     ? `Confirm archive session @${chat.agent_name}`
                                                                     : `Confirm archive branch @${chat.agent_name}`}
-                                                                onClick=${(e) => {
+                                                                onPointerDown=${(e) => {
                                                                     e.preventDefault();
                                                                     e.stopPropagation();
                                                                     void confirmSessionRowArchive(chat);
                                                                 }}
-                                                            >✓</button>
-                                                            <button
-                                                                type="button"
-                                                                class="compose-session-archive-confirm cancel"
-                                                                title="Cancel archive"
-                                                                aria-label=${`Cancel archive of @${chat.agent_name}`}
-                                                                onClick=${(e) => {
+                                                                onKeyDown=${(e) => {
+                                                                    if (e.key !== 'Enter' && e.key !== ' ') return;
                                                                     e.preventDefault();
                                                                     e.stopPropagation();
-                                                                    setPendingArchiveChatJid(null);
+                                                                    void confirmSessionRowArchive(chat);
                                                                 }}
-                                                            >×</button>
+                                                            >
+                                                                <span class="compose-model-popup-item-delete-confirm">OK</span>
+                                                            </button>
                                                         `
                                                         : html`
                                                             <button
@@ -3557,6 +3573,7 @@ export function ComposeBox({
                                                         type="button"
                                                         class="compose-model-popup-item-delete confirming"
                                                         data-chat-jid=${chat.chat_jid}
+                                                        data-delete-kind="purge"
                                                         title="Confirm permanent deletion"
                                                         aria-label=${isRoot
                                                             ? `Confirm permanent deletion of archived session @${chat.agent_name}`
