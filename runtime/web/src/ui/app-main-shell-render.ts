@@ -460,7 +460,17 @@ export function renderMainShell(options: MainShellRenderOptions): any {
               <polyline points="6 3 11 8 6 13" />
             </svg>
           </button>
-          <div class="workspace-splitter" onMouseDown=${handleSplitterMouseDown} onTouchStart=${handleSplitterTouchStart}></div>
+          <div
+            class="workspace-splitter"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize Workspace"
+            title="Drag to resize Workspace"
+            onMouseDown=${handleSplitterMouseDown}
+            onTouchStart=${handleSplitterTouchStart}
+          >
+            <span class="workspace-splitter-touch-target" aria-hidden="true"></span>
+          </div>
         `}
       `}
       ${showPaneContainer && html`
