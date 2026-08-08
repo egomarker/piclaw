@@ -1197,11 +1197,11 @@
     }
 }
 
-.compose-session-archive-request,
-.compose-session-archive-confirm {
+.compose-session-archive-request {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    width: 58px;
     height: 28px;
     padding: 0;
     border: 1px solid transparent;
@@ -1212,38 +1212,18 @@
     font-family: var(--font-family-base);
     font-size: 10px;
     line-height: 1;
+    letter-spacing: 0.01em;
     opacity: 0.58;
     transition: opacity 0.12s, color 0.12s, background-color 0.12s, border-color 0.12s;
 }
 
-.compose-session-archive-request {
-    width: 58px;
-    letter-spacing: 0.01em;
-}
-
-.compose-session-archive-confirm {
-    width: 28px;
-    font-size: 13px;
-    font-weight: 700;
-}
-
 .compose-session-archive-request:hover,
-.compose-session-archive-request:focus-visible,
-.compose-session-archive-confirm:hover,
-.compose-session-archive-confirm:focus-visible {
+.compose-session-archive-request:focus-visible {
     opacity: 1;
     color: var(--text-primary);
     background: color-mix(in srgb, var(--text-secondary) 10%, transparent);
     border-color: color-mix(in srgb, var(--text-secondary) 24%, transparent);
     outline: none;
-}
-
-.compose-session-archive-confirm.confirm {
-    color: var(--success-color, #10b981);
-}
-
-.compose-session-archive-confirm.cancel {
-    color: var(--text-secondary);
 }
 
 .compose-session-archive-request:disabled {
@@ -1277,6 +1257,11 @@
 .compose-model-popup-item-delete svg {
     width: 12px;
     height: 12px;
+}
+
+.compose-session-archive-control.confirming .compose-model-popup-item-delete {
+    display: inline-flex;
+    margin-right: 0;
 }
 
 .compose-model-popup-item-row:hover .compose-model-popup-item-delete,
