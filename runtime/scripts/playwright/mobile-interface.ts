@@ -1037,7 +1037,7 @@ async function installActiveSessionsIndicatorFixture(page: Page) {
           { chat_jid: 'web:running-other', agent_name: 'running-other', last_activity_at: new Date(now - 60_000).toISOString() },
           { chat_jid: 'web:idle-resident', agent_name: 'idle-resident', last_activity_at: new Date(now - (3 * 60_000)).toISOString() },
           { chat_jid: 'web:recent-other', agent_name: 'recent-other', last_activity_at: new Date(now - (21 * 60_000)).toISOString() },
-          { chat_jid: 'web:stale', agent_name: 'stale', last_activity_at: new Date(now - (46 * 60_000)).toISOString() },
+          { chat_jid: 'web:stale', agent_name: 'stale', last_activity_at: new Date(now - (121 * 60_000)).toISOString() },
         ],
       }),
     });

@@ -44,19 +44,19 @@ test('Session menu resolves recent inactive sessions newest-first with exact min
   const now = Date.parse('2026-08-06T09:00:00.000Z');
   const active = [{ chat_jid: 'web:active', agent_name: 'active', is_active: true }];
   const recent = resolveRecentChatSessions([
-    { chat_jid: 'web:older', agent_name: 'older', last_activity_at: '2026-08-06T08:16:00.000Z' },
+    { chat_jid: 'web:older', agent_name: 'older', last_activity_at: '2026-08-06T07:01:00.000Z' },
     { chat_jid: 'web:recent', agent_name: 'recent', last_activity_at: '2026-08-06T08:57:30.000Z' },
     { chat_jid: 'web:active', agent_name: 'active', last_activity_at: '2026-08-06T08:59:00.000Z' },
-    { chat_jid: 'web:stale', agent_name: 'stale', last_activity_at: '2026-08-06T08:15:00.000Z' },
+    { chat_jid: 'web:stale', agent_name: 'stale', last_activity_at: '2026-08-06T07:00:00.000Z' },
     { chat_jid: 'web:archived', agent_name: 'archived', last_activity_at: '2026-08-06T08:58:00.000Z', archived_at: '2026-08-06T08:59:00.000Z' },
     { chat_jid: 'web:recent', agent_name: 'duplicate', last_activity_at: '2026-08-06T08:55:00.000Z' },
     { chat_jid: 'web:invalid', agent_name: 'invalid', last_activity_at: 'not-a-date' },
   ], active, now);
 
-  expect(RECENT_SESSION_WINDOW_MINUTES).toBe(45);
+  expect(RECENT_SESSION_WINDOW_MINUTES).toBe(120);
   expect(recent.map((chat) => ({ chat_jid: chat.chat_jid, activity_minutes: chat.activity_minutes }))).toEqual([
     { chat_jid: 'web:recent', activity_minutes: 2 },
-    { chat_jid: 'web:older', activity_minutes: 44 },
+    { chat_jid: 'web:older', activity_minutes: 119 },
   ]);
 });
 

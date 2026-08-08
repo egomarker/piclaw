@@ -38,7 +38,7 @@ import type {
 /** Dependencies required by the extracted endpoint facade. */
 import type { AgentPool } from "../../../agent-pool.js";
 
-export const ACTIVE_CHATS_RECENT_WINDOW_MINUTES = 45;
+export const ACTIVE_CHATS_RECENT_WINDOW_MINUTES = 120;
 const ACTIVE_CHATS_RECENT_WINDOW_MS = ACTIVE_CHATS_RECENT_WINDOW_MINUTES * 60_000;
 const ACTIVE_CHATS_RECENT_LIMIT = 100;
 

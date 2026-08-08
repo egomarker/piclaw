@@ -98,13 +98,13 @@ test("recent chat activity uses persisted message timestamps and excludes stale 
   const archivedJid = `${prefix}:archived`;
 
   db.storeChatMetadata(recentJid, new Date(baseMs - (3 * 60_000)).toISOString(), "Recent");
-  db.storeChatMetadata(olderJid, new Date(baseMs - (44 * 60_000)).toISOString(), "Older");
-  db.storeChatMetadata(staleJid, new Date(baseMs - (46 * 60_000)).toISOString(), "Stale");
+  db.storeChatMetadata(olderJid, new Date(baseMs - (119 * 60_000)).toISOString(), "Older");
+  db.storeChatMetadata(staleJid, new Date(baseMs - (121 * 60_000)).toISOString(), "Stale");
   db.storeChatMetadata(archivedJid, new Date(baseMs - 60_000).toISOString(), "Archived");
   db.archiveChatBranch(archivedJid);
 
   const rows = db.listRecentChatActivity(
-    new Date(baseMs - (45 * 60_000)).toISOString(),
+    new Date(baseMs - (120 * 60_000)).toISOString(),
     20,
   ).filter((row) => row.chat_jid.startsWith(prefix));
 
