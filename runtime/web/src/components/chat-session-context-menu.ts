@@ -5,7 +5,7 @@ export function formatRunningChatSessionHandle(chat: any): string {
   return normalizeHandle(chat?.agent_name) || 'Unnamed session';
 }
 
-export const RECENT_SESSION_WINDOW_MINUTES = 45;
+export const RECENT_SESSION_WINDOW_MINUTES = 120;
 export const RECENT_SESSION_WINDOW_MS = RECENT_SESSION_WINDOW_MINUTES * 60_000;
 
 export function resolveRunningChatSessions(chats: unknown): any[] {
