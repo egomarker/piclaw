@@ -66,6 +66,12 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     overflow: visible;
 }
 
+/* Keep the divider flush with the Workspace edge instead of centering it in the four-pixel track. */
+.app-shell.mobile-interface > .workspace-splitter::after {
+    left: 0;
+    transform: none;
+}
+
 /*
  * Keep the splitter's four-pixel grid footprint while making its touch target
  * substantially easier to grab. The absolutely positioned target contributes
@@ -74,7 +80,7 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
 .app-shell.mobile-interface > .workspace-splitter > .workspace-splitter-touch-target {
     position: absolute;
     inset-block: 0;
-    left: 50%;
+    left: 0;
     width: 32px;
     transform: translateX(-50%);
     display: flex;
@@ -93,6 +99,7 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     height: 36px;
     border-radius: 999px;
     background: color-mix(in srgb, var(--border-color) 75%, var(--text-secondary) 25%);
+    transform: translateX(10px);
     transition: background-color var(--ui-transition-fast), transform var(--ui-transition-fast);
 }
 
@@ -102,7 +109,7 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
 }
 
 .app-shell.mobile-interface > .workspace-splitter.dragging > .workspace-splitter-touch-target::before {
-    transform: scaleY(1.08);
+    transform: translateX(10px) scaleY(1.08);
 }
 
 /* Keep the existing collapse toggle clickable where its edge meets the hit area. */
