@@ -175,6 +175,72 @@ export function isSessionPopupChatEmphasized(chat) {
     return Boolean(chat?.is_active && !chat?.archived_at);
 }
 
+export function resolveSessionArchiveControl(chat, chats = [], hasArchiveHandler = true) {
+    const chatJid = typeof chat?.chat_jid === 'string' ? chat.chat_jid.trim() : '';
+    const rootChatJid = typeof chat?.root_chat_jid === 'string' && chat.root_chat_jid.trim()
+        ? chat.root_chat_jid.trim()
+        : chatJid;
+    const isRoot = Boolean(chatJid && chatJid === rootChatJid);
+    if (!chatJid || chat?.archived_at || !hasArchiveHandler) {
+        return { visible: false, disabled: true, reason: '' };
+    }
+    if (isRoot && chatJid === 'web:default') {
+        return { visible: true, disabled: true, reason: 'The default chat session cannot be archived.' };
+    }
+    if (chat?.is_active) {
+        return {
+            visible: true,
+            disabled: true,
+            reason: isRoot ? 'Cannot archive this session while it is active.' : 'Cannot archive this branch while it is active.',
+        };
+    }
+    const hasActiveChildBranches = isRoot && (Array.isArray(chats) ? chats : []).some((item) => {
+        const itemChatJid = typeof item?.chat_jid === 'string' ? item.chat_jid.trim() : '';
+        const itemRootChatJid = typeof item?.root_chat_jid === 'string' && item.root_chat_jid.trim()
+            ? item.root_chat_jid.trim()
+            : itemChatJid;
+        return itemChatJid
+            && itemChatJid !== chatJid
+            && itemRootChatJid === chatJid
+            && !item?.archived_at;
+    });
+    if (hasActiveChildBranches) {
+        return { visible: true, disabled: true, reason: 'Archive or delete child branch sessions first.' };
+    }
+    return { visible: true, disabled: false, reason: isRoot ? 'Archive this session' : 'Archive this branch' };
+}
+
+export function shouldNavigateAfterSessionArchive(chatJid, currentChatJid) {
+    const target = typeof chatJid === 'string' ? chatJid.trim() : '';
+    const current = typeof currentChatJid === 'string' ? currentChatJid.trim() : '';
+    return Boolean(target && current && target === current);
+}
+
+export function captureSessionPopupScrollTop(popup) {
+    const menu = popup?.querySelector?.('.compose-model-popup-menu');
+    const scrollTop = Number(menu?.scrollTop);
+    return menu && Number.isFinite(scrollTop) ? scrollTop : null;
+}
+
+export function restoreSessionPopupScrollTop(popup, scrollTop) {
+    const menu = popup?.querySelector?.('.compose-model-popup-menu');
+    const nextScrollTop = Number(scrollTop);
+    if (!menu || !Number.isFinite(nextScrollTop)) return false;
+
+    const previousSpace = Number(menu.dataset?.sessionScrollPreserveSpace || 0);
+    const scrollHeight = Number(menu.scrollHeight);
+    const clientHeight = Number(menu.clientHeight);
+    if (menu.style?.setProperty && Number.isFinite(scrollHeight) && Number.isFinite(clientHeight)) {
+        const baseScrollHeight = Math.max(0, scrollHeight - (Number.isFinite(previousSpace) ? previousSpace : 0));
+        const preserveSpace = Math.max(0, nextScrollTop + clientHeight - baseScrollHeight);
+        menu.style.setProperty('--compose-session-scroll-preserve-space', `${preserveSpace}px`);
+        if (menu.dataset) menu.dataset.sessionScrollPreserveSpace = String(preserveSpace);
+    }
+
+    menu.scrollTop = nextScrollTop;
+    return true;
+}
+
 export function resolveSessionPopupInitialIndex(items, currentChatJid = null) {
     const list = Array.isArray(items) ? items : [];
     const normalizedCurrentChatJid = typeof currentChatJid === 'string' ? currentChatJid.trim() : '';
@@ -1158,7 +1224,7 @@ export function ComposeBox({
     const [showModelPopup, setShowModelPopup] = useState(false);
     const [showSessionPopup, setShowSessionPopup] = useState(false);
     const [pendingPurgeChatJid, setPendingPurgeChatJid] = useState(null);
-    const [pendingPruneChatJid, setPendingPruneChatJid] = useState(null);
+    const [pendingArchiveChatJid, setPendingArchiveChatJid] = useState(null);
     const [hiddenSessionChatJids, setHiddenSessionChatJids] = useState(() => new Set());
     const deletingSessionChatJidsRef = useRef(new Set());
     const [modelOptions, setModelOptions] = useState([]);
@@ -1181,6 +1247,8 @@ export function ComposeBox({
     const modelHintRef = useRef(null);
     const sessionPopupRef = useRef(null);
     const sessionPopupChatsRef = useRef([]);
+    const sessionPopupScrollRestoreRef = useRef(null);
+    const sessionPopupScrollRestoreTokenRef = useRef(0);
     const sessionTriggerRef = useRef(null);
     const footerRef = useRef(null);
     const popupTypeaheadRef = useRef({ value: '', updatedAt: 0 });
@@ -1612,41 +1680,56 @@ export function ComposeBox({
         });
     }, []);
 
-    const confirmSessionRowDelete = useCallback(async (chat, options = {}) => {
+    const preserveSessionPopupScrollTop = useCallback(() => {
+        const scrollTop = captureSessionPopupScrollTop(sessionPopupRef.current);
+        if (scrollTop == null) return;
+        sessionPopupScrollRestoreTokenRef.current += 1;
+        sessionPopupScrollRestoreRef.current = {
+            scrollTop,
+            token: sessionPopupScrollRestoreTokenRef.current,
+        };
+    }, []);
+
+    const confirmSessionRowArchive = useCallback(async (chat) => {
         const chatJid = typeof chat?.chat_jid === 'string' ? chat.chat_jid.trim() : '';
-        if (!chatJid) return;
-        if (options.canPurgeArchived) {
-            if (!hideSessionRowWhileDeleting(chatJid)) return;
-            setPendingPurgeChatJid(null);
-            let succeeded = false;
-            try {
-                const purged = await onPurgeArchivedSession?.(chatJid, { confirmed: true });
-                succeeded = purged !== false;
-            } catch (error) {
-                console.warn('Failed to purge archived session:', error);
-            }
-            finishSessionRowDelete(chatJid, succeeded);
-            if (succeeded) {
-                setShowSessionPopup(false);
-            }
+        if (!chatJid || typeof onDeleteSession !== 'function') return;
+        const navigateOnSuccess = shouldNavigateAfterSessionArchive(chatJid, currentChatJid);
+        preserveSessionPopupScrollTop();
+        if (!hideSessionRowWhileDeleting(chatJid)) {
+            sessionPopupScrollRestoreRef.current = null;
             return;
         }
-        if (options.canPrune) {
-            if (!hideSessionRowWhileDeleting(chatJid)) return;
-            setPendingPruneChatJid(null);
-            let succeeded = false;
-            try {
-                const pruned = await onDeleteSession(chatJid, { confirmed: true });
-                succeeded = pruned !== false;
-            } catch (error) {
-                console.warn('Failed to delete session:', error);
-            }
-            finishSessionRowDelete(chatJid, succeeded);
-            if (succeeded) {
-                setShowSessionPopup(false);
-            }
+        setPendingArchiveChatJid(null);
+        let succeeded = false;
+        try {
+            const archived = await onDeleteSession(chatJid, { confirmed: true, navigateOnSuccess });
+            succeeded = archived !== false;
+        } catch (error) {
+            console.warn('Failed to archive session:', error);
         }
-    }, [finishSessionRowDelete, hideSessionRowWhileDeleting, onDeleteSession, onPurgeArchivedSession]);
+        if (!succeeded) preserveSessionPopupScrollTop();
+        finishSessionRowDelete(chatJid, succeeded);
+        if (succeeded && navigateOnSuccess) {
+            setShowSessionPopup(false);
+        }
+    }, [currentChatJid, finishSessionRowDelete, hideSessionRowWhileDeleting, onDeleteSession, preserveSessionPopupScrollTop]);
+
+    const confirmSessionRowDelete = useCallback(async (chat) => {
+        const chatJid = typeof chat?.chat_jid === 'string' ? chat.chat_jid.trim() : '';
+        if (!chatJid || !hideSessionRowWhileDeleting(chatJid)) return;
+        setPendingPurgeChatJid(null);
+        let succeeded = false;
+        try {
+            const purged = await onPurgeArchivedSession?.(chatJid, { confirmed: true });
+            succeeded = purged !== false;
+        } catch (error) {
+            console.warn('Failed to purge archived session:', error);
+        }
+        finishSessionRowDelete(chatJid, succeeded);
+        if (succeeded) {
+            setShowSessionPopup(false);
+        }
+    }, [finishSessionRowDelete, hideSessionRowWhileDeleting, onPurgeArchivedSession]);
 
     useEffect(() => {
         if (!showSessionPopup) return;
@@ -1662,10 +1745,7 @@ export function ComposeBox({
             const chatJid = typeof button.dataset?.chatJid === 'string' ? button.dataset.chatJid.trim() : '';
             if (!chatJid) return;
             const chat = sessionPopupChatsRef.current.find((row) => row?.chat_jid === chatJid) || { chat_jid: chatJid };
-            void confirmSessionRowDelete(chat, {
-                canPurgeArchived: button.dataset?.deleteKind === 'purge',
-                canPrune: button.dataset?.deleteKind === 'prune',
-            });
+            void confirmSessionRowDelete(chat);
         };
         document.addEventListener('pointerdown', handleConfirmDeletePointer, true);
         document.addEventListener('mousedown', handleConfirmDeletePointer, true);
@@ -2815,7 +2895,8 @@ export function ComposeBox({
     useEffect(() => {
         if (!showSessionPopup) {
             setPendingPurgeChatJid(null);
-            setPendingPruneChatJid(null);
+            setPendingArchiveChatJid(null);
+            sessionPopupScrollRestoreRef.current = null;
         }
     }, [showSessionPopup]);
 
@@ -2883,6 +2964,25 @@ export function ComposeBox({
     useEffect(() => {
         if (!showSessionPopup) return;
         const popup = sessionPopupRef.current;
+        const preserved = sessionPopupScrollRestoreRef.current;
+        if (preserved) {
+            const restoreIfCurrent = () => {
+                if (sessionPopupScrollRestoreRef.current?.token !== preserved.token) return;
+                restoreSessionPopupScrollTop(popup, preserved.scrollTop);
+            };
+            popup?.focus?.({ preventScroll: true });
+            restoreIfCurrent();
+            requestAnimationFrame(() => {
+                restoreIfCurrent();
+                requestAnimationFrame(() => {
+                    restoreIfCurrent();
+                    if (sessionPopupScrollRestoreRef.current?.token === preserved.token) {
+                        sessionPopupScrollRestoreRef.current = null;
+                    }
+                });
+            });
+            return;
+        }
         popup?.focus?.();
         const active = popup?.querySelector?.('.compose-model-popup-item.active');
         active?.scrollIntoView?.({ block: 'nearest' });
@@ -3336,11 +3436,12 @@ export function ComposeBox({
                                 ${hasSwitchableChatAgents && switchableChatAgents.map((chat, listIndex) => {
                                     const archived = Boolean(chat.archived_at);
                                     const isRoot = chat.chat_jid === (chat.root_chat_jid || chat.chat_jid);
-                                    const canPrune = !isRoot && !chat.is_active && !archived && typeof onDeleteSession === 'function';
+                                    const archiveControl = resolveSessionArchiveControl(chat, switchableChatAgents, typeof onDeleteSession === 'function');
+                                    const archiveConfirming = archiveControl.visible
+                                        && !archiveControl.disabled
+                                        && pendingArchiveChatJid === chat.chat_jid;
                                     const canPurgeArchived = archived && canPurgeArchivedSession;
                                     const purgeConfirming = canPurgeArchived && pendingPurgeChatJid === chat.chat_jid;
-                                    const pruneConfirming = canPrune && pendingPruneChatJid === chat.chat_jid;
-                                    const deleteConfirming = purgeConfirming || pruneConfirming;
                                     const label = formatBranchPickerLabel(chat, { currentChatJid });
                                     const baseLabel = formatBranchPickerBaseLabel(chat);
                                     const lifecycleBadges = getBranchLifecycleBadges(chat, { currentChatJid });
@@ -3399,28 +3500,77 @@ export function ComposeBox({
                                                     <path d="M12 9v5H2V4h5"/>
                                                 </svg>
                                             </button>
-                                            ${(canPrune || canPurgeArchived) && html`
-                                                ${deleteConfirming
+                                            ${archiveControl.visible && html`
+                                                <span
+                                                    class=${`compose-session-archive-control${archiveConfirming ? ' confirming' : ''}`}
+                                                    title=${archiveControl.reason}
+                                                >
+                                                    ${archiveConfirming
+                                                        ? html`
+                                                            <button
+                                                                type="button"
+                                                                class="compose-session-archive-confirm confirm"
+                                                                title="Confirm archive"
+                                                                aria-label=${isRoot
+                                                                    ? `Confirm archive session @${chat.agent_name}`
+                                                                    : `Confirm archive branch @${chat.agent_name}`}
+                                                                onClick=${(e) => {
+                                                                    e.preventDefault();
+                                                                    e.stopPropagation();
+                                                                    void confirmSessionRowArchive(chat);
+                                                                }}
+                                                            >✓</button>
+                                                            <button
+                                                                type="button"
+                                                                class="compose-session-archive-confirm cancel"
+                                                                title="Cancel archive"
+                                                                aria-label=${`Cancel archive of @${chat.agent_name}`}
+                                                                onClick=${(e) => {
+                                                                    e.preventDefault();
+                                                                    e.stopPropagation();
+                                                                    setPendingArchiveChatJid(null);
+                                                                }}
+                                                            >×</button>
+                                                        `
+                                                        : html`
+                                                            <button
+                                                                type="button"
+                                                                class="compose-session-archive-request"
+                                                                aria-label=${isRoot
+                                                                    ? `Archive session @${chat.agent_name}`
+                                                                    : `Archive branch @${chat.agent_name}`}
+                                                                disabled=${archiveControl.disabled}
+                                                                onClick=${(e) => {
+                                                                    e.preventDefault();
+                                                                    e.stopPropagation();
+                                                                    setPendingPurgeChatJid(null);
+                                                                    setPendingArchiveChatJid(chat.chat_jid);
+                                                                }}
+                                                            >Archive</button>
+                                                        `}
+                                                </span>
+                                            `}
+                                            ${canPurgeArchived && html`
+                                                ${purgeConfirming
                                                     ? html`<button
                                                         key=${`${chat.chat_jid}:delete-confirm`}
                                                         type="button"
                                                         class="compose-model-popup-item-delete confirming"
                                                         data-chat-jid=${chat.chat_jid}
-                                                        data-delete-kind=${canPurgeArchived ? 'purge' : 'prune'}
-                                                        title=${canPurgeArchived ? 'Confirm permanent deletion' : 'Confirm branch deletion'}
-                                                        aria-label=${canPurgeArchived
-                                                            ? (isRoot ? `Confirm permanent deletion of archived session @${chat.agent_name}` : `Confirm permanent deletion of archived branch @${chat.agent_name}`)
-                                                            : `Confirm delete @${chat.agent_name}`}
+                                                        title="Confirm permanent deletion"
+                                                        aria-label=${isRoot
+                                                            ? `Confirm permanent deletion of archived session @${chat.agent_name}`
+                                                            : `Confirm permanent deletion of archived branch @${chat.agent_name}`}
                                                         onPointerDown=${(e) => {
                                                             e.preventDefault();
                                                             e.stopPropagation();
-                                                            void confirmSessionRowDelete(chat, { canPurgeArchived, canPrune });
+                                                            void confirmSessionRowDelete(chat);
                                                         }}
                                                         onKeyDown=${(e) => {
                                                             if (e.key !== 'Enter' && e.key !== ' ') return;
                                                             e.preventDefault();
                                                             e.stopPropagation();
-                                                            void confirmSessionRowDelete(chat, { canPurgeArchived, canPrune });
+                                                            void confirmSessionRowDelete(chat);
                                                         }}
                                                     >
                                                         <span class="compose-model-popup-item-delete-confirm">OK</span>
@@ -3429,24 +3579,14 @@ export function ComposeBox({
                                                         key=${`${chat.chat_jid}:delete-request`}
                                                         type="button"
                                                         class="compose-model-popup-item-delete"
-                                                        title=${canPurgeArchived
-                                                            ? (isRoot ? 'Permanently delete this archived session' : 'Permanently delete this archived branch')
-                                                            : 'Delete this branch'}
-                                                        aria-label=${canPurgeArchived
-                                                            ? (isRoot ? `Permanently delete archived session @${chat.agent_name}` : `Permanently delete archived branch @${chat.agent_name}`)
-                                                            : `Delete @${chat.agent_name}`}
+                                                        title=${isRoot ? 'Permanently delete this archived session' : 'Permanently delete this archived branch'}
+                                                        aria-label=${isRoot
+                                                            ? `Permanently delete archived session @${chat.agent_name}`
+                                                            : `Permanently delete archived branch @${chat.agent_name}`}
                                                         onClick=${(e) => {
                                                             e.stopPropagation();
-                                                            if (canPurgeArchived) {
-                                                                setPendingPurgeChatJid(chat.chat_jid);
-                                                                return;
-                                                            }
-                                                            if (canPrune) {
-                                                                setPendingPruneChatJid(chat.chat_jid);
-                                                                return;
-                                                            }
-                                                            setShowSessionPopup(false);
-                                                            void onDeleteSession(chat.chat_jid);
+                                                            setPendingArchiveChatJid(null);
+                                                            setPendingPurgeChatJid(chat.chat_jid);
                                                         }}
                                                     >
                                                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
