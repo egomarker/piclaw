@@ -955,6 +955,8 @@
 .compose-model-popup-menu {
     max-height: 220px;
     overflow-y: auto;
+    overflow-anchor: none;
+    padding-bottom: var(--compose-session-scroll-preserve-space, 0px);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
     background: var(--bg-primary);
@@ -1171,6 +1173,88 @@
     color: var(--accent-color);
     background: color-mix(in srgb, var(--accent-color) 10%, transparent);
     border-color: color-mix(in srgb, var(--accent-color) 24%, transparent);
+}
+
+.compose-session-archive-control {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 58px;
+    width: 58px;
+    height: 28px;
+    margin-right: 2px;
+    gap: 2px;
+}
+
+.compose-model-popup-item-row:hover .compose-session-archive-control,
+.compose-session-archive-control.confirming {
+    display: inline-flex;
+}
+
+@media (hover: none), (pointer: coarse) {
+    .compose-model-popup-item-row .compose-session-archive-control {
+        display: inline-flex;
+    }
+}
+
+.compose-session-archive-request,
+.compose-session-archive-confirm {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 28px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm, 4px);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-family: var(--font-family-base);
+    font-size: 10px;
+    line-height: 1;
+    opacity: 0.58;
+    transition: opacity 0.12s, color 0.12s, background-color 0.12s, border-color 0.12s;
+}
+
+.compose-session-archive-request {
+    width: 58px;
+    letter-spacing: 0.01em;
+}
+
+.compose-session-archive-confirm {
+    width: 28px;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.compose-session-archive-request:hover,
+.compose-session-archive-request:focus-visible,
+.compose-session-archive-confirm:hover,
+.compose-session-archive-confirm:focus-visible {
+    opacity: 1;
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--text-secondary) 10%, transparent);
+    border-color: color-mix(in srgb, var(--text-secondary) 24%, transparent);
+    outline: none;
+}
+
+.compose-session-archive-confirm.confirm {
+    color: var(--success-color, #10b981);
+}
+
+.compose-session-archive-confirm.cancel {
+    color: var(--text-secondary);
+}
+
+.compose-session-archive-request:disabled {
+    cursor: not-allowed;
+    opacity: 0.28;
+}
+
+.compose-session-archive-request:disabled:hover {
+    color: var(--text-secondary);
+    background: transparent;
+    border-color: transparent;
 }
 
 .compose-model-popup-item-delete {

@@ -25,6 +25,10 @@ import {
   isComposeSubmitAbortMode,
   resolveSessionPopupChats,
   isSessionPopupChatEmphasized,
+  resolveSessionArchiveControl,
+  shouldNavigateAfterSessionArchive,
+  captureSessionPopupScrollTop,
+  restoreSessionPopupScrollTop,
   resolveSessionPopupInitialIndex,
   resolveUiOnlyCommandNotice,
 } from '../../web/src/components/compose-box.ts';
@@ -194,6 +198,77 @@ test('isSessionPopupChatEmphasized only highlights active non-archived sessions'
   expect(isSessionPopupChatEmphasized({ is_active: true, archived_at: null })).toBe(true);
   expect(isSessionPopupChatEmphasized({ is_active: true, archived_at: '2026-04-29T00:00:00Z' })).toBe(false);
   expect(isSessionPopupChatEmphasized({ is_active: false, archived_at: null })).toBe(false);
+});
+
+test('resolveSessionArchiveControl exposes archive in place while respecting backend restrictions', () => {
+  const idleRoot = { chat_jid: 'web:root', root_chat_jid: 'web:root', agent_name: 'root', is_active: false };
+  const idleBranch = { chat_jid: 'web:root:branch:1', root_chat_jid: 'web:root', agent_name: 'branch', is_active: false };
+
+  expect(resolveSessionArchiveControl(idleBranch, [idleRoot, idleBranch])).toEqual({
+    visible: true,
+    disabled: false,
+    reason: 'Archive this branch',
+  });
+  expect(resolveSessionArchiveControl({ ...idleBranch, is_active: true }, [idleRoot, idleBranch])).toEqual({
+    visible: true,
+    disabled: true,
+    reason: 'Cannot archive this branch while it is active.',
+  });
+  expect(resolveSessionArchiveControl(idleRoot, [idleRoot, idleBranch])).toEqual({
+    visible: true,
+    disabled: true,
+    reason: 'Archive or delete child branch sessions first.',
+  });
+  expect(resolveSessionArchiveControl({ chat_jid: 'web:default', root_chat_jid: 'web:default' }, [])).toEqual({
+    visible: true,
+    disabled: true,
+    reason: 'The default chat session cannot be archived.',
+  });
+  expect(resolveSessionArchiveControl({ ...idleBranch, archived_at: '2026-08-08T00:00:00Z' }, [])).toEqual({
+    visible: false,
+    disabled: true,
+    reason: '',
+  });
+  expect(resolveSessionArchiveControl(idleBranch, [], false).visible).toBe(false);
+});
+
+test('session archive navigation is limited to the selected row', () => {
+  expect(shouldNavigateAfterSessionArchive('web:current', 'web:current')).toBe(true);
+  expect(shouldNavigateAfterSessionArchive('web:other', 'web:current')).toBe(false);
+  expect(shouldNavigateAfterSessionArchive('', 'web:current')).toBe(false);
+});
+
+test('session popup scroll helpers preserve the exact menu scrollTop', () => {
+  const styles = new Map<string, string>();
+  const menu = {
+    scrollTop: 137.25,
+    scrollHeight: 250,
+    clientHeight: 220,
+    dataset: {} as Record<string, string>,
+    style: { setProperty: (name: string, value: string) => styles.set(name, value) },
+  };
+  const popup = {
+    querySelector: (selector: string) => selector === '.compose-model-popup-menu' ? menu : null,
+  };
+
+  expect(captureSessionPopupScrollTop(popup)).toBe(137.25);
+  expect(restoreSessionPopupScrollTop(popup, 82.75)).toBe(true);
+  expect(menu.scrollTop).toBe(82.75);
+  expect(styles.get('--compose-session-scroll-preserve-space')).toBe('52.75px');
+  expect(menu.dataset.sessionScrollPreserveSpace).toBe('52.75');
+  expect(captureSessionPopupScrollTop(null)).toBeNull();
+  expect(restoreSessionPopupScrollTop(null, 10)).toBe(false);
+});
+
+test('session rows render an in-place Archive to check-or-cancel control', () => {
+  const source = readFileSync(join(import.meta.dir, '../../web/src/components/compose-box.ts'), 'utf8');
+  const css = readFileSync(join(import.meta.dir, '../../web/static/classic/css/chat.css'), 'utf8');
+  expect(source).toContain('class="compose-session-archive-request"');
+  expect(source).toContain('>Archive</button>');
+  expect(source).toContain('>✓</button>');
+  expect(source).toContain('>×</button>');
+  expect(source).toContain('{ confirmed: true, navigateOnSuccess }');
+  expect(css).toContain('flex: 0 0 58px;');
 });
 
 test('resolveSessionPopupInitialIndex prefers the current session over the first alphabetical row', () => {

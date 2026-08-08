@@ -181,6 +181,7 @@ export interface PruneCurrentBranchActionOptions {
   showIntentToast: (title: string, detail?: string | null, kind?: string, durationMs?: number) => void;
   chatOnlyMode?: boolean;
   navigate: (url: string) => void;
+  navigateOnSuccess?: boolean;
   confirm?: (message: string) => boolean;
   hasWindow?: boolean;
   baseHref?: string;
@@ -740,7 +741,10 @@ export function useBranchPaneLifecycle(options: UseBranchPaneLifecycleOptions) {
     });
   }, [closeRenameCurrentBranchForm, currentBranchRecord, chatOnlyMode, getFormLock, navigate, openRenameCurrentBranchForm, refreshActiveChatAgents, refreshCurrentChatBranches, renameBranchInFlightRef, renameBranchLockUntilRef, renameChatBranch, setIsRenamingBranch, showIntentToast]);
 
-  const handlePruneCurrentBranch = useCallback(async (targetChatJid: string | null = null, options?: { confirmed?: boolean }) => {
+  const handlePruneCurrentBranch = useCallback(async (
+    targetChatJid: string | null = null,
+    options?: { confirmed?: boolean; navigateOnSuccess?: boolean },
+  ) => {
     const target = typeof targetChatJid === 'string' && targetChatJid.trim()
       ? targetChatJid.trim()
       : currentBranchRecord?.chat_jid || currentChatJid;
@@ -760,6 +764,7 @@ export function useBranchPaneLifecycle(options: UseBranchPaneLifecycleOptions) {
         showIntentToast,
         chatOnlyMode,
         navigate,
+        navigateOnSuccess: options?.navigateOnSuccess !== false,
         ...(options?.confirmed ? { confirm: () => true } : {}),
       });
     } finally {

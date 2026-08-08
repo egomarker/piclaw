@@ -189,10 +189,11 @@ export interface PruneCurrentBranchOptions {
   baseHref: string;
   chatOnlyMode?: boolean;
   navigate?: NavigateFn;
+  navigateOnSuccess?: boolean;
   confirm?: (message: string) => boolean;
 }
 
-/** Archive the selected branch and navigate back to its root chat. */
+/** Archive the selected branch, optionally navigating back to its root chat. */
 export async function pruneCurrentBranch(options: PruneCurrentBranchOptions): Promise<boolean> {
   const {
     hasWindow = typeof window !== 'undefined',
@@ -208,6 +209,7 @@ export async function pruneCurrentBranch(options: PruneCurrentBranchOptions): Pr
     baseHref,
     chatOnlyMode,
     navigate,
+    navigateOnSuccess = true,
     confirm = (message: string) => window.confirm(message),
   } = options;
 
@@ -265,8 +267,10 @@ export async function pruneCurrentBranch(options: PruneCurrentBranchOptions): Pr
     ]);
     const fallbackChatJid = isRootBranch ? 'web:default' : (branch?.root_chat_jid || 'web:default');
     showIntentToast?.(isRootBranch ? 'Session archived' : 'Branch pruned', `${label} has been archived.`, 'info', 3000);
-    const nextUrl = buildChatWindowUrl(baseHref, fallbackChatJid, { chatOnly: chatOnlyMode });
-    navigate?.(nextUrl);
+    if (navigateOnSuccess) {
+      const nextUrl = buildChatWindowUrl(baseHref, fallbackChatJid, { chatOnly: chatOnlyMode });
+      navigate?.(nextUrl);
+    }
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error || 'Could not prune branch.');

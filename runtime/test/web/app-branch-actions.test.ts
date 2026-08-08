@@ -167,6 +167,35 @@ test('pruneCurrentBranch archives non-default root sessions, blocks the default 
   expect(navigateCalls[navigateCalls.length - 1]).toContain('chat_jid=web%3Aroot');
 });
 
+test('pruneCurrentBranch can archive another session without navigating away from the selected session', async () => {
+  const navigateCalls: string[] = [];
+  const refreshes: string[] = [];
+
+  const archived = await pruneCurrentBranch({
+    hasWindow: true,
+    targetChatJid: 'web:other',
+    currentChatJid: 'web:current',
+    currentBranchRecord: { chat_jid: 'web:current', root_chat_jid: 'web:current', agent_name: 'current' },
+    currentChatBranches: [
+      { chat_jid: 'web:other', root_chat_jid: 'web:other', agent_name: 'other' },
+    ],
+    activeChatAgents: [],
+    pruneChatBranch: async (chatJid: string) => { expect(chatJid).toBe('web:other'); },
+    refreshActiveChatAgents: async () => { refreshes.push('active'); },
+    refreshCurrentChatBranches: async () => { refreshes.push('branches'); },
+    showIntentToast: () => undefined,
+    baseHref: 'https://example.test/?chat_jid=web%3Acurrent',
+    chatOnlyMode: true,
+    navigate: (url: string) => navigateCalls.push(url),
+    navigateOnSuccess: false,
+    confirm: () => true,
+  });
+
+  expect(archived).toBe(true);
+  expect(refreshes.sort()).toEqual(['active', 'branches']);
+  expect(navigateCalls).toEqual([]);
+});
+
 test('pruneCurrentBranch blocks archiving a root session while child branches still exist', async () => {
   const toasts: Array<[string, string, string, number]> = [];
 
