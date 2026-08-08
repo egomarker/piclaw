@@ -60,6 +60,14 @@ test('Only Mobile differentiates comfortable Workspace tab and explorer rail siz
   expect(visualWorkspaceCss).not.toMatch(/--workspace-tree-font-size: (?:14|16)px/);
 });
 
+test('Mobile widens the Workspace divider touch target without moving either surface', () => {
+  expect(classicWorkspaceCss).toMatch(/\.workspace-splitter \{[^}]*width: 4px;/s);
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface > \.workspace-splitter \{[^}]*grid-column: 2;[^}]*grid-row: 1 \/ -1;[^}]*overflow: visible;/s);
+  expect(mobileCss).toMatch(/\.workspace-splitter > \.workspace-splitter-touch-target \{[^}]*position: absolute;[^}]*inset-block: 0;[^}]*left: 50%;[^}]*width: 32px;[^}]*transform: translateX\(-50%\);/s);
+  expect(mobileCss).toMatch(/\.workspace-splitter > \.workspace-splitter-touch-target::before \{[^}]*width: 4px;[^}]*height: 36px;[^}]*border-radius: 999px;/s);
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface > \.workspace-toggle-tab \{\s*z-index: 51;/);
+});
+
 test('Mobile uses a full Workspace tab surface and insets tree content without moving its scrollbar', () => {
   expect(mobileCss).toContain('@media (max-width: 1023.98px), (orientation: portrait)');
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface\.mobile-workspace-active > \.workspace-sidebar \{[^}]*display: flex;[^}]*grid-row: 2;[^}]*width: 100%;/s);

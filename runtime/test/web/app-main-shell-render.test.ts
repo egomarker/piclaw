@@ -420,13 +420,21 @@ test('wide Mobile Workspace rail preserves its file selection callback', () => {
   }));
 
   let explorerVNode: any = null;
+  let splitterVNode: any = null;
+  let splitterTouchTargetVNode: any = null;
   walkVNodes(tree, (node) => {
     if (node.type === WorkspaceExplorer) explorerVNode = node;
+    if (node.props?.class === 'workspace-splitter') splitterVNode = node;
+    if (node.props?.class === 'workspace-splitter-touch-target') splitterTouchTargetVNode = node;
   });
 
   expect(explorerVNode?.props.visible).toBe(true);
   expect(explorerVNode?.props.mobileInterface).toBe(true);
   expect(explorerVNode?.props.onFileSelect).toBe(addFileRef);
+  expect(splitterVNode?.props.role).toBe('separator');
+  expect(splitterVNode?.props['aria-orientation']).toBe('vertical');
+  expect(splitterVNode?.props['aria-label']).toBe('Resize Workspace');
+  expect(splitterTouchTargetVNode?.props['aria-hidden']).toBe('true');
 });
 
 test('Mobile connects roving tabs to active and inert surface panels', () => {

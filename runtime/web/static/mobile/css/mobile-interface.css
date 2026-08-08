@@ -63,6 +63,51 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
 .app-shell.mobile-interface > .workspace-splitter {
     grid-column: 2;
     grid-row: 1 / -1;
+    overflow: visible;
+}
+
+/*
+ * Keep the splitter's four-pixel grid footprint while making its touch target
+ * substantially easier to grab. The absolutely positioned target contributes
+ * no layout width; its pill mirrors the horizontal Compose resize affordance.
+ */
+.app-shell.mobile-interface > .workspace-splitter > .workspace-splitter-touch-target {
+    position: absolute;
+    inset-block: 0;
+    left: 50%;
+    width: 32px;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+    cursor: col-resize;
+    touch-action: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.app-shell.mobile-interface > .workspace-splitter > .workspace-splitter-touch-target::before {
+    content: '';
+    width: 4px;
+    height: 36px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--border-color) 75%, var(--text-secondary) 25%);
+    transition: background-color var(--ui-transition-fast), transform var(--ui-transition-fast);
+}
+
+.app-shell.mobile-interface > .workspace-splitter:hover > .workspace-splitter-touch-target::before,
+.app-shell.mobile-interface > .workspace-splitter.dragging > .workspace-splitter-touch-target::before {
+    background: var(--accent-color);
+}
+
+.app-shell.mobile-interface > .workspace-splitter.dragging > .workspace-splitter-touch-target::before {
+    transform: scaleY(1.08);
+}
+
+/* Keep the existing collapse toggle clickable where its edge meets the hit area. */
+.app-shell.mobile-interface > .workspace-toggle-tab {
+    z-index: 51;
 }
 
 .app-shell.mobile-interface > .editor-splitter {
