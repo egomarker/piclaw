@@ -80,6 +80,7 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
 .app-shell.mobile-interface > .workspace-splitter > .workspace-splitter-touch-target {
     position: absolute;
     inset-block: 0;
+    padding-block-start: env(safe-area-inset-top, 0px);
     left: 0;
     width: 32px;
     transform: translateX(-50%);
