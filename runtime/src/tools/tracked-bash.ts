@@ -217,19 +217,40 @@ function createTrackedShellOperations(resolveCandidates: () => ShellConfig[]): B
             }
 
             attemptedShells.push(candidate.shell);
-            const spawned = spawn(candidate.shell, [...candidate.args, resolvedCommand], {
-              cwd,
-              detached: shouldDetachChildProcess(process.platform),
-              env: resolvedEnv,
-              stdio: ["ignore", "pipe", "pipe"],
-            });
+
+            if (resolvedCommand.includes("\0")) {
+              settleError(new Error(
+                `Shell command contains NUL bytes (\\0), which child_process.spawn cannot execute. ` +
+                `Strip NUL characters from the command and retry.`
+              ));
+              return;
+            }
+
+            let shellUnavailable = false;
+            let spawned: ReturnType<typeof spawn>;
+            try {
+              spawned = spawn(candidate.shell, [...candidate.args, resolvedCommand], {
+                cwd,
+                detached: shouldDetachChildProcess(process.platform),
+                env: resolvedEnv,
+                stdio: ["ignore", "pipe", "pipe"],
+              });
+            } catch (error) {
+              const errWithCode = error as NodeJS.ErrnoException;
+              if (!settled && errWithCode.code === "ENOENT") {
+                shellUnavailable = true;
+                trySpawn(candidateIndex + 1);
+                return;
+              }
+              settleError(error as Error);
+              return;
+            }
             child = spawned;
 
             if (spawned.pid) {
               registerProcess(spawned.pid);
             }
 
-            let shellUnavailable = false;
             let exited = false;
             let exitCode: number | null = null;
             let stdoutEnded = !spawned.stdout;
@@ -328,7 +349,11 @@ function createTrackedShellOperations(resolveCandidates: () => ShellConfig[]): B
             spawned.once("close", onClose);
           };
 
-          trySpawn(0);
+          try {
+            trySpawn(0);
+          } catch (error) {
+            settleError(error as Error);
+          }
         })();
       });
     },

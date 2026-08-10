@@ -119,6 +119,21 @@ test("tracked bash times out and cancels", async () => {
   expect(duration).toBeLessThan(1000);
 });
 
+test("tracked bash rejects commands containing NUL bytes instead of crashing", async () => {
+  const ws = getTestWorkspace();
+  const ops = createTrackedBashOperations();
+  let error: Error | null = null;
+
+  try {
+    await ops.exec("echo hi" + "\0\0\0", ws.workspace, { onData: () => {} });
+  } catch (err) {
+    error = err as Error;
+  }
+
+  expect(error).not.toBeNull();
+  expect(error?.message).toContain("NUL");
+});
+
 test("tracked bash auto-injects env-style keychain entries", async () => {
   const ws = getTestWorkspace();
   const restore = setEnv({ PICLAW_KEYCHAIN_KEY: "test-key" });
