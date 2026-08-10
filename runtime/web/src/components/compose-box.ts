@@ -1686,14 +1686,17 @@ export function ComposeBox({
         });
     }, []);
 
-    const preserveSessionPopupScrollTop = useCallback(() => {
-        const scrollTop = captureSessionPopupScrollTop(sessionPopupRef.current);
-        if (scrollTop == null) return;
+    const preserveSessionPopupScrollTop = useCallback((capturedScrollTop = undefined) => {
+        const scrollTop = capturedScrollTop === undefined
+            ? captureSessionPopupScrollTop(sessionPopupRef.current)
+            : capturedScrollTop;
+        if (scrollTop == null || !Number.isFinite(Number(scrollTop))) return false;
         sessionPopupScrollRestoreTokenRef.current += 1;
         sessionPopupScrollRestoreRef.current = {
-            scrollTop,
+            scrollTop: Number(scrollTop),
             token: sessionPopupScrollRestoreTokenRef.current,
         };
+        return true;
     }, []);
 
     const scheduleSessionPopupScrollRestore = useCallback(() => {
@@ -1746,8 +1749,12 @@ export function ComposeBox({
 
     const confirmSessionRowDelete = useCallback(async (chat) => {
         const chatJid = typeof chat?.chat_jid === 'string' ? chat.chat_jid.trim() : '';
-        if (!chatJid || !hideSessionRowWhileDeleting(chatJid)) return;
+        if (!chatJid) return;
+        const capturedScrollTop = captureSessionPopupScrollTop(sessionPopupRef.current);
+        if (!hideSessionRowWhileDeleting(chatJid)) return;
+        preserveSessionPopupScrollTop(capturedScrollTop);
         setPendingPurgeChatJid(null);
+        scheduleSessionPopupScrollRestore();
         let succeeded = false;
         try {
             const purged = await onPurgeArchivedSession?.(chatJid, { confirmed: true });
@@ -1755,11 +1762,10 @@ export function ComposeBox({
         } catch (error) {
             console.warn('Failed to purge archived session:', error);
         }
+        if (!succeeded) preserveSessionPopupScrollTop();
         finishSessionRowDelete(chatJid, succeeded);
-        if (succeeded) {
-            setShowSessionPopup(false);
-        }
-    }, [finishSessionRowDelete, hideSessionRowWhileDeleting, onPurgeArchivedSession]);
+        scheduleSessionPopupScrollRestore();
+    }, [finishSessionRowDelete, hideSessionRowWhileDeleting, onPurgeArchivedSession, preserveSessionPopupScrollTop, scheduleSessionPopupScrollRestore]);
 
     useEffect(() => {
         if (!showSessionPopup) return;
