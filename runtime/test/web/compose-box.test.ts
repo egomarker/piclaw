@@ -273,6 +273,20 @@ test('session rows render an in-place Archive to the shared OK confirmation cont
   expect(css).toContain('.compose-session-archive-control.confirming .compose-model-popup-item-delete');
 });
 
+test('archived session deletion keeps the popup open and restores its scroll position', () => {
+  const source = readFileSync(join(import.meta.dir, '../../web/src/components/compose-box.ts'), 'utf8');
+  const blockStart = source.indexOf('const confirmSessionRowDelete = useCallback');
+  const blockEnd = source.indexOf('\n\n    useEffect(() => {', blockStart);
+  expect(blockStart).toBeGreaterThan(-1);
+  expect(blockEnd).toBeGreaterThan(blockStart);
+  const deleteBlock = source.slice(blockStart, blockEnd);
+  expect(deleteBlock).toContain('const capturedScrollTop = captureSessionPopupScrollTop(sessionPopupRef.current);');
+  expect(deleteBlock).toContain('preserveSessionPopupScrollTop(capturedScrollTop);');
+  expect(deleteBlock).toContain('finishSessionRowDelete(chatJid, succeeded);');
+  expect(deleteBlock).toContain('scheduleSessionPopupScrollRestore();');
+  expect(deleteBlock).not.toContain('setShowSessionPopup(false)');
+});
+
 test('resolveSessionPopupInitialIndex prefers the current session over the first alphabetical row', () => {
   expect(resolveSessionPopupInitialIndex([
     { type: 'session', chat: { chat_jid: 'web:alpha' }, disabled: false },
