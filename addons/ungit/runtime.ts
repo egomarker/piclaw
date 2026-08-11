@@ -1,3 +1,5 @@
 import { startUngitIfNeeded } from "./service.ts";
 
-await startUngitIfNeeded();
+void startUngitIfNeeded().catch((error) => {
+  console.warn("[ungit] automatic startup failed", error);
+});

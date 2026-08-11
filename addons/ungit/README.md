@@ -4,21 +4,35 @@ Adds a small Git-branch action to every folder row in Piclaw's workspace explore
 
 ## Automatic startup
 
-At Piclaw startup, the add-on checks `http://127.0.0.1:8448/ungit/api/ping`. If Ungit is already live, it is left alone. Otherwise the add-on launches:
+At Piclaw startup, the add-on checks `http://127.0.0.1:8448/ungit/api/ping`. If Ungit is already live, it is left alone. Otherwise the add-on resolves `egomarker/ungit`'s remote `main` branch to a full commit SHA and launches that immutable GitHub package:
 
 ```sh
-bunx --bun ungit \
+bunx --bun \
+  --package github:egomarker/ungit#<full-commit-sha> \
+  ungit \
   --ungitBindIp=127.0.0.1 \
   --port=8448 \
   --rootPath=/ungit \
   --no-launchBrowser
 ```
 
-The launcher runs from `/workspace/.piclaw`, giving the Ungit server the writable `/workspace` working directory. The add-on does not monitor or stop the launched process; if it survives a Piclaw restart, the next startup check reuses it.
+The mutable branch name is never passed to Bun, avoiding stale `#main` package-cache entries. Resolution uses a bounded `git ls-remote` request. After launch, the add-on waits for the health endpoint and required browser assets before recording the revision as last known good. Concurrent startup requests share one launch attempt.
+
+The launcher runs from `/workspace/.piclaw`, giving the Ungit server the writable `/workspace` working directory. The add-on does not monitor or stop the process after startup verification; if it survives a Piclaw restart, the next startup check reuses it.
 
 The path configured as **Workspace root** must refer to Piclaw's workspace from the Ungit process. The default is `/workspace`.
 
 Piclaw serves the browser-facing `/ungit/` route through its authenticated origin, so port `8448` does not need to be published from the container. Ungit uses Socket.IO's HTTP-polling transport through this route; WebSocket upgrades are not proxied.
+
+## Updates, fallback, and rollback
+
+A healthy running process is deliberately reused. To load a newer fork revision, use **Settings → Ungit → Stop Ungit**, then **Start Ungit**. The new start resolves the current remote `main` SHA.
+
+The verified revision is written atomically to `ungit-launch-state.json` under `PICLAW_DATA` (default `/workspace/.piclaw/data`). If remote resolution fails, startup selects this last-known-good SHA. If a newly resolved remote revision launches but fails readiness, it is stopped and the last-known-good SHA is tried once. If no valid fallback exists, startup fails without launching an unpinned package.
+
+For an explicit rollback, set `PICLAW_UNGIT_SHA` to a full 40-character commit SHA, then stop and start Ungit. Invalid or abbreviated overrides fail closed. Remove the override and stop/start again to resume tracking remote `main`.
+
+The fork's selected commit must be a complete runnable package containing its current prebuilt browser assets.
 
 ## Install from this checkout
 

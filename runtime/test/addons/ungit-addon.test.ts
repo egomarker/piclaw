@@ -1,16 +1,31 @@
 import { afterEach, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   createUngitProxyHandler,
   UNGIT_PROXY_PATH,
 } from "../../../addons/ungit/proxy.ts";
 import {
+  buildUngitStartCommand,
   isUngitLive,
+  loadLastKnownGoodUngitSha,
+  normalizeUngitSha,
+  parseUngitLsRemote,
+  resolveRemoteUngitSha,
+  resolveUngitRevision,
+  runGitCommand,
+  saveLastKnownGoodUngitRevision,
   startUngitIfNeeded,
   stopUngit,
   UNGIT_HEALTH_URL,
   UNGIT_LAUNCH_CWD,
-  UNGIT_START_COMMAND,
+  UNGIT_PACKAGE_PREFIX,
+  UNGIT_REPOSITORY_REF,
+  UNGIT_REPOSITORY_URL,
+  UNGIT_REQUIRED_ASSET_URLS,
+  verifyUngitRuntime,
 } from "../../../addons/ungit/service.ts";
 import { DEFAULT_UNGIT_CONFIG, normalizeUngitConfig } from "../../../addons/ungit/storage.ts";
 import { importFresh } from "../helpers.js";
@@ -82,11 +97,158 @@ test("Ungit health check recognizes only a successful JSON ping", async () => {
   expect(await isUngitLive(async () => new Response("not json", { status: 200 }))).toBe(false);
 });
 
-test("Ungit autostart skips a live service and otherwise launches the fixed loopback command", async () => {
+const TEST_UNGIT_SHA = "7c295c1edbe37ef990461e3d2abc9eeb98b106c8";
+const OTHER_UNGIT_SHA = "55d5080fe67ea85953771c078d267e3a97c24ba2";
+
+test("Ungit parses only the requested full remote main SHA", async () => {
+  expect(normalizeUngitSha(`  ${TEST_UNGIT_SHA.toUpperCase()}  `)).toBe(TEST_UNGIT_SHA);
+  expect(normalizeUngitSha(TEST_UNGIT_SHA.slice(0, 12))).toBeNull();
+  expect(parseUngitLsRemote(`${TEST_UNGIT_SHA}\t${UNGIT_REPOSITORY_REF}\n`)).toBe(
+    TEST_UNGIT_SHA,
+  );
+  expect(() => parseUngitLsRemote(`${TEST_UNGIT_SHA}\trefs/tags/main\n`)).toThrow(
+    "Unable to resolve",
+  );
+
+  let requestedCommand: string[] = [];
+  let requestedTimeout = 0;
+  expect(
+    await resolveRemoteUngitSha({
+      timeoutMs: 25,
+      runGitImpl: async (command, timeoutMs) => {
+        requestedCommand = command;
+        requestedTimeout = timeoutMs;
+        return {
+          exitCode: 0,
+          stdout: `${TEST_UNGIT_SHA}\t${UNGIT_REPOSITORY_REF}\n`,
+          stderr: "",
+        };
+      },
+    }),
+  ).toBe(TEST_UNGIT_SHA);
+  expect(requestedCommand).toEqual([
+    "git",
+    "ls-remote",
+    "--exit-code",
+    UNGIT_REPOSITORY_URL,
+    UNGIT_REPOSITORY_REF,
+  ]);
+  expect(requestedTimeout).toBe(25);
+
+  await expect(
+    resolveRemoteUngitSha({
+      runGitImpl: async () => ({ exitCode: 0, stdout: "malformed\n", stderr: "" }),
+    }),
+  ).rejects.toThrow("Unable to resolve");
+  await expect(
+    resolveRemoteUngitSha({
+      runGitImpl: async () => ({ exitCode: 2, stdout: "", stderr: "offline" }),
+    }),
+  ).rejects.toThrow("offline");
+
+  await expect(
+    runGitCommand([process.execPath, "-e", "await Bun.sleep(5_000)"], 25),
+  ).rejects.toThrow("Timed out after 25ms");
+});
+
+test("Ungit revision resolution supports override, remote main, and last-known-good fallback", async () => {
+  expect(
+    await resolveUngitRevision({
+      env: { PICLAW_UNGIT_SHA: TEST_UNGIT_SHA },
+      resolveRemoteSha: async () => {
+        throw new Error("override must skip remote resolution");
+      },
+    }),
+  ).toEqual({ sha: TEST_UNGIT_SHA, source: "override" });
+
+  await expect(
+    resolveUngitRevision({
+      env: { PICLAW_UNGIT_SHA: "main" },
+    }),
+  ).rejects.toThrow("full 40-character Git SHA");
+
+  expect(
+    await resolveUngitRevision({
+      env: {},
+      resolveRemoteSha: async () => TEST_UNGIT_SHA,
+      loadLastKnownGood: () => OTHER_UNGIT_SHA,
+    }),
+  ).toEqual({ sha: TEST_UNGIT_SHA, source: "remote-main" });
+
+  expect(
+    await resolveUngitRevision({
+      env: {},
+      resolveRemoteSha: async () => {
+        throw new Error("offline");
+      },
+      loadLastKnownGood: () => OTHER_UNGIT_SHA,
+    }),
+  ).toEqual({ sha: OTHER_UNGIT_SHA, source: "last-known-good" });
+
+  await expect(
+    resolveUngitRevision({
+      env: {},
+      resolveRemoteSha: async () => {
+        throw new Error("offline without fallback");
+      },
+      loadLastKnownGood: () => null,
+    }),
+  ).rejects.toThrow("offline without fallback");
+});
+
+test("Ungit persists verified state atomically and ignores malformed state", () => {
+  const root = mkdtempSync(join(tmpdir(), "piclaw-ungit-state-"));
+  const statePath = join(root, "nested", "ungit-launch-state.json");
+  try {
+    expect(loadLastKnownGoodUngitSha(statePath)).toBeNull();
+    saveLastKnownGoodUngitRevision(
+      { sha: TEST_UNGIT_SHA, source: "remote-main" },
+      statePath,
+    );
+    expect(loadLastKnownGoodUngitSha(statePath)).toBe(TEST_UNGIT_SHA);
+    expect(statSync(statePath).mode & 0o777).toBe(0o600);
+    expect(readdirSync(join(root, "nested"))).toEqual(["ungit-launch-state.json"]);
+    expect(JSON.parse(readFileSync(statePath, "utf8"))).toMatchObject({
+      version: 1,
+      sha: TEST_UNGIT_SHA,
+      source: "remote-main",
+    });
+
+    writeFileSync(statePath, '{"version":1,"sha":"main","source":"remote-main"}', "utf8");
+    expect(loadLastKnownGoodUngitSha(statePath)).toBeNull();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Ungit runtime verification requires health and all routed assets", async () => {
+  const requestedUrls: string[] = [];
+  const healthyFetch = async (input: string | URL | Request) => {
+    const url = String(input);
+    requestedUrls.push(url);
+    return url === UNGIT_HEALTH_URL ? Response.json({}) : new Response("asset");
+  };
+  expect(await verifyUngitRuntime(healthyFetch)).toBe(true);
+  expect(requestedUrls).toEqual([UNGIT_HEALTH_URL, ...UNGIT_REQUIRED_ASSET_URLS]);
+
+  expect(
+    await verifyUngitRuntime(async (input) => {
+      const url = String(input);
+      if (url === UNGIT_HEALTH_URL) return Response.json({});
+      return new Response("missing", {
+        status: url === UNGIT_REQUIRED_ASSET_URLS.at(-1) ? 404 : 200,
+      });
+    }),
+  ).toBe(false);
+});
+
+test("Ungit autostart skips a live service and launches the resolved immutable package", async () => {
   let spawnCount = 0;
   await startUngitIfNeeded({
     fetchImpl: async () => Response.json({}),
-    ensureLaunchCwd: () => { throw new Error("live service must not prepare a launch directory"); },
+    ensureLaunchCwd: () => {
+      throw new Error("live service must not prepare a launch directory");
+    },
     spawnImpl: () => {
       spawnCount += 1;
       return {};
@@ -98,20 +260,43 @@ test("Ungit autostart skips a live service and otherwise launches the fixed loop
   let launchedOptions: Record<string, unknown> = {};
   let unrefCalled = false;
   let preparedCwd = "";
+  let savedRevision: unknown;
+  let waitCount = 0;
   await startUngitIfNeeded({
     fetchImpl: async () => new Response("{}", { status: 503 }),
-    ensureLaunchCwd: (cwd) => { preparedCwd = cwd; },
+    ensureLaunchCwd: (cwd) => {
+      preparedCwd = cwd;
+    },
+    resolveRevision: async () => ({ sha: TEST_UNGIT_SHA, source: "remote-main" }),
     spawnImpl: (command, options) => {
       spawnCount += 1;
       launchedCommand = command;
       launchedOptions = options;
-      return { pid: 123, unref: () => { unrefCalled = true; } };
+      return {
+        pid: 123,
+        unref: () => {
+          unrefCalled = true;
+        },
+      };
+    },
+    waitForRuntime: async () => {
+      waitCount += 1;
+    },
+    saveLastKnownGood: (revision) => {
+      savedRevision = revision;
     },
   });
 
   expect(spawnCount).toBe(1);
   expect(preparedCwd).toBe(UNGIT_LAUNCH_CWD);
-  expect(launchedCommand).toEqual([...UNGIT_START_COMMAND]);
+  expect(launchedCommand).toEqual(buildUngitStartCommand(TEST_UNGIT_SHA));
+  expect(launchedCommand.slice(0, 5)).toEqual([
+    "bunx",
+    "--bun",
+    "--package",
+    `${UNGIT_PACKAGE_PREFIX}#${TEST_UNGIT_SHA}`,
+    "ungit",
+  ]);
   expect(launchedOptions).toEqual({
     cwd: "/workspace/.piclaw",
     stdin: "ignore",
@@ -119,6 +304,110 @@ test("Ungit autostart skips a live service and otherwise launches the fixed loop
     stderr: "inherit",
   });
   expect(unrefCalled).toBe(true);
+  expect(waitCount).toBe(1);
+  expect(savedRevision).toEqual({ sha: TEST_UNGIT_SHA, source: "remote-main" });
+});
+
+test("Ungit shares concurrent startup and records state only after readiness", async () => {
+  let releaseRuntime!: () => void;
+  const runtimeReady = new Promise<void>((resolve) => {
+    releaseRuntime = resolve;
+  });
+  let spawnCount = 0;
+  let saveCount = 0;
+  const firstStart = startUngitIfNeeded({
+    fetchImpl: async () => new Response("{}", { status: 503 }),
+    ensureLaunchCwd: () => {},
+    resolveRevision: async () => ({ sha: TEST_UNGIT_SHA, source: "remote-main" }),
+    spawnImpl: () => {
+      spawnCount += 1;
+      return {};
+    },
+    waitForRuntime: () => runtimeReady,
+    saveLastKnownGood: () => {
+      saveCount += 1;
+    },
+  });
+  const secondStart = startUngitIfNeeded();
+  expect(secondStart).toBe(firstStart);
+  expect(saveCount).toBe(0);
+  releaseRuntime();
+  await Promise.all([firstStart, secondStart]);
+  expect(spawnCount).toBe(1);
+  expect(saveCount).toBe(1);
+
+  await expect(
+    startUngitIfNeeded({
+      fetchImpl: async () => new Response("{}", { status: 503 }),
+      ensureLaunchCwd: () => {},
+      resolveRevision: async () => ({ sha: TEST_UNGIT_SHA, source: "remote-main" }),
+      spawnImpl: () => ({}),
+      waitForRuntime: async () => {
+        throw new Error("readiness timeout");
+      },
+      loadLastKnownGood: () => null,
+      cleanupFailedLaunch: () => {},
+      saveLastKnownGood: () => {
+        saveCount += 1;
+      },
+    }),
+  ).rejects.toThrow("readiness timeout");
+  expect(saveCount).toBe(1);
+});
+
+test("Ungit reports an early launcher exit without waiting for the readiness timeout", async () => {
+  await expect(
+    startUngitIfNeeded({
+      fetchImpl: async () => new Response("{}", { status: 503 }),
+      ensureLaunchCwd: () => {},
+      resolveRevision: async () => ({ sha: TEST_UNGIT_SHA, source: "remote-main" }),
+      spawnImpl: () => ({ exited: Promise.resolve(17) }),
+      waitForRuntime: () => new Promise(() => {}),
+      loadLastKnownGood: () => null,
+      cleanupFailedLaunch: () => {},
+      saveLastKnownGood: () => {
+        throw new Error("failed launch must not be saved");
+      },
+    }),
+  ).rejects.toThrow(`revision ${TEST_UNGIT_SHA} exited with code 17 before readiness`);
+});
+
+test("Ungit retries last-known-good after a newly resolved revision fails readiness", async () => {
+  const launchedCommands: string[][] = [];
+  const savedRevisions: unknown[] = [];
+  let waitCount = 0;
+  let cleanupCount = 0;
+
+  await startUngitIfNeeded({
+    fetchImpl: async () => new Response("{}", { status: 503 }),
+    ensureLaunchCwd: () => {},
+    resolveRevision: async () => ({ sha: TEST_UNGIT_SHA, source: "remote-main" }),
+    spawnImpl: (command) => {
+      launchedCommands.push(command);
+      return {};
+    },
+    waitForRuntime: async () => {
+      waitCount += 1;
+      if (waitCount === 1) throw new Error("new revision is incomplete");
+    },
+    loadLastKnownGood: () => OTHER_UNGIT_SHA,
+    cleanupFailedLaunch: () => {
+      cleanupCount += 1;
+    },
+    saveLastKnownGood: (revision) => {
+      savedRevisions.push(revision);
+    },
+  });
+
+  expect(launchedCommands).toEqual([
+    buildUngitStartCommand(TEST_UNGIT_SHA),
+    buildUngitStartCommand(OTHER_UNGIT_SHA),
+  ]);
+  expect(waitCount).toBe(2);
+  expect(cleanupCount).toBe(1);
+  expect(savedRevisions).toEqual([
+    { sha: OTHER_UNGIT_SHA, source: "last-known-good" },
+  ]);
 });
 
 test("Ungit stop finds matching PIDs and terminates them", () => {
