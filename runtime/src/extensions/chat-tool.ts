@@ -1,9 +1,10 @@
 /**
- * chat-tool – relay a message from the current chat session to another session.
+ * chat-tool – send a message from the current chat session to another destination.
  *
- * The runtime implementation resolves and verifies source/destination identity,
- * then routes a message through the normal inbound-message path for the target
- * chat so queue semantics, follow-up handling, and agent execution remain unchanged.
+ * Local destinations use the normal inbound-message path so queue semantics,
+ * follow-up handling, and agent execution remain unchanged. Explicit non-web
+ * chat JIDs may instead use a registered channel transport when the destination
+ * is the current or another known chat.
  */
 import { Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
@@ -45,6 +46,27 @@ export type ChatRelayResult = {
 
 export type ChatToolRelayFn = (request: ChatRelayRequest) => Promise<ChatRelayResult>;
 
+export type ChatChannelDeliveryRequest = {
+  source_chat_jid: string;
+  target_chat_jid: string;
+  content: string;
+};
+
+export type ChatChannelDeliveryResult =
+  | { handled: false }
+  | { handled: true; result: ChatTransportResult };
+
+export type ChatToolChannelDeliveryFn = (
+  request: ChatChannelDeliveryRequest,
+) => Promise<ChatChannelDeliveryResult>;
+
+let chatToolChannelDeliveryFn: ChatToolChannelDeliveryFn | undefined;
+
+/** Install or remove the optional direct channel-delivery attempt. */
+export function setChatToolChannelDeliveryFn(fn: ChatToolChannelDeliveryFn | undefined): void {
+  chatToolChannelDeliveryFn = fn;
+}
+
 /** Install or remove the built-in local relay behind the generic transport seam. */
 export function setChatToolRelayFn(fn: ChatToolRelayFn | undefined): void {
   if (!fn) {
@@ -71,14 +93,14 @@ export function setChatToolRelayFn(fn: ChatToolRelayFn | undefined): void {
 
 const ChatSchema = Type.Object({
   target_address: Type.Optional(Type.String({ description: "Destination address. Local examples: '@research'. One-hop remote example: 'lab!@research'. Mutually exclusive with target_chat_jid and target_agent_name." })),
-  target_chat_jid: Type.Optional(Type.String({ description: "Destination chat JID. Fallback only; prefer target_agent_name/@alias so the runtime can resolve the internal session tree." })),
+  target_chat_jid: Type.Optional(Type.String({ description: "Destination chat JID. Recognized non-web prefixes use an available channel transport for current or known chats; all other JIDs use the existing local session relay. Prefer target_agent_name/@alias for local sessions." })),
   target_agent_name: Type.Optional(Type.String({ description: "Preferred destination branch handle/alias, e.g. 'research' or '@research'. Resolves through the internal session tree mapping." })),
-  content: Type.String({ description: "Message body to deliver to the destination session." }),
+  content: Type.String({ description: "Text body to send to the destination." }),
   mode: Type.Optional(Type.Union([
     Type.Literal("auto"),
     Type.Literal("queue"),
     Type.Literal("steer"),
-  ], { description: "Delivery mode for busy targets: steer (default), queue, or auto." })),
+  ], { description: "Relay mode for local or peer targets: steer (default), queue, or auto. Direct channel delivery sends immediately." })),
   idempotency_key: Type.Optional(Type.String({ description: "Optional transport idempotency key. Used by transports that support durable retry deduplication." })),
   in_reply_to: Type.Optional(Type.String({ description: "Optional opaque transport reply token or message id." })),
 });
@@ -95,13 +117,14 @@ export type ChatToolParams = {
 
 const HINT = [
   "## Cross-session chat",
-  "Use the chat tool when one agent session needs to message another session.",
-  "Prefer target_agent_name with an @alias (for example @research). Use target_chat_jid only as a fallback when no alias exists.",
+  "Use the chat tool when one agent session needs to message another session or an installed channel transport.",
+  "Prefer target_agent_name with an @alias (for example @research) for local sessions. Use target_chat_jid for an explicit chat JID.",
+  "A recognized non-web target_chat_jid uses its registered channel transport when available and the destination is the current or another known chat. Web, unprefixed, unknown-prefix, unknown-chat, and unavailable-transport JIDs retain the normal local session relay.",
   "Use target_address for an explicit address. Local aliases use @name; installed transports may add one-hop peer!target addresses. Multi-hop bang paths are rejected.",
   "@aliases are resolved through the internal Pi chat-branch/session-tree registry before delivery; do not use opaque session IDs when an alias is available.",
-  "Sender identity is derived from the current chat session and cannot be supplied by the caller; destination identity is resolved before delivery.",
-  "The destination receives the message through its normal inbound-message path with structured reply-to metadata.",
-  "Messages steer the target immediately by default. Use mode='queue' to enqueue behind active work, or mode='auto' for standard request behavior.",
+  "Sender identity is derived from the current chat session and cannot be supplied by the caller; local destination identity is resolved before relay.",
+  "Local relay messages steer the target immediately by default. Use mode='queue' to enqueue behind active work, or mode='auto' for standard request behavior.",
+  "The chat tool sends text only; attachments are not forwarded.",
 ].join("\n");
 
 function err(message: string): AgentToolResult<Record<string, unknown>> {
@@ -128,7 +151,7 @@ function describeTarget(result: ChatTransportResult): string {
         : "destination";
 }
 
-/** Built-in tool for cross-session chat relay. */
+/** Built-in tool for local relay and direct channel text delivery. */
 export const chatTool: ExtensionFactory = (pi: ExtensionAPI) => {
   pi.on("before_agent_start", async (event) => ({
     systemPrompt: `${event.systemPrompt}\n\n${HINT}`,
@@ -137,8 +160,8 @@ export const chatTool: ExtensionFactory = (pi: ExtensionAPI) => {
   pi.registerTool({
     name: "chat",
     label: "chat",
-    description: "Send a message from the current session to another local session or a destination handled by an installed chat transport.",
-    promptSnippet: "chat: relay a message to a local @alias or a one-hop transport address. Prefer target_agent_name='@alias' for local sessions.",
+    description: "Send text from the current session to another local session, a current or known non-web channel JID, or a destination handled by an installed chat transport.",
+    promptSnippet: "chat: send text to a local @alias, an explicit channel chat JID, or a one-hop transport address. Prefer target_agent_name='@alias' for local sessions.",
     parameters: ChatSchema,
     async execute(_toolCallId, params: ChatToolParams) {
       const sourceChatJid = getChatJid("").trim();
@@ -159,6 +182,29 @@ export const chatTool: ExtensionFactory = (pi: ExtensionAPI) => {
       if (!content) return err("Provide content.");
 
       try {
+        if (targetChatJid && chatToolChannelDeliveryFn) {
+          const delivery = await chatToolChannelDeliveryFn({
+            source_chat_jid: sourceChatJid,
+            target_chat_jid: targetChatJid,
+            content,
+          });
+          if (delivery.handled) {
+            const result = delivery.result;
+            const target = describeTarget(result);
+            const transportSuffix = result.transport ? ` via ${result.transport}` : "";
+            return {
+              content: [{ type: "text", text: `Sent to ${target}${transportSuffix}.` }],
+              details: {
+                tool: "chat",
+                relayed: true,
+                delivered: true,
+                delivery: "channel",
+                ...result,
+              },
+            };
+          }
+        }
+
         const address = targetAddress
           ? parseChatAddress(targetAddress)
           : localChatAddressFromSelector({ targetChatJid, targetAgentName });
@@ -185,8 +231,8 @@ export const chatTool: ExtensionFactory = (pi: ExtensionAPI) => {
           },
         };
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error || "Cross-session chat relay failed.");
-        return err(message || "Cross-session chat relay failed.");
+        const message = error instanceof Error ? error.message : String(error || "Chat delivery failed.");
+        return err(message || "Chat delivery failed.");
       }
     },
   });

@@ -7,6 +7,8 @@ import { AgentPool } from "../agent-pool.js";
 import { createRuntimeModelServices } from "../agent-pool/model-services.js";
 import { installRuntimeModelExecutor } from "../extensions/model-execution-runtime.js";
 import { registerGitHubCopilotDynamicModels } from "../extensions/github-copilot-dynamic-models.js";
+import { setChatToolChannelDeliveryFn } from "../extensions/chat-tool.js";
+import { createChatToolChannelDeliveryHandler } from "../extensions/chat-tool-runtime.js";
 import {
   getIdentityConfig,
   getRoutingConfig,
@@ -56,7 +58,8 @@ export type RuntimeBootstrapAgentPool =
   & StartRuntimeLoopDeps["agentPool"]
   & SchedulerDeps["agentPool"]
   & RuntimeModelResolver
-  & ShutdownDeps["agentPool"];
+  & ShutdownDeps["agentPool"]
+  & Pick<AgentPool, "listKnownChats">;
 
 export type RuntimeBootstrapState = StartRuntimeLoopDeps["state"];
 export type RuntimeBootstrapWeb = RuntimeWebWorkerChannel & ShutdownDeps["web"];
@@ -93,6 +96,10 @@ export interface RuntimeBootstrapDeps {
     web: RuntimeBootstrapWeb,
     pushover: RuntimeBootstrapPushover | null
   ): RuntimeSenders;
+  installChatToolChannelDelivery(
+    sendMessage: RuntimeSenders["sendMessage"],
+    agentPool: RuntimeBootstrapAgentPool,
+  ): void;
   startRuntimeWorkers(
     queue: RuntimeBootstrapQueue,
     agentPool: RuntimeBootstrapAgentPool,
@@ -172,6 +179,12 @@ export function createDefaultRuntimeBootstrapDeps(base: RuntimeBootstrapDefaultB
     createShutdownHandler,
     registerRuntimeShutdownSignals,
     createRuntimeSenders,
+    installChatToolChannelDelivery: (sendMessage, agentPool) => {
+      setChatToolChannelDeliveryFn(createChatToolChannelDeliveryHandler(sendMessage, {
+        isKnownChatJid: (chatJid) => agentPool.listKnownChats()
+          .some((chat) => chat.chat_jid === chatJid),
+      }));
+    },
     startRuntimeWorkers,
     installAddonRuntimeInterop,
     ensureAddonRuntimeEntriesLoaded,
@@ -218,6 +231,7 @@ export async function bootstrapRuntime(deps: RuntimeBootstrapDeps): Promise<void
     deps.registerRuntimeShutdownSignals(deps.signalRegistrar, shutdown);
 
     const senders = deps.createRuntimeSenders(web, pushover);
+    deps.installChatToolChannelDelivery(senders.sendMessage, agentPool);
     deps.installAddonRuntimeInterop({
       queue,
       web,

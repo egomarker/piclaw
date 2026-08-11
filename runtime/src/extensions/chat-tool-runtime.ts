@@ -1,16 +1,24 @@
 /**
- * chat-tool-runtime – direct runtime relay for the built-in chat tool.
+ * chat-tool-runtime – local relay and direct channel delivery for the chat tool.
  *
- * This intentionally does not use the web peer relay endpoint. The chat tool is already
- * running inside a trusted session context, so the runtime resolves source and
- * destination identities itself, then delivers a normal message to the target
- * chat with a structured reply-to descriptor.
+ * Local relay intentionally avoids the web peer endpoint: the tool already runs
+ * inside a trusted session context, so the runtime resolves both identities and
+ * delivers a normal inbound message. Direct channel delivery reuses the shared
+ * runtime sender so the add-on transport and web timeline stay in sync.
  */
 import type { AgentPool } from "../agent-pool.js";
 import { getIdentityConfig } from "../core/config.js";
 import { getChatBranchByAgentName, getChatBranchByChatJid } from "../db.js";
+import { detectChannel } from "../router.js";
+import { getChannelTransport, type RuntimeChannelTransport } from "../runtime/channel-transport-registry.js";
+import type { RuntimeSenders } from "../runtime/wiring.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
-import type { ChatRelayRequest, ChatRelayResult } from "./chat-tool.js";
+import type {
+  ChatChannelDeliveryRequest,
+  ChatChannelDeliveryResult,
+  ChatRelayRequest,
+  ChatRelayResult,
+} from "./chat-tool.js";
 
 const log = createLogger("extensions.chat-tool-runtime");
 
@@ -45,6 +53,12 @@ type DirectChatToolRelayOptions = {
   getAgentDisplayName?: () => string | null | undefined;
   getChatBranchByChatJid?: (chatJid: string) => ChatBranchLike | null;
   getChatBranchByAgentName?: (agentName: string) => ChatBranchLike | null;
+};
+
+type ChatToolChannelDeliveryOptions = {
+  detectChannel?: (chatJid: string) => string;
+  getChannelTransport?: (channel: string) => RuntimeChannelTransport | null;
+  isKnownChatJid?: (chatJid: string) => boolean;
 };
 
 function fallbackPeerAgentHandle(chatJid: string): string {
@@ -212,6 +226,65 @@ function readForwardedCreated(responseBody: Record<string, unknown>): boolean | 
   return responseBody.user_message && typeof responseBody.user_message === "object" ? true : undefined;
 }
 
+function getExplicitChatJidPrefix(chatJid: string): string | null {
+  const separator = chatJid.indexOf(":");
+  if (separator <= 0) return null;
+  const prefix = chatJid.slice(0, separator).trim().toLowerCase();
+  return prefix || null;
+}
+
+/**
+ * Build the optional direct-delivery attempt used before local chat relay.
+ * Returning handled:false preserves the existing relay for web, unprefixed,
+ * unknown-prefix, unknown-chat, and currently unregistered channel destinations.
+ * Once an eligible registered transport is selected, send errors propagate
+ * without fallback.
+ */
+export function createChatToolChannelDeliveryHandler(
+  sendMessage: RuntimeSenders["sendMessage"],
+  options: ChatToolChannelDeliveryOptions = {},
+): (request: ChatChannelDeliveryRequest) => Promise<ChatChannelDeliveryResult> {
+  const resolveChannel = options.detectChannel || detectChannel;
+  const resolveTransport = options.getChannelTransport || getChannelTransport;
+
+  return async (request) => {
+    const targetChatJid = request.target_chat_jid.trim();
+    const prefix = getExplicitChatJidPrefix(targetChatJid);
+    if (!prefix || prefix === "web") {
+      return { handled: false };
+    }
+
+    const channel = String(resolveChannel(targetChatJid) || "").trim().toLowerCase();
+    if (!channel || channel === "unknown" || channel === "web") {
+      return { handled: false };
+    }
+    if (!resolveTransport(channel)) {
+      return { handled: false };
+    }
+
+    const sourceChatJid = request.source_chat_jid.trim();
+    const isKnownTarget = targetChatJid === sourceChatJid
+      || options.isKnownChatJid?.(targetChatJid) === true;
+    if (!isKnownTarget) {
+      return { handled: false };
+    }
+
+    await sendMessage(targetChatJid, request.content, { source: "chat-tool" });
+    return {
+      handled: true,
+      result: {
+        status: "sent",
+        relayed: true,
+        delivered: true,
+        delivery: "channel",
+        transport: channel,
+        source_chat_jid: sourceChatJid,
+        target_chat_jid: targetChatJid,
+      },
+    };
+  };
+}
+
 export function createDirectChatToolRelayHandler(
   agentPool: ChatToolRelayAgentPool,
   web: DirectChatToolRelayWeb,
@@ -296,4 +369,5 @@ export const __chatToolRuntimeInternals = {
   buildForwardedContent,
   buildPeerRelayBlock,
   buildReplyToDescriptor,
+  getExplicitChatJidPrefix,
 };

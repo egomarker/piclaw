@@ -68,6 +68,7 @@ describe("chat tool extension", () => {
     resetChatTransportRegistryForTests();
     try {
       const module = await importFresh<typeof import("../src/extensions/chat-tool.js")>("../src/extensions/chat-tool.js");
+      module.setChatToolChannelDeliveryFn(undefined);
       module.setChatToolRelayFn(undefined);
     } catch (e) {
       // ignore cleanup import failures in teardown
@@ -154,6 +155,104 @@ describe("chat tool extension", () => {
       content: "Please act on this now.",
       mode: "steer",
     }]);
+  });
+
+  test("delivers a target_chat_jid directly when the channel handler accepts it", async () => {
+    const { tool, chatToolModule } = await getTool();
+    const deliveryCalls: Array<Record<string, unknown>> = [];
+    let relayCalls = 0;
+    chatToolModule.setChatToolChannelDeliveryFn(async (request) => {
+      deliveryCalls.push(request as unknown as Record<string, unknown>);
+      return {
+        handled: true,
+        result: {
+          status: "sent",
+          relayed: true,
+          delivered: true,
+          delivery: "channel",
+          transport: "telegram",
+          source_chat_jid: request.source_chat_jid,
+          target_chat_jid: request.target_chat_jid,
+        },
+      };
+    });
+    chatToolModule.setChatToolRelayFn(async () => {
+      relayCalls += 1;
+      throw new Error("local relay must not run");
+    });
+
+    const result = await withChatContext(chatJid, "web", () => tool.execute("x", {
+      target_chat_jid: "telegram:123",
+      content: "  hello telegram  ",
+    }));
+
+    expect(deliveryCalls).toEqual([{
+      source_chat_jid: chatJid,
+      target_chat_jid: "telegram:123",
+      content: "hello telegram",
+    }]);
+    expect(relayCalls).toBe(0);
+    expect(result.content[0].text).toBe("Sent to telegram:123 via telegram.");
+    expect(result.details).toMatchObject({
+      relayed: true,
+      delivered: true,
+      delivery: "channel",
+      transport: "telegram",
+      target_chat_jid: "telegram:123",
+    });
+  });
+
+  test("keeps the existing relay when optional channel delivery declines a chat JID", async () => {
+    const { tool, chatToolModule } = await getTool();
+    const deliveryTargets: string[] = [];
+    const relayTargets: string[] = [];
+    chatToolModule.setChatToolChannelDeliveryFn(async (request) => {
+      deliveryTargets.push(request.target_chat_jid);
+      return { handled: false };
+    });
+    chatToolModule.setChatToolRelayFn(async (request) => {
+      relayTargets.push(String(request.target_chat_jid));
+      return {
+        status: "ok",
+        relayed: true,
+        source_chat_jid: request.source_chat_jid,
+        target_chat_jid: String(request.target_chat_jid),
+        target_agent_name: "target",
+      };
+    });
+
+    for (const target of ["web:target", "local-target", "unknown:target", "telegram:target"]) {
+      const result = await withChatContext(chatJid, "web", () => tool.execute("x", {
+        target_chat_jid: target,
+        content: "hello",
+      }));
+      expect(result.details).toMatchObject({ relayed: true, target_chat_jid: target });
+      expect(result.content[0].text).toContain("Relayed to");
+    }
+
+    expect(deliveryTargets).toEqual(["web:target", "local-target", "unknown:target", "telegram:target"]);
+    expect(relayTargets).toEqual(deliveryTargets);
+  });
+
+  test("does not fall back to local relay after channel delivery throws", async () => {
+    const { tool, chatToolModule } = await getTool();
+    let relayCalls = 0;
+    chatToolModule.setChatToolChannelDeliveryFn(async () => {
+      throw new Error("Telegram delivery outcome is unknown");
+    });
+    chatToolModule.setChatToolRelayFn(async () => {
+      relayCalls += 1;
+      throw new Error("local relay must not run");
+    });
+
+    const result = await withChatContext(chatJid, "web", () => tool.execute("x", {
+      target_chat_jid: "telegram:123",
+      content: "hello",
+    }));
+
+    expect(relayCalls).toBe(0);
+    expect(result.details.relayed).toBe(false);
+    expect(result.details.error).toBe("Telegram delivery outcome is unknown");
   });
 
   test("relays a local target_address through the built-in local transport", async () => {
