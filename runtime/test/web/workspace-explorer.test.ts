@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
   WORKSPACE_DRAG_GHOST_VIEWPORT_PADDING_PX,
@@ -39,6 +41,25 @@ function createRowTarget(options: { path?: string; type?: string; isDragHandle?:
     },
   };
 }
+
+test('workspace header places the terminal tab button between create and refresh', () => {
+  const source = readFileSync(join(import.meta.dir, '../../web/src/components/workspace-explorer.ts'), 'utf8');
+  const actionsStart = source.indexOf('<div class="workspace-header-actions">');
+  const actionsEnd = source.indexOf('\n                </div>', actionsStart);
+  expect(actionsStart).toBeGreaterThan(-1);
+  expect(actionsEnd).toBeGreaterThan(actionsStart);
+
+  const actions = source.slice(actionsStart, actionsEnd);
+  const createIndex = actions.indexOf('class="workspace-create"');
+  const terminalIndex = actions.indexOf('class="workspace-open-terminal"');
+  const refreshIndex = actions.indexOf('class="workspace-refresh"');
+  expect(createIndex).toBeGreaterThan(-1);
+  expect(terminalIndex).toBeGreaterThan(createIndex);
+  expect(refreshIndex).toBeGreaterThan(terminalIndex);
+  expect(actions).toContain('showTerminalHeaderAction && onOpenTerminalTab');
+  expect(actions).toContain('title=${t(\'menu.openTerminal\')}');
+  expect(actions).toContain('<polyline points="4.5 5.25 7 7.75 4.5 10.25" />');
+});
 
 test('workspace touch start only prepares drag state and does not arm file deletion', () => {
   const intent = getWorkspaceTouchStartIntent({

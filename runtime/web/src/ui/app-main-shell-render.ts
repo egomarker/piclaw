@@ -441,6 +441,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
           active=${workspaceVisible || (!workspaceTabMode && editorOpen)}
           onOpenEditor=${openEditor}
           onOpenTerminalTab=${openTerminalTab}
+          showTerminalHeaderAction=${!workspaceTabMode}
           onOpenVncTab=${openVncTab}
           surfaceId=${mobileWorkspacePanelEnabled ? MOBILE_WORKSPACE_PANEL_ID : undefined}
           surfaceRole=${mobileWorkspacePanelEnabled ? 'tabpanel' : undefined}

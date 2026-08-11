@@ -200,6 +200,7 @@
 .workspace-edit,
 .workspace-delete,
 .workspace-create,
+.workspace-open-terminal,
 .workspace-toggle-hidden,
 .workspace-menu-button {
     background: var(--bg-secondary);
@@ -224,6 +225,7 @@
 .workspace-edit svg,
 .workspace-delete svg,
 .workspace-create svg,
+.workspace-open-terminal svg,
 .workspace-toggle-hidden svg,
 .workspace-menu-button svg {
     width: var(--workspace-header-icon-size);
@@ -243,6 +245,7 @@
 .workspace-edit:hover,
 .workspace-delete:hover,
 .workspace-create:hover,
+.workspace-open-terminal:hover,
 .workspace-toggle-hidden:hover,
 .workspace-menu-button:hover {
     color: var(--text-primary);
