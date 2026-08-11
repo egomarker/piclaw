@@ -363,6 +363,7 @@ function buildSessionControlTreeDescriptor(branch: {
   root_chat_jid?: string | null;
   parent_branch_id?: string | null;
   agent_name?: string | null;
+  archived_at?: string | null;
 }): Record<string, unknown> {
   return {
     branch_id: branch.branch_id ?? null,
@@ -370,6 +371,7 @@ function buildSessionControlTreeDescriptor(branch: {
     root_chat_jid: branch.root_chat_jid ?? branch.chat_jid,
     parent_branch_id: branch.parent_branch_id ?? null,
     agent_name: branch.agent_name ?? null,
+    archived_at: branch.archived_at ?? null,
   };
 }
 
@@ -390,7 +392,7 @@ function resolveSessionControlTarget(agentPool: AgentPool, request: SessionContr
   return { chatJid: found.chat_jid, agentName: found.agent_name || agentName, sessionTree: buildSessionControlTreeDescriptor(known) };
 }
 
-function registerSessionControlHandler(agentPool: AgentPool, web: WebChannel): void {
+export function registerSessionControlHandler(agentPool: AgentPool, web: WebChannel): void {
   setSessionControlHandler(async (request): Promise<SessionControlResult> => {
     if (getSessionIsolationLevel() === "full") throw new Error("Session isolation is full; session_control is disabled.");
     const target = resolveSessionControlTarget(agentPool, request);
@@ -401,6 +403,31 @@ function registerSessionControlHandler(agentPool: AgentPool, web: WebChannel): v
       target_agent_name: target.agentName,
       target_session_tree: target.sessionTree,
     };
+
+    // Match the web UI archive path directly. In particular, do not build the
+    // usual model/context snapshot first because doing so can warm a dormant
+    // session immediately before pruneChatBranch disposes it.
+    if (request.action === "archive") {
+      const before = {
+        chat_jid: target.chatJid,
+        active: agentPool.isActive(target.chatJid),
+        streaming: agentPool.isStreaming(target.chatJid),
+        archived_at: target.sessionTree?.archived_at ?? null,
+      };
+      const archived = await agentPool.pruneChatBranch(target.chatJid);
+      const after = buildSessionControlTreeDescriptor(archived);
+      const label = target.agentName ? `@${target.agentName} (${target.chatJid})` : target.chatJid;
+      return {
+        ok: true,
+        ...base,
+        status: "archived",
+        before,
+        after,
+        archived: true,
+        message: `Archived ${label}.`,
+      };
+    }
+
     const before = await buildSessionControlSnapshot(agentPool, target.chatJid);
 
     if (request.action === "inspect") return { ok: true, ...base, before };
@@ -581,7 +608,7 @@ export async function startWebChannel(queue: AgentQueue, agentPool: AgentPool): 
   });
 
   // Wire session_control separately from chat relay. This tool controls target
-  // session runtime state (inspect/compact/abort/model/failed-run/wake).
+  // session runtime state (inspect/archive/compact/abort/model/failed-run/wake).
   registerSessionControlHandler(agentPool, web);
 
   return web;

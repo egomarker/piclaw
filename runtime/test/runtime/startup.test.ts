@@ -8,6 +8,7 @@ import {
   buildStartupAgentStatus,
   initializeWebAddonMessagingRuntime,
   queueStartupSessionWarmup,
+  registerSessionControlHandler,
   resolveStartupSessionWarmupOptions,
   runWebStartupRecoveryBootstrap,
 } from "../../src/runtime/startup.js";
@@ -147,6 +148,76 @@ export {};
       resetAddonRuntimeContributionsForTests();
       restoreEnv();
       ws.cleanup();
+    }
+  });
+
+  test("session_control archives through the UI branch lifecycle without warming the target", async () => {
+    const { initDatabase } = await import("../../src/db.js");
+    const { withChatContext } = await import("../../src/core/chat-context.js");
+    const { sessionControl, setSessionControlHandler } = await import("../../src/extensions/session-control.js");
+    initDatabase();
+
+    const target = {
+      branch_id: "branch-archive-target",
+      chat_jid: "web:archive-target",
+      root_chat_jid: "web:archive-target",
+      parent_branch_id: null,
+      agent_name: "archive-target",
+      created_at: "2026-08-11T10:00:00.000Z",
+      updated_at: "2026-08-11T10:00:00.000Z",
+      archived_at: null,
+      is_active: false,
+    };
+    const archiveCalls: string[] = [];
+    let snapshotWarmups = 0;
+    const agentPool = {
+      listKnownChats: () => [target],
+      findChatByAgentName: (name: string) => name === target.agent_name ? target : null,
+      isActive: () => false,
+      isStreaming: () => false,
+      getAvailableModels: async () => {
+        snapshotWarmups += 1;
+        throw new Error("archive should not load model state");
+      },
+      getContextUsageForChat: async () => {
+        snapshotWarmups += 1;
+        throw new Error("archive should not load context state");
+      },
+      pruneChatBranch: async (chatJid: string) => {
+        archiveCalls.push(chatJid);
+        return { ...target, archived_at: "2026-08-11T10:01:00.000Z" };
+      },
+    };
+
+    const tools = new Map<string, any>();
+    sessionControl({
+      on() {},
+      registerTool(tool: any) { tools.set(tool.name, tool); },
+    } as any);
+    registerSessionControlHandler(agentPool as any, {} as any);
+
+    try {
+      const result = await withChatContext("web:source", "web", () => tools.get("session_control").execute("call-archive", {
+        action: "archive",
+        target_agent_name: "archive-target",
+      }));
+
+      expect(result.details).toMatchObject({
+        ok: true,
+        action: "archive",
+        status: "archived",
+        target_chat_jid: target.chat_jid,
+        target_agent_name: target.agent_name,
+        archived: true,
+        after: {
+          chat_jid: target.chat_jid,
+          archived_at: "2026-08-11T10:01:00.000Z",
+        },
+      });
+      expect(archiveCalls).toEqual([target.chat_jid]);
+      expect(snapshotWarmups).toBe(0);
+    } finally {
+      setSessionControlHandler(undefined);
     }
   });
 

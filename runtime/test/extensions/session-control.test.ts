@@ -29,6 +29,7 @@ test("session_control registers a separate tool from chat with startup guidance"
   expect(event.systemPrompt).toContain("Cross-session session control");
   expect(event.systemPrompt).toContain("separate from the chat tool");
   expect(event.systemPrompt).toContain("Prefer target_agent_name with an @alias");
+  expect(event.systemPrompt).toContain("Archive follows the web UI lifecycle rules");
 });
 
 test("session_control requires exactly one target selector", async () => {
@@ -104,7 +105,7 @@ test("session_control dispatches every supported action name to the runtime hand
 
   const { tools } = makePi();
   const tool = tools.get("session_control");
-  const actions = ["inspect", "assess_stuck", "compact", "abort", "retry_failed", "skip_failed", "wake", "unblock"];
+  const actions = ["inspect", "assess_stuck", "archive", "compact", "abort", "retry_failed", "skip_failed", "wake", "unblock"];
   for (const action of actions) {
     const result = await withChatContext("web:source", "web", () => tool.execute(`call-${action}`, {
       action,

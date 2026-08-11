@@ -2,8 +2,8 @@
  * session-control – cross-session operational controls.
  *
  * Separate from the chat relay tool: chat sends messages, while this tool
- * inspects and mutates target session runtime state (compact, abort, model
- * switch, failed-run handling, wake).
+ * inspects and mutates target session runtime state (archive, compact, abort,
+ * model switch, failed-run handling, wake).
  */
 import { Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
@@ -12,6 +12,7 @@ import { getChatJid } from "../core/chat-context.js";
 export type SessionControlAction =
   | "inspect"
   | "assess_stuck"
+  | "archive"
   | "compact"
   | "abort"
   | "switch_model"
@@ -58,6 +59,7 @@ const SessionControlSchema = Type.Object({
   action: Type.Optional(Type.Union([
     Type.Literal("inspect"),
     Type.Literal("assess_stuck"),
+    Type.Literal("archive"),
     Type.Literal("compact"),
     Type.Literal("abort"),
     Type.Literal("switch_model"),
@@ -84,9 +86,10 @@ type SessionControlParams = {
 
 const HINT = [
   "## Cross-session session control",
-  "Use session_control for operational control of another session: inspect, assess_stuck, compact, abort, switch_model, retry_failed, skip_failed, wake, or unblock.",
+  "Use session_control for operational control of another session: inspect, assess_stuck, archive, compact, abort, switch_model, retry_failed, skip_failed, wake, or unblock.",
   "This is intentionally separate from the chat tool. chat relays messages; session_control mutates session runtime state.",
   "Prefer target_agent_name with an @alias over raw target_chat_jid/session IDs; aliases resolve through the internal Pi session-tree registry.",
+  "Archive follows the web UI lifecycle rules: the default chat, active sessions, and roots with active child branches cannot be archived.",
   "Prefer inspect or assess_stuck before mutating a target session unless the user explicitly asks you to unblock it.",
 ].join("\n");
 
@@ -108,6 +111,7 @@ function formatResult(result: SessionControlResult): string {
     : result.target_chat_jid;
   if (result.action === "inspect") return `Inspected ${target}.`;
   if (result.action === "assess_stuck") return `Assessment for ${target}: ${result.assessment || "unknown"}.`;
+  if (result.action === "archive") return result.message || `Archived ${target}.`;
   return result.message || `${result.action} completed for ${target}.`;
 }
 
@@ -119,8 +123,8 @@ export const sessionControl: ExtensionFactory = (pi: ExtensionAPI) => {
   pi.registerTool({
     name: "session_control",
     label: "session_control",
-    description: "Inspect or control another @alias/session: assess stuck state, compact, abort, switch model, handle failed runs, wake it, or unblock it.",
-    promptSnippet: "session_control: inspect/assess/compact/abort/switch_model/retry_failed/skip_failed/wake/unblock another session. Prefer target_agent_name='@alias' over raw chat/session IDs. Separate from chat relay.",
+    description: "Inspect or control another @alias/session: assess stuck state, archive, compact, abort, switch model, handle failed runs, wake it, or unblock it.",
+    promptSnippet: "session_control: inspect/assess/archive/compact/abort/switch_model/retry_failed/skip_failed/wake/unblock another session. Prefer target_agent_name='@alias' over raw chat/session IDs. Separate from chat relay.",
     parameters: SessionControlSchema,
     async execute(_toolCallId, params: SessionControlParams) {
       const sourceChatJid = getChatJid("").trim();
