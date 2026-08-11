@@ -78,13 +78,13 @@
       "semanticReaderOccurrences": 0
     },
     "tooling": {
-      "referencedNames": 76,
-      "directReaderNames": 41,
-      "directReaderOccurrences": 78,
+      "referencedNames": 77,
+      "directReaderNames": 42,
+      "directReaderOccurrences": 81,
       "helperReaderNames": 0,
       "helperReaderOccurrences": 0,
-      "semanticReaderNames": 41,
-      "semanticReaderOccurrences": 78
+      "semanticReaderNames": 42,
+      "semanticReaderOccurrences": 81
     },
     "docsDeploy": {
       "referencedNames": 122,
@@ -1697,18 +1697,20 @@
       "scopes": {
         "tooling": {
           "referenced": true,
-          "directReaders": 3,
+          "directReaders": 4,
           "helperReaders": 0,
-          "semanticReaders": 3,
+          "semanticReaders": 4,
           "files": [
             "runtime/scripts/playwright/mobile-interface.ts",
             "runtime/scripts/playwright/mobile-terminal-controls.ts",
-            "runtime/scripts/playwright/terminal-reopen.ts"
+            "runtime/scripts/playwright/terminal-reopen.ts",
+            "runtime/scripts/playwright/timeline-virtualization.ts"
           ],
           "readerFiles": [
             "runtime/scripts/playwright/mobile-interface.ts",
             "runtime/scripts/playwright/mobile-terminal-controls.ts",
-            "runtime/scripts/playwright/terminal-reopen.ts"
+            "runtime/scripts/playwright/terminal-reopen.ts",
+            "runtime/scripts/playwright/timeline-virtualization.ts"
           ]
         }
       }
@@ -1746,6 +1748,23 @@
             ".github/workflows/e2e.yml"
           ],
           "readerFiles": []
+        }
+      }
+    },
+    {
+      "name": "PICLAW_E2E_REPORT_PATH",
+      "scopes": {
+        "tooling": {
+          "referenced": true,
+          "directReaders": 1,
+          "helperReaders": 0,
+          "semanticReaders": 1,
+          "files": [
+            "runtime/scripts/playwright/timeline-virtualization.ts"
+          ],
+          "readerFiles": [
+            "runtime/scripts/playwright/timeline-virtualization.ts"
+          ]
         }
       }
     },
@@ -2966,22 +2985,24 @@
       "scopes": {
         "tooling": {
           "referenced": true,
-          "directReaders": 5,
+          "directReaders": 6,
           "helperReaders": 0,
-          "semanticReaders": 5,
+          "semanticReaders": 6,
           "files": [
             "runtime/scripts/playwright/mobile-interface.ts",
             "runtime/scripts/playwright/mobile-terminal-controls.ts",
             "runtime/scripts/playwright/terminal-reopen-multicycle.ts",
             "runtime/scripts/playwright/terminal-reopen-race.ts",
-            "runtime/scripts/playwright/terminal-reopen.ts"
+            "runtime/scripts/playwright/terminal-reopen.ts",
+            "runtime/scripts/playwright/timeline-virtualization.ts"
           ],
           "readerFiles": [
             "runtime/scripts/playwright/mobile-interface.ts",
             "runtime/scripts/playwright/mobile-terminal-controls.ts",
             "runtime/scripts/playwright/terminal-reopen-multicycle.ts",
             "runtime/scripts/playwright/terminal-reopen-race.ts",
-            "runtime/scripts/playwright/terminal-reopen.ts"
+            "runtime/scripts/playwright/terminal-reopen.ts",
+            "runtime/scripts/playwright/timeline-virtualization.ts"
           ]
         }
       }
