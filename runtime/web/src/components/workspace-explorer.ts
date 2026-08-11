@@ -755,6 +755,7 @@ export function WorkspaceExplorer({
     active = undefined,
     onOpenEditor,
     onOpenTerminalTab,
+    showTerminalHeaderAction = false,
     onOpenVncTab,
     surfaceId,
     surfaceRole,
@@ -2740,6 +2741,21 @@ export function WorkspaceExplorer({
                             <line x1="5" y1="12" x2="19" y2="12" />
                         </svg>
                     </button>
+                    ${showTerminalHeaderAction && onOpenTerminalTab && html`
+                        <button
+                            class="workspace-open-terminal"
+                            onClick=${handleMenuOpenTerminalTab}
+                            title=${t('menu.openTerminal')}
+                            aria-label=${t('menu.openTerminal')}
+                        >
+                            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
+                                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <rect x="1.75" y="2.25" width="12.5" height="11.5" rx="2" />
+                                <polyline points="4.5 5.25 7 7.75 4.5 10.25" />
+                                <line x1="8.5" y1="10.25" x2="11.5" y2="10.25" />
+                            </svg>
+                        </button>
+                    `}
                     <button class="workspace-refresh" onClick=${handleRefreshClick} title=${t('menu.refreshTree')}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
                             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

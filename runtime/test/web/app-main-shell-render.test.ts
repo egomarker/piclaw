@@ -398,6 +398,7 @@ test('compact Mobile renders Workspace as a permanent surface without rail contr
   expect(explorerVNode?.props.visible).toBe(true);
   expect(explorerVNode?.props.active).toBe(true);
   expect(explorerVNode?.props.mobileInterface).toBe(true);
+  expect(explorerVNode?.props.showTerminalHeaderAction).toBe(false);
   expect(explorerVNode?.props.onFileSelect).toBeUndefined();
   expect(tabStripVNode?.props.tabs).toBe(displayTabs);
   expect(tabStripVNode?.props.activeId).toBe('piclaw://workspace');
@@ -430,6 +431,7 @@ test('wide Mobile Workspace rail preserves its file selection callback', () => {
 
   expect(explorerVNode?.props.visible).toBe(true);
   expect(explorerVNode?.props.mobileInterface).toBe(true);
+  expect(explorerVNode?.props.showTerminalHeaderAction).toBe(true);
   expect(explorerVNode?.props.onFileSelect).toBe(addFileRef);
   expect(splitterVNode?.props.role).toBe('separator');
   expect(splitterVNode?.props['aria-orientation']).toBe('vertical');
@@ -573,6 +575,7 @@ test('Classic shell does not opt into Mobile tab or panel accessibility behavior
   expect(explorerVNode?.props.surfaceRole).toBeUndefined();
   expect(explorerVNode?.props.surfaceInert).toBeUndefined();
   expect(explorerVNode?.props.mobileInterface).toBeUndefined();
+  expect(explorerVNode?.props.showTerminalHeaderAction).toBe(true);
   expect(chatMainVNode?.props.role).toBeUndefined();
   expect(chatMainVNode?.props['aria-hidden']).toBeUndefined();
   expect(chatMainVNode?.props.inert).toBeUndefined();
