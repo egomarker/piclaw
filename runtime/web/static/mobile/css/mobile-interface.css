@@ -240,7 +240,11 @@ html[data-iphone-standalone-compose-inset="1"] .app-shell.mobile-interface > .co
     padding-right: 10px;
 }
 
-/* Match the active state of the terminal control in the shared tab strip. */
+/* Match the inactive and active states of the terminal control in the shared tab strip. */
+.app-shell.mobile-interface .compose-terminal-dock-toggle {
+    color: var(--text-secondary);
+}
+
 .app-shell.mobile-interface .compose-terminal-dock-toggle.active {
     color: var(--accent-color);
 }

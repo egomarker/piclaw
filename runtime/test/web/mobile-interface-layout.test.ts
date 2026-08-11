@@ -79,7 +79,8 @@ test('Mobile uses a full Workspace tab surface and insets tree content without m
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface > \.workspace-sidebar \{\s*display: none;/);
 });
 
-test('Mobile compose terminal control mirrors the active terminal tab-strip state', () => {
+test('Mobile compose terminal control distinguishes closed and open dock states', () => {
+  expect(mobileCss).toMatch(/\.app-shell\.mobile-interface \.compose-terminal-dock-toggle \{\s*color: var\(--text-secondary\);/);
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface \.compose-terminal-dock-toggle\.active \{\s*color: var\(--accent-color\);/);
 });
 
