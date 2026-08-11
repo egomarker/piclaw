@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
-import { createDirectChatToolRelayHandler } from "../../src/extensions/chat-tool-runtime.js";
+import {
+  createChatToolChannelDeliveryHandler,
+  createDirectChatToolRelayHandler,
+} from "../../src/extensions/chat-tool-runtime.js";
+import { registerChannelDetector } from "../../src/router.js";
+import { registerChannelTransport } from "../../src/runtime/channel-transport-registry.js";
+import { createRuntimeSenders } from "../../src/runtime/wiring.js";
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -217,5 +223,154 @@ describe("direct chat tool runtime relay", () => {
       content: "hello",
       mode: "auto",
     })).rejects.toThrow("Unknown target chat: web:not-registered");
+  });
+
+  test("declines direct delivery for web, unprefixed, unknown, and unavailable targets", async () => {
+    const detected: string[] = [];
+    const lookedUp: string[] = [];
+    const handler = createChatToolChannelDeliveryHandler(async () => {
+      throw new Error("sender must not run");
+    }, {
+      detectChannel: (chatJid) => {
+        detected.push(chatJid);
+        return chatJid.startsWith("telegram:") ? "telegram" : "unknown";
+      },
+      getChannelTransport: (channel) => {
+        lookedUp.push(channel);
+        return null;
+      },
+    });
+
+    for (const target_chat_jid of ["web:target", "local-target", "unknown:target", "telegram:123"]) {
+      await expect(handler({
+        source_chat_jid: "web:source",
+        target_chat_jid,
+        content: "hello",
+      })).resolves.toEqual({ handled: false });
+    }
+
+    expect(detected).toEqual(["unknown:target", "telegram:123"]);
+    expect(lookedUp).toEqual(["telegram"]);
+  });
+
+  test("declines an active transport when the target is not a known chat", async () => {
+    const handler = createChatToolChannelDeliveryHandler(async () => {
+      throw new Error("sender must not run");
+    }, {
+      detectChannel: () => "telegram",
+      getChannelTransport: () => ({ sendMessage: async () => {} }),
+      isKnownChatJid: () => false,
+    });
+
+    await expect(handler({
+      source_chat_jid: "web:source",
+      target_chat_jid: "telegram:unknown",
+      content: "hello",
+    })).resolves.toEqual({ handled: false });
+  });
+
+  test("allows direct delivery back to the current non-web chat", async () => {
+    const calls: string[] = [];
+    const handler = createChatToolChannelDeliveryHandler(async (jid) => {
+      calls.push(jid);
+    }, {
+      detectChannel: () => "telegram",
+      getChannelTransport: () => ({ sendMessage: async () => {} }),
+      isKnownChatJid: () => false,
+    });
+
+    await expect(handler({
+      source_chat_jid: "telegram:self",
+      target_chat_jid: "telegram:self",
+      content: "hello",
+    })).resolves.toMatchObject({ handled: true });
+    expect(calls).toEqual(["telegram:self"]);
+  });
+
+  test("uses the shared runtime sender after selecting a registered channel", async () => {
+    const calls: Array<{ jid: string; text: string; options?: Record<string, unknown> }> = [];
+    const handler = createChatToolChannelDeliveryHandler(async (jid, text, options) => {
+      calls.push({ jid, text, options: options as Record<string, unknown> | undefined });
+    }, {
+      detectChannel: () => "telegram",
+      getChannelTransport: () => ({ sendMessage: async () => {} }),
+      isKnownChatJid: () => true,
+    });
+
+    const result = await handler({
+      source_chat_jid: "web:source",
+      target_chat_jid: "telegram:123",
+      content: "hello",
+    });
+
+    expect(calls).toEqual([{
+      jid: "telegram:123",
+      text: "hello",
+      options: { source: "chat-tool" },
+    }]);
+    expect(result).toEqual({
+      handled: true,
+      result: {
+        status: "sent",
+        relayed: true,
+        delivered: true,
+        delivery: "channel",
+        transport: "telegram",
+        source_chat_jid: "web:source",
+        target_chat_jid: "telegram:123",
+      },
+    });
+  });
+
+  test("propagates a selected channel send failure without returning a relay fallback", async () => {
+    const handler = createChatToolChannelDeliveryHandler(async () => {
+      throw new Error("delivery outcome unknown");
+    }, {
+      detectChannel: () => "telegram",
+      getChannelTransport: () => ({ sendMessage: async () => {} }),
+      isKnownChatJid: () => true,
+    });
+
+    await expect(handler({
+      source_chat_jid: "web:source",
+      target_chat_jid: "telegram:123",
+      content: "hello",
+    })).rejects.toThrow("delivery outcome unknown");
+  });
+
+  test("sends through a registered channel and mirrors through the web sender", async () => {
+    const transportCalls: Array<{ jid: string; text: string; source?: string }> = [];
+    const webCalls: Array<{ jid: string; text: string; source?: string }> = [];
+    const unregisterDetector = registerChannelDetector((chatJid) => chatJid.startsWith("toolchan:") ? "toolchan" : null);
+    const unregisterTransport = registerChannelTransport("toolchan", {
+      sendMessage: async (jid, text, options) => {
+        transportCalls.push({ jid, text, source: options?.source });
+      },
+    });
+
+    try {
+      const senders = createRuntimeSenders({
+        sendMessage: async (jid, text, options) => {
+          webCalls.push({ jid, text, source: options?.source });
+        },
+        resumeChat: () => {},
+        resumePendingChats: () => {},
+      }, null);
+      const handler = createChatToolChannelDeliveryHandler(senders.sendMessage, {
+        isKnownChatJid: () => true,
+      });
+
+      await expect(handler({
+        source_chat_jid: "web:source",
+        target_chat_jid: "toolchan:123",
+        content: "hello",
+      })).resolves.toMatchObject({ handled: true });
+
+      expect(transportCalls).toEqual([{ jid: "toolchan:123", text: "hello", source: "chat-tool" }]);
+      expect(webCalls).toEqual([{ jid: "toolchan:123", text: "hello", source: "chat-tool" }]);
+    } finally {
+      unregisterTransport();
+      unregisterDetector();
+    }
   });
 });

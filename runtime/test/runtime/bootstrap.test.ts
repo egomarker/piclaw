@@ -32,6 +32,7 @@ function bootstrapDepsForFailure(overrides: Partial<RuntimeBootstrapDeps> = {}):
     createShutdownHandler: () => async () => {},
     registerRuntimeShutdownSignals: () => {},
     createRuntimeSenders: () => ({ sendMessage: async () => {}, sendNudge: async () => {} }),
+    installChatToolChannelDelivery: () => {},
     startRuntimeWorkers: () => {},
     queueStartupResumePendingIpc: () => {},
     startRuntimeLoop: async () => {},
@@ -111,6 +112,11 @@ describe("runtime bootstrap", () => {
         events.push("create-senders");
         return senders;
       },
+      installChatToolChannelDelivery: (sendMessage, receivedAgentPool) => {
+        events.push("install-chat-tool-channel-delivery");
+        expect(sendMessage).toBe(senders.sendMessage);
+        expect(receivedAgentPool).toBe(agentPool);
+      },
       installAddonRuntimeInterop: (options) => {
         events.push("install-addon-runtime-interop");
         expect(options.queue).toBe(queue);
@@ -153,6 +159,7 @@ describe("runtime bootstrap", () => {
       "create-shutdown",
       "register-shutdown-signals",
       "create-senders",
+      "install-chat-tool-channel-delivery",
       "install-addon-runtime-interop",
       "load-addon-runtime-entries",
       "start-workers",
@@ -206,6 +213,7 @@ describe("runtime bootstrap", () => {
       createShutdownHandler: () => async () => {},
       registerRuntimeShutdownSignals: () => {},
       createRuntimeSenders: () => ({ sendMessage: async () => {}, sendNudge: async () => {} }),
+      installChatToolChannelDelivery: () => {},
       installAddonRuntimeInterop: () => {},
       ensureAddonRuntimeEntriesLoaded: async () => {},
       startRuntimeWorkers: () => {},
@@ -236,6 +244,7 @@ describe("runtime bootstrap", () => {
     expect(typeof deps.hydrateMcpCredentials).toBe("function");
     expect(typeof deps.clearMcpCredentials).toBe("function");
     expect(typeof deps.createAgentPool).toBe("function");
+    expect(typeof deps.installChatToolChannelDelivery).toBe("function");
     expect(typeof deps.installAddonRuntimeInterop).toBe("function");
     expect(typeof deps.ensureAddonRuntimeEntriesLoaded).toBe("function");
     expect(typeof deps.startRuntimeLoop).toBe("function");
