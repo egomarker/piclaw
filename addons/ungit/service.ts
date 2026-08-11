@@ -1,26 +1,252 @@
-import { mkdirSync } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 
 export const UNGIT_HEALTH_URL = "http://127.0.0.1:8448/ungit/api/ping";
 export const UNGIT_LAUNCH_CWD = "/workspace/.piclaw";
-export const UNGIT_START_COMMAND = Object.freeze([
-  "bunx",
-  "--bun",
-  "ungit",
+export const UNGIT_REPOSITORY_URL = "https://github.com/egomarker/ungit.git";
+export const UNGIT_REPOSITORY_REF = "refs/heads/main";
+export const UNGIT_PACKAGE_PREFIX = "github:egomarker/ungit";
+export const UNGIT_SHA_OVERRIDE_ENV = "PICLAW_UNGIT_SHA";
+export const UNGIT_STATE_PATH = join(
+  process.env.PICLAW_DATA?.trim() || "/workspace/.piclaw/data",
+  "ungit-launch-state.json",
+);
+export const UNGIT_REQUIRED_ASSET_URLS = Object.freeze([
+  "http://127.0.0.1:8448/ungit/css/styles.css",
+  "http://127.0.0.1:8448/ungit/css/styles-light.css",
+  "http://127.0.0.1:8448/ungit/js/ungit.js",
+  "http://127.0.0.1:8448/ungit/plugins/app/app.bundle.js",
+  "http://127.0.0.1:8448/ungit/plugins/app/app.css",
+  "http://127.0.0.1:8448/ungit/plugins/app/app-light.css",
+]);
+
+const UNGIT_SERVER_ARGUMENTS = Object.freeze([
   "--ungitBindIp=127.0.0.1",
   "--port=8448",
   "--rootPath=/ungit",
   "--no-launchBrowser",
 ]);
-
+const FULL_GIT_SHA = /^[0-9a-f]{40}$/;
 const HEALTH_TIMEOUT_MS = 1_500;
-const UNGIT_PROCESS_PATTERN = "ungit.*--ungitBindIp=127[.]0[.]0[.]1.*--port=8448.*--rootPath=/ungit";
+const REMOTE_REF_TIMEOUT_MS = 10_000;
+const STARTUP_TIMEOUT_MS = 120_000;
+const STARTUP_POLL_INTERVAL_MS = 500;
+const FAILED_LAUNCH_STOP_TIMEOUT_MS = 5_000;
+const FAILED_LAUNCH_STOP_POLL_INTERVAL_MS = 100;
+const UNGIT_PROCESS_PATTERN =
+  "ungit.*--ungitBindIp=127[.]0[.]0[.]1.*--port=8448.*--rootPath=/ungit";
 
+export type UngitRevisionSource = "override" | "remote-main" | "last-known-good";
+
+export interface ResolvedUngitRevision {
+  sha: string;
+  source: UngitRevisionSource;
+}
+
+interface UngitLaunchState extends ResolvedUngitRevision {
+  version: 1;
+  verifiedAt: string;
+}
+
+interface CommandResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
+type Environment = Record<string, string | undefined>;
 type FetchImplementation = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
-type SpawnedProcess = { pid?: number; unref?: () => void };
+type RunGitImplementation = (command: string[], timeoutMs: number) => Promise<CommandResult>;
+export type SpawnedUngitProcess = {
+  pid?: number;
+  exited?: Promise<number>;
+  unref?: () => void;
+  kill?: (signal?: "SIGTERM") => void;
+};
 type SpawnImplementation = (
   command: string[],
   options: { cwd: string; stdin: "ignore"; stdout: "inherit"; stderr: "inherit" },
-) => SpawnedProcess;
+) => SpawnedUngitProcess;
+type SleepImplementation = (milliseconds: number) => Promise<unknown>;
+
+export interface ResolveUngitRevisionOptions {
+  env?: Environment;
+  resolveRemoteSha?: () => Promise<string>;
+  loadLastKnownGood?: () => string | null;
+}
+
+export interface StartUngitOptions {
+  fetchImpl?: FetchImplementation;
+  spawnImpl?: SpawnImplementation;
+  ensureLaunchCwd?: (cwd: string) => void;
+  launchCwd?: string;
+  resolveRevision?: () => Promise<ResolvedUngitRevision>;
+  waitForRuntime?: () => Promise<void>;
+  loadLastKnownGood?: () => string | null;
+  cleanupFailedLaunch?: (child?: SpawnedUngitProcess) => Promise<void> | void;
+  saveLastKnownGood?: (revision: ResolvedUngitRevision) => void;
+}
+
+function isUngitRevisionSource(value: unknown): value is UngitRevisionSource {
+  return value === "override" || value === "remote-main" || value === "last-known-good";
+}
+
+export function normalizeUngitSha(value: unknown): string | null {
+  const sha = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return FULL_GIT_SHA.test(sha) ? sha : null;
+}
+
+export function parseUngitLsRemote(output: string): string {
+  for (const line of output.trim().split(/\r?\n/)) {
+    const [candidate, ref] = line.trim().split(/\s+/, 2);
+    const sha = normalizeUngitSha(candidate);
+    if (sha && ref === UNGIT_REPOSITORY_REF) return sha;
+  }
+  throw new Error(`Unable to resolve ${UNGIT_REPOSITORY_REF} from ${UNGIT_REPOSITORY_URL}.`);
+}
+
+export async function runGitCommand(command: string[], timeoutMs: number): Promise<CommandResult> {
+  const child = Bun.spawn(command, { stdout: "pipe", stderr: "pipe" });
+  const stdoutPromise = new Response(child.stdout).text();
+  const stderrPromise = new Response(child.stderr).text();
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // The process may have exited between the timeout firing and kill().
+    }
+  }, timeoutMs);
+
+  try {
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      stdoutPromise,
+      stderrPromise,
+    ]);
+    if (timedOut) throw new Error(`Timed out after ${timeoutMs}ms running git ls-remote.`);
+    return { exitCode, stdout, stderr };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function resolveRemoteUngitSha(options: {
+  runGitImpl?: RunGitImplementation;
+  timeoutMs?: number;
+} = {}): Promise<string> {
+  const command = [
+    "git",
+    "ls-remote",
+    "--exit-code",
+    UNGIT_REPOSITORY_URL,
+    UNGIT_REPOSITORY_REF,
+  ];
+  const result = await (options.runGitImpl ?? runGitCommand)(
+    command,
+    options.timeoutMs ?? REMOTE_REF_TIMEOUT_MS,
+  );
+  if (result.exitCode !== 0) {
+    const detail = result.stderr.trim() || "no error output";
+    throw new Error(`git ls-remote failed with exit code ${result.exitCode}: ${detail}`);
+  }
+  return parseUngitLsRemote(result.stdout);
+}
+
+export function loadLastKnownGoodUngitSha(statePath = UNGIT_STATE_PATH): string | null {
+  try {
+    const state = JSON.parse(readFileSync(statePath, "utf8")) as Partial<UngitLaunchState>;
+    if (state.version !== 1 || !isUngitRevisionSource(state.source)) return null;
+    return normalizeUngitSha(state.sha);
+  } catch {
+    return null;
+  }
+}
+
+export function saveLastKnownGoodUngitRevision(
+  revision: ResolvedUngitRevision,
+  statePath = UNGIT_STATE_PATH,
+): void {
+  const sha = normalizeUngitSha(revision.sha);
+  if (!sha || !isUngitRevisionSource(revision.source)) {
+    throw new Error("Cannot persist an invalid Ungit revision.");
+  }
+
+  mkdirSync(dirname(statePath), { recursive: true });
+  const temporaryPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
+  const state: UngitLaunchState = {
+    version: 1,
+    sha,
+    source: revision.source,
+    verifiedAt: new Date().toISOString(),
+  };
+
+  try {
+    writeFileSync(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+      flag: "wx",
+    });
+    renameSync(temporaryPath, statePath);
+  } finally {
+    try {
+      unlinkSync(temporaryPath);
+    } catch {
+      // renameSync() removes the temporary path after a successful write.
+    }
+  }
+}
+
+export async function resolveUngitRevision(
+  options: ResolveUngitRevisionOptions = {},
+): Promise<ResolvedUngitRevision> {
+  const env = options.env ?? process.env;
+  const overrideValue = env[UNGIT_SHA_OVERRIDE_ENV];
+  if (overrideValue?.trim()) {
+    const sha = normalizeUngitSha(overrideValue);
+    if (!sha) {
+      throw new Error(`${UNGIT_SHA_OVERRIDE_ENV} must be a full 40-character Git SHA.`);
+    }
+    return { sha, source: "override" };
+  }
+
+  try {
+    const remoteValue = await (options.resolveRemoteSha ?? resolveRemoteUngitSha)();
+    const sha = normalizeUngitSha(remoteValue);
+    if (!sha) throw new Error("Remote Ungit resolver returned an invalid Git SHA.");
+    return { sha, source: "remote-main" };
+  } catch (error) {
+    const fallbackSha = normalizeUngitSha(
+      (options.loadLastKnownGood ?? loadLastKnownGoodUngitSha)(),
+    );
+    if (!fallbackSha) throw error;
+    console.warn(
+      `[ungit] remote main resolution failed; using last-known-good ${fallbackSha}`,
+      error,
+    );
+    return { sha: fallbackSha, source: "last-known-good" };
+  }
+}
+
+export function buildUngitStartCommand(shaValue: string): string[] {
+  const sha = normalizeUngitSha(shaValue);
+  if (!sha) throw new Error("Cannot build the Ungit startup command from an invalid Git SHA.");
+  return [
+    "bunx",
+    "--bun",
+    "--package",
+    `${UNGIT_PACKAGE_PREFIX}#${sha}`,
+    "ungit",
+    ...UNGIT_SERVER_ARGUMENTS,
+  ];
+}
 
 export async function isUngitLive(
   fetchImpl: FetchImplementation = globalThis.fetch,
@@ -44,6 +270,44 @@ export async function isUngitLive(
   }
 }
 
+export async function verifyUngitRuntime(
+  fetchImpl: FetchImplementation = globalThis.fetch,
+  timeoutMs = HEALTH_TIMEOUT_MS,
+): Promise<boolean> {
+  if (!(await isUngitLive(fetchImpl, timeoutMs))) return false;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const responses = await Promise.all(
+      UNGIT_REQUIRED_ASSET_URLS.map((url) =>
+        fetchImpl(url, { headers: { Accept: "*/*" }, signal: controller.signal }),
+      ),
+    );
+    return responses.every((response) => response.ok);
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function waitForUngitRuntime(options: {
+  fetchImpl?: FetchImplementation;
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+  sleepImpl?: SleepImplementation;
+} = {}): Promise<void> {
+  const timeoutMs = options.timeoutMs ?? STARTUP_TIMEOUT_MS;
+  const pollIntervalMs = options.pollIntervalMs ?? STARTUP_POLL_INTERVAL_MS;
+  const deadline = Date.now() + timeoutMs;
+  do {
+    if (await verifyUngitRuntime(options.fetchImpl)) return;
+    if (Date.now() >= deadline) break;
+    await (options.sleepImpl ?? ((milliseconds) => Bun.sleep(milliseconds)))(pollIntervalMs);
+  } while (Date.now() <= deadline);
+  throw new Error(`Ungit did not become ready within ${timeoutMs}ms.`);
+}
+
 export function findUngitPids(): number[] {
   try {
     const result = Bun.spawnSync(["pgrep", "-f", UNGIT_PROCESS_PATTERN], {
@@ -52,7 +316,14 @@ export function findUngitPids(): number[] {
     });
     const output = new TextDecoder().decode(result.stdout).trim();
     if (!output) return [];
-    return [...new Set(output.split(/\s+/).map(Number).filter((pid) => Number.isInteger(pid) && pid > 1))];
+    return [
+      ...new Set(
+        output
+          .split(/\s+/)
+          .map(Number)
+          .filter((pid) => Number.isInteger(pid) && pid > 1),
+      ),
+    ];
   } catch {
     return [];
   }
@@ -63,7 +334,11 @@ export function stopUngit(options: {
   killImpl?: (pid: number, signal: "SIGTERM") => void;
 } = {}): number {
   const pids = (options.findPids ?? findUngitPids)();
-  const killImpl = options.killImpl ?? ((pid, signal) => { process.kill(pid, signal); });
+  const killImpl =
+    options.killImpl ??
+    ((pid, signal) => {
+      process.kill(pid, signal);
+    });
   let killed = 0;
   for (const pid of pids) {
     try {
@@ -73,34 +348,172 @@ export function stopUngit(options: {
       // A parent may already have stopped its child.
     }
   }
-  if (killed > 0) console.info(`[ungit] stopped process${killed === 1 ? "" : "es"}: ${pids.join(", ")}`);
+  if (killed > 0) {
+    console.info(`[ungit] stopped process${killed === 1 ? "" : "es"}: ${pids.join(", ")}`);
+  }
   return killed;
 }
 
-export async function startUngitIfNeeded(options: {
-  fetchImpl?: FetchImplementation;
-  spawnImpl?: SpawnImplementation;
-  ensureLaunchCwd?: (cwd: string) => void;
-  launchCwd?: string;
-} = {}): Promise<void> {
+let ungitStartInFlight: Promise<void> | null = null;
+
+async function cleanupFailedUngitLaunch(
+  child: SpawnedUngitProcess | undefined,
+  fetchImpl: FetchImplementation | undefined,
+): Promise<void> {
+  try {
+    child?.kill?.("SIGTERM");
+  } catch {
+    // The process may already have exited after failing readiness.
+  }
+  stopUngit();
+
+  const deadline = Date.now() + FAILED_LAUNCH_STOP_TIMEOUT_MS;
+  while (await isUngitLive(fetchImpl, HEALTH_TIMEOUT_MS)) {
+    if (Date.now() >= deadline) {
+      throw new Error("Failed Ungit revision remained live after SIGTERM.");
+    }
+    await Bun.sleep(FAILED_LAUNCH_STOP_POLL_INTERVAL_MS);
+  }
+}
+
+function spawnUngitRevision(
+  revision: ResolvedUngitRevision,
+  launchCwd: string,
+  options: StartUngitOptions,
+): SpawnedUngitProcess {
+  const command = buildUngitStartCommand(revision.sha);
+  const spawnImpl: SpawnImplementation =
+    options.spawnImpl ?? ((spawnCommand, spawnOptions) => Bun.spawn(spawnCommand, spawnOptions));
+  const child = spawnImpl(command, {
+    cwd: launchCwd,
+    stdin: "ignore",
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  child.unref?.();
+  console.info(
+    `[ungit] launching ${revision.sha} from ${revision.source}${child.pid ? ` (pid ${child.pid})` : ""}`,
+  );
+  return child;
+}
+
+async function waitForResolvedUngitRuntime(
+  revision: ResolvedUngitRevision,
+  child: SpawnedUngitProcess,
+  options: StartUngitOptions,
+): Promise<void> {
+  const readiness = (
+    options.waitForRuntime ?? (() => waitForUngitRuntime({ fetchImpl: options.fetchImpl }))
+  )();
+  if (!child.exited) {
+    await readiness;
+    return;
+  }
+
+  const outcome = await Promise.race([
+    readiness.then(
+      () => ({ kind: "ready" as const }),
+      (error: unknown) => ({ kind: "readiness-error" as const, error }),
+    ),
+    child.exited.then(
+      (exitCode) => ({ kind: "exit" as const, exitCode }),
+      (error: unknown) => ({ kind: "exit-error" as const, error }),
+    ),
+  ]);
+  if (outcome.kind === "ready") return;
+  if (outcome.kind === "readiness-error" || outcome.kind === "exit-error") throw outcome.error;
+  throw new Error(`Ungit revision ${revision.sha} exited with code ${outcome.exitCode} before readiness.`);
+}
+
+function rememberVerifiedUngitRevision(
+  revision: ResolvedUngitRevision,
+  options: StartUngitOptions,
+): void {
+  try {
+    (options.saveLastKnownGood ?? saveLastKnownGoodUngitRevision)(revision);
+  } catch (error) {
+    console.warn(`[ungit] unable to persist verified revision ${revision.sha}`, error);
+  }
+  console.info(`[ungit] verified revision ${revision.sha}`);
+}
+
+async function cleanUpFailedRevision(
+  revision: ResolvedUngitRevision,
+  child: SpawnedUngitProcess | undefined,
+  launchError: unknown,
+  options: StartUngitOptions,
+): Promise<void> {
+  try {
+    await (
+      options.cleanupFailedLaunch ??
+      ((failedChild) => cleanupFailedUngitLaunch(failedChild, options.fetchImpl))
+    )(child);
+  } catch (cleanupError) {
+    throw new AggregateError(
+      [launchError, cleanupError],
+      `Ungit revision ${revision.sha} failed and could not be stopped cleanly.`,
+    );
+  }
+}
+
+async function startUngitInternal(options: StartUngitOptions): Promise<void> {
   if (await isUngitLive(options.fetchImpl)) {
     console.info("[ungit] service is already live");
     return;
   }
 
   const launchCwd = options.launchCwd || UNGIT_LAUNCH_CWD;
+  (options.ensureLaunchCwd ?? ((cwd) => mkdirSync(cwd, { recursive: true })))(launchCwd);
+  const revision = await (
+    options.resolveRevision ??
+    (() => resolveUngitRevision({ loadLastKnownGood: options.loadLastKnownGood }))
+  )();
+
+  let child: SpawnedUngitProcess | undefined;
   try {
-    (options.ensureLaunchCwd ?? ((cwd) => mkdirSync(cwd, { recursive: true })))(launchCwd);
-    const spawnImpl: SpawnImplementation = options.spawnImpl ?? ((command, spawnOptions) => Bun.spawn(command, spawnOptions));
-    const child = spawnImpl([...UNGIT_START_COMMAND], {
-      cwd: launchCwd,
-      stdin: "ignore",
-      stdout: "inherit",
-      stderr: "inherit",
-    });
-    child.unref?.();
-    console.info(`[ungit] startup command launched${child.pid ? ` (pid ${child.pid})` : ""}`);
-  } catch (error) {
-    console.warn("[ungit] unable to launch startup command", error);
+    child = spawnUngitRevision(revision, launchCwd, options);
+    await waitForResolvedUngitRuntime(revision, child, options);
+    rememberVerifiedUngitRevision(revision, options);
+    return;
+  } catch (launchError) {
+    await cleanUpFailedRevision(revision, child, launchError, options);
+    const fallbackSha = normalizeUngitSha(
+      revision.source === "remote-main"
+        ? (options.loadLastKnownGood ?? loadLastKnownGoodUngitSha)()
+        : null,
+    );
+    if (!fallbackSha || fallbackSha === revision.sha) throw launchError;
+
+    const fallbackRevision: ResolvedUngitRevision = {
+      sha: fallbackSha,
+      source: "last-known-good",
+    };
+    console.warn(
+      `[ungit] revision ${revision.sha} failed readiness; retrying last-known-good ${fallbackSha}`,
+      launchError,
+    );
+
+    let fallbackChild: SpawnedUngitProcess | undefined;
+    try {
+      fallbackChild = spawnUngitRevision(fallbackRevision, launchCwd, options);
+      await waitForResolvedUngitRuntime(fallbackRevision, fallbackChild, options);
+      rememberVerifiedUngitRevision(fallbackRevision, options);
+    } catch (fallbackError) {
+      await cleanUpFailedRevision(fallbackRevision, fallbackChild, fallbackError, options);
+      throw new AggregateError(
+        [launchError, fallbackError],
+        `Ungit revision ${revision.sha} and fallback ${fallbackSha} both failed readiness.`,
+      );
+    }
   }
+}
+
+export function startUngitIfNeeded(options: StartUngitOptions = {}): Promise<void> {
+  if (ungitStartInFlight) return ungitStartInFlight;
+  const operation = startUngitInternal(options);
+  const trackedOperation = operation.finally(() => {
+    if (ungitStartInFlight === trackedOperation) ungitStartInFlight = null;
+  });
+  ungitStartInFlight = trackedOperation;
+  return trackedOperation;
 }
