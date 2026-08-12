@@ -320,6 +320,18 @@ const TOOL_CAPABILITIES: Record<string, ToolCapability> = {
       nouns: ["file", "editor", "workspace"],
     }),
   },
+  local_app_proxy: {
+    kind: "mixed",
+    weight: "standard",
+    summary: "Publish and manage temporary authenticated /apps/<slug>/ proxies for trusted loopback HTTP apps.",
+    recommend: rec({
+      domains: ["web apps", "previews", "demos", "local development"],
+      verbs: ["publish", "expose", "proxy", "preview", "demo", "share"],
+      nouns: ["web app", "local app", "local port", "preview", "demo", "deliverable", "localhost"],
+      keywords: ["open app", "publish app", "expose local port", "proxy test"],
+      negativeTerms: ["remote host", "tcp proxy", "database port"],
+    }),
+  },
 
   // automation
   schedule_task: {

@@ -28,6 +28,7 @@ import {
 } from "../handlers/general-settings.js";
 import { getQuickActionsSettingsData, saveQuickActionsSettings } from "../handlers/quick-actions-settings.js";
 import { handleScheduledTasksManagementAction, handleScheduledTasksManagementList } from "../handlers/scheduled-tasks-management.js";
+import { handleLocalAppProxySettingsAction, handleLocalAppProxySettingsList } from "../handlers/local-app-proxy-settings.js";
 import { getWorkspaceSettingsData, saveWorkspaceSettings } from "../handlers/workspace-settings.js";
 import { getServerUiState, setServerUiMetersConfig, setServerUiOutputConfig, setServerUiThemeConfig } from "../ui-state.js";
 import {
@@ -202,6 +203,16 @@ const EXACT_AGENT_ROUTES: ExactAgentRoute[] = [
     method: "GET",
     path: "/agent/scheduled-tasks",
     handle: (channel, req, url) => handleScheduledTasksManagementList(channel, req, url),
+  },
+  {
+    method: "GET",
+    path: "/agent/local-apps",
+    handle: (channel) => handleLocalAppProxySettingsList(channel),
+  },
+  {
+    method: "POST",
+    path: "/agent/local-apps/action",
+    handle: (channel, req) => handleLocalAppProxySettingsAction(channel, req),
   },
   {
     method: "POST",

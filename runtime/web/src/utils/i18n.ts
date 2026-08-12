@@ -126,6 +126,7 @@ type MessageKey =
   | 'settings.section.providers'
   | 'settings.section.models'
   | 'settings.section.theme'
+  | 'settings.section.local-apps'
   | 'settings.section.scheduled-tasks'
   | 'settings.section.quick-actions'
   | 'settings.section.keychain'
@@ -135,6 +136,7 @@ type MessageKey =
   | 'settings.placeholder.keyboard'
   | 'settings.placeholder.environment'
   | 'settings.placeholder.models'
+  | 'settings.placeholder.local-apps'
   | 'settings.placeholder.scheduled-tasks'
   | 'settings.placeholder.quick-actions'
   | 'settings.placeholder.keychain'
@@ -601,6 +603,57 @@ type MessageKey =
   | 'settings.tasks.resumedToast'
   | 'settings.tasks.actionFailed'
   | 'settings.tasks.loadFailed'
+  | 'settings.localApps.trustedTitle'
+  | 'settings.localApps.trustedWarning'
+  | 'settings.localApps.authRequired'
+  | 'settings.localApps.configError'
+  | 'settings.localApps.loadFailed'
+  | 'settings.localApps.saving'
+  | 'settings.localApps.updated'
+  | 'settings.localApps.created'
+  | 'settings.localApps.saveFailed'
+  | 'settings.localApps.confirmRemove'
+  | 'settings.localApps.tested'
+  | 'settings.localApps.actionComplete'
+  | 'settings.localApps.actionFailed'
+  | 'settings.localApps.copied'
+  | 'settings.localApps.copyPrompt'
+  | 'settings.localApps.editTitle'
+  | 'settings.localApps.addTitle'
+  | 'settings.localApps.cancel'
+  | 'settings.localApps.name'
+  | 'settings.localApps.slug'
+  | 'settings.localApps.port'
+  | 'settings.localApps.upstreamPath'
+  | 'settings.localApps.healthPath'
+  | 'settings.localApps.enabled'
+  | 'settings.localApps.save'
+  | 'settings.localApps.add'
+  | 'settings.localApps.registered'
+  | 'settings.localApps.refresh'
+  | 'settings.localApps.loading'
+  | 'settings.localApps.none'
+  | 'settings.localApps.noneHint'
+  | 'settings.localApps.healthy'
+  | 'settings.localApps.reachableStatus'
+  | 'settings.localApps.unreachable'
+  | 'settings.localApps.unknown'
+  | 'settings.localApps.temporary'
+  | 'settings.localApps.persistent'
+  | 'settings.localApps.disabled'
+  | 'settings.localApps.loopbackPort'
+  | 'settings.localApps.basePath'
+  | 'settings.localApps.owner'
+  | 'settings.localApps.expires'
+  | 'settings.localApps.open'
+  | 'settings.localApps.copy'
+  | 'settings.localApps.test'
+  | 'settings.localApps.edit'
+  | 'settings.localApps.enable'
+  | 'settings.localApps.disable'
+  | 'settings.localApps.promote'
+  | 'settings.localApps.remove'
+  | 'settings.localApps.noMatch'
   | 'settings.compaction.appliedNotice'
   | 'settings.compaction.saving'
   | 'settings.compaction.saveFailed'
@@ -770,6 +823,7 @@ const EN: Record<MessageKey, string> = {
   'settings.section.providers': 'Providers',
   'settings.section.models': 'Models',
   'settings.section.theme': 'Appearance',
+  'settings.section.local-apps': 'Local Apps',
   'settings.section.scheduled-tasks': 'Scheduled Tasks',
   'settings.section.quick-actions': 'Quick Actions',
   'settings.section.keychain': 'Keychain',
@@ -779,6 +833,7 @@ const EN: Record<MessageKey, string> = {
   'settings.placeholder.keyboard': 'Filter shortcuts…',
   'settings.placeholder.environment': 'Filter environment…',
   'settings.placeholder.models': 'Filter models…',
+  'settings.placeholder.local-apps': 'Filter local apps…',
   'settings.placeholder.scheduled-tasks': 'Filter scheduled tasks…',
   'settings.placeholder.quick-actions': 'Filter quick actions…',
   'settings.placeholder.keychain': 'Filter entries…',
@@ -1239,6 +1294,57 @@ const EN: Record<MessageKey, string> = {
   'settings.tasks.resumedToast': 'Scheduled task {id} resumed.',
   'settings.tasks.actionFailed': 'Failed to {action} task.',
   'settings.tasks.loadFailed': 'Failed to load scheduled tasks.',
+  'settings.localApps.trustedTitle': 'Trusted apps only',
+  'settings.localApps.trustedWarning': 'Local apps run on Piclaw’s authenticated browser origin. Only publish code you trust. Removing a mapping does not stop the app process.',
+  'settings.localApps.authRequired': 'Local App Proxy requires Piclaw web authentication.',
+  'settings.localApps.configError': 'Proxy configuration error: {error}',
+  'settings.localApps.loadFailed': 'Failed to load local apps.',
+  'settings.localApps.saving': 'Saving local app…',
+  'settings.localApps.updated': 'Local app updated.',
+  'settings.localApps.created': 'Local app added.',
+  'settings.localApps.saveFailed': 'Failed to save local app.',
+  'settings.localApps.confirmRemove': 'Remove {name}? This does not stop the app process.',
+  'settings.localApps.tested': 'Health test complete.',
+  'settings.localApps.actionComplete': 'Local app mapping updated.',
+  'settings.localApps.actionFailed': 'Local app action failed.',
+  'settings.localApps.copied': 'App URL copied.',
+  'settings.localApps.copyPrompt': 'Copy app URL',
+  'settings.localApps.editTitle': 'Edit persistent app',
+  'settings.localApps.addTitle': 'Add persistent app',
+  'settings.localApps.cancel': 'Cancel',
+  'settings.localApps.name': 'Name',
+  'settings.localApps.slug': 'Path slug',
+  'settings.localApps.port': 'Loopback port',
+  'settings.localApps.upstreamPath': 'Upstream base path',
+  'settings.localApps.healthPath': 'Health path',
+  'settings.localApps.enabled': 'Enabled',
+  'settings.localApps.save': 'Save changes',
+  'settings.localApps.add': 'Add app',
+  'settings.localApps.registered': '{count} registered apps',
+  'settings.localApps.refresh': 'Refresh',
+  'settings.localApps.loading': 'Loading local apps…',
+  'settings.localApps.none': 'No local apps registered',
+  'settings.localApps.noneHint': 'Add a trusted HTTP app listening on 127.0.0.1.',
+  'settings.localApps.healthy': 'Healthy',
+  'settings.localApps.reachableStatus': 'Reachable · HTTP {status}',
+  'settings.localApps.unreachable': 'Unavailable',
+  'settings.localApps.unknown': 'Not tested',
+  'settings.localApps.temporary': 'Temporary',
+  'settings.localApps.persistent': 'Persistent',
+  'settings.localApps.disabled': 'Disabled',
+  'settings.localApps.loopbackPort': '127.0.0.1:{port}',
+  'settings.localApps.basePath': 'Base {path}',
+  'settings.localApps.owner': 'Owner {owner}',
+  'settings.localApps.expires': 'Expires {when}',
+  'settings.localApps.open': 'Open',
+  'settings.localApps.copy': 'Copy URL',
+  'settings.localApps.test': 'Test',
+  'settings.localApps.edit': 'Edit',
+  'settings.localApps.enable': 'Enable',
+  'settings.localApps.disable': 'Disable',
+  'settings.localApps.promote': 'Promote',
+  'settings.localApps.remove': 'Remove',
+  'settings.localApps.noMatch': 'No local apps match “{filter}”.',
   'settings.compaction.appliedNotice': 'Compaction settings applied. Existing turns keep their current timers; new turns use the updated values.',
   'settings.compaction.saving': 'Saving compaction settings…',
   'settings.compaction.saveFailed': 'Failed to save compaction settings.',
@@ -1408,6 +1514,7 @@ const ZH_CN: Partial<Record<MessageKey, string>> = {
   'settings.section.providers': '提供商',
   'settings.section.models': '模型',
   'settings.section.theme': '外观',
+  'settings.section.local-apps': '本地应用',
   'settings.section.scheduled-tasks': '计划任务',
   'settings.section.quick-actions': '快捷操作',
   'settings.section.keychain': '密钥串',
@@ -1417,6 +1524,7 @@ const ZH_CN: Partial<Record<MessageKey, string>> = {
   'settings.placeholder.keyboard': '筛选快捷键…',
   'settings.placeholder.environment': '筛选环境…',
   'settings.placeholder.models': '筛选模型…',
+  'settings.placeholder.local-apps': '筛选本地应用…',
   'settings.placeholder.scheduled-tasks': '筛选计划任务…',
   'settings.placeholder.quick-actions': '筛选快捷操作…',
   'settings.placeholder.keychain': '筛选条目…',
@@ -1877,6 +1985,57 @@ const ZH_CN: Partial<Record<MessageKey, string>> = {
   'settings.tasks.resumedToast': '计划任务 {id} 已恢复。',
   'settings.tasks.actionFailed': '执行 {action} 任务失败。',
   'settings.tasks.loadFailed': '加载计划任务失败。',
+  'settings.localApps.trustedTitle': '仅限可信应用',
+  'settings.localApps.trustedWarning': '本地应用与 Piclaw 共享已认证的浏览器来源。仅发布您信任的代码。移除映射不会停止应用进程。',
+  'settings.localApps.authRequired': '本地应用代理需要启用 Piclaw 网页身份验证。',
+  'settings.localApps.configError': '代理配置错误：{error}',
+  'settings.localApps.loadFailed': '加载本地应用失败。',
+  'settings.localApps.saving': '正在保存本地应用…',
+  'settings.localApps.updated': '本地应用已更新。',
+  'settings.localApps.created': '本地应用已添加。',
+  'settings.localApps.saveFailed': '保存本地应用失败。',
+  'settings.localApps.confirmRemove': '移除 {name}？这不会停止应用进程。',
+  'settings.localApps.tested': '健康检查完成。',
+  'settings.localApps.actionComplete': '本地应用映射已更新。',
+  'settings.localApps.actionFailed': '本地应用操作失败。',
+  'settings.localApps.copied': '应用网址已复制。',
+  'settings.localApps.copyPrompt': '复制应用网址',
+  'settings.localApps.editTitle': '编辑持久应用',
+  'settings.localApps.addTitle': '添加持久应用',
+  'settings.localApps.cancel': '取消',
+  'settings.localApps.name': '名称',
+  'settings.localApps.slug': '路径标识',
+  'settings.localApps.port': '回环端口',
+  'settings.localApps.upstreamPath': '上游基础路径',
+  'settings.localApps.healthPath': '健康检查路径',
+  'settings.localApps.enabled': '已启用',
+  'settings.localApps.save': '保存更改',
+  'settings.localApps.add': '添加应用',
+  'settings.localApps.registered': '已注册 {count} 个应用',
+  'settings.localApps.refresh': '刷新',
+  'settings.localApps.loading': '正在加载本地应用…',
+  'settings.localApps.none': '尚未注册本地应用',
+  'settings.localApps.noneHint': '添加监听于 127.0.0.1 的可信 HTTP 应用。',
+  'settings.localApps.healthy': '健康',
+  'settings.localApps.reachableStatus': '可访问 · HTTP {status}',
+  'settings.localApps.unreachable': '不可用',
+  'settings.localApps.unknown': '未测试',
+  'settings.localApps.temporary': '临时',
+  'settings.localApps.persistent': '持久',
+  'settings.localApps.disabled': '已禁用',
+  'settings.localApps.loopbackPort': '127.0.0.1:{port}',
+  'settings.localApps.basePath': '基础路径 {path}',
+  'settings.localApps.owner': '所有者 {owner}',
+  'settings.localApps.expires': '到期时间 {when}',
+  'settings.localApps.open': '打开',
+  'settings.localApps.copy': '复制网址',
+  'settings.localApps.test': '测试',
+  'settings.localApps.edit': '编辑',
+  'settings.localApps.enable': '启用',
+  'settings.localApps.disable': '禁用',
+  'settings.localApps.promote': '转为持久',
+  'settings.localApps.remove': '移除',
+  'settings.localApps.noMatch': '没有与“{filter}”匹配的本地应用。',
   'settings.compaction.appliedNotice': '压缩设置已应用。现有回合保留其当前计时器；新回合使用更新后的值。',
   'settings.compaction.saving': '正在保存压缩设置…',
   'settings.compaction.saveFailed': '保存压缩设置失败。',
@@ -2046,6 +2205,7 @@ const JA: Partial<Record<MessageKey, string>> = {
   'settings.section.providers': 'プロバイダー',
   'settings.section.models': 'モデル',
   'settings.section.theme': '外観',
+  'settings.section.local-apps': 'ローカルアプリ',
   'settings.section.scheduled-tasks': 'スケジュールタスク',
   'settings.section.quick-actions': 'クイックアクション',
   'settings.section.keychain': 'キーチェーン',
@@ -2055,6 +2215,7 @@ const JA: Partial<Record<MessageKey, string>> = {
   'settings.placeholder.keyboard': 'ショートカットをフィルター…',
   'settings.placeholder.environment': '環境をフィルター…',
   'settings.placeholder.models': 'モデルをフィルター…',
+  'settings.placeholder.local-apps': 'ローカルアプリをフィルター…',
   'settings.placeholder.scheduled-tasks': 'スケジュールタスクをフィルター…',
   'settings.placeholder.quick-actions': 'クイックアクションをフィルター…',
   'settings.placeholder.keychain': 'エントリをフィルター…',
@@ -2515,6 +2676,57 @@ const JA: Partial<Record<MessageKey, string>> = {
   'settings.tasks.resumedToast': 'スケジュールタスク {id} を再開しました。',
   'settings.tasks.actionFailed': '{action} タスクに失敗しました。',
   'settings.tasks.loadFailed': 'スケジュールタスクの読み込みに失敗しました。',
+  'settings.localApps.trustedTitle': '信頼できるアプリのみ',
+  'settings.localApps.trustedWarning': 'ローカルアプリは Piclaw の認証済みブラウザーオリジンで動作します。信頼できるコードだけを公開してください。マッピングを削除してもアプリのプロセスは停止しません。',
+  'settings.localApps.authRequired': 'ローカルアプリプロキシには Piclaw のウェブ認証が必要です。',
+  'settings.localApps.configError': 'プロキシ設定エラー: {error}',
+  'settings.localApps.loadFailed': 'ローカルアプリの読み込みに失敗しました。',
+  'settings.localApps.saving': 'ローカルアプリを保存中…',
+  'settings.localApps.updated': 'ローカルアプリを更新しました。',
+  'settings.localApps.created': 'ローカルアプリを追加しました。',
+  'settings.localApps.saveFailed': 'ローカルアプリの保存に失敗しました。',
+  'settings.localApps.confirmRemove': '{name} を削除しますか？アプリのプロセスは停止しません。',
+  'settings.localApps.tested': 'ヘルスチェックが完了しました。',
+  'settings.localApps.actionComplete': 'ローカルアプリのマッピングを更新しました。',
+  'settings.localApps.actionFailed': 'ローカルアプリの操作に失敗しました。',
+  'settings.localApps.copied': 'アプリのURLをコピーしました。',
+  'settings.localApps.copyPrompt': 'アプリのURLをコピー',
+  'settings.localApps.editTitle': '永続アプリを編集',
+  'settings.localApps.addTitle': '永続アプリを追加',
+  'settings.localApps.cancel': 'キャンセル',
+  'settings.localApps.name': '名前',
+  'settings.localApps.slug': 'パススラッグ',
+  'settings.localApps.port': 'ループバックポート',
+  'settings.localApps.upstreamPath': '上流ベースパス',
+  'settings.localApps.healthPath': 'ヘルスパス',
+  'settings.localApps.enabled': '有効',
+  'settings.localApps.save': '変更を保存',
+  'settings.localApps.add': 'アプリを追加',
+  'settings.localApps.registered': '{count} 個の登録済みアプリ',
+  'settings.localApps.refresh': '更新',
+  'settings.localApps.loading': 'ローカルアプリを読み込み中…',
+  'settings.localApps.none': 'ローカルアプリは登録されていません',
+  'settings.localApps.noneHint': '127.0.0.1 で待ち受ける信頼済み HTTP アプリを追加します。',
+  'settings.localApps.healthy': '正常',
+  'settings.localApps.reachableStatus': '到達可能 · HTTP {status}',
+  'settings.localApps.unreachable': '利用不可',
+  'settings.localApps.unknown': '未テスト',
+  'settings.localApps.temporary': '一時',
+  'settings.localApps.persistent': '永続',
+  'settings.localApps.disabled': '無効',
+  'settings.localApps.loopbackPort': '127.0.0.1:{port}',
+  'settings.localApps.basePath': 'ベース {path}',
+  'settings.localApps.owner': '所有者 {owner}',
+  'settings.localApps.expires': '期限 {when}',
+  'settings.localApps.open': '開く',
+  'settings.localApps.copy': 'URLをコピー',
+  'settings.localApps.test': 'テスト',
+  'settings.localApps.edit': '編集',
+  'settings.localApps.enable': '有効化',
+  'settings.localApps.disable': '無効化',
+  'settings.localApps.promote': '永続化',
+  'settings.localApps.remove': '削除',
+  'settings.localApps.noMatch': '「{filter}」に一致するローカルアプリはありません。',
   'settings.compaction.appliedNotice': '圧縮設定が適用されました。既存のターンは現在のタイマーを保持し、新しいターンは更新された値を使用します。',
   'settings.compaction.saving': '圧縮設定を保存中…',
   'settings.compaction.saveFailed': '圧縮設定の保存に失敗しました。',

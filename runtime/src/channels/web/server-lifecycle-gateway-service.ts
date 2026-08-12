@@ -7,6 +7,10 @@ import { startWorkspaceWatcher, type WorkspaceWatcherChannel } from "./handlers/
 import { checkCsrfOrigin } from "./http/security.js";
 import type { TerminalSocketData } from "./terminal/terminal-session-service.js";
 import type { VncSocketData } from "./vnc/vnc-session-service.js";
+import {
+  localAppProxyService,
+  localAppWebSocketUnsupportedResponse,
+} from "../../local-app-proxy/index.js";
 
 const log = createLogger("web");
 const LINK_PREVIEW_CACHE_PURGE_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -200,7 +204,15 @@ export class WebServerLifecycleGatewayService {
 
     if (lastBindError) throw lastBindError;
 
-    await this.syncWorkspaceWatcher();
+    localAppProxyService.start();
+    try {
+      await this.syncWorkspaceWatcher();
+    } catch (error) {
+      localAppProxyService.stop();
+      this.server?.stop(true);
+      this.server = null;
+      throw error;
+    }
     const purgeNow = () => {
       const result = this.deps.purgeExpiredLinkPreviewImageCache(new Date().toISOString(), 256);
       if (result.purgedEntries > 0) {
@@ -223,6 +235,7 @@ export class WebServerLifecycleGatewayService {
   }
 
   async stop(): Promise<void> {
+    localAppProxyService.stop();
     this.deps.sse.closeAll();
     this.deps.uiBridge.stop();
     this.deps.terminalService.shutdown();
@@ -243,6 +256,9 @@ export class WebServerLifecycleGatewayService {
 
   async handleFetch(req: Request, server?: Bun.Server<WebSocketSessionData>): Promise<Response | undefined> {
     const pathname = new URL(req.url).pathname;
+    if (req.headers.get("upgrade")?.toLowerCase() === "websocket" && pathname.startsWith("/apps/")) {
+      return localAppWebSocketUnsupportedResponse();
+    }
     if (pathname === "/terminal/ws") {
       return this.handleTerminalWebSocketUpgrade(req, server);
     }
