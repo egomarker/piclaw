@@ -15,7 +15,7 @@
 // Legacy/loose inputs (`zh`, `zh_cn`, `ja-JP`, ...) normalize into the above.
 
 import { getLocalStorageItem, setLocalStorageItem } from './storage.js';
-import { useEffect, useState } from '../vendor/preact-htm.js';
+import { useCallback, useEffect, useState } from '../vendor/preact-htm.js';
 
 export type Locale = 'en' | 'zh-CN' | 'ja';
 
@@ -605,7 +605,6 @@ type MessageKey =
   | 'settings.tasks.loadFailed'
   | 'settings.localApps.trustedTitle'
   | 'settings.localApps.trustedWarning'
-  | 'settings.localApps.authRequired'
   | 'settings.localApps.configError'
   | 'settings.localApps.loadFailed'
   | 'settings.localApps.saving'
@@ -1295,8 +1294,7 @@ const EN: Record<MessageKey, string> = {
   'settings.tasks.actionFailed': 'Failed to {action} task.',
   'settings.tasks.loadFailed': 'Failed to load scheduled tasks.',
   'settings.localApps.trustedTitle': 'Trusted apps only',
-  'settings.localApps.trustedWarning': 'Local apps run on Piclaw’s authenticated browser origin. Only publish code you trust. Removing a mapping does not stop the app process.',
-  'settings.localApps.authRequired': 'Local App Proxy requires Piclaw web authentication.',
+  'settings.localApps.trustedWarning': 'Local apps run on Piclaw’s browser origin. Only publish code you trust. With authentication off, anyone who can reach Piclaw can access enabled apps. Removing a mapping does not stop the app process.',
   'settings.localApps.configError': 'Proxy configuration error: {error}',
   'settings.localApps.loadFailed': 'Failed to load local apps.',
   'settings.localApps.saving': 'Saving local app…',
@@ -1986,8 +1984,7 @@ const ZH_CN: Partial<Record<MessageKey, string>> = {
   'settings.tasks.actionFailed': '执行 {action} 任务失败。',
   'settings.tasks.loadFailed': '加载计划任务失败。',
   'settings.localApps.trustedTitle': '仅限可信应用',
-  'settings.localApps.trustedWarning': '本地应用与 Piclaw 共享已认证的浏览器来源。仅发布您信任的代码。移除映射不会停止应用进程。',
-  'settings.localApps.authRequired': '本地应用代理需要启用 Piclaw 网页身份验证。',
+  'settings.localApps.trustedWarning': '本地应用与 Piclaw 共享浏览器来源。仅发布您信任的代码。关闭身份验证时，任何能访问 Piclaw 的人都能访问已启用的应用。移除映射不会停止应用进程。',
   'settings.localApps.configError': '代理配置错误：{error}',
   'settings.localApps.loadFailed': '加载本地应用失败。',
   'settings.localApps.saving': '正在保存本地应用…',
@@ -2677,8 +2674,7 @@ const JA: Partial<Record<MessageKey, string>> = {
   'settings.tasks.actionFailed': '{action} タスクに失敗しました。',
   'settings.tasks.loadFailed': 'スケジュールタスクの読み込みに失敗しました。',
   'settings.localApps.trustedTitle': '信頼できるアプリのみ',
-  'settings.localApps.trustedWarning': 'ローカルアプリは Piclaw の認証済みブラウザーオリジンで動作します。信頼できるコードだけを公開してください。マッピングを削除してもアプリのプロセスは停止しません。',
-  'settings.localApps.authRequired': 'ローカルアプリプロキシには Piclaw のウェブ認証が必要です。',
+  'settings.localApps.trustedWarning': 'ローカルアプリは Piclaw のブラウザーオリジンで動作します。信頼できるコードだけを公開してください。認証がオフの場合、Piclaw にアクセスできる全員が有効なアプリへアクセスできます。マッピングを削除してもアプリのプロセスは停止しません。',
   'settings.localApps.configError': 'プロキシ設定エラー: {error}',
   'settings.localApps.loadFailed': 'ローカルアプリの読み込みに失敗しました。',
   'settings.localApps.saving': 'ローカルアプリを保存中…',
@@ -2936,10 +2932,14 @@ export function useTranslation(): {
   t: (key: MessageKey, vars?: Record<string, string | number>) => string;
 } {
   const [locale, setLocaleValue] = useLocale();
+  const translateForLocale = useCallback(
+    (key: MessageKey, vars?: Record<string, string | number>) => translate(key, vars, locale),
+    [locale],
+  );
   return {
     locale,
     setLocale: setLocaleValue,
-    t: (key: MessageKey, vars?: Record<string, string | number>) => translate(key, vars, locale),
+    t: translateForLocale,
   };
 }
 

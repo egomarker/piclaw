@@ -10,17 +10,7 @@ function errorResponse(channel: WebChannelLike, error: unknown): Response {
   return channel.json({ error: message || "Local app proxy action failed." }, 400);
 }
 
-function featureUnavailable(channel: WebChannelLike): Response {
-  return channel.json({
-    ok: false,
-    servingEnabled: false,
-    apps: [],
-    error: "Local App Proxy requires Piclaw web authentication.",
-  }, 403);
-}
-
 export function handleLocalAppProxySettingsList(channel: WebChannelLike): Response {
-  if (!channel.authGateway.isAuthEnabled()) return featureUnavailable(channel);
   return channel.json({
     ok: true,
     servingEnabled: true,
@@ -33,7 +23,6 @@ export async function handleLocalAppProxySettingsAction(
   channel: WebChannelLike,
   request: Request,
 ): Promise<Response> {
-  if (!channel.authGateway.isAuthEnabled()) return featureUnavailable(channel);
   const chatJid = new URL(request.url).searchParams.get("chat_jid")?.trim() || "web:default";
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   if (!body || typeof body !== "object") return channel.json({ error: "Expected a JSON request body." }, 400);

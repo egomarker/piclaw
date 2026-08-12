@@ -35,7 +35,6 @@ function healthLabel(app, tr) {
 export function LocalAppsSection({ filter = '', setStatus }) {
     const { t: tr } = useTranslation();
     const [apps, setApps] = useState([]);
-    const [servingEnabled, setServingEnabled] = useState(true);
     const [configError, setConfigError] = useState('');
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState('');
@@ -49,7 +48,6 @@ export function LocalAppsSection({ filter = '', setStatus }) {
         try {
             const payload = await getLocalApps();
             setApps(Array.isArray(payload.apps) ? payload.apps : []);
-            setServingEnabled(payload.servingEnabled !== false);
             setConfigError(payload.configError || '');
         } catch (e) {
             setError(e?.message || tr('settings.localApps.loadFailed'));
@@ -154,7 +152,6 @@ export function LocalAppsSection({ filter = '', setStatus }) {
                 <span>${tr('settings.localApps.trustedWarning')}</span>
             </div>
 
-            ${!servingEnabled && html`<div class="settings-error-state">${tr('settings.localApps.authRequired')}</div>`}
             ${configError && html`<div class="settings-error-state">${tr('settings.localApps.configError', { error: configError })}</div>`}
             ${error && html`<div class="settings-error-state">${error}</div>`}
 
@@ -171,7 +168,7 @@ export function LocalAppsSection({ filter = '', setStatus }) {
                     <label><span>${tr('settings.localApps.healthPath')}</span><input required value=${form.healthPath} onInput=${e => updateForm('healthPath', e.target.value)} /></label>
                     <label class="settings-local-app-enabled"><input type="checkbox" checked=${form.enabled} onChange=${e => updateForm('enabled', e.target.checked)} /><span>${tr('settings.localApps.enabled')}</span></label>
                 </div>
-                <button class="settings-local-app-primary" type="submit" disabled=${Boolean(busy) || !servingEnabled}>${editingId ? tr('settings.localApps.save') : tr('settings.localApps.add')}</button>
+                <button class="settings-local-app-primary" type="submit" disabled=${Boolean(busy)}>${editingId ? tr('settings.localApps.save') : tr('settings.localApps.add')}</button>
             </form>
 
             <div class="settings-local-app-toolbar">
