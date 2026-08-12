@@ -14,6 +14,25 @@ import {
 const desktopNavigator = { userAgent: "Mozilla/5.0 (X11; Linux x86_64) Chrome/140 Safari/537.36" } as Navigator;
 const androidNavigator = { userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 9) Chrome/140 Mobile Safari/537.36" } as Navigator;
 
+function createTerminalControlsRuntime(options: {
+  userAgent?: string;
+  userAgentDataMobile?: boolean;
+  maxTouchPoints?: number;
+  navigatorStandalone?: boolean;
+  matchingMedia?: string[];
+} = {}): Window {
+  const matchingMedia = new Set(options.matchingMedia || []);
+  return {
+    navigator: {
+      userAgent: options.userAgent ?? desktopNavigator.userAgent,
+      userAgentData: { mobile: Boolean(options.userAgentDataMobile) },
+      maxTouchPoints: options.maxTouchPoints ?? 0,
+      standalone: Boolean(options.navigatorStandalone),
+    },
+    matchMedia: (query: string) => ({ matches: matchingMedia.has(query) }),
+  } as unknown as Window;
+}
+
 describe("terminal mobile toolbar contract", () => {
   test("matches ttyd-go2's exact two-row control order and sequences", () => {
     expect(TERMINAL_MOBILE_CONTROLS.map(({ id, label, input, modifier }) => ({ id, label, input, modifier }))).toEqual([
@@ -32,10 +51,40 @@ describe("terminal mobile toolbar contract", () => {
     ]);
   });
 
-  test("preserves ttyd-go2's unconditional toolbar display policy", () => {
-    expect(shouldShowTerminalMobileControls(null)).toBe(true);
-    expect(shouldShowTerminalMobileControls({ navigator: desktopNavigator } as Window)).toBe(true);
-    expect(shouldShowTerminalMobileControls({ navigator: androidNavigator } as Window)).toBe(true);
+  test("shows on mobile browsers identified by client hints or user agent", () => {
+    expect(shouldShowTerminalMobileControls(createTerminalControlsRuntime({ userAgentDataMobile: true }))).toBe(true);
+    expect(shouldShowTerminalMobileControls(createTerminalControlsRuntime({ userAgent: androidNavigator.userAgent }))).toBe(true);
+  });
+
+  test("shows on touch and coarse-pointer devices, including fine-pointer hybrids", () => {
+    expect(shouldShowTerminalMobileControls(createTerminalControlsRuntime({ maxTouchPoints: 2 }))).toBe(true);
+    expect(shouldShowTerminalMobileControls(createTerminalControlsRuntime({ matchingMedia: ["(pointer: coarse)"] }))).toBe(true);
+    expect(shouldShowTerminalMobileControls(createTerminalControlsRuntime({ matchingMedia: ["(any-pointer: coarse)"] }))).toBe(true);
+    expect(shouldShowTerminalMobileControls(createTerminalControlsRuntime({
+      maxTouchPoints: 2,
+      matchingMedia: ["(pointer: fine)"],
+    }))).toBe(true);
+  });
+
+  test("shows in standalone display modes only when the device also reports touch", () => {
+    expect(shouldShowTerminalMobileControls(createTerminalControlsRuntime({
+      maxTouchPoints: 1,
+      navigatorStandalone: true,
+    }))).toBe(true);
+    for (const displayMode of ["standalone", "fullscreen", "minimal-ui"]) {
+      expect(shouldShowTerminalMobileControls(createTerminalControlsRuntime({
+        maxTouchPoints: 1,
+        matchingMedia: [`(display-mode: ${displayMode})`],
+      }))).toBe(true);
+    }
+    expect(shouldShowTerminalMobileControls(createTerminalControlsRuntime({
+      matchingMedia: ["(display-mode: standalone)"],
+    }))).toBe(false);
+  });
+
+  test("stays hidden on mouse-only desktop and ambiguous single-touch browser devices", () => {
+    expect(shouldShowTerminalMobileControls(createTerminalControlsRuntime())).toBe(false);
+    expect(shouldShowTerminalMobileControls(createTerminalControlsRuntime({ maxTouchPoints: 1 }))).toBe(false);
   });
 });
 

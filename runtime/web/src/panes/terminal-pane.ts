@@ -332,6 +332,7 @@ function injectStyles(ownerDocument = document) {
         transition-delay: 0s;
       }
       .terminal-pane-xterm .terminal-toolbar-anchor {
+        display: block;
         flex: 0 0 auto;
         width: 100%;
         position: relative;
@@ -339,16 +340,6 @@ function injectStyles(ownerDocument = document) {
         box-sizing: border-box;
         background: var(--bg-secondary, #161b22);
         border-top: 1px solid var(--border-color, rgba(148,163,184,.24));
-      }
-      @media (hover: hover) and (pointer: fine) {
-        .terminal-pane-xterm .terminal-toolbar-anchor {
-          display: none;
-        }
-      }
-      @media (any-pointer: coarse) {
-        .terminal-pane-xterm .terminal-toolbar-anchor {
-          display: block;
-        }
       }
       .terminal-pane-xterm .terminal-mobile-toolbar {
         display: grid;

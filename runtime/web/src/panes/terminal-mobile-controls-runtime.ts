@@ -22,11 +22,7 @@ export interface TerminalMobileControlDefinition {
   modifier?: Exclude<TerminalModifierMode, null>;
 }
 
-/**
- * Matches ttyd-go2's two-row terminal toolbar exactly. ttyd-go2 renders this
- * toolbar unconditionally; its platform gates apply only to clipboard and
- * touch-selection behavior.
- */
+/** Matches ttyd-go2's two-row terminal toolbar exactly. */
 export const TERMINAL_MOBILE_CONTROLS: readonly TerminalMobileControlDefinition[] = Object.freeze([
   { id: "escape", label: "Esc", ariaLabel: "Escape", input: "\x1b" },
   { id: "alt", label: "Alt", ariaLabel: "Latch Alt for the next character", modifier: "alt" },
@@ -42,9 +38,46 @@ export const TERMINAL_MOBILE_CONTROLS: readonly TerminalMobileControlDefinition[
   { id: "page-down", label: "PgDn", ariaLabel: "Page down", input: "\x1b[6~" },
 ]);
 
-/** Exact ttyd-go2 toolbar display behavior: there is no device gate. */
-export function shouldShowTerminalMobileControls(_runtimeWindow?: Window | null): boolean {
-  return true;
+function matchesTerminalMedia(runtimeWindow: Window | null, query: string): boolean {
+  if (!runtimeWindow || typeof runtimeWindow.matchMedia !== "function") return false;
+  try {
+    return Boolean(runtimeWindow.matchMedia(query)?.matches);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Show the touch toolbar when browser/device signals identify a mobile or
+ * touch-capable environment. JavaScript owns this decision so Android cannot
+ * be hidden by conflicting hover/fine-pointer media-query results.
+ */
+export function shouldShowTerminalMobileControls(
+  runtimeWindow: Window | null = typeof window === "undefined" ? null : window,
+): boolean {
+  const runtimeNavigator = runtimeWindow?.navigator
+    ?? (typeof navigator === "undefined" ? null : navigator);
+  if (!runtimeWindow && !runtimeNavigator) return false;
+
+  const navigatorWithHints = runtimeNavigator as (Navigator & {
+    standalone?: boolean;
+    userAgentData?: { mobile?: boolean };
+  }) | null;
+  const userAgent = String(navigatorWithHints?.userAgent || "");
+  const maxTouchPoints = Number(navigatorWithHints?.maxTouchPoints || 0);
+  const mobileUserAgent = /Android|webOS|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(userAgent);
+  const coarsePointer = matchesTerminalMedia(runtimeWindow, "(pointer: coarse)")
+    || matchesTerminalMedia(runtimeWindow, "(any-pointer: coarse)");
+  const standaloneDisplay = navigatorWithHints?.standalone === true
+    || matchesTerminalMedia(runtimeWindow, "(display-mode: standalone)")
+    || matchesTerminalMedia(runtimeWindow, "(display-mode: fullscreen)")
+    || matchesTerminalMedia(runtimeWindow, "(display-mode: minimal-ui)");
+
+  return navigatorWithHints?.userAgentData?.mobile === true
+    || mobileUserAgent
+    || maxTouchPoints > 1
+    || coarsePointer
+    || (standaloneDisplay && maxTouchPoints > 0);
 }
 
 export function isAndroidLikeTerminalPlatform(
