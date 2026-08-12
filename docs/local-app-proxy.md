@@ -20,6 +20,8 @@ Open **Settings → Local Apps** and provide:
 
 Persistent mappings are stored under `domains.localAppProxy.apps` in `.piclaw/config.json`. Agent-created mappings are temporary in-memory leases and disappear when Piclaw restarts. Removing a mapping never stops its application process.
 
+Open `/apps/` to browse all enabled mappings, copy their public URLs, or launch them.
+
 ## Application contract
 
 Apps must listen on `127.0.0.1` in the same container or machine as Piclaw. In a container, `127.0.0.1` means the Piclaw container—not the physical host.
