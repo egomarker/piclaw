@@ -60,4 +60,30 @@ describe("LocalAppProxyService", () => {
     expect(harness.service.list().filter((app) => app.id === lease.id)).toHaveLength(1);
     harness.service.stop();
   });
+
+  test("serves an index of enabled apps at /apps/", async () => {
+    const harness = serviceHarness();
+    harness.service.createPersistent({ name: "Demo & Reports", slug: "demo", port: 4173 });
+    harness.service.createPersistent({ name: "Hidden", slug: "hidden", port: 4174, enabled: false });
+
+    const response = await harness.service.handleHttpRequest(
+      new Request("https://piclaw.test/apps/"),
+      "/apps/",
+    );
+    const body = await response.text();
+    expect(response.status).toBe(200);
+    expect(body).toContain("Demo &amp; Reports");
+    expect(body).toContain("https://piclaw.test/apps/demo/");
+    expect(body).toContain("Copy URL");
+    expect(body).toContain("Go to");
+    expect(body).not.toContain("Hidden");
+
+    const redirect = await harness.service.handleHttpRequest(
+      new Request("https://piclaw.test/apps"),
+      "/apps",
+    );
+    expect(redirect.status).toBe(308);
+    expect(redirect.headers.get("location")).toBe("/apps/");
+    harness.service.stop();
+  });
 });

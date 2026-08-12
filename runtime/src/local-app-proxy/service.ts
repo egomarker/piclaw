@@ -1,6 +1,7 @@
 import { getWebServerConfig } from "../core/config-web.js";
 import { createUuid } from "../utils/ids.js";
 import { createLogger } from "../utils/logger.js";
+import { localAppIndexResponse } from "./app-index.js";
 import { readPersistentLocalApps, writePersistentLocalApps } from "./config.js";
 import { proxyLocalAppHttpRequest, type LocalAppProxyFetch } from "./http-proxy.js";
 import {
@@ -310,8 +311,23 @@ export class LocalAppProxyService {
   }
 
   async handleHttpRequest(request: Request, pathname: string): Promise<Response> {
-    if (pathname === LOCAL_APP_PUBLIC_ROOT || pathname === `${LOCAL_APP_PUBLIC_ROOT}/`) {
-      return new Response("Not found", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
+    if (pathname === LOCAL_APP_PUBLIC_ROOT) {
+      const url = new URL(request.url);
+      url.pathname = `${LOCAL_APP_PUBLIC_ROOT}/`;
+      return new Response(null, {
+        status: 308,
+        headers: { location: `${url.pathname}${url.search}` },
+      });
+    }
+    if (pathname === `${LOCAL_APP_PUBLIC_ROOT}/`) {
+      const method = request.method.toUpperCase();
+      if (method !== "GET" && method !== "HEAD") {
+        return new Response("Method not allowed.", {
+          status: 405,
+          headers: { "content-type": "text/plain; charset=utf-8" },
+        });
+      }
+      return localAppIndexResponse(request, this.list());
     }
     const resolved = this.resolvePath(pathname);
     if (!resolved) return new Response("Not found", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
