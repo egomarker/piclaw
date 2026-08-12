@@ -208,6 +208,12 @@ describe("web server lifecycle gateway service", () => {
       handoffToken: "handoff-1",
     });
 
+    const appWebSocketResponse = await service.handleFetch(createRequest("/apps/demo/ws", {
+      headers: { upgrade: "websocket" },
+    }), fixture.server);
+    expect(appWebSocketResponse?.status).toBe(426);
+    expect(fixture.state.upgradeCalls).toHaveLength(2);
+
     const standardResponse = await service.handleFetch(createRequest("/timeline?limit=10"));
     expect(standardResponse?.status).toBe(200);
     expect(fixture.state.handleRequestCalls).toEqual(["/timeline"]);

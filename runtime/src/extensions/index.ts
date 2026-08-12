@@ -65,6 +65,7 @@ import { persistedToolResultSanitizer } from "./persisted-tool-result-sanitizer.
 import { createContextPruneExtension } from "./context-prune.js";
 import { mcpTimeoutPatch } from "./mcp-timeout-patch.js";
 import { localLitePromptProfile } from "./local-lite-prompt-profile.js";
+import { localAppProxyTool } from "./local-app-proxy.js";
 
 /** Build the built-in extension factory list used for session creation. */
 export function createBuiltinExtensionFactories(options?: {
@@ -91,6 +92,7 @@ export function createBuiltinExtensionFactories(options?: {
     chatTool,
     sessionControl,
     openWorkspaceFile,
+    localAppProxyTool,
     envTools,
     exitProcess,
     imageProcessing,

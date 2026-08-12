@@ -70,6 +70,15 @@ export function registerExtensionRoute(
   const normalised = prefix.startsWith("/") ? prefix : `/${prefix}`;
   const now = new Date().toISOString();
 
+  if (normalised === "/apps" || normalised.startsWith("/apps/")) {
+    log.warn("Rejected extension route registration — /apps is reserved for Local App Proxy", {
+      operation: "web_extension_routes.register_reserved",
+      prefix: normalised,
+      extensionPath,
+    });
+    return "rejected";
+  }
+
   const existing = routes.find((route) => route.prefix === normalised && route.extensionPath === extensionPath);
   if (existing) {
     existing.handler = handler;

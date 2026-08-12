@@ -23,6 +23,11 @@ describe("tool-capabilities registry", () => {
     expect(exitProcess.kind).toBe("mutating");
     expect(exitProcess.weight).toBe("lightweight");
 
+    const localAppProxy = getToolCapability("local_app_proxy");
+    expect(localAppProxy.kind).toBe("mixed");
+    expect(localAppProxy.weight).toBe("standard");
+    expect(TOOLSETS.find((toolset) => toolset.name === "ui")?.toolNames).toContain("local_app_proxy");
+
     // upstream core tools
     const find = getToolCapability("find");
     expect(find.kind).toBe("read-only");

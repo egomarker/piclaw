@@ -31,6 +31,7 @@ const DATA_AGENT_PEER_LIMIT = 30;
 const DATA_AGENT_UI_LIMIT = 30;
 const DATA_AGENT_TASK_LIMIT = 30;
 const DATA_AGENT_SIDE_PROMPT_LIMIT = 20;
+const DATA_LOCAL_APP_PROXY_LIMIT = 30;
 
 /** Rate-limit rule returned for a specific method/path endpoint. */
 export type DataRateLimitRule = {
@@ -83,6 +84,13 @@ export function getDataRateLimitRule(method: string, pathname: string): DataRate
       bucket: "data/agent_peer",
       limit: DATA_AGENT_PEER_LIMIT,
       message: "Too many peer-agent messages. Slow down.",
+    };
+  }
+  if (method === "POST" && pathname === "/agent/local-apps/action") {
+    return {
+      bucket: "data/local_app_proxy",
+      limit: DATA_LOCAL_APP_PROXY_LIMIT,
+      message: "Too many local app proxy actions. Slow down.",
     };
   }
   if (method === "POST" && pathname === "/agent/scheduled-tasks/action") {

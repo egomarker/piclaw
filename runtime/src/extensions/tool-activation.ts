@@ -68,7 +68,7 @@ export const TOOLSETS: ToolsetDefinition[] = [
   {
     name: "ui",
     description: "PiClaw web UI posting tools and cross-session relay.",
-    toolNames: ["send_adaptive_card", "send_dashboard_widget", "chat"],
+    toolNames: ["send_adaptive_card", "send_dashboard_widget", "chat", "local_app_proxy"],
   },
   {
     name: "experiments",

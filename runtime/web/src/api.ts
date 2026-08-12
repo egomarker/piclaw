@@ -190,6 +190,22 @@ export async function updateScheduledTask(action, id, options: ApiOptions = {}) 
     });
 }
 
+function currentLocalAppChatJid(): string {
+    if (typeof window === 'undefined') return 'web:default';
+    return String((window as any).__piclawCurrentChatJid || 'web:default').trim() || 'web:default';
+}
+
+export async function getLocalApps() {
+    return request(`/agent/local-apps?chat_jid=${encodeURIComponent(currentLocalAppChatJid())}`);
+}
+
+export async function updateLocalApp(action, payload: ApiOptions = {}) {
+    return request(`/agent/local-apps/action?chat_jid=${encodeURIComponent(currentLocalAppChatJid())}`, {
+        method: 'POST',
+        body: JSON.stringify({ action, ...(payload || {}) }),
+    });
+}
+
 export async function getSessionRecordings() {
     return request('/agent/recordings');
 }

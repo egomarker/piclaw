@@ -29,6 +29,7 @@ export * from "./config-secrets.js";
 export * from "./config-web.js";
 export * from "./config-tools.js";
 export * from "./config-runtime.js";
+export { readPersistentLocalApps, writePersistentLocalApps } from "../local-app-proxy/config.js";
 
 /** Grouped runtime timing settings. */
 export const RUNTIME_TIMING_CONFIG = Object.freeze<RuntimeTimingConfig>({

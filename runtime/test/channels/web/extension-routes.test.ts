@@ -33,6 +33,12 @@ describe("extension route registry", () => {
     expect(await response!.text()).toBe("second");
   });
 
+  test("rejects the reserved /apps namespace", () => {
+    expect(registerExtensionRoute("/apps", () => new Response("bad"), "/ext/bad")).toBe("rejected");
+    expect(registerExtensionRoute("apps/demo", () => new Response("bad"), "/ext/bad")).toBe("rejected");
+    expect(getRegisteredRoutes()).toEqual([]);
+  });
+
   test("keeps distinct registrations when extension paths differ", () => {
     registerExtensionRoute("/example-addon", () => new Response("first"), "/ext/example-addon-a");
     registerExtensionRoute("/example-addon", () => new Response("second"), "/ext/example-addon-b");

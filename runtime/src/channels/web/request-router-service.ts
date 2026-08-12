@@ -48,6 +48,11 @@ import { enforceRequestGuards } from "./http/request-guards.js";
 import { getRouteFlags } from "./http/route-flags.js";
 import { withSecurityHeaders } from "./http/security.js";
 import { appendServerTiming, measureAsync } from "./http/server-timing.js";
+import {
+  isLocalAppWebSocketRequest,
+  localAppProxyService,
+  localAppWebSocketUnsupportedResponse,
+} from "../../local-app-proxy/index.js";
 
 const STATIC_DIR = resolve(
   process.env.PICLAW_WEB_STATIC_DIR || resolve(import.meta.dir, "..", "..", "..", "web", "static")
@@ -142,6 +147,15 @@ export class RequestRouterService {
 
     // Track the last seen origin only after the request clears guard/auth checks.
     rememberWebOrigin("web:default", req);
+
+    // Reserve the entire /apps namespace for authenticated loopback app proxying.
+    if (pathname === "/apps" || pathname.startsWith("/apps/")) {
+      if (!this.channel.authGateway.isAuthEnabled()) {
+        return this.channel.json({ error: "Local App Proxy requires Piclaw web authentication." }, 403);
+      }
+      if (isLocalAppWebSocketRequest(req)) return localAppWebSocketUnsupportedResponse();
+      return await localAppProxyService.handleHttpRequest(req, pathname);
+    }
 
     const recordingResponse = await handleSessionRecordingRoutes(req, pathname, (body, status) => this.channel.json(body, status));
     if (recordingResponse) {

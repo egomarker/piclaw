@@ -146,6 +146,32 @@ When direct-connect is disabled and no saved targets exist, the VNC pane shows a
 
 CLI overrides: `piclaw --port`, `--host`, `--idle-timeout`, `--tls-cert`, `--tls-key`.
 
+### Local App Proxy
+
+Authenticated users can map a trusted loopback HTTP app to `/apps/<slug>/` from **Settings → Local Apps**. Persistent entries are stored in `domains.localAppProxy.apps`; the target host is always `127.0.0.1` and remote hosts are not accepted.
+
+```json
+{
+  "domains": {
+    "localAppProxy": {
+      "apps": [{
+        "id": "app-example",
+        "name": "Demo",
+        "slug": "demo",
+        "port": 4173,
+        "upstreamBasePath": "/",
+        "healthPath": "/",
+        "enabled": true,
+        "createdAt": "2026-08-12T12:00:00.000Z",
+        "updatedAt": "2026-08-12T12:00:00.000Z"
+      }]
+    }
+  }
+}
+```
+
+Prefer the Settings pane instead of editing this block by hand because IDs and timestamps are server-generated and all entries are strictly validated. Web authentication must be enabled. See [Local App Proxy](local-app-proxy.md) for the application base-path contract, header policy, agent leases, and V1 WebSocket limitation.
+
 ### Web UI mode
 
 Select the authenticated shell with `web.uiMode` in `.piclaw/config.json`:
