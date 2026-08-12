@@ -1,8 +1,6 @@
 import { Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { getChatChannel, getChatJid } from "../core/chat-context.js";
-import { getWebRuntimeConfig } from "../core/config-web.js";
-import { isAuthEnabled } from "../channels/web/auth/auth-runtime.js";
 import { getWebOrigin } from "../channels/web/auth/request-origin.js";
 import { localAppProxyService } from "../local-app-proxy/index.js";
 import {
@@ -56,17 +54,6 @@ function withPublicUrl<T extends { publicPath: string }>(app: T, chatJid: string
   };
 }
 
-function authConfigured(): boolean {
-  const config = getWebRuntimeConfig();
-  return isAuthEnabled({
-    passkeyMode: config.passkeyMode,
-    totpSecret: config.totpSecret,
-    internalSecret: config.internalSecret,
-    sessionTtlSeconds: config.sessionTtl,
-    hasTls: false,
-  });
-}
-
 function errorResult(action: string, error: unknown): AgentToolResult<Record<string, unknown>> {
   const message = error instanceof Error ? error.message : String(error);
   const typed = error instanceof LocalAppProxyError ? error as LocalAppProxyErrorType : null;
@@ -80,7 +67,7 @@ function errorResult(action: string, error: unknown): AgentToolResult<Record<str
 
 const HINT = [
   "## Local App Proxy",
-  "Use local_app_proxy to publish a trusted HTTP app already listening on 127.0.0.1 through authenticated /apps/<slug>/.",
+  "Use local_app_proxy to publish a trusted HTTP app already listening on 127.0.0.1 through /apps/<slug>/.",
   "Create a temporary lease, verify it with action=status, then include the returned Open App URL in the final response.",
   "The tool does not start, stop, or supervise the app process. V1 does not forward WebSockets.",
 ].join("\n");
@@ -94,8 +81,8 @@ export const localAppProxyTool: ExtensionFactory = (pi: ExtensionAPI) => {
   pi.registerTool({
     name: "local_app_proxy",
     label: "local_app_proxy",
-    description: "Publish and inspect a trusted HTTP app bound to a loopback port through an authenticated Piclaw /apps/<slug>/ path.",
-    promptSnippet: "local_app_proxy: create, list, verify, renew, or remove temporary authenticated loopback web-app proxy leases.",
+    description: "Publish and inspect a trusted HTTP app bound to a loopback port through a Piclaw /apps/<slug>/ path.",
+    promptSnippet: "local_app_proxy: create, list, verify, renew, or remove temporary loopback web-app proxy leases.",
     parameters: LocalAppProxySchema,
     async execute(_toolCallId, params: LocalAppProxyParams) {
       const action = params.action || "list";
@@ -105,10 +92,6 @@ export const localAppProxyTool: ExtensionFactory = (pi: ExtensionAPI) => {
         if (channel !== "web" || !chatJid.startsWith("web:")) {
           throw new LocalAppProxyError("unsupported_channel", "Local App Proxy is available only for Piclaw web chats.", 403);
         }
-        if (!authConfigured()) {
-          throw new LocalAppProxyError("auth_required", "Local App Proxy requires Piclaw web authentication.", 403);
-        }
-
         if (action === "create") {
           if (!params.name?.trim()) throw new LocalAppProxyError("invalid_name", "Provide name for action=create.");
           if (!Number.isInteger(params.port)) throw new LocalAppProxyError("invalid_port", "Provide port for action=create.");

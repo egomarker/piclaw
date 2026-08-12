@@ -6,7 +6,7 @@ Piclaw can publish a trusted HTTP application listening inside the Piclaw enviro
 http://127.0.0.1:4173/  →  https://piclaw.example/apps/demo/
 ```
 
-Every proxied request passes through Piclaw web authentication and, for mutations, its CSRF Origin checks. The upstream host is fixed to `127.0.0.1`; Local App Proxy cannot forward to remote hosts or arbitrary TCP services.
+When Piclaw web authentication is configured, every proxied request requires it. With authentication disabled, enabled mappings are reachable by anyone who can access Piclaw. Mutating requests still pass through Piclaw's CSRF Origin checks. The upstream host is fixed to `127.0.0.1`; Local App Proxy cannot forward to remote hosts or arbitrary TCP services.
 
 ## Configure an app
 
@@ -59,7 +59,7 @@ Same-upstream redirects are rewritten below the application mount. Redirects tha
 
 ## Security model
 
-Path-based apps execute on Piclaw's browser origin. **Only publish code you trust.** A proxied app can call same-origin Piclaw APIs from the browser, and shares origin-wide browser state such as `localStorage`. Use a separate origin to isolate untrusted code.
+Path-based apps execute on Piclaw's browser origin. **Only publish code you trust.** A proxied app can call same-origin Piclaw APIs from the browser, and shares origin-wide browser state such as `localStorage`. When Piclaw authentication is disabled, enabled apps are also unauthenticated. Use a separate origin to isolate untrusted code.
 
 Piclaw never forwards browser cookies, `Authorization`, `Origin`, `Referer`, or client-supplied forwarding headers upstream. It drops upstream cookies, CORS policy headers, and origin-wide destructive response headers. HTTP Authorization and application cookies are therefore unsupported in V1.
 

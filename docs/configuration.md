@@ -170,7 +170,7 @@ Authenticated users can map a trusted loopback HTTP app to `/apps/<slug>/` from 
 }
 ```
 
-Prefer the Settings pane instead of editing this block by hand because IDs and timestamps are server-generated and all entries are strictly validated. Web authentication must be enabled. See [Local App Proxy](local-app-proxy.md) for the application base-path contract, header policy, agent leases, and V1 WebSocket limitation.
+Prefer the Settings pane instead of editing this block by hand because IDs and timestamps are server-generated and all entries are strictly validated. See [Local App Proxy](local-app-proxy.md) for the application base-path contract, header policy, agent leases, and V1 WebSocket limitation.
 
 ### Web UI mode
 

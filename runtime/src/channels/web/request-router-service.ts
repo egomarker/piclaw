@@ -150,9 +150,6 @@ export class RequestRouterService {
 
     // Reserve the entire /apps namespace for authenticated loopback app proxying.
     if (pathname === "/apps" || pathname.startsWith("/apps/")) {
-      if (!this.channel.authGateway.isAuthEnabled()) {
-        return this.channel.json({ error: "Local App Proxy requires Piclaw web authentication." }, 403);
-      }
       if (isLocalAppWebSocketRequest(req)) return localAppWebSocketUnsupportedResponse();
       return await localAppProxyService.handleHttpRequest(req, pathname);
     }
