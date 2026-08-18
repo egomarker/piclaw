@@ -186,7 +186,13 @@ export function useTimeline({ preserveTimelineScroll, preserveTimelineScrollTop,
     const currentPosts = postsRef.current;
     if (!currentPosts || currentPosts.length === 0) return;
     if (loadingMoreRef.current) return;
-    const { preserveScroll = true, preserveMode = 'top', allowRepeat = false } = options;
+    const {
+      preserveScroll = true,
+      preserveMode = 'top',
+      allowRepeat = false,
+      pageSize: requestedPageSize = 10,
+    } = options;
+    const pageSize = Math.max(1, Math.min(100, Number(requestedPageSize) || 10));
     const applyUpdate = (fn) => {
       if (!preserveScroll) {
         fn();
@@ -203,7 +209,7 @@ export function useTimeline({ preserveTimelineScroll, preserveTimelineScrollTop,
     loadingMoreRef.current = true;
     lastBeforeIdRef.current = oldestId;
     try {
-      const result = await getTimeline(10, oldestId, chatJid);
+      const result = await getTimeline(pageSize, oldestId, chatJid);
       if (token !== chatTokenRef.current) return;
       if (result.posts.length > 0) {
         applyUpdate(() => {

@@ -7,16 +7,16 @@ export const TIMELINE_WINDOW_SIZE = 16;
 export const TIMELINE_WINDOW_THRESHOLD = 100;
 export const TIMELINE_REVEAL_EVENT = 'piclaw:reveal-timeline-post';
 const TIMELINE_TOUCH_OVERSCAN_VIEWPORTS = 4;
-const TIMELINE_ANDROID_IDLE_OVERSCAN_VIEWPORTS = 4;
 const TIMELINE_TOUCH_SCROLL_IDLE_MS = 200;
-const TIMELINE_ANDROID_SCROLL_IDLE_MS = 500;
-const TIMELINE_POST_SCROLL_LOAD_DELAY_MS = 50;
+const ANDROID_STABLE_OVERSCAN_VIEWPORTS = 4;
+const ANDROID_STABLE_PRELOAD_VIEWPORTS = 8;
+const ANDROID_STABLE_PAGE_SIZE = 30;
 
-/** Android browser and installed-PWA gate; Android PWAs retain the Android platform. */
+/** Strict runtime gate shared by Android browser tabs and installed Android PWAs. */
 export function isAndroidTimelinePlatform(navigatorLike: any = typeof navigator === 'undefined' ? null : navigator) {
     const platform = String(navigatorLike?.userAgentData?.platform || '').trim();
     const userAgent = String(navigatorLike?.userAgent || '');
-    return /^android$/i.test(platform) || /android/i.test(userAgent);
+    return /android/i.test(platform) || /android/i.test(userAgent);
 }
 
 export function haveSameTimelineProps(currentProps, nextProps) {
@@ -116,18 +116,17 @@ export function getTimelineWindowForViewport(prefixHeights, viewportStart, viewp
     return { start, end };
 }
 
-function getTimelineViewportWindow(root, prefixHeights, postCount, reverse, overscanPx = root?.clientHeight) {
+function getTimelineViewportWindow(root, prefixHeights, postCount, reverse) {
     if (!root) return null;
     return getTimelineWindowForViewport(
         prefixHeights,
         getTimelineContentOffset(root, reverse),
         root.clientHeight,
         postCount,
-        overscanPx,
     );
 }
 
-function getTimelineAnchorWindow(root, prefixHeights, postCount, anchorIndex, anchor, overscanPx = root?.clientHeight) {
+function getTimelineAnchorWindow(root, prefixHeights, postCount, anchorIndex, anchor) {
     if (!root || !anchor || anchorIndex < 0) return null;
     const anchorTop = Number(prefixHeights[anchorIndex]) || 0;
     return getTimelineWindowForViewport(
@@ -135,7 +134,6 @@ function getTimelineAnchorWindow(root, prefixHeights, postCount, anchorIndex, an
         anchorTop - anchor.offset,
         root.clientHeight,
         postCount,
-        overscanPx,
     );
 }
 
@@ -149,6 +147,9 @@ export class Timeline extends Component {
     }
 
     render(props) {
+        if (props.reverse !== false && isAndroidTimelinePlatform()) {
+            return h(AndroidStableTimelineView, props);
+        }
         return h(TimelineView, props);
     }
 }
@@ -283,6 +284,353 @@ function haveSameTimelineWindow(current, next) {
     return current.start === next.start && current.end === next.end;
 }
 
+function remapAndroidStableWindow(current, previousPosts, nextPosts) {
+    const length = Math.max(TIMELINE_WINDOW_SIZE, current.end - current.start);
+    if (current.end <= current.start || previousPosts.length === 0) {
+        return getLatestTimelineWindow(nextPosts.length);
+    }
+
+    const firstId = previousPosts[current.start]?.id;
+    const lastId = previousPosts[Math.max(current.start, current.end - 1)]?.id;
+    const preservedStart = nextPosts.findIndex((post) => post.id === firstId);
+    const preservedLast = nextPosts.findIndex((post) => post.id === lastId);
+    if (preservedStart >= 0) {
+        return {
+            start: preservedStart,
+            end: Math.min(nextPosts.length, Math.max(preservedStart + length, preservedLast + 1)),
+        };
+    }
+    if (preservedLast >= 0) {
+        return {
+            start: Math.max(0, preservedLast + 1 - length),
+            end: preservedLast + 1,
+        };
+    }
+    return getLatestTimelineWindow(nextPosts.length);
+}
+
+function measureAndroidStableRows(content, measuredHeights) {
+    let changed = false;
+    for (const row of content?.querySelectorAll?.(':scope > .android-stable-row') || []) {
+        const id = String(row.dataset?.timelinePostId || '');
+        const height = row.getBoundingClientRect().height;
+        const previous = measuredHeights.get(id);
+        if (id && Number.isFinite(height) && height > 0 && Math.abs((previous ?? 0) - height) > 0.5) {
+            measuredHeights.set(id, height);
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+/**
+ * Android keeps the reverse-scroll contract used by the rest of the app, but
+ * virtualizes inside a fixed-height coordinate canvas. Window swaps therefore
+ * only change mounted nodes; they never replace rows with live-flow spacers or
+ * write scrollTop while touch momentum is running.
+ */
+function AndroidStableTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, removingPostIds, searchQuery }) {
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [windowRange, setWindowRange] = useState({ start: 0, end: 0 });
+    const [windowingActive, setWindowingActive] = useState(false);
+    const [heightRevision, setHeightRevision] = useState(0);
+    const sentinelRef = useRef(null);
+    const contentRef = useRef(null);
+    const previousPostsRef = useRef([]);
+    const measuredHeightsRef = useRef(new Map());
+    const measuredWidthRef = useRef(0);
+    const loadingMoreRef = useRef(false);
+    const scrollFrameRef = useRef(0);
+    const resizeFrameRef = useRef(0);
+    const resizeHeightsChangedRef = useRef(false);
+    const updateWindowRef = useRef(null);
+
+    const displayPosts = useMemo(
+        () => Array.isArray(posts) ? posts.slice().sort((a, b) => a.id - b.id) : [],
+        [posts],
+    );
+    const threadInfoByIndex = useMemo(() => resolveThreadInfo(displayPosts), [displayPosts]);
+    const virtualHeights = useMemo(
+        () => buildTimelinePrefixHeights(displayPosts, measuredHeightsRef.current),
+        [displayPosts, heightRevision],
+    );
+    const canWindow = displayPosts.length > TIMELINE_WINDOW_THRESHOLD;
+    const shouldBootstrapWindow = canWindow
+        && !windowingActive
+        && previousPostsRef.current.length === 0;
+    const shouldWindow = canWindow && (windowingActive || shouldBootstrapWindow);
+    const remappedRange = shouldWindow
+        ? shouldBootstrapWindow
+            ? getLatestTimelineWindow(displayPosts.length)
+            : remapAndroidStableWindow(windowRange, previousPostsRef.current, displayPosts)
+        : { start: 0, end: displayPosts.length };
+    const effectiveRange = shouldWindow
+        ? {
+            start: Math.max(0, Math.min(remappedRange.start, displayPosts.length)),
+            end: Math.max(remappedRange.start, Math.min(remappedRange.end, displayPosts.length)),
+        }
+        : remappedRange;
+    const totalHeight = virtualHeights[displayPosts.length] || 0;
+
+    const updateWindow = useCallback((root) => {
+        if (!root || !canWindow || displayPosts.length === 0) return;
+        const nextWindow = getTimelineWindowForViewport(
+            virtualHeights,
+            getTimelineContentOffset(root, true),
+            root.clientHeight,
+            displayPosts.length,
+            root.clientHeight * ANDROID_STABLE_OVERSCAN_VIEWPORTS,
+        );
+        setWindowRange((current) => (
+            haveSameTimelineWindow(current, nextWindow) ? current : nextWindow
+        ));
+    }, [canWindow, displayPosts.length, virtualHeights]);
+    updateWindowRef.current = updateWindow;
+
+    const triggerLoadMore = useCallback(async () => {
+        if (!onLoadMore || !hasMore || loadingMoreRef.current) return;
+        loadingMoreRef.current = true;
+        setLoadingMore(true);
+        try {
+            await onLoadMore({
+                preserveScroll: false,
+                preserveMode: 'top',
+                pageSize: ANDROID_STABLE_PAGE_SIZE,
+            });
+        } finally {
+            loadingMoreRef.current = false;
+            setLoadingMore(false);
+        }
+    }, [hasMore, onLoadMore]);
+
+    const maybePreload = useCallback((root) => {
+        if (!root || !hasMore || loadingMoreRef.current) return;
+        const preloadDistance = root.clientHeight * ANDROID_STABLE_PRELOAD_VIEWPORTS;
+        if (root.scrollHeight <= root.clientHeight + 1
+            || getTimelineContentOffset(root, true) < preloadDistance) {
+            void triggerLoadMore();
+        }
+    }, [hasMore, triggerLoadMore]);
+
+    const handleScroll = useCallback((event) => {
+        const root = event.currentTarget;
+        maybePreload(root);
+        if (scrollFrameRef.current) return;
+        scrollFrameRef.current = requestAnimationFrame(() => {
+            scrollFrameRef.current = 0;
+            updateWindowRef.current?.(root);
+        });
+    }, [maybePreload]);
+
+    const handleTouchStart = useCallback((event) => {
+        event.currentTarget.dataset.timelineTouchScrolling = 'true';
+    }, []);
+
+    const handleTouchEnd = useCallback((event) => {
+        delete event.currentTarget.dataset.timelineTouchScrolling;
+    }, []);
+
+    useLayoutEffect(() => {
+        const root = timelineRef?.current;
+        const content = contentRef.current;
+        if (!root || !content) return;
+
+        const width = root.clientWidth || 0;
+        if (width > 0 && measuredWidthRef.current !== width) {
+            measuredWidthRef.current = width;
+            measuredHeightsRef.current.clear();
+        }
+        const heightsChanged = measureAndroidStableRows(content, measuredHeightsRef.current);
+        previousPostsRef.current = displayPosts;
+        if (heightsChanged) setHeightRevision((value) => value + 1);
+        if (!canWindow) {
+            if (windowingActive) setWindowingActive(false);
+            return;
+        }
+        updateWindowRef.current?.(root);
+        if (!windowingActive) setWindowingActive(true);
+    }, [canWindow, displayPosts, effectiveRange.end, effectiveRange.start, heightRevision, timelineRef, windowingActive]);
+
+    useEffect(() => {
+        if (typeof ResizeObserver === 'undefined') return;
+        const root = timelineRef?.current;
+        const content = contentRef.current;
+        if (!root || !content) return;
+
+        const observer = new ResizeObserver((entries) => {
+            let heightsChanged = false;
+            let viewportChanged = false;
+            for (const entry of entries) {
+                if (entry.target === root) {
+                    const width = root.clientWidth || 0;
+                    if (width > 0 && measuredWidthRef.current !== width) {
+                        measuredWidthRef.current = width;
+                        measuredHeightsRef.current.clear();
+                        heightsChanged = true;
+                    }
+                    viewportChanged = true;
+                    continue;
+                }
+                const row = entry.target;
+                const id = String(row.dataset?.timelinePostId || '');
+                const height = row.getBoundingClientRect().height;
+                const previous = measuredHeightsRef.current.get(id);
+                if (id && Number.isFinite(height) && height > 0
+                    && Math.abs((previous ?? 0) - height) > 0.5) {
+                    measuredHeightsRef.current.set(id, height);
+                    heightsChanged = true;
+                }
+            }
+            if (!heightsChanged && !viewportChanged) return;
+            resizeHeightsChangedRef.current ||= heightsChanged;
+            if (resizeFrameRef.current) return;
+            resizeFrameRef.current = requestAnimationFrame(() => {
+                resizeFrameRef.current = 0;
+                const shouldUpdateHeights = resizeHeightsChangedRef.current;
+                resizeHeightsChangedRef.current = false;
+                if (shouldUpdateHeights) setHeightRevision((value) => value + 1);
+                updateWindowRef.current?.(root);
+                maybePreload(root);
+            });
+        });
+        observer.observe(root);
+        for (const row of content.querySelectorAll(':scope > .android-stable-row')) {
+            observer.observe(row);
+        }
+        return () => {
+            observer.disconnect();
+            cancelAnimationFrame(resizeFrameRef.current);
+            resizeFrameRef.current = 0;
+            resizeHeightsChangedRef.current = false;
+        };
+    }, [displayPosts.length, effectiveRange.end, effectiveRange.start, maybePreload, timelineRef]);
+
+    useEffect(() => {
+        const root = timelineRef?.current;
+        if (!root) return;
+        const frame = requestAnimationFrame(() => {
+            updateWindowRef.current?.(root);
+            maybePreload(root);
+        });
+        return () => cancelAnimationFrame(frame);
+    }, [displayPosts.length, hasMore, heightRevision, loadingMore, maybePreload, timelineRef]);
+
+    useEffect(() => {
+        if (typeof IntersectionObserver === 'undefined') return;
+        const sentinel = sentinelRef.current;
+        const root = timelineRef?.current;
+        if (!sentinel || !root) return;
+        const preloadDistance = Math.max(300, root.clientHeight * ANDROID_STABLE_PRELOAD_VIEWPORTS);
+        const observer = new IntersectionObserver((entries) => {
+            if (entries.some((entry) => entry.isIntersecting)) void triggerLoadMore();
+        }, {
+            root,
+            rootMargin: `${Math.ceil(preloadDistance)}px 0px ${Math.ceil(preloadDistance)}px 0px`,
+            threshold: 0,
+        });
+        observer.observe(sentinel);
+        return () => observer.disconnect();
+    }, [displayPosts.length, hasMore, timelineRef, triggerLoadMore]);
+
+    useEffect(() => {
+        const reveal = (event) => {
+            const targetId = String(event?.detail?.id ?? '');
+            if (!targetId) return;
+            const index = displayPosts.findIndex((post) => String(post.id) === targetId);
+            if (index >= 0 && shouldWindow) {
+                setWindowRange(getTimelineWindowAroundIndex(
+                    index,
+                    displayPosts.length,
+                    TIMELINE_WINDOW_SIZE * 2,
+                ));
+            }
+        };
+        window.addEventListener(TIMELINE_REVEAL_EVENT, reveal);
+        return () => window.removeEventListener(TIMELINE_REVEAL_EVENT, reveal);
+    }, [displayPosts, shouldWindow]);
+
+    useEffect(() => () => {
+        cancelAnimationFrame(scrollFrameRef.current);
+        cancelAnimationFrame(resizeFrameRef.current);
+        scrollFrameRef.current = 0;
+        resizeFrameRef.current = 0;
+        const root = timelineRef?.current;
+        if (root?.dataset) delete root.dataset.timelineTouchScrolling;
+    }, [timelineRef]);
+
+    if (!posts) {
+        return html`<div class="loading"><div class="spinner"></div></div>`;
+    }
+
+    if (displayPosts.length === 0) {
+        return html`
+            <div class="timeline reverse android-stable-timeline" ref=${timelineRef}>
+                <div class="timeline-content">
+                    <div style="padding: var(--spacing-xl); text-align: center; color: var(--text-secondary)">
+                        ${emptyMessage || 'No messages yet. Start a conversation!'}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    const visiblePosts = displayPosts.slice(effectiveRange.start, effectiveRange.end);
+    return html`
+        <div
+            class="timeline reverse android-stable-timeline"
+            ref=${timelineRef}
+            onScroll=${handleScroll}
+            onTouchStart=${handleTouchStart}
+            onTouchEnd=${handleTouchEnd}
+            onTouchCancel=${handleTouchEnd}
+        >
+            <div
+                class="timeline-content android-stable-canvas"
+                ref=${contentRef}
+                style=${{ height: `${Math.max(1, totalHeight)}px` }}
+            >
+                <div class="timeline-sentinel android-stable-sentinel" ref=${sentinelRef}></div>
+                ${visiblePosts.map((post, visibleIndex) => {
+                    const index = effectiveRange.start + visibleIndex;
+                    const isThreadReply = Boolean(post.data?.thread_id && post.data.thread_id !== post.id);
+                    const isRemoving = removingPostIds?.has?.(post.id);
+                    const threadInfo = threadInfoByIndex[index] || {};
+                    return html`
+                        <div
+                            key=${post.id}
+                            class="android-stable-row"
+                            data-timeline-post-id=${post.id}
+                            style=${{ top: `${virtualHeights[index] || 0}px` }}
+                        >
+                            <${TimelinePost}
+                                post=${post}
+                                isThreadReply=${isThreadReply}
+                                isThreadPrev=${threadInfo.hasThreadPrev}
+                                isThreadNext=${threadInfo.hasThreadNext}
+                                isRemoving=${isRemoving}
+                                highlightQuery=${searchQuery}
+                                agentName=${getAgentName(post.data?.agent_id, agents || {})}
+                                agentAvatarUrl=${getAgentAvatarUrl(post.data?.agent_id, agents || {})}
+                                userName=${user?.name || user?.user_name}
+                                userAvatarUrl=${user?.avatar_url || user?.avatarUrl || user?.avatar}
+                                userAvatarBackground=${user?.avatar_background || user?.avatarBackground}
+                                onPostClick=${onPostClick}
+                                onHashtagClick=${onHashtagClick}
+                                onMessageRef=${onMessageRef}
+                                onScrollToMessage=${onScrollToMessage}
+                                onFileRef=${onFileRef}
+                                onOpenWidget=${onOpenWidget}
+                                onDelete=${onDeletePost}
+                                onOpenAttachmentPreview=${onOpenAttachmentPreview}
+                            />
+                        </div>
+                    `;
+                })}
+            </div>
+        </div>
+    `;
+}
+
 /** Timeline component. */
 function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, reverse = true, removingPostIds, searchQuery }) {
     const [loadingMore, setLoadingMore] = useState(false);
@@ -300,7 +648,6 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
     const restoreFramesRef = useRef({ first: 0, second: 0 });
     const scrollWindowFrameRef = useRef(0);
     const updateWindowForScrollRef = useRef(null);
-    const triggerLoadMoreRef = useRef(null);
     const measuredWidthRef = useRef(0);
     const touchScrollActiveRef = useRef(false);
     const touchContactRef = useRef(false);
@@ -310,30 +657,11 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
     const deferredHeightsRef = useRef(new Map());
     const deferredWidthResetRef = useRef(false);
     const deferredMeasuredWidthRef = useRef(0);
-    const androidPlatformRef = useRef(isAndroidTimelinePlatform());
-    const androidTouchGeometryFrozenRef = useRef(false);
-    const androidTouchPostsSnapshotRef = useRef(null);
-    const latestSortedPostsRef = useRef([]);
-    const pendingAndroidLoadRef = useRef(false);
-    const androidLoadTimerRef = useRef(0);
-    const androidAnchorRootRef = useRef(null);
-    const androidPreviousOverflowAnchorRef = useRef('');
-    const androidAnchorReleaseFramesRef = useRef({ first: 0, second: 0, third: 0 });
     const hasIntersectionObserver = typeof IntersectionObserver !== 'undefined';
-    const sortedPosts = useMemo(
+    const displayPosts = useMemo(
         () => Array.isArray(posts) ? posts.slice().sort((a, b) => a.id - b.id) : [],
         [posts],
     );
-    latestSortedPostsRef.current = sortedPosts;
-    const frozenPosts = androidTouchPostsSnapshotRef.current;
-    const frozenNewestId = frozenPosts?.[frozenPosts.length - 1]?.id;
-    const frozenViewStillCurrent = frozenNewestId !== undefined
-        && sortedPosts.some((post) => post.id === frozenNewestId);
-    const displayPosts = androidTouchGeometryFrozenRef.current
-        && frozenPosts
-        && frozenViewStillCurrent
-        ? frozenPosts
-        : sortedPosts;
     const canWindow = reverse && hasIntersectionObserver && displayPosts.length > TIMELINE_WINDOW_THRESHOLD;
     const previousPostCount = previousPostsRef.current.length;
     const shouldBootstrapWindow = canWindow && !windowingActive
@@ -360,94 +688,23 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         }
         : { start: 0, end: displayPosts.length };
 
-    // Android freezes its rendered window for a complete gesture, so render the
-    // existing four-viewport touch cushion before contact instead of on touchstart.
-    const getIdleOverscanPx = useCallback((root) => {
-        if (!root) return 0;
-        return androidPlatformRef.current
-            ? root.clientHeight * TIMELINE_ANDROID_IDLE_OVERSCAN_VIEWPORTS
-            : root.clientHeight;
-    }, []);
-
-    const cancelAndroidAnchorRelease = useCallback(() => {
-        cancelAnimationFrame(androidAnchorReleaseFramesRef.current.first);
-        cancelAnimationFrame(androidAnchorReleaseFramesRef.current.second);
-        cancelAnimationFrame(androidAnchorReleaseFramesRef.current.third);
-        androidAnchorReleaseFramesRef.current = { first: 0, second: 0, third: 0 };
-    }, []);
-
-    const restoreAndroidAnchorPolicy = useCallback((root = androidAnchorRootRef.current) => {
-        cancelAndroidAnchorRelease();
-        if (!root || root.dataset?.timelineAndroidAnchorReconcile !== 'true') return;
-        root.style.overflowAnchor = androidPreviousOverflowAnchorRef.current;
-        delete root.dataset.timelineAndroidAnchorReconcile;
-        if (androidAnchorRootRef.current === root) androidAnchorRootRef.current = null;
-        androidPreviousOverflowAnchorRef.current = '';
-    }, [cancelAndroidAnchorRelease]);
-
-    // Virtual-spacer reconciliation is not an ordinary prepend. On Android,
-    // temporarily leave it to the measured post anchor instead of letting Blink
-    // and the JS restore independently adjust the reverse scroller.
-    const beginAndroidAnchorReconcile = useCallback((root) => {
-        if (!androidPlatformRef.current || !root) return;
-        if (androidAnchorRootRef.current && androidAnchorRootRef.current !== root) {
-            restoreAndroidAnchorPolicy(androidAnchorRootRef.current);
-        }
-        cancelAndroidAnchorRelease();
-        if (root.dataset?.timelineAndroidAnchorReconcile !== 'true') {
-            androidPreviousOverflowAnchorRef.current = root.style.overflowAnchor || '';
-        }
-        androidAnchorRootRef.current = root;
-        root.dataset.timelineAndroidAnchorReconcile = 'true';
-        root.style.overflowAnchor = 'none';
-    }, [cancelAndroidAnchorRelease, restoreAndroidAnchorPolicy]);
-
-    const scheduleAndroidAnchorRelease = useCallback((root) => {
-        if (!androidPlatformRef.current || !root) return;
-        cancelAndroidAnchorRelease();
-        androidAnchorReleaseFramesRef.current.first = requestAnimationFrame(() => {
-            androidAnchorReleaseFramesRef.current.first = 0;
-            androidAnchorReleaseFramesRef.current.second = requestAnimationFrame(() => {
-                androidAnchorReleaseFramesRef.current.second = 0;
-                androidAnchorReleaseFramesRef.current.third = requestAnimationFrame(() => {
-                    androidAnchorReleaseFramesRef.current.third = 0;
-                    restoreAndroidAnchorPolicy(root);
-                });
-            });
-        });
-    }, [cancelAndroidAnchorRelease, restoreAndroidAnchorPolicy]);
-
-    const triggerLoadMore = useCallback(async (force = false) => {
-        const touchScrolling = touchScrollActiveRef.current;
-        if (!force && androidPlatformRef.current && touchScrolling) {
-            if (onLoadMore && hasMore) pendingAndroidLoadRef.current = true;
-            return;
-        }
+    const triggerLoadMore = useCallback(async () => {
         if (!onLoadMore || !hasMore || loadingMore) return;
-        pendingAndroidLoadRef.current = false;
-        const root = timelineRef?.current;
+        const touchScrolling = touchScrollActiveRef.current;
         const anchor = touchScrolling
             ? null
-            : captureTimelineViewportAnchor(root, timelineContentRef.current);
+            : captureTimelineViewportAnchor(timelineRef?.current, timelineContentRef.current);
         loadAnchorRef.current = anchor;
-        if (androidPlatformRef.current) beginAndroidAnchorReconcile(root);
         setLoadingMore(true);
         try {
-            await onLoadMore({
-                preserveScroll: androidPlatformRef.current || !touchScrolling,
-                preserveMode: 'top',
-            });
+            await onLoadMore({ preserveScroll: !touchScrolling, preserveMode: 'top' });
         } finally {
             setLoadingMore(false);
-            if (androidPlatformRef.current) scheduleAndroidAnchorRelease(root);
         }
-    }, [beginAndroidAnchorReconcile, hasMore, loadingMore, onLoadMore, scheduleAndroidAnchorRelease, timelineRef]);
+    }, [hasMore, loadingMore, onLoadMore, timelineRef]);
 
     const updateWindowForScroll = useCallback((root) => {
         if (!root || restoringAnchorRef.current || isAnchorScrolling(root) || !shouldWindow) return;
-        if (androidPlatformRef.current
-            && touchScrollActiveRef.current
-            && androidTouchGeometryFrozenRef.current) return;
         const { clientHeight } = root;
         const contentOffset = getTimelineContentOffset(root, reverse);
         const viewportEnd = contentOffset + clientHeight;
@@ -460,9 +717,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             contentOffset,
             clientHeight,
             displayPosts.length,
-            touchScrolling
-                ? clientHeight * TIMELINE_TOUCH_OVERSCAN_VIEWPORTS
-                : getIdleOverscanPx(root),
+            touchScrolling ? clientHeight * TIMELINE_TOUCH_OVERSCAN_VIEWPORTS : clientHeight,
         );
         const extraRows = Math.max(0, desiredWindow.start - effectiveRange.start)
             + Math.max(0, effectiveRange.end - desiredWindow.end);
@@ -516,7 +771,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
                 : null;
         }
         setWindowRange(nextWindow);
-    }, [displayPosts, effectiveRange.end, effectiveRange.start, getIdleOverscanPx, reverse, shouldWindow, virtualHeights, windowRange]);
+    }, [displayPosts, effectiveRange.end, effectiveRange.start, reverse, shouldWindow, virtualHeights, windowRange]);
 
     const finishTouchScroll = useCallback(() => {
         if (!touchScrollActiveRef.current || touchContactRef.current) return;
@@ -525,15 +780,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         touchScrollIdleTimerRef.current = 0;
 
         const root = touchScrollerRef.current || timelineRef?.current;
-        const androidFrozenGeometry = androidPlatformRef.current
-            && androidTouchGeometryFrozenRef.current;
-        if (androidFrozenGeometry) beginAndroidAnchorReconcile(root);
-        androidTouchGeometryFrozenRef.current = false;
-        androidTouchPostsSnapshotRef.current = null;
-        if (root?.dataset) {
-            delete root.dataset.timelineTouchScrolling;
-            delete root.dataset.timelineAndroidTouchScrolling;
-        }
+        if (root?.dataset) delete root.dataset.timelineTouchScrolling;
         touchScrollerRef.current = null;
         const content = timelineContentRef.current;
         const anchor = captureTimelineViewportAnchor(root, content);
@@ -558,47 +805,24 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             deferredMeasuredWidthRef.current = 0;
         }
 
-        const loadAfterScroll = androidPlatformRef.current && pendingAndroidLoadRef.current;
-        pendingAndroidLoadRef.current = false;
-        const schedulePendingLoad = () => {
-            if (!loadAfterScroll || loadingMore) return;
-            clearTimeout(androidLoadTimerRef.current);
-            androidLoadTimerRef.current = setTimeout(() => {
-                androidLoadTimerRef.current = 0;
-                triggerLoadMoreRef.current?.(true);
-            }, TIMELINE_POST_SCROLL_LOAD_DELAY_MS);
-        };
-
         setTouchScrollRevision((value) => value + 1);
         if (!windowingActive) {
-            pendingAnchorRef.current = androidFrozenGeometry ? anchor : null;
-            if (androidFrozenGeometry) scheduleAndroidAnchorRelease(root);
-            schedulePendingLoad();
+            pendingAnchorRef.current = null;
             return;
         }
 
-        const postsForReconcile = androidFrozenGeometry
-            ? latestSortedPostsRef.current
-            : displayPosts;
-        const prefix = buildTimelinePrefixHeights(postsForReconcile, measuredHeightsRef.current);
+        const prefix = buildTimelinePrefixHeights(displayPosts, measuredHeightsRef.current);
         const anchorIndex = anchor
-            ? postsForReconcile.findIndex((post) => String(post.id) === anchor.id)
+            ? displayPosts.findIndex((post) => String(post.id) === anchor.id)
             : -1;
-        const idleOverscanPx = getIdleOverscanPx(root);
         const compactWindow = getTimelineAnchorWindow(
             root,
             prefix,
-            postsForReconcile.length,
+            displayPosts.length,
             anchorIndex,
             anchor,
-            idleOverscanPx,
-        ) || getTimelineViewportWindow(
-            root,
-            prefix,
-            postsForReconcile.length,
-            reverse,
-            idleOverscanPx,
-        ) || getLatestTimelineWindow(postsForReconcile.length);
+        ) || getTimelineViewportWindow(root, prefix, displayPosts.length, reverse)
+            || getLatestTimelineWindow(displayPosts.length);
         pendingAnchorRef.current = anchorIndex >= compactWindow.start && anchorIndex < compactWindow.end
             ? anchor
             : null;
@@ -606,24 +830,18 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         setWindowRange((current) => (
             haveSameTimelineWindow(current, compactWindow) ? current : compactWindow
         ));
-        if (androidFrozenGeometry) scheduleAndroidAnchorRelease(root);
-        schedulePendingLoad();
-    }, [beginAndroidAnchorReconcile, displayPosts, getIdleOverscanPx, loadingMore, reverse, scheduleAndroidAnchorRelease, timelineRef, windowingActive]);
+    }, [displayPosts, reverse, timelineRef, windowingActive]);
 
     finishTouchScrollRef.current = finishTouchScroll;
     updateWindowForScrollRef.current = updateWindowForScroll;
-    triggerLoadMoreRef.current = triggerLoadMore;
 
     const scheduleTouchScrollEnd = useCallback(() => {
         if (!touchScrollActiveRef.current) return;
         clearTimeout(touchScrollIdleTimerRef.current);
-        const delay = androidPlatformRef.current
-            ? TIMELINE_ANDROID_SCROLL_IDLE_MS
-            : TIMELINE_TOUCH_SCROLL_IDLE_MS;
         touchScrollIdleTimerRef.current = setTimeout(() => {
             touchScrollIdleTimerRef.current = 0;
             finishTouchScrollRef.current?.();
-        }, delay);
+        }, TIMELINE_TOUCH_SCROLL_IDLE_MS);
     }, []);
 
     const handleTouchStart = useCallback((event) => {
@@ -632,15 +850,6 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         touchScrollActiveRef.current = true;
         touchScrollerRef.current = root;
         root.dataset.timelineTouchScrolling = 'true';
-        if (androidPlatformRef.current) {
-            // Fetches may finish while momentum is active, but their post lists and
-            // virtual ranges remain visually frozen until the settled reconciliation.
-            androidTouchGeometryFrozenRef.current = true;
-            androidTouchPostsSnapshotRef.current = displayPosts;
-            root.dataset.timelineAndroidTouchScrolling = 'true';
-            clearTimeout(androidLoadTimerRef.current);
-            androidLoadTimerRef.current = 0;
-        }
         clearTimeout(touchScrollIdleTimerRef.current);
         touchScrollIdleTimerRef.current = 0;
         cancelAnimationFrame(scrollWindowFrameRef.current);
@@ -651,7 +860,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         pendingAnchorRef.current = null;
         loadAnchorRef.current = null;
 
-        if (!shouldWindow || androidPlatformRef.current) return;
+        if (!shouldWindow) return;
         const expandedWindow = getTimelineWindowForViewport(
             virtualHeights,
             getTimelineContentOffset(root, reverse),
@@ -663,7 +872,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             start: Math.min(effectiveRange.start, expandedWindow.start),
             end: Math.max(effectiveRange.end, expandedWindow.end),
         });
-    }, [displayPosts, effectiveRange.end, effectiveRange.start, reverse, shouldWindow, virtualHeights]);
+    }, [displayPosts.length, effectiveRange.end, effectiveRange.start, reverse, shouldWindow, virtualHeights]);
 
     const handleTouchEnd = useCallback((event) => {
         if (event?.touches?.length > 0) return;
@@ -701,20 +910,13 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         scrollWindowFrameRef.current = 0;
         clearTimeout(touchScrollIdleTimerRef.current);
         touchScrollIdleTimerRef.current = 0;
-        clearTimeout(androidLoadTimerRef.current);
-        androidLoadTimerRef.current = 0;
-        pendingAndroidLoadRef.current = false;
-        androidTouchGeometryFrozenRef.current = false;
-        androidTouchPostsSnapshotRef.current = null;
         if (touchScrollerRef.current?.dataset) {
             delete touchScrollerRef.current.dataset.timelineTouchScrolling;
-            delete touchScrollerRef.current.dataset.timelineAndroidTouchScrolling;
         }
-        restoreAndroidAnchorPolicy();
         touchScrollerRef.current = null;
         touchContactRef.current = false;
         touchScrollActiveRef.current = false;
-    }, [restoreAndroidAnchorPolicy]);
+    }, []);
 
     useLayoutEffect(() => {
         const previousPosts = previousPostsRef.current;
@@ -722,9 +924,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
 
         if (!canWindow) {
             loadAnchorRef.current = null;
-            const keepAndroidAnchor = androidPlatformRef.current
-                && timelineRef?.current?.dataset?.timelineAndroidAnchorReconcile === 'true';
-            if (!keepAndroidAnchor) pendingAnchorRef.current = null;
+            pendingAnchorRef.current = null;
             if (windowingActive) setWindowingActive(false);
             setWindowRange((current) => {
                 const fullRange = { start: 0, end: displayPosts.length };
@@ -750,21 +950,14 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             const anchorIndex = capturedAnchor
                 ? displayPosts.findIndex((post) => String(post.id) === capturedAnchor.id)
                 : -1;
-            const idleOverscanPx = getIdleOverscanPx(root);
             const nextWindow = getTimelineAnchorWindow(
                 root,
                 measuredPrefix,
                 displayPosts.length,
                 anchorIndex,
                 capturedAnchor,
-                idleOverscanPx,
-            ) || getTimelineViewportWindow(
-                root,
-                measuredPrefix,
-                displayPosts.length,
-                reverse,
-                idleOverscanPx,
-            ) || getLatestTimelineWindow(displayPosts.length);
+            ) || getTimelineViewportWindow(root, measuredPrefix, displayPosts.length, reverse)
+                || getLatestTimelineWindow(displayPosts.length);
 
             if (capturedAnchor) pendingAnchorRef.current = capturedAnchor;
             setHeightRevision((value) => value + 1);
@@ -779,7 +972,6 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         const currentPrefix = buildTimelinePrefixHeights(displayPosts, measuredHeightsRef.current);
         if (touchScrollActiveRef.current) {
             pendingAnchorRef.current = null;
-            if (androidPlatformRef.current && androidTouchGeometryFrozenRef.current) return;
             const touchWindow = root
                 ? getTimelineWindowForViewport(
                     currentPrefix,
@@ -819,31 +1011,20 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
                         displayPosts.length,
                         anchorIndex,
                         loadAnchor,
-                        getIdleOverscanPx(root),
                     ) || getTimelineWindowAroundIndex(anchorIndex, displayPosts.length);
                     return haveSameTimelineWindow(current, anchoredWindow) ? current : anchoredWindow;
                 }
             }
             if (previousPosts.length === 0 || current.end === 0) {
-                return getTimelineViewportWindow(
-                    root,
-                    currentPrefix,
-                    displayPosts.length,
-                    reverse,
-                    getIdleOverscanPx(root),
-                ) || getLatestTimelineWindow(displayPosts.length);
+                return getTimelineViewportWindow(root, currentPrefix, displayPosts.length, reverse)
+                    || getLatestTimelineWindow(displayPosts.length);
             }
 
             const wasPinnedToNewest = current.end >= previousPosts.length
                 && (!reverse || (root && root.scrollTop >= -2));
             if (wasPinnedToNewest) {
-                return getTimelineViewportWindow(
-                    root,
-                    currentPrefix,
-                    displayPosts.length,
-                    reverse,
-                    getIdleOverscanPx(root),
-                ) || getLatestTimelineWindow(displayPosts.length);
+                return getTimelineViewportWindow(root, currentPrefix, displayPosts.length, reverse)
+                    || getLatestTimelineWindow(displayPosts.length);
             }
 
             const firstWindowId = previousPosts[current.start]?.id;
@@ -856,42 +1037,13 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             };
             return haveSameTimelineWindow(current, preservedWindow) ? current : preservedWindow;
         });
-    }, [canWindow, displayPosts, getIdleOverscanPx, reverse, shouldBootstrapWindow, timelineRef, touchScrollRevision, windowingActive]);
+    }, [canWindow, displayPosts, reverse, shouldBootstrapWindow, timelineRef, touchScrollRevision, windowingActive]);
 
     useLayoutEffect(() => {
+        if (!shouldWindow) return;
         const root = timelineRef?.current;
         const content = timelineContentRef.current;
         if (!root || !content) return;
-
-        if (!shouldWindow) {
-            const androidAnchor = androidPlatformRef.current
-                ? pendingAnchorRef.current
-                : null;
-            if (!androidAnchor || !findTimelinePostElement(content, androidAnchor.id)) return;
-
-            cancelAnimationFrame(restoreFramesRef.current.first);
-            cancelAnimationFrame(restoreFramesRef.current.second);
-            restoringAnchorRef.current = true;
-            const restore = () => {
-                if (pendingAnchorRef.current !== androidAnchor) return false;
-                return restoreTimelineViewportAnchor(root, content, androidAnchor);
-            };
-            restore();
-            restoreFramesRef.current.first = requestAnimationFrame(() => {
-                restore();
-                restoreFramesRef.current.second = requestAnimationFrame(() => {
-                    restore();
-                    if (pendingAnchorRef.current === androidAnchor) pendingAnchorRef.current = null;
-                    restoringAnchorRef.current = false;
-                });
-            });
-
-            return () => {
-                cancelAnimationFrame(restoreFramesRef.current.first);
-                cancelAnimationFrame(restoreFramesRef.current.second);
-                restoringAnchorRef.current = false;
-            };
-        }
 
         const existingAnchor = pendingAnchorRef.current;
         if (existingAnchor && !findTimelinePostElement(content, existingAnchor.id)) {
@@ -899,7 +1051,6 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         }
         if (touchScrollActiveRef.current) {
             queueTimelinePostHeights(content, deferredHeightsRef.current);
-            if (androidPlatformRef.current && androidTouchGeometryFrozenRef.current) return;
         } else if (measureTimelinePostHeights(content, measuredHeightsRef.current)) {
             if (!pendingAnchorRef.current) {
                 pendingAnchorRef.current = captureTimelineViewportAnchor(root, content);
@@ -927,7 +1078,6 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
                     measuredPrefix,
                     displayPosts.length,
                     reverse,
-                    getIdleOverscanPx(root),
                 );
                 const nextWindow = {
                     start: needsEarlierRows
@@ -974,7 +1124,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             cancelAnimationFrame(restoreFramesRef.current.second);
             restoringAnchorRef.current = false;
         };
-    }, [displayPosts, effectiveRange.end, effectiveRange.start, getIdleOverscanPx, heightRevision, reverse, shouldWindow, timelineRef, windowRange]);
+    }, [displayPosts, effectiveRange.end, effectiveRange.start, heightRevision, reverse, shouldWindow, timelineRef, windowRange]);
 
     useEffect(() => {
         if (!shouldWindow || typeof ResizeObserver === 'undefined') return;
@@ -1046,9 +1196,6 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             if (!targetId || !shouldWindow) return;
             const index = displayPosts.findIndex((post) => String(post.id) === targetId);
             if (index >= 0) {
-                if (androidPlatformRef.current
-                    && touchScrollActiveRef.current
-                    && androidTouchGeometryFrozenRef.current) return;
                 pendingAnchorRef.current = null;
                 const viewportHeight = timelineRef?.current?.clientHeight || 1;
                 const targetTop = virtualHeights[index] ?? 0;
@@ -1085,6 +1232,9 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         observer.observe(sentinel);
         return () => observer.disconnect();
     }, [hasIntersectionObserver, hasMore, onLoadMore, timelineRef, triggerLoadMore]);
+
+    const triggerLoadMoreRef = useRef(triggerLoadMore);
+    triggerLoadMoreRef.current = triggerLoadMore;
 
     useEffect(() => {
         if (hasIntersectionObserver || !timelineRef?.current) return;

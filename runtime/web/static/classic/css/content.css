@@ -95,6 +95,36 @@
     pointer-events: none;
 }
 
+/* Android-only fixed-coordinate virtualization; inactive without the runtime class. */
+.timeline.android-stable-timeline {
+    overflow-anchor: auto;
+}
+
+.timeline-content.android-stable-canvas {
+    position: relative;
+    display: block;
+    flex: 0 0 auto;
+    width: 100%;
+    overflow-anchor: auto;
+}
+
+.android-stable-canvas > .android-stable-row {
+    position: absolute;
+    left: 0;
+    right: 0;
+    overflow-anchor: auto;
+}
+
+.android-stable-canvas > .android-stable-row > .post {
+    animation: none;
+}
+
+.timeline-sentinel.android-stable-sentinel {
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
 .load-more-btn {
     background: none;
     border: none;
