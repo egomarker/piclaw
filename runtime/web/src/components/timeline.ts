@@ -1,4 +1,4 @@
-import { Component, h, html, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from '../vendor/preact-htm.js';
+import { Component, flushSync, h, html, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from '../vendor/preact-htm.js';
 import {
     Virtualizer,
     elementScroll,
@@ -17,6 +17,19 @@ const TIMELINE_TOUCH_SCROLL_IDLE_MS = 200;
 const CHAT_VIRTUAL_OVERSCAN_ROWS = 6;
 const CHAT_PRELOAD_VIEWPORTS = 8;
 const CHAT_HISTORY_PAGE_SIZE = 30;
+
+function isWebKitTimelinePlatform(navigatorLike = typeof navigator === 'undefined' ? null : navigator) {
+    const userAgent = String(navigatorLike?.userAgent || '');
+    if (!/AppleWebKit/i.test(userAgent)) return false;
+
+    const platform = String(navigatorLike?.platform || '');
+    const isIOSWebKit = /iPhone|iPad|iPod/i.test(userAgent)
+        || (platform === 'MacIntel' && Number(navigatorLike?.maxTouchPoints) > 0);
+    if (isIOSWebKit) return true;
+
+    return /Safari/i.test(userAgent)
+        && !/Chrome|Chromium|CriOS|Edg|EdgiOS|FxiOS|OPR|OPiOS|Android/i.test(userAgent);
+}
 
 export function haveSameTimelineProps(currentProps, nextProps) {
     if (currentProps === nextProps) return true;
@@ -287,7 +300,9 @@ function usePreactVirtualizer(options) {
     const consumerOnChangeRef = useRef(options.onChange);
     consumerOnChangeRef.current = options.onChange;
     const onChange = useCallback((instance, sync) => {
-        setRevision((value) => value + 1);
+        const rerender = () => setRevision((value) => value + 1);
+        if (sync) flushSync(rerender);
+        else rerender();
         consumerOnChangeRef.current?.(instance, sync);
     }, []);
     const resolvedOptions = { ...options, onChange };
@@ -335,6 +350,7 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
         anchorTo: 'end',
         followOnAppend: true,
         scrollEndThreshold: 80,
+        useAnimationFrameWithResizeObserver: isWebKitTimelinePlatform(),
         enabled: Boolean(posts),
     });
 
