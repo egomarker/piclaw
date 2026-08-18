@@ -646,6 +646,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
           />
         `}
         <${Timeline}
+          key=${currentChatJid}
           posts=${posts}
           active=${timelineSurfaceActive}
           hasMore=${isMainTimelineView ? hasMore : false}
