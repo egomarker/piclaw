@@ -14,16 +14,9 @@ export const TIMELINE_WINDOW_THRESHOLD = 100;
 export const TIMELINE_REVEAL_EVENT = 'piclaw:reveal-timeline-post';
 const TIMELINE_TOUCH_OVERSCAN_VIEWPORTS = 4;
 const TIMELINE_TOUCH_SCROLL_IDLE_MS = 200;
-const ANDROID_VIRTUAL_OVERSCAN_ROWS = 6;
-const ANDROID_PRELOAD_VIEWPORTS = 8;
-const ANDROID_HISTORY_PAGE_SIZE = 30;
-
-/** Strict runtime gate shared by Android browser tabs and installed Android PWAs. */
-export function isAndroidTimelinePlatform(navigatorLike: any = typeof navigator === 'undefined' ? null : navigator) {
-    const platform = String(navigatorLike?.userAgentData?.platform || '').trim();
-    const userAgent = String(navigatorLike?.userAgent || '');
-    return /android/i.test(platform) || /android/i.test(userAgent);
-}
+const CHAT_VIRTUAL_OVERSCAN_ROWS = 6;
+const CHAT_PRELOAD_VIEWPORTS = 8;
+const CHAT_HISTORY_PAGE_SIZE = 30;
 
 export function haveSameTimelineProps(currentProps, nextProps) {
     if (currentProps === nextProps) return true;
@@ -153,9 +146,7 @@ export class Timeline extends Component {
     }
 
     render(props) {
-        if (props.reverse !== false && isAndroidTimelinePlatform()) {
-            return h(AndroidVirtualTimelineView, props);
-        }
+        if (props.reverse !== false) return h(EndAnchoredTimelineView, props);
         return h(TimelineView, props);
     }
 }
@@ -311,11 +302,11 @@ function usePreactVirtualizer(options) {
 }
 
 /**
- * Android-only chat virtualizer. It deliberately uses normal positive scroll
- * coordinates and disables native CSS anchoring; TanStack is the sole owner of
- * keyed prepend anchoring, dynamic-size corrections, and end following.
+ * Main chat virtualizer. It deliberately uses normal positive scroll coordinates
+ * and disables native CSS anchoring; TanStack is the sole owner of keyed prepend
+ * anchoring, dynamic-size corrections, and end following on every platform.
  */
-function AndroidVirtualTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, removingPostIds, searchQuery }) {
+function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, removingPostIds, searchQuery }) {
     const [loadingMore, setLoadingMore] = useState(false);
     const loadingMoreRef = useRef(false);
     const initialScrollPendingRef = useRef(true);
@@ -340,7 +331,7 @@ function AndroidVirtualTimelineView({ posts, hasMore, onLoadMore, onPostClick, o
         observeElementRect,
         observeElementOffset,
         scrollToFn: elementScroll,
-        overscan: ANDROID_VIRTUAL_OVERSCAN_ROWS,
+        overscan: CHAT_VIRTUAL_OVERSCAN_ROWS,
         anchorTo: 'end',
         followOnAppend: true,
         scrollEndThreshold: 80,
@@ -357,7 +348,7 @@ function AndroidVirtualTimelineView({ posts, hasMore, onLoadMore, onPostClick, o
             await onLoadMore({
                 preserveScroll: false,
                 preserveMode: 'top',
-                pageSize: ANDROID_HISTORY_PAGE_SIZE,
+                pageSize: CHAT_HISTORY_PAGE_SIZE,
             });
         } finally {
             loadingMoreRef.current = false;
@@ -367,7 +358,7 @@ function AndroidVirtualTimelineView({ posts, hasMore, onLoadMore, onPostClick, o
 
     const maybePreload = useCallback((root) => {
         if (!root || !hasMore || loadingMoreRef.current) return;
-        const preloadDistance = root.clientHeight * ANDROID_PRELOAD_VIEWPORTS;
+        const preloadDistance = root.clientHeight * CHAT_PRELOAD_VIEWPORTS;
         if (root.scrollHeight <= root.clientHeight + 1 || root.scrollTop < preloadDistance) {
             void triggerLoadMore();
         }
@@ -421,7 +412,7 @@ function AndroidVirtualTimelineView({ posts, hasMore, onLoadMore, onPostClick, o
     if (displayPosts.length === 0) {
         return html`
             <div
-                class="timeline normal android-virtual-timeline"
+                class="timeline normal end-anchored-timeline"
                 data-timeline-scroll-model="end-anchored"
                 ref=${timelineRef}
             >
@@ -437,7 +428,7 @@ function AndroidVirtualTimelineView({ posts, hasMore, onLoadMore, onPostClick, o
     const virtualItems = virtualizer.getVirtualItems();
     return html`
         <div
-            class="timeline normal android-virtual-timeline"
+            class="timeline normal end-anchored-timeline"
             data-timeline-scroll-model="end-anchored"
             ref=${timelineRef}
             onScroll=${handleScroll}
@@ -446,7 +437,7 @@ function AndroidVirtualTimelineView({ posts, hasMore, onLoadMore, onPostClick, o
             onTouchCancel=${handleTouchEnd}
         >
             <div
-                class="timeline-content android-virtual-canvas"
+                class="timeline-content end-anchored-canvas"
                 style=${{ height: `${Math.max(1, virtualizer.getTotalSize())}px` }}
             >
                 ${virtualItems.map((virtualItem) => {
@@ -459,7 +450,7 @@ function AndroidVirtualTimelineView({ posts, hasMore, onLoadMore, onPostClick, o
                     return html`
                         <div
                             key=${virtualItem.key}
-                            class="android-virtual-row"
+                            class="end-anchored-row"
                             data-index=${index}
                             ref=${virtualizer.measureElement}
                             style=${{ transform: `translateY(${virtualItem.start}px)` }}

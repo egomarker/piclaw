@@ -81,13 +81,13 @@
     flex-direction: column;
 }
 
-/* Android-only TanStack chat virtualizer; inactive without the runtime class. */
-.timeline.android-virtual-timeline {
+/* TanStack end-anchored virtualization for the main chat timeline. */
+.timeline.end-anchored-timeline {
     flex-direction: column;
     overflow-anchor: none;
 }
 
-.timeline-content.android-virtual-canvas {
+.timeline-content.end-anchored-canvas {
     position: relative;
     display: block;
     flex: 0 0 auto;
@@ -95,7 +95,7 @@
     overflow-anchor: none;
 }
 
-.android-virtual-canvas > .android-virtual-row {
+.end-anchored-canvas > .end-anchored-row {
     position: absolute;
     top: 0;
     left: 0;
@@ -103,7 +103,7 @@
     overflow-anchor: none;
 }
 
-.android-virtual-canvas > .android-virtual-row > .post {
+.end-anchored-canvas > .end-anchored-row > .post {
     animation: none;
 }
 
