@@ -159,7 +159,9 @@ export class Timeline extends Component {
     }
 
     render(props) {
-        if (props.reverse !== false) return h(EndAnchoredTimelineView, props);
+        if (props.reverse !== false && !isWebKitTimelinePlatform()) {
+            return h(EndAnchoredTimelineView, props);
+        }
         return h(TimelineView, props);
     }
 }
@@ -317,9 +319,9 @@ function usePreactVirtualizer(options) {
 }
 
 /**
- * Main chat virtualizer. It deliberately uses normal positive scroll coordinates
- * and disables native CSS anchoring; TanStack is the sole owner of keyed prepend
- * anchoring, dynamic-size corrections, and end following on every platform.
+ * Non-WebKit main chat virtualizer. It deliberately uses normal positive scroll
+ * coordinates and disables native CSS anchoring; TanStack owns keyed prepend
+ * anchoring, dynamic-size corrections, and end following on this path.
  */
 function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, removingPostIds, searchQuery }) {
     const [loadingMore, setLoadingMore] = useState(false);
@@ -327,7 +329,6 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
     const initialScrollPendingRef = useRef(true);
     const pinnedToEndRef = useRef(true);
     const previousViewportHeightRef = useRef(null);
-    const useDeferredWebKitMeasurements = isWebKitTimelinePlatform();
     const observeTimelineRect = useCallback((instance, callback) => observeElementRect(instance, (rect) => {
         const previousHeight = previousViewportHeightRef.current;
         previousViewportHeightRef.current = rect.height;
@@ -366,23 +367,8 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
         anchorTo: 'end',
         followOnAppend: true,
         scrollEndThreshold: 80,
-        useAnimationFrameWithResizeObserver: useDeferredWebKitMeasurements,
         enabled: Boolean(posts),
     });
-    const measureVirtualRow = useCallback((node) => {
-        if (!useDeferredWebKitMeasurements || !node) {
-            virtualizer.measureElement(node);
-            return;
-        }
-
-        // Preact invokes callback refs during its commit. WebKit can measure a
-        // newly mounted dynamic row before its nested message DOM has reached
-        // the final layout, then visibly correct it through ResizeObserver.
-        // Measure after the complete Preact commit, matching Vue's nextTick fix.
-        queueMicrotask(() => {
-            if (node.isConnected) virtualizer.measureElement(node);
-        });
-    }, [useDeferredWebKitMeasurements, virtualizer]);
 
     if (!posts || displayPosts.length === 0) {
         initialScrollPendingRef.current = true;
@@ -507,7 +493,7 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
                             key=${virtualItem.key}
                             class="end-anchored-row"
                             data-index=${index}
-                            ref=${measureVirtualRow}
+                            ref=${virtualizer.measureElement}
                             style=${{ transform: `translateY(${virtualItem.start}px)` }}
                         >
                             <${TimelinePost}
