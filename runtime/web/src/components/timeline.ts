@@ -325,6 +325,21 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
     const [loadingMore, setLoadingMore] = useState(false);
     const loadingMoreRef = useRef(false);
     const initialScrollPendingRef = useRef(true);
+    const pinnedToEndRef = useRef(true);
+    const previousViewportHeightRef = useRef(null);
+    const observeTimelineRect = useCallback((instance, callback) => observeElementRect(instance, (rect) => {
+        const previousHeight = previousViewportHeightRef.current;
+        previousViewportHeightRef.current = rect.height;
+        const viewportHeightChanged = previousHeight !== null
+            && Math.abs(rect.height - previousHeight) > 0.5;
+        const shouldRestoreEnd = viewportHeightChanged && pinnedToEndRef.current;
+        callback(rect);
+
+        // Status panels live below the timeline in the same flex column. When
+        // one appears or expands, the timeline viewport shrinks without a user
+        // scroll. Preserve bottom pinning only if it was pinned before resize.
+        if (shouldRestoreEnd) instance.scrollToEnd({ behavior: 'auto' });
+    }), []);
     const displayPosts = useMemo(
         () => Array.isArray(posts) ? posts.slice().sort((a, b) => a.id - b.id) : [],
         [posts],
@@ -343,7 +358,7 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
         getScrollElement: () => timelineRef?.current || null,
         estimateSize,
         getItemKey,
-        observeElementRect,
+        observeElementRect: observeTimelineRect,
         observeElementOffset,
         scrollToFn: elementScroll,
         overscan: CHAT_VIRTUAL_OVERSCAN_ROWS,
@@ -354,7 +369,10 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
         enabled: Boolean(posts),
     });
 
-    if (!posts || displayPosts.length === 0) initialScrollPendingRef.current = true;
+    if (!posts || displayPosts.length === 0) {
+        initialScrollPendingRef.current = true;
+        pinnedToEndRef.current = true;
+    }
 
     const triggerLoadMore = useCallback(async () => {
         if (!onLoadMore || !hasMore || loadingMoreRef.current) return;
@@ -381,7 +399,12 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
     }, [hasMore, triggerLoadMore]);
 
     const handleScroll = useCallback((event) => {
-        maybePreload(event.currentTarget);
+        const root = event.currentTarget;
+        if (!isAnchorScrolling(root)) {
+            const distanceFromEnd = Math.max(0, root.scrollHeight - root.clientHeight - root.scrollTop);
+            pinnedToEndRef.current = distanceFromEnd <= 2;
+        }
+        maybePreload(root);
     }, [maybePreload]);
 
     const handleTouchStart = useCallback((event) => {
@@ -395,6 +418,7 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
     useLayoutEffect(() => {
         if (!initialScrollPendingRef.current || displayPosts.length === 0 || !timelineRef?.current) return;
         virtualizer.scrollToEnd();
+        pinnedToEndRef.current = true;
         initialScrollPendingRef.current = false;
     }, [displayPosts.length, timelineRef, virtualizer]);
 
