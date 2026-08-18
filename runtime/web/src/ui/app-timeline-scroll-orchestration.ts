@@ -9,6 +9,10 @@ function isTimelineTouchScrolling(container: HTMLElement | null | undefined): bo
   return container?.dataset?.timelineTouchScrolling === 'true';
 }
 
+function usesEndAnchoredVirtualizer(container: HTMLElement | null | undefined): boolean {
+  return container?.dataset?.timelineScrollModel === 'end-anchored';
+}
+
 export function shouldAutoScrollToBottom(scrollTop: number, threshold = 150): boolean {
   return Math.abs(scrollTop) <= threshold;
 }
@@ -26,7 +30,7 @@ export function useTimelineScrollOrchestration(options: {
 
   const scrollToBottom = useCallback(() => {
     const el = timelineRef.current;
-    if (!el || isTimelineTouchScrolling(el)) return;
+    if (!el || isTimelineTouchScrolling(el) || usesEndAnchoredVirtualizer(el)) return;
     if (shouldAutoScrollToBottom(el.scrollTop)) {
       el.scrollTop = 0;
     }
@@ -36,6 +40,10 @@ export function useTimelineScrollOrchestration(options: {
     const container = timelineRef.current;
     if (!container || typeof mutate !== 'function') {
       mutate?.();
+      return;
+    }
+    if (usesEndAnchoredVirtualizer(container)) {
+      mutate();
       return;
     }
     const { currentHashtag: activeHashtag, searchQuery: activeSearch, searchOpen: activeSearchOpen } = viewStateRef.current || {};
@@ -64,6 +72,10 @@ export function useTimelineScrollOrchestration(options: {
     const container = timelineRef.current;
     if (!container || typeof mutate !== 'function') {
       mutate?.();
+      return;
+    }
+    if (usesEndAnchoredVirtualizer(container)) {
+      mutate();
       return;
     }
     const anchor = container.scrollTop;

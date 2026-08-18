@@ -1,4 +1,10 @@
 import { Component, h, html, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from '../vendor/preact-htm.js';
+import {
+    Virtualizer,
+    elementScroll,
+    observeElementOffset,
+    observeElementRect,
+} from '@tanstack/virtual-core';
 import { Post } from './post.js';
 import { isAnchorScrolling } from '../ui/scroll-anchor.js';
 import { getAgentAvatarUrl, getAgentName } from '../ui/agent-utils.js';
@@ -8,9 +14,9 @@ export const TIMELINE_WINDOW_THRESHOLD = 100;
 export const TIMELINE_REVEAL_EVENT = 'piclaw:reveal-timeline-post';
 const TIMELINE_TOUCH_OVERSCAN_VIEWPORTS = 4;
 const TIMELINE_TOUCH_SCROLL_IDLE_MS = 200;
-const ANDROID_STABLE_OVERSCAN_VIEWPORTS = 4;
-const ANDROID_STABLE_PRELOAD_VIEWPORTS = 8;
-const ANDROID_STABLE_PAGE_SIZE = 30;
+const ANDROID_VIRTUAL_OVERSCAN_ROWS = 6;
+const ANDROID_PRELOAD_VIEWPORTS = 8;
+const ANDROID_HISTORY_PAGE_SIZE = 30;
 
 /** Strict runtime gate shared by Android browser tabs and installed Android PWAs. */
 export function isAndroidTimelinePlatform(navigatorLike: any = typeof navigator === 'undefined' ? null : navigator) {
@@ -148,7 +154,7 @@ export class Timeline extends Component {
 
     render(props) {
         if (props.reverse !== false && isAndroidTimelinePlatform()) {
-            return h(AndroidStableTimelineView, props);
+            return h(AndroidVirtualTimelineView, props);
         }
         return h(TimelineView, props);
     }
@@ -284,108 +290,64 @@ function haveSameTimelineWindow(current, next) {
     return current.start === next.start && current.end === next.end;
 }
 
-function remapAndroidStableWindow(current, previousPosts, nextPosts) {
-    const length = Math.max(TIMELINE_WINDOW_SIZE, current.end - current.start);
-    if (current.end <= current.start || previousPosts.length === 0) {
-        return getLatestTimelineWindow(nextPosts.length);
-    }
+/** Minimal Preact adapter for the framework-neutral TanStack virtualizer core. */
+function usePreactVirtualizer(options) {
+    const [, setRevision] = useState(0);
+    const consumerOnChangeRef = useRef(options.onChange);
+    consumerOnChangeRef.current = options.onChange;
+    const onChange = useCallback((instance, sync) => {
+        setRevision((value) => value + 1);
+        consumerOnChangeRef.current?.(instance, sync);
+    }, []);
+    const resolvedOptions = { ...options, onChange };
+    const [instance] = useState(() => new Virtualizer(resolvedOptions));
 
-    const firstId = previousPosts[current.start]?.id;
-    const lastId = previousPosts[Math.max(current.start, current.end - 1)]?.id;
-    const preservedStart = nextPosts.findIndex((post) => post.id === firstId);
-    const preservedLast = nextPosts.findIndex((post) => post.id === lastId);
-    if (preservedStart >= 0) {
-        return {
-            start: preservedStart,
-            end: Math.min(nextPosts.length, Math.max(preservedStart + length, preservedLast + 1)),
-        };
-    }
-    if (preservedLast >= 0) {
-        return {
-            start: Math.max(0, preservedLast + 1 - length),
-            end: preservedLast + 1,
-        };
-    }
-    return getLatestTimelineWindow(nextPosts.length);
-}
-
-function measureAndroidStableRows(content, measuredHeights) {
-    let changed = false;
-    for (const row of content?.querySelectorAll?.(':scope > .android-stable-row') || []) {
-        const id = String(row.dataset?.timelinePostId || '');
-        const height = row.getBoundingClientRect().height;
-        const previous = measuredHeights.get(id);
-        if (id && Number.isFinite(height) && height > 0 && Math.abs((previous ?? 0) - height) > 0.5) {
-            measuredHeights.set(id, height);
-            changed = true;
-        }
-    }
-    return changed;
+    // TanStack captures the visible keyed item here before a prepend changes
+    // indexes, then resolves the same key in the new measurement model.
+    instance.setOptions(resolvedOptions);
+    useLayoutEffect(() => instance._didMount(), [instance]);
+    useLayoutEffect(() => instance._willUpdate());
+    return instance;
 }
 
 /**
- * Android keeps the reverse-scroll contract used by the rest of the app, but
- * virtualizes inside a fixed-height coordinate canvas. Window swaps therefore
- * only change mounted nodes; they never replace rows with live-flow spacers or
- * write scrollTop while touch momentum is running.
+ * Android-only chat virtualizer. It deliberately uses normal positive scroll
+ * coordinates and disables native CSS anchoring; TanStack is the sole owner of
+ * keyed prepend anchoring, dynamic-size corrections, and end following.
  */
-function AndroidStableTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, removingPostIds, searchQuery }) {
+function AndroidVirtualTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, removingPostIds, searchQuery }) {
     const [loadingMore, setLoadingMore] = useState(false);
-    const [windowRange, setWindowRange] = useState({ start: 0, end: 0 });
-    const [windowingActive, setWindowingActive] = useState(false);
-    const [heightRevision, setHeightRevision] = useState(0);
-    const sentinelRef = useRef(null);
-    const contentRef = useRef(null);
-    const previousPostsRef = useRef([]);
-    const measuredHeightsRef = useRef(new Map());
-    const measuredWidthRef = useRef(0);
     const loadingMoreRef = useRef(false);
-    const scrollFrameRef = useRef(0);
-    const resizeFrameRef = useRef(0);
-    const resizeHeightsChangedRef = useRef(false);
-    const updateWindowRef = useRef(null);
-
+    const initialScrollPendingRef = useRef(true);
     const displayPosts = useMemo(
         () => Array.isArray(posts) ? posts.slice().sort((a, b) => a.id - b.id) : [],
         [posts],
     );
     const threadInfoByIndex = useMemo(() => resolveThreadInfo(displayPosts), [displayPosts]);
-    const virtualHeights = useMemo(
-        () => buildTimelinePrefixHeights(displayPosts, measuredHeightsRef.current),
-        [displayPosts, heightRevision],
+    const getItemKey = useCallback(
+        (index) => displayPosts[index]?.id ?? `missing-${index}`,
+        [displayPosts],
     );
-    const canWindow = displayPosts.length > TIMELINE_WINDOW_THRESHOLD;
-    const shouldBootstrapWindow = canWindow
-        && !windowingActive
-        && previousPostsRef.current.length === 0;
-    const shouldWindow = canWindow && (windowingActive || shouldBootstrapWindow);
-    const remappedRange = shouldWindow
-        ? shouldBootstrapWindow
-            ? getLatestTimelineWindow(displayPosts.length)
-            : remapAndroidStableWindow(windowRange, previousPostsRef.current, displayPosts)
-        : { start: 0, end: displayPosts.length };
-    const effectiveRange = shouldWindow
-        ? {
-            start: Math.max(0, Math.min(remappedRange.start, displayPosts.length)),
-            end: Math.max(remappedRange.start, Math.min(remappedRange.end, displayPosts.length)),
-        }
-        : remappedRange;
-    const totalHeight = virtualHeights[displayPosts.length] || 0;
+    const estimateSize = useCallback(
+        (index) => estimateTimelinePostHeight(displayPosts[index]),
+        [displayPosts],
+    );
+    const virtualizer = usePreactVirtualizer({
+        count: displayPosts.length,
+        getScrollElement: () => timelineRef?.current || null,
+        estimateSize,
+        getItemKey,
+        observeElementRect,
+        observeElementOffset,
+        scrollToFn: elementScroll,
+        overscan: ANDROID_VIRTUAL_OVERSCAN_ROWS,
+        anchorTo: 'end',
+        followOnAppend: true,
+        scrollEndThreshold: 80,
+        enabled: Boolean(posts),
+    });
 
-    const updateWindow = useCallback((root) => {
-        if (!root || !canWindow || displayPosts.length === 0) return;
-        const nextWindow = getTimelineWindowForViewport(
-            virtualHeights,
-            getTimelineContentOffset(root, true),
-            root.clientHeight,
-            displayPosts.length,
-            root.clientHeight * ANDROID_STABLE_OVERSCAN_VIEWPORTS,
-        );
-        setWindowRange((current) => (
-            haveSameTimelineWindow(current, nextWindow) ? current : nextWindow
-        ));
-    }, [canWindow, displayPosts.length, virtualHeights]);
-    updateWindowRef.current = updateWindow;
+    if (!posts || displayPosts.length === 0) initialScrollPendingRef.current = true;
 
     const triggerLoadMore = useCallback(async () => {
         if (!onLoadMore || !hasMore || loadingMoreRef.current) return;
@@ -395,7 +357,7 @@ function AndroidStableTimelineView({ posts, hasMore, onLoadMore, onPostClick, on
             await onLoadMore({
                 preserveScroll: false,
                 preserveMode: 'top',
-                pageSize: ANDROID_STABLE_PAGE_SIZE,
+                pageSize: ANDROID_HISTORY_PAGE_SIZE,
             });
         } finally {
             loadingMoreRef.current = false;
@@ -405,21 +367,14 @@ function AndroidStableTimelineView({ posts, hasMore, onLoadMore, onPostClick, on
 
     const maybePreload = useCallback((root) => {
         if (!root || !hasMore || loadingMoreRef.current) return;
-        const preloadDistance = root.clientHeight * ANDROID_STABLE_PRELOAD_VIEWPORTS;
-        if (root.scrollHeight <= root.clientHeight + 1
-            || getTimelineContentOffset(root, true) < preloadDistance) {
+        const preloadDistance = root.clientHeight * ANDROID_PRELOAD_VIEWPORTS;
+        if (root.scrollHeight <= root.clientHeight + 1 || root.scrollTop < preloadDistance) {
             void triggerLoadMore();
         }
     }, [hasMore, triggerLoadMore]);
 
     const handleScroll = useCallback((event) => {
-        const root = event.currentTarget;
-        maybePreload(root);
-        if (scrollFrameRef.current) return;
-        scrollFrameRef.current = requestAnimationFrame(() => {
-            scrollFrameRef.current = 0;
-            updateWindowRef.current?.(root);
-        });
+        maybePreload(event.currentTarget);
     }, [maybePreload]);
 
     const handleTouchStart = useCallback((event) => {
@@ -431,129 +386,30 @@ function AndroidStableTimelineView({ posts, hasMore, onLoadMore, onPostClick, on
     }, []);
 
     useLayoutEffect(() => {
-        const root = timelineRef?.current;
-        const content = contentRef.current;
-        if (!root || !content) return;
-
-        const width = root.clientWidth || 0;
-        if (width > 0 && measuredWidthRef.current !== width) {
-            measuredWidthRef.current = width;
-            measuredHeightsRef.current.clear();
-        }
-        const heightsChanged = measureAndroidStableRows(content, measuredHeightsRef.current);
-        previousPostsRef.current = displayPosts;
-        if (heightsChanged) setHeightRevision((value) => value + 1);
-        if (!canWindow) {
-            if (windowingActive) setWindowingActive(false);
-            return;
-        }
-        updateWindowRef.current?.(root);
-        if (!windowingActive) setWindowingActive(true);
-    }, [canWindow, displayPosts, effectiveRange.end, effectiveRange.start, heightRevision, timelineRef, windowingActive]);
-
-    useEffect(() => {
-        if (typeof ResizeObserver === 'undefined') return;
-        const root = timelineRef?.current;
-        const content = contentRef.current;
-        if (!root || !content) return;
-
-        const observer = new ResizeObserver((entries) => {
-            let heightsChanged = false;
-            let viewportChanged = false;
-            for (const entry of entries) {
-                if (entry.target === root) {
-                    const width = root.clientWidth || 0;
-                    if (width > 0 && measuredWidthRef.current !== width) {
-                        measuredWidthRef.current = width;
-                        measuredHeightsRef.current.clear();
-                        heightsChanged = true;
-                    }
-                    viewportChanged = true;
-                    continue;
-                }
-                const row = entry.target;
-                const id = String(row.dataset?.timelinePostId || '');
-                const height = row.getBoundingClientRect().height;
-                const previous = measuredHeightsRef.current.get(id);
-                if (id && Number.isFinite(height) && height > 0
-                    && Math.abs((previous ?? 0) - height) > 0.5) {
-                    measuredHeightsRef.current.set(id, height);
-                    heightsChanged = true;
-                }
-            }
-            if (!heightsChanged && !viewportChanged) return;
-            resizeHeightsChangedRef.current ||= heightsChanged;
-            if (resizeFrameRef.current) return;
-            resizeFrameRef.current = requestAnimationFrame(() => {
-                resizeFrameRef.current = 0;
-                const shouldUpdateHeights = resizeHeightsChangedRef.current;
-                resizeHeightsChangedRef.current = false;
-                if (shouldUpdateHeights) setHeightRevision((value) => value + 1);
-                updateWindowRef.current?.(root);
-                maybePreload(root);
-            });
-        });
-        observer.observe(root);
-        for (const row of content.querySelectorAll(':scope > .android-stable-row')) {
-            observer.observe(row);
-        }
-        return () => {
-            observer.disconnect();
-            cancelAnimationFrame(resizeFrameRef.current);
-            resizeFrameRef.current = 0;
-            resizeHeightsChangedRef.current = false;
-        };
-    }, [displayPosts.length, effectiveRange.end, effectiveRange.start, maybePreload, timelineRef]);
+        if (!initialScrollPendingRef.current || displayPosts.length === 0 || !timelineRef?.current) return;
+        virtualizer.scrollToEnd();
+        initialScrollPendingRef.current = false;
+    }, [displayPosts.length, timelineRef, virtualizer]);
 
     useEffect(() => {
         const root = timelineRef?.current;
         if (!root) return;
-        const frame = requestAnimationFrame(() => {
-            updateWindowRef.current?.(root);
-            maybePreload(root);
-        });
+        const frame = requestAnimationFrame(() => maybePreload(root));
         return () => cancelAnimationFrame(frame);
-    }, [displayPosts.length, hasMore, heightRevision, loadingMore, maybePreload, timelineRef]);
-
-    useEffect(() => {
-        if (typeof IntersectionObserver === 'undefined') return;
-        const sentinel = sentinelRef.current;
-        const root = timelineRef?.current;
-        if (!sentinel || !root) return;
-        const preloadDistance = Math.max(300, root.clientHeight * ANDROID_STABLE_PRELOAD_VIEWPORTS);
-        const observer = new IntersectionObserver((entries) => {
-            if (entries.some((entry) => entry.isIntersecting)) void triggerLoadMore();
-        }, {
-            root,
-            rootMargin: `${Math.ceil(preloadDistance)}px 0px ${Math.ceil(preloadDistance)}px 0px`,
-            threshold: 0,
-        });
-        observer.observe(sentinel);
-        return () => observer.disconnect();
-    }, [displayPosts.length, hasMore, timelineRef, triggerLoadMore]);
+    }, [displayPosts.length, hasMore, loadingMore, maybePreload, timelineRef]);
 
     useEffect(() => {
         const reveal = (event) => {
             const targetId = String(event?.detail?.id ?? '');
             if (!targetId) return;
             const index = displayPosts.findIndex((post) => String(post.id) === targetId);
-            if (index >= 0 && shouldWindow) {
-                setWindowRange(getTimelineWindowAroundIndex(
-                    index,
-                    displayPosts.length,
-                    TIMELINE_WINDOW_SIZE * 2,
-                ));
-            }
+            if (index >= 0) virtualizer.scrollToIndex(index, { align: 'center' });
         };
         window.addEventListener(TIMELINE_REVEAL_EVENT, reveal);
         return () => window.removeEventListener(TIMELINE_REVEAL_EVENT, reveal);
-    }, [displayPosts, shouldWindow]);
+    }, [displayPosts, virtualizer]);
 
     useEffect(() => () => {
-        cancelAnimationFrame(scrollFrameRef.current);
-        cancelAnimationFrame(resizeFrameRef.current);
-        scrollFrameRef.current = 0;
-        resizeFrameRef.current = 0;
         const root = timelineRef?.current;
         if (root?.dataset) delete root.dataset.timelineTouchScrolling;
     }, [timelineRef]);
@@ -564,7 +420,11 @@ function AndroidStableTimelineView({ posts, hasMore, onLoadMore, onPostClick, on
 
     if (displayPosts.length === 0) {
         return html`
-            <div class="timeline reverse android-stable-timeline" ref=${timelineRef}>
+            <div
+                class="timeline normal android-virtual-timeline"
+                data-timeline-scroll-model="end-anchored"
+                ref=${timelineRef}
+            >
                 <div class="timeline-content">
                     <div style="padding: var(--spacing-xl); text-align: center; color: var(--text-secondary)">
                         ${emptyMessage || 'No messages yet. Start a conversation!'}
@@ -574,10 +434,11 @@ function AndroidStableTimelineView({ posts, hasMore, onLoadMore, onPostClick, on
         `;
     }
 
-    const visiblePosts = displayPosts.slice(effectiveRange.start, effectiveRange.end);
+    const virtualItems = virtualizer.getVirtualItems();
     return html`
         <div
-            class="timeline reverse android-stable-timeline"
+            class="timeline normal android-virtual-timeline"
+            data-timeline-scroll-model="end-anchored"
             ref=${timelineRef}
             onScroll=${handleScroll}
             onTouchStart=${handleTouchStart}
@@ -585,22 +446,23 @@ function AndroidStableTimelineView({ posts, hasMore, onLoadMore, onPostClick, on
             onTouchCancel=${handleTouchEnd}
         >
             <div
-                class="timeline-content android-stable-canvas"
-                ref=${contentRef}
-                style=${{ height: `${Math.max(1, totalHeight)}px` }}
+                class="timeline-content android-virtual-canvas"
+                style=${{ height: `${Math.max(1, virtualizer.getTotalSize())}px` }}
             >
-                <div class="timeline-sentinel android-stable-sentinel" ref=${sentinelRef}></div>
-                ${visiblePosts.map((post, visibleIndex) => {
-                    const index = effectiveRange.start + visibleIndex;
+                ${virtualItems.map((virtualItem) => {
+                    const index = virtualItem.index;
+                    const post = displayPosts[index];
+                    if (!post) return null;
                     const isThreadReply = Boolean(post.data?.thread_id && post.data.thread_id !== post.id);
                     const isRemoving = removingPostIds?.has?.(post.id);
                     const threadInfo = threadInfoByIndex[index] || {};
                     return html`
                         <div
-                            key=${post.id}
-                            class="android-stable-row"
-                            data-timeline-post-id=${post.id}
-                            style=${{ top: `${virtualHeights[index] || 0}px` }}
+                            key=${virtualItem.key}
+                            class="android-virtual-row"
+                            data-index=${index}
+                            ref=${virtualizer.measureElement}
+                            style=${{ transform: `translateY(${virtualItem.start}px)` }}
                         >
                             <${TimelinePost}
                                 post=${post}

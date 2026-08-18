@@ -95,34 +95,30 @@
     pointer-events: none;
 }
 
-/* Android-only fixed-coordinate virtualization; inactive without the runtime class. */
-.timeline.android-stable-timeline {
-    overflow-anchor: auto;
+/* Android-only TanStack chat virtualizer; inactive without the runtime class. */
+.timeline.android-virtual-timeline {
+    flex-direction: column;
+    overflow-anchor: none;
 }
 
-.timeline-content.android-stable-canvas {
+.timeline-content.android-virtual-canvas {
     position: relative;
     display: block;
     flex: 0 0 auto;
     width: 100%;
-    overflow-anchor: auto;
+    overflow-anchor: none;
 }
 
-.android-stable-canvas > .android-stable-row {
-    position: absolute;
-    left: 0;
-    right: 0;
-    overflow-anchor: auto;
-}
-
-.android-stable-canvas > .android-stable-row > .post {
-    animation: none;
-}
-
-.timeline-sentinel.android-stable-sentinel {
+.android-virtual-canvas > .android-virtual-row {
     position: absolute;
     top: 0;
     left: 0;
+    right: 0;
+    overflow-anchor: none;
+}
+
+.android-virtual-canvas > .android-virtual-row > .post {
+    animation: none;
 }
 
 .load-more-btn {
