@@ -327,6 +327,7 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
     const initialScrollPendingRef = useRef(true);
     const pinnedToEndRef = useRef(true);
     const previousViewportHeightRef = useRef(null);
+    const useDeferredWebKitMeasurements = isWebKitTimelinePlatform();
     const observeTimelineRect = useCallback((instance, callback) => observeElementRect(instance, (rect) => {
         const previousHeight = previousViewportHeightRef.current;
         previousViewportHeightRef.current = rect.height;
@@ -365,9 +366,23 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
         anchorTo: 'end',
         followOnAppend: true,
         scrollEndThreshold: 80,
-        useAnimationFrameWithResizeObserver: isWebKitTimelinePlatform(),
+        useAnimationFrameWithResizeObserver: useDeferredWebKitMeasurements,
         enabled: Boolean(posts),
     });
+    const measureVirtualRow = useCallback((node) => {
+        if (!useDeferredWebKitMeasurements || !node) {
+            virtualizer.measureElement(node);
+            return;
+        }
+
+        // Preact invokes callback refs during its commit. WebKit can measure a
+        // newly mounted dynamic row before its nested message DOM has reached
+        // the final layout, then visibly correct it through ResizeObserver.
+        // Measure after the complete Preact commit, matching Vue's nextTick fix.
+        queueMicrotask(() => {
+            if (node.isConnected) virtualizer.measureElement(node);
+        });
+    }, [useDeferredWebKitMeasurements, virtualizer]);
 
     if (!posts || displayPosts.length === 0) {
         initialScrollPendingRef.current = true;
@@ -492,7 +507,7 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
                             key=${virtualItem.key}
                             class="end-anchored-row"
                             data-index=${index}
-                            ref=${virtualizer.measureElement}
+                            ref=${measureVirtualRow}
                             style=${{ transform: `translateY(${virtualItem.start}px)` }}
                         >
                             <${TimelinePost}
