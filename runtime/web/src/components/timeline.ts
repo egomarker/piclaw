@@ -18,17 +18,10 @@ const CHAT_VIRTUAL_OVERSCAN_ROWS = 6;
 const CHAT_PRELOAD_VIEWPORTS = 8;
 const CHAT_HISTORY_PAGE_SIZE = 30;
 
-function isWebKitTimelinePlatform(navigatorLike = typeof navigator === 'undefined' ? null : navigator) {
+export function isAndroidTimelinePlatform(navigatorLike = typeof navigator === 'undefined' ? null : navigator) {
     const userAgent = String(navigatorLike?.userAgent || '');
-    if (!/AppleWebKit/i.test(userAgent)) return false;
-
-    const platform = String(navigatorLike?.platform || '');
-    const isIOSWebKit = /iPhone|iPad|iPod/i.test(userAgent)
-        || (platform === 'MacIntel' && Number(navigatorLike?.maxTouchPoints) > 0);
-    if (isIOSWebKit) return true;
-
-    return /Safari/i.test(userAgent)
-        && !/Chrome|Chromium|CriOS|Edg|EdgiOS|FxiOS|OPR|OPiOS|Android/i.test(userAgent);
+    const userAgentPlatform = String(navigatorLike?.userAgentData?.platform || '');
+    return /\bAndroid\b/i.test(userAgent) || /^Android$/i.test(userAgentPlatform);
 }
 
 export function haveSameTimelineProps(currentProps, nextProps) {
@@ -170,7 +163,7 @@ export class Timeline extends Component {
     }
 
     render(props) {
-        if (props.reverse !== false && !isWebKitTimelinePlatform()) {
+        if (props.reverse !== false && isAndroidTimelinePlatform()) {
             return h(EndAnchoredTimelineView, props);
         }
         return h(TimelineView, props);
@@ -336,7 +329,7 @@ function usePreactVirtualizer(options) {
 }
 
 /**
- * Non-WebKit main chat virtualizer. It deliberately uses normal positive scroll
+ * Android-only main chat virtualizer. It deliberately uses normal positive scroll
  * coordinates and disables native CSS anchoring; TanStack owns keyed prepend
  * anchoring, dynamic-size corrections, and end following on this path.
  */
