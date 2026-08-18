@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import {
+  captureTimelineViewportAnchor,
   estimateTimelinePostHeight,
   findTimelineIndexAtOffset,
   getAnchoredTimelineScrollTop,
@@ -112,6 +113,26 @@ test('timeline viewport rejects inactive, disconnected, and zero-sized surfaces'
     ...visible,
     getBoundingClientRect: () => ({ width: 0, height: 0 }),
   }, true)).toBe(false);
+});
+
+test('timeline anchor capture supports TanStack rows nested inside the canvas', () => {
+  let queriedSelector = '';
+  const post = {
+    id: 'post-42',
+    getBoundingClientRect: () => ({ top: 125, bottom: 225 }),
+  };
+  const content = {
+    querySelectorAll: (selector: string) => {
+      queriedSelector = selector;
+      return [post];
+    },
+  };
+  const root = {
+    getBoundingClientRect: () => ({ top: 100, bottom: 500 }),
+  };
+
+  expect(captureTimelineViewportAnchor(root, content)).toEqual({ id: '42', offset: 25 });
+  expect(queriedSelector).toContain('.end-anchored-row > .post');
 });
 
 test('timeline anchor correction restores the captured viewport offset', () => {
