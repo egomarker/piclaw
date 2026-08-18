@@ -6,6 +6,7 @@ import {
   getLatestTimelineWindow,
   getTimelineContentOffset,
   getTimelineWindowAroundIndex,
+  hasUsableTimelineViewport,
   haveSameTimelineProps,
   windowFromScrollOffset,
 } from '../../web/src/components/timeline.js';
@@ -93,6 +94,24 @@ test('reverse timeline content offset reaches zero at the history edge', () => {
 test('timeline content offset uses positive scrollTop in normal mode', () => {
   expect(getTimelineContentOffset({ scrollTop: 900, scrollHeight: 12000, clientHeight: 600 }, false)).toBe(900);
   expect(getTimelineContentOffset(null, false)).toBe(0);
+});
+
+test('timeline viewport rejects inactive, disconnected, and zero-sized surfaces', () => {
+  const visible = {
+    clientHeight: 600,
+    clientWidth: 800,
+    isConnected: true,
+    getBoundingClientRect: () => ({ width: 800, height: 600 }),
+  };
+
+  expect(hasUsableTimelineViewport(visible, true)).toBe(true);
+  expect(hasUsableTimelineViewport(visible, false)).toBe(false);
+  expect(hasUsableTimelineViewport({ ...visible, isConnected: false }, true)).toBe(false);
+  expect(hasUsableTimelineViewport({ ...visible, clientHeight: 0 }, true)).toBe(false);
+  expect(hasUsableTimelineViewport({
+    ...visible,
+    getBoundingClientRect: () => ({ width: 0, height: 0 }),
+  }, true)).toBe(false);
 });
 
 test('timeline anchor correction restores the captured viewport offset', () => {

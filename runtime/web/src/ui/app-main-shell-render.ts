@@ -322,6 +322,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
   const mobilePaneSurfaceInactive = mobileTabAccessibilityEnabled && (mobileChatActive || mobileWorkspaceActive);
   const mobileTimelineActive = uiMode === 'mobile'
     && (chatOnlyMode || mobileChatActive || (!editorOpen && !mobileWorkspaceActive));
+  const timelineSurfaceActive = uiMode !== 'mobile' || mobileTimelineActive;
   const mobileTerminalDockControlEnabled = uiMode === 'mobile' && hasDockPanes && !chatOnlyMode;
   const mobilePaneLabelledBy = mobileTabAccessibilityEnabled && tabStripActiveId
     ? getMobileSurfaceTabElementId(tabStripActiveId)
@@ -646,6 +647,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
         `}
         <${Timeline}
           posts=${posts}
+          active=${timelineSurfaceActive}
           hasMore=${isMainTimelineView ? hasMore : false}
           onLoadMore=${isMainTimelineView ? loadMore : undefined}
           timelineRef=${timelineRef}

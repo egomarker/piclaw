@@ -4,6 +4,7 @@ import { ActiveSessionsIndicator } from '../../web/src/components/active-session
 import { ComposeBox, QueuedFollowupStack } from '../../web/src/components/compose-box.js';
 import { MarkdownPreview } from '../../web/src/components/markdown-preview.js';
 import { TabStrip } from '../../web/src/components/tab-strip.js';
+import { Timeline } from '../../web/src/components/timeline.js';
 import { TimelineMenu } from '../../web/src/components/timeline-menu.js';
 import { TimelineQuickActions } from '../../web/src/components/timeline-quick-actions.js';
 import { WorkspaceExplorer } from '../../web/src/components/workspace-explorer.js';
@@ -320,6 +321,31 @@ test('renderMainShell groups Chat chrome separately from global overlays', () =>
 
   expect(classes.has('chat-surface-main')).toBe(true);
   expect(classes.has('chat-surface-footer')).toBe(true);
+});
+
+test('renderMainShell marks the timeline inactive while another Mobile surface is selected', () => {
+  const renderTimeline = (overrides: Record<string, unknown>) => {
+    const tree = renderMainShell(createMainShellRenderOptions(overrides));
+    let timelineVNode: any = null;
+    walkVNodes(tree, (node) => {
+      if (node.type === Timeline) timelineVNode = node;
+    });
+    return timelineVNode;
+  };
+
+  expect(renderTimeline({ uiMode: 'classic' })?.props.active).toBe(true);
+  expect(renderTimeline({
+    uiMode: 'mobile',
+    chatOnlyMode: false,
+    editorOpen: true,
+    mobileChatActive: true,
+  })?.props.active).toBe(true);
+  expect(renderTimeline({
+    uiMode: 'mobile',
+    chatOnlyMode: false,
+    editorOpen: true,
+    mobileChatActive: false,
+  })?.props.active).toBe(false);
 });
 
 test('only Mobile renders the active sessions indicator for the timeline surface', () => {

@@ -79,6 +79,17 @@ export function getTimelineContentOffset(root, reverse) {
         : Math.max(0, scrollTop);
 }
 
+/** Hidden/inactive timeline surfaces must not drive pagination or geometry. */
+export function hasUsableTimelineViewport(root, active = true) {
+    if (!active || !root || root.isConnected === false) return false;
+    if (!Number.isFinite(root.clientHeight) || root.clientHeight <= 0) return false;
+    if (Number.isFinite(root.clientWidth) && root.clientWidth <= 0) return false;
+    const rect = root.getBoundingClientRect?.();
+    if (rect && (!Number.isFinite(rect.height) || rect.height <= 0
+        || !Number.isFinite(rect.width) || rect.width <= 0)) return false;
+    return true;
+}
+
 /** Scroll correction that returns an element to its captured viewport offset. */
 export function getAnchoredTimelineScrollTop(scrollTop, currentOffset, capturedOffset) {
     if (![scrollTop, currentOffset, capturedOffset].every(Number.isFinite)) return scrollTop;
@@ -323,13 +334,19 @@ function usePreactVirtualizer(options) {
  * coordinates and disables native CSS anchoring; TanStack owns keyed prepend
  * anchoring, dynamic-size corrections, and end following on this path.
  */
-function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, removingPostIds, searchQuery }) {
+function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, removingPostIds, searchQuery, active = true }) {
     const [loadingMore, setLoadingMore] = useState(false);
     const loadingMoreRef = useRef(false);
     const initialScrollPendingRef = useRef(true);
     const pinnedToEndRef = useRef(true);
+    const activeRef = useRef(active);
+    const previousActiveRef = useRef(active);
+    const suspendedScrollTopRef = useRef(null);
+    const suspendedCanvasSizeRef = useRef(1);
     const previousViewportHeightRef = useRef(null);
+    activeRef.current = active;
     const observeTimelineRect = useCallback((instance, callback) => observeElementRect(instance, (rect) => {
+        if (!activeRef.current) return;
         const previousHeight = previousViewportHeightRef.current;
         previousViewportHeightRef.current = rect.height;
         const viewportHeightChanged = previousHeight !== null
@@ -342,32 +359,38 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
         // scroll. Preserve bottom pinning only if it was pinned before resize.
         if (shouldRestoreEnd) instance.scrollToEnd({ behavior: 'auto' });
     }), []);
+    const observeTimelineOffset = useCallback((instance, callback) => observeElementOffset(instance, (offset, isScrolling) => {
+        if (activeRef.current) callback(offset, isScrolling);
+    }), []);
     const displayPosts = useMemo(
         () => Array.isArray(posts) ? posts.slice().sort((a, b) => a.id - b.id) : [],
         [posts],
     );
-    const threadInfoByIndex = useMemo(() => resolveThreadInfo(displayPosts), [displayPosts]);
+    const activePostsRef = useRef(displayPosts);
+    if (active) activePostsRef.current = displayPosts;
+    const virtualPosts = active ? displayPosts : activePostsRef.current;
+    const threadInfoByIndex = useMemo(() => resolveThreadInfo(virtualPosts), [virtualPosts]);
     const getItemKey = useCallback(
-        (index) => displayPosts[index]?.id ?? `missing-${index}`,
-        [displayPosts],
+        (index) => virtualPosts[index]?.id ?? `missing-${index}`,
+        [virtualPosts],
     );
     const estimateSize = useCallback(
-        (index) => estimateTimelinePostHeight(displayPosts[index]),
-        [displayPosts],
+        (index) => estimateTimelinePostHeight(virtualPosts[index]),
+        [virtualPosts],
     );
     const virtualizer = usePreactVirtualizer({
-        count: displayPosts.length,
+        count: virtualPosts.length,
         getScrollElement: () => timelineRef?.current || null,
         estimateSize,
         getItemKey,
         observeElementRect: observeTimelineRect,
-        observeElementOffset,
+        observeElementOffset: observeTimelineOffset,
         scrollToFn: elementScroll,
         overscan: CHAT_VIRTUAL_OVERSCAN_ROWS,
         anchorTo: 'end',
         followOnAppend: true,
         scrollEndThreshold: 80,
-        enabled: Boolean(posts),
+        enabled: Boolean(posts) && active,
     });
 
     if (!posts || displayPosts.length === 0) {
@@ -376,7 +399,9 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
     }
 
     const triggerLoadMore = useCallback(async () => {
-        if (!onLoadMore || !hasMore || loadingMoreRef.current) return;
+        const root = timelineRef?.current;
+        if (!onLoadMore || !hasMore || loadingMoreRef.current
+            || !hasUsableTimelineViewport(root, active)) return;
         loadingMoreRef.current = true;
         setLoadingMore(true);
         try {
@@ -389,24 +414,25 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
             loadingMoreRef.current = false;
             setLoadingMore(false);
         }
-    }, [hasMore, onLoadMore]);
+    }, [active, hasMore, onLoadMore, timelineRef]);
 
     const maybePreload = useCallback((root) => {
-        if (!root || !hasMore || loadingMoreRef.current) return;
+        if (!hasUsableTimelineViewport(root, active) || !hasMore || loadingMoreRef.current) return;
         const preloadDistance = root.clientHeight * CHAT_PRELOAD_VIEWPORTS;
         if (root.scrollHeight <= root.clientHeight + 1 || root.scrollTop < preloadDistance) {
             void triggerLoadMore();
         }
-    }, [hasMore, triggerLoadMore]);
+    }, [active, hasMore, triggerLoadMore]);
 
     const handleScroll = useCallback((event) => {
         const root = event.currentTarget;
+        if (!hasUsableTimelineViewport(root, active)) return;
         if (!isAnchorScrolling(root)) {
             const distanceFromEnd = Math.max(0, root.scrollHeight - root.clientHeight - root.scrollTop);
             pinnedToEndRef.current = distanceFromEnd <= 2;
         }
         maybePreload(root);
-    }, [maybePreload]);
+    }, [active, maybePreload]);
 
     const handleTouchStart = useCallback((event) => {
         event.currentTarget.dataset.timelineTouchScrolling = 'true';
@@ -417,11 +443,35 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
     }, []);
 
     useLayoutEffect(() => {
-        if (!initialScrollPendingRef.current || displayPosts.length === 0 || !timelineRef?.current) return;
+        if (!active || !initialScrollPendingRef.current || displayPosts.length === 0 || !timelineRef?.current) return;
         virtualizer.scrollToEnd();
         pinnedToEndRef.current = true;
         initialScrollPendingRef.current = false;
-    }, [displayPosts.length, timelineRef, virtualizer]);
+    }, [active, displayPosts.length, timelineRef, virtualizer]);
+
+    useLayoutEffect(() => {
+        const wasActive = previousActiveRef.current;
+        previousActiveRef.current = active;
+        const root = timelineRef?.current;
+
+        if (wasActive && !active) {
+            suspendedScrollTopRef.current = Number.isFinite(root?.scrollTop) ? root.scrollTop : null;
+            previousViewportHeightRef.current = null;
+            return;
+        }
+        if (!active || wasActive) return;
+
+        const frame = requestAnimationFrame(() => {
+            const resumedRoot = timelineRef?.current;
+            if (!hasUsableTimelineViewport(resumedRoot, true)) return;
+            if (pinnedToEndRef.current) {
+                virtualizer.scrollToEnd({ behavior: 'auto' });
+            } else if (Number.isFinite(suspendedScrollTopRef.current)) {
+                resumedRoot.scrollTop = suspendedScrollTopRef.current;
+            }
+        });
+        return () => cancelAnimationFrame(frame);
+    }, [active, timelineRef, virtualizer]);
 
     useEffect(() => {
         const root = timelineRef?.current;
@@ -433,13 +483,13 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
     useEffect(() => {
         const reveal = (event) => {
             const targetId = String(event?.detail?.id ?? '');
-            if (!targetId) return;
+            if (!active || !targetId) return;
             const index = displayPosts.findIndex((post) => String(post.id) === targetId);
             if (index >= 0) virtualizer.scrollToIndex(index, { align: 'center' });
         };
         window.addEventListener(TIMELINE_REVEAL_EVENT, reveal);
         return () => window.removeEventListener(TIMELINE_REVEAL_EVENT, reveal);
-    }, [displayPosts, virtualizer]);
+    }, [active, displayPosts, virtualizer]);
 
     useEffect(() => () => {
         const root = timelineRef?.current;
@@ -466,7 +516,10 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
         `;
     }
 
-    const virtualItems = virtualizer.getVirtualItems();
+    const virtualItems = active ? virtualizer.getVirtualItems() : [];
+    const currentCanvasSize = Math.max(1, virtualizer.getTotalSize());
+    if (active) suspendedCanvasSizeRef.current = currentCanvasSize;
+    const canvasSize = active ? currentCanvasSize : suspendedCanvasSizeRef.current;
     return html`
         <div
             class="timeline normal end-anchored-timeline"
@@ -479,11 +532,11 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
         >
             <div
                 class="timeline-content end-anchored-canvas"
-                style=${{ height: `${Math.max(1, virtualizer.getTotalSize())}px` }}
+                style=${{ height: `${canvasSize}px` }}
             >
                 ${virtualItems.map((virtualItem) => {
                     const index = virtualItem.index;
-                    const post = displayPosts[index];
+                    const post = virtualPosts[index];
                     if (!post) return null;
                     const isThreadReply = Boolean(post.data?.thread_id && post.data.thread_id !== post.id);
                     const isRemoving = removingPostIds?.has?.(post.id);
@@ -526,7 +579,7 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
 }
 
 /** Timeline component. */
-function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, reverse = true, removingPostIds, searchQuery }) {
+function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, reverse = true, removingPostIds, searchQuery, active = true }) {
     const [loadingMore, setLoadingMore] = useState(false);
     const [windowRange, setWindowRange] = useState({ start: 0, end: 0 });
     const [windowingActive, setWindowingActive] = useState(false);
@@ -538,6 +591,9 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
     const measuredHeightsRef = useRef(new Map());
     const loadAnchorRef = useRef(null);
     const pendingAnchorRef = useRef(null);
+    const pinnedToEndRef = useRef(true);
+    const previousActiveRef = useRef(active);
+    const suspendedScrollTopRef = useRef(null);
     const restoringAnchorRef = useRef(false);
     const restoreFramesRef = useRef({ first: 0, second: 0 });
     const scrollWindowFrameRef = useRef(0);
@@ -583,7 +639,9 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         : { start: 0, end: displayPosts.length };
 
     const triggerLoadMore = useCallback(async () => {
-        if (!onLoadMore || !hasMore || loadingMore) return;
+        const root = timelineRef?.current;
+        if (!onLoadMore || !hasMore || loadingMore
+            || !hasUsableTimelineViewport(root, active)) return;
         const touchScrolling = touchScrollActiveRef.current;
         const anchor = touchScrolling
             ? null
@@ -595,7 +653,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         } finally {
             setLoadingMore(false);
         }
-    }, [hasMore, loadingMore, onLoadMore, timelineRef]);
+    }, [active, hasMore, loadingMore, onLoadMore, timelineRef]);
 
     const updateWindowForScroll = useCallback((root) => {
         if (!root || restoringAnchorRef.current || isAnchorScrolling(root) || !shouldWindow) return;
@@ -668,7 +726,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
     }, [displayPosts, effectiveRange.end, effectiveRange.start, reverse, shouldWindow, virtualHeights, windowRange]);
 
     const finishTouchScroll = useCallback(() => {
-        if (!touchScrollActiveRef.current || touchContactRef.current) return;
+        if (!active || !touchScrollActiveRef.current || touchContactRef.current) return;
         touchScrollActiveRef.current = false;
         clearTimeout(touchScrollIdleTimerRef.current);
         touchScrollIdleTimerRef.current = 0;
@@ -724,7 +782,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         setWindowRange((current) => (
             haveSameTimelineWindow(current, compactWindow) ? current : compactWindow
         ));
-    }, [displayPosts, reverse, timelineRef, windowingActive]);
+    }, [active, displayPosts, reverse, timelineRef, windowingActive]);
 
     finishTouchScrollRef.current = finishTouchScroll;
     updateWindowForScrollRef.current = updateWindowForScroll;
@@ -777,6 +835,10 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
     const handleScroll = useCallback((event) => {
         if (restoringAnchorRef.current || isAnchorScrolling(event.target)) return;
         const root = event.target;
+        if (!hasUsableTimelineViewport(root, active)) return;
+        pinnedToEndRef.current = reverse
+            ? root.scrollTop >= -2
+            : Math.max(0, root.scrollHeight - root.clientHeight - root.scrollTop) <= 2;
         const touchScrolling = touchScrollActiveRef.current;
         if (touchScrolling && !touchContactRef.current) scheduleTouchScrollEnd();
         const contentOffset = getTimelineContentOffset(root, reverse);
@@ -789,15 +851,50 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             scrollWindowFrameRef.current = 0;
             updateWindowForScrollRef.current?.(root);
         });
-    }, [reverse, scheduleTouchScrollEnd, shouldWindow, triggerLoadMore]);
+    }, [active, reverse, scheduleTouchScrollEnd, shouldWindow, triggerLoadMore]);
+
+    useLayoutEffect(() => {
+        const wasActive = previousActiveRef.current;
+        previousActiveRef.current = active;
+        const root = timelineRef?.current;
+
+        if (wasActive && !active) {
+            suspendedScrollTopRef.current = Number.isFinite(root?.scrollTop) ? root.scrollTop : null;
+            cancelAnimationFrame(scrollWindowFrameRef.current);
+            scrollWindowFrameRef.current = 0;
+            clearTimeout(touchScrollIdleTimerRef.current);
+            touchScrollIdleTimerRef.current = 0;
+            touchContactRef.current = false;
+            touchScrollActiveRef.current = false;
+            loadAnchorRef.current = null;
+            pendingAnchorRef.current = null;
+            return;
+        }
+        if (!active || wasActive) return;
+
+        if (pinnedToEndRef.current && canWindow) {
+            setWindowRange(getLatestTimelineWindow(displayPosts.length));
+            setWindowingActive(true);
+        }
+        const frame = requestAnimationFrame(() => {
+            const resumedRoot = timelineRef?.current;
+            if (!hasUsableTimelineViewport(resumedRoot, true)) return;
+            if (pinnedToEndRef.current) {
+                resumedRoot.scrollTop = reverse ? 0 : resumedRoot.scrollHeight;
+            } else if (Number.isFinite(suspendedScrollTopRef.current)) {
+                resumedRoot.scrollTop = suspendedScrollTopRef.current;
+            }
+        });
+        return () => cancelAnimationFrame(frame);
+    }, [active, canWindow, displayPosts.length, reverse, timelineRef]);
 
     useEffect(() => {
         const root = timelineRef?.current;
-        if (!root) return;
+        if (!active || !root) return;
         const onScrollEnd = () => finishTouchScrollRef.current?.();
         root.addEventListener('scrollend', onScrollEnd, { passive: true });
         return () => root.removeEventListener('scrollend', onScrollEnd);
-    }, [displayPosts.length, timelineRef]);
+    }, [active, displayPosts.length, timelineRef]);
 
     useEffect(() => () => {
         cancelAnimationFrame(scrollWindowFrameRef.current);
@@ -815,6 +912,12 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
     useLayoutEffect(() => {
         const previousPosts = previousPostsRef.current;
         previousPostsRef.current = displayPosts;
+
+        if (!active) {
+            loadAnchorRef.current = null;
+            pendingAnchorRef.current = null;
+            return;
+        }
 
         if (!canWindow) {
             loadAnchorRef.current = null;
@@ -931,10 +1034,10 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             };
             return haveSameTimelineWindow(current, preservedWindow) ? current : preservedWindow;
         });
-    }, [canWindow, displayPosts, reverse, shouldBootstrapWindow, timelineRef, touchScrollRevision, windowingActive]);
+    }, [active, canWindow, displayPosts, reverse, shouldBootstrapWindow, timelineRef, touchScrollRevision, windowingActive]);
 
     useLayoutEffect(() => {
-        if (!shouldWindow) return;
+        if (!active || !shouldWindow) return;
         const root = timelineRef?.current;
         const content = timelineContentRef.current;
         if (!root || !content) return;
@@ -1018,10 +1121,10 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             cancelAnimationFrame(restoreFramesRef.current.second);
             restoringAnchorRef.current = false;
         };
-    }, [displayPosts, effectiveRange.end, effectiveRange.start, heightRevision, reverse, shouldWindow, timelineRef, windowRange]);
+    }, [active, displayPosts, effectiveRange.end, effectiveRange.start, heightRevision, reverse, shouldWindow, timelineRef, windowRange]);
 
     useEffect(() => {
-        if (!shouldWindow || typeof ResizeObserver === 'undefined') return;
+        if (!active || !shouldWindow || typeof ResizeObserver === 'undefined') return;
         const content = timelineContentRef.current;
         if (!content) return;
         let updateFrame = 0;
@@ -1082,12 +1185,12 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             observer.disconnect();
             if (updateFrame) cancelAnimationFrame(updateFrame);
         };
-    }, [displayPosts, shouldWindow, timelineRef, windowRange.start, windowRange.end]);
+    }, [active, displayPosts, shouldWindow, timelineRef, windowRange.start, windowRange.end]);
 
     useEffect(() => {
         const reveal = (event) => {
             const targetId = String(event?.detail?.id ?? '');
-            if (!targetId || !shouldWindow) return;
+            if (!active || !targetId || !shouldWindow) return;
             const index = displayPosts.findIndex((post) => String(post.id) === targetId);
             if (index >= 0) {
                 pendingAnchorRef.current = null;
@@ -1109,10 +1212,10 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         };
         window.addEventListener(TIMELINE_REVEAL_EVENT, reveal);
         return () => window.removeEventListener(TIMELINE_REVEAL_EVENT, reveal);
-    }, [displayPosts, shouldWindow, timelineRef, virtualHeights]);
+    }, [active, displayPosts, shouldWindow, timelineRef, virtualHeights]);
 
     useEffect(() => {
-        if (!hasIntersectionObserver) return;
+        if (!active || !hasIntersectionObserver) return;
         const sentinel = sentinelRef.current;
         const root = timelineRef?.current;
         if (!sentinel || !root) return;
@@ -1125,27 +1228,29 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
         });
         observer.observe(sentinel);
         return () => observer.disconnect();
-    }, [hasIntersectionObserver, hasMore, onLoadMore, timelineRef, triggerLoadMore]);
+    }, [active, hasIntersectionObserver, hasMore, onLoadMore, timelineRef, triggerLoadMore]);
 
     const triggerLoadMoreRef = useRef(triggerLoadMore);
     triggerLoadMoreRef.current = triggerLoadMore;
 
     useEffect(() => {
-        if (hasIntersectionObserver || !timelineRef?.current) return;
+        if (!active || hasIntersectionObserver || !timelineRef?.current) return;
         const root = timelineRef.current;
-        if (getTimelineContentOffset(root, reverse) < Math.max(300, root.clientHeight)) {
+        if (hasUsableTimelineViewport(root, active)
+            && getTimelineContentOffset(root, reverse) < Math.max(300, root.clientHeight)) {
             triggerLoadMoreRef.current?.();
         }
-    }, [hasIntersectionObserver, posts, hasMore, reverse, timelineRef]);
+    }, [active, hasIntersectionObserver, posts, hasMore, reverse, timelineRef]);
 
     useEffect(() => {
-        if (!timelineRef?.current || !hasMore || loadingMore) return;
+        if (!active || !timelineRef?.current || !hasMore || loadingMore) return;
         const root = timelineRef.current;
+        if (!hasUsableTimelineViewport(root, active)) return;
         if (root.scrollHeight <= root.clientHeight + 1
             || getTimelineContentOffset(root, reverse) < Math.max(300, root.clientHeight)) {
             triggerLoadMoreRef.current?.();
         }
-    }, [posts, hasMore, loadingMore, reverse, timelineRef]);
+    }, [active, posts, hasMore, loadingMore, reverse, timelineRef]);
 
     if (!posts) {
         return html`<div class="loading"><div class="spinner"></div></div>`;
