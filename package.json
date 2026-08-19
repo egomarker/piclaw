@@ -116,6 +116,7 @@
     "build:web:visual": "cd runtime && bun web/static/visual/frontend/build.ts && bun build web/static/visual/frontend/styles/app.css --target=browser --minify --sourcemap --outdir web/static/visual/dist --entry-naming=\"[name].bundle.css\"",
     "test:e2e:markdown-table-late-rendering": "bun runtime/scripts/playwright/markdown-table-late-rendering.ts",
     "test:e2e:markdown-table-cell-stress": "bun runtime/scripts/playwright/markdown-table-cell-stress.ts",
+    "test:e2e:markdown-table-alignment": "bun run runtime/scripts/playwright/markdown-table-alignment.ts",
     "smoke:bedrock-opus5": "bun run runtime/scripts/bedrock-opus5-smoke.ts"
   },
   "dependencies": {

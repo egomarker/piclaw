@@ -853,6 +853,16 @@
     word-break: normal;
 }
 
+.post-content th[align="center"],
+.post-content td[align="center"] {
+    text-align: center;
+}
+
+.post-content th[align="right"],
+.post-content td[align="right"] {
+    text-align: right;
+}
+
 .post-content th:first-child,
 .post-content td:first-child {
     width: auto;
