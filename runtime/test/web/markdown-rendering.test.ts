@@ -203,8 +203,11 @@ test('applySyntaxHighlighting falls back to escaped plaintext for unsupported la
   expect(highlighted).not.toContain('<span class="tok-');
 });
 
-test('isSanitizedHtmlAttributeAllowed rejects inline style while preserving safe attrs', async () => {
-  const { isSanitizedHtmlAttributeAllowed } = await import('../../web/src/markdown.ts');
+test('markdown sanitizer preserves safe table alignment without allowing arbitrary align attrs', async () => {
+  const {
+    isSanitizedHtmlAttributeAllowed,
+    isSanitizedHtmlAttributeValueAllowed,
+  } = await import('../../web/src/markdown.ts');
 
   expect(isSanitizedHtmlAttributeAllowed('span', 'style')).toBe(false);
   expect(isSanitizedHtmlAttributeAllowed('span', 'title')).toBe(true);
@@ -212,6 +215,13 @@ test('isSanitizedHtmlAttributeAllowed rejects inline style while preserving safe
   expect(isSanitizedHtmlAttributeAllowed('img', 'src')).toBe(true);
   expect(isSanitizedHtmlAttributeAllowed('span', 'aria-label')).toBe(true);
   expect(isSanitizedHtmlAttributeAllowed('span', 'onclick')).toBe(false);
+  expect(isSanitizedHtmlAttributeAllowed('th', 'align')).toBe(true);
+  expect(isSanitizedHtmlAttributeAllowed('td', 'align')).toBe(true);
+  expect(isSanitizedHtmlAttributeAllowed('div', 'align')).toBe(false);
+  expect(isSanitizedHtmlAttributeValueAllowed('th', 'align', 'left')).toBe(true);
+  expect(isSanitizedHtmlAttributeValueAllowed('td', 'align', 'CENTER')).toBe(true);
+  expect(isSanitizedHtmlAttributeValueAllowed('td', 'align', 'right')).toBe(true);
+  expect(isSanitizedHtmlAttributeValueAllowed('td', 'align', 'justify')).toBe(false);
 });
 
 test('renderMarkdown honors sanitize: false for trusted surfaces', async () => {

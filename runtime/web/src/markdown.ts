@@ -166,8 +166,11 @@ const TAG_ALLOWED_ATTRS = {
     a: new Set(['href', 'target', 'rel']),
     img: new Set(['src', 'alt', 'title']),
     input: new Set(['type', 'checked', 'disabled']),
+    td: new Set(['align']),
+    th: new Set(['align']),
 };
 
+const SAFE_TABLE_ALIGNMENTS = new Set(['left', 'center', 'right']);
 const SAFE_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', '']);
 
 const SVG_TAGS = new Set([
@@ -190,6 +193,16 @@ export function isSanitizedHtmlAttributeAllowed(tagName, attrName) {
     if (SVG_TAGS.has(normalizedTag)) return true;
     const allowedAttrs = TAG_ALLOWED_ATTRS[normalizedTag] || new Set();
     return allowedAttrs.has(normalizedAttr) || GLOBAL_ALLOWED_ATTRS.has(normalizedAttr);
+}
+
+export function isSanitizedHtmlAttributeValueAllowed(tagName, attrName, attrValue) {
+    if (!isSanitizedHtmlAttributeAllowed(tagName, attrName)) return false;
+    const normalizedTag = String(tagName || '').toLowerCase();
+    const normalizedAttr = String(attrName || '').toLowerCase();
+    if ((normalizedTag === 'th' || normalizedTag === 'td') && normalizedAttr === 'align') {
+        return SAFE_TABLE_ALIGNMENTS.has(String(attrValue || '').toLowerCase());
+    }
+    return true;
 }
 
 function escapeHtmlAttr(value) {
@@ -257,7 +270,7 @@ function sanitizeHtml(html, options: MarkdownOptions = {}) {
                 el.removeAttribute(attr.name);
                 continue;
             }
-            if (isSanitizedHtmlAttributeAllowed(tag, name)) {
+            if (isSanitizedHtmlAttributeValueAllowed(tag, name, value)) {
                 if (name === 'href') {
                     const safe = sanitizeUrl(value);
                     if (!safe) {
@@ -284,6 +297,8 @@ function sanitizeHtml(html, options: MarkdownOptions = {}) {
                     } else {
                         el.setAttribute(attr.name, safe);
                     }
+                } else if (name === 'align') {
+                    el.setAttribute(attr.name, value.toLowerCase());
                 }
                 continue;
             }
