@@ -8,14 +8,18 @@ import {
   UNGIT_PROXY_PATH,
 } from "../../../addons/ungit/proxy.ts";
 import {
+  buildUngitInstallCommand,
   buildUngitStartCommand,
+  ensureUngitBinary,
   isUngitLive,
   loadLastKnownGoodUngitSha,
   normalizeUngitSha,
   parseUngitLsRemote,
   resolveRemoteUngitSha,
+  resolveUngitBinaryPath,
   resolveUngitRevision,
   runGitCommand,
+  runGoInstallCommand,
   saveLastKnownGoodUngitRevision,
   startUngitIfNeeded,
   stopUngit,
@@ -106,6 +110,10 @@ test("Ungit-Go health check requires both a JSON ping and the Go document identi
 
 const TEST_UNGIT_SHA = "7c295c1edbe37ef990461e3d2abc9eeb98b106c8";
 const OTHER_UNGIT_SHA = "55d5080fe67ea85953771c078d267e3a97c24ba2";
+const ensureTestUngitBinary = async (
+  revision: { sha: string },
+  launchCwd: string,
+) => resolveUngitBinaryPath(revision.sha, launchCwd);
 
 test("Ungit-Go parses only the requested full remote main SHA", async () => {
   expect(normalizeUngitSha(`  ${TEST_UNGIT_SHA.toUpperCase()}  `)).toBe(TEST_UNGIT_SHA);
@@ -242,6 +250,68 @@ test("Ungit-Go persists verified state atomically and ignores malformed state", 
   }
 });
 
+test("Ungit-Go provisions an immutable executable atomically and reuses it", async () => {
+  const root = mkdtempSync(join(tmpdir(), "piclaw-ungit-binary-"));
+  let installCount = 0;
+  try {
+    expect(buildUngitInstallCommand(TEST_UNGIT_SHA)).toEqual([
+      "go",
+      "install",
+      `${UNGIT_GO_PACKAGE}@${TEST_UNGIT_SHA}`,
+    ]);
+    const binaryPath = await ensureUngitBinary(TEST_UNGIT_SHA, root, {
+      timeoutMs: 123,
+      runInstallImpl: async (command, options) => {
+        installCount += 1;
+        expect(command).toEqual(buildUngitInstallCommand(TEST_UNGIT_SHA));
+        expect(options.cwd).toBe(root);
+        expect(options.timeoutMs).toBe(123);
+        expect(options.env.CGO_ENABLED).toBe("0");
+        expect(options.env.GOCACHE).toBe(join(root, "cache", "ungit-go", "build"));
+        expect(options.env.GOMODCACHE).toBe(join(root, "cache", "ungit-go", "modules"));
+        const temporaryBin = String(options.env.GOBIN);
+        expect(temporaryBin).toContain(`${TEST_UNGIT_SHA}.`);
+        writeFileSync(
+          join(temporaryBin, process.platform === "win32" ? "ungit-go.exe" : "ungit-go"),
+          "test executable",
+          "utf8",
+        );
+        return { exitCode: 0, stdout: "", stderr: "" };
+      },
+    });
+
+    expect(binaryPath).toBe(resolveUngitBinaryPath(TEST_UNGIT_SHA, root));
+    expect(statSync(binaryPath).isFile()).toBe(true);
+    if (process.platform !== "win32") expect(statSync(binaryPath).mode & 0o111).not.toBe(0);
+    expect(installCount).toBe(1);
+    expect(
+      await ensureUngitBinary(TEST_UNGIT_SHA, root, {
+        runInstallImpl: async () => {
+          throw new Error("cached executable must skip installation");
+        },
+      }),
+    ).toBe(binaryPath);
+    expect(installCount).toBe(1);
+    expect(readdirSync(join(root, "bin", "ungit-go"))).toEqual([TEST_UNGIT_SHA]);
+
+    await expect(
+      ensureUngitBinary(OTHER_UNGIT_SHA, root, {
+        runInstallImpl: async () => ({ exitCode: 1, stdout: "", stderr: "compile failed" }),
+      }),
+    ).rejects.toThrow("go install failed with exit code 1: compile failed");
+    expect(readdirSync(join(root, "bin", "ungit-go"))).toEqual([TEST_UNGIT_SHA]);
+
+    await expect(
+      runGoInstallCommand(
+        [process.execPath, "-e", "await Bun.sleep(5_000)"],
+        { cwd: root, env: process.env, timeoutMs: 25 },
+      ),
+    ).rejects.toThrow("Timed out after 25ms installing Ungit-Go");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Ungit-Go runtime verification requires health and all routed assets", async () => {
   const requestedUrls: string[] = [];
   const healthyFetch = async (input: string | URL | Request) => {
@@ -270,7 +340,7 @@ test("Ungit-Go runtime verification requires health and all routed assets", asyn
   ).toBe(false);
 });
 
-test("Ungit-Go autostart skips a live service and launches the resolved immutable Go module", async () => {
+test("Ungit-Go autostart skips a live service and launches the installed immutable binary", async () => {
   let spawnCount = 0;
   await startUngitIfNeeded({
     fetchImpl: async (input) => String(input) === UNGIT_HEALTH_URL
@@ -298,6 +368,7 @@ test("Ungit-Go autostart skips a live service and launches the resolved immutabl
       preparedCwd = cwd;
     },
     resolveRevision: async () => ({ sha: TEST_UNGIT_SHA, source: "remote-main" }),
+    ensureBinary: ensureTestUngitBinary,
     spawnImpl: (command, options) => {
       spawnCount += 1;
       launchedCommand = command;
@@ -320,11 +391,8 @@ test("Ungit-Go autostart skips a live service and launches the resolved immutabl
   expect(spawnCount).toBe(1);
   expect(preparedCwd).toBe(UNGIT_LAUNCH_CWD);
   expect(launchedCommand).toEqual(buildUngitStartCommand(TEST_UNGIT_SHA));
-  expect(launchedCommand.slice(0, 3)).toEqual([
-    "go",
-    "run",
-    `${UNGIT_GO_PACKAGE}@${TEST_UNGIT_SHA}`,
-  ]);
+  expect(launchedCommand[0]).toBe(resolveUngitBinaryPath(TEST_UNGIT_SHA));
+  expect(launchedCommand).not.toContain("go");
   expect(launchedOptions).toEqual({
     cwd: "/workspace/.piclaw",
     stdin: "ignore",
@@ -358,6 +426,7 @@ test("Ungit-Go shares concurrent startup and records state only after readiness"
     fetchImpl: async () => new Response("{}", { status: 503 }),
     ensureLaunchCwd: () => {},
     resolveRevision: async () => ({ sha: TEST_UNGIT_SHA, source: "remote-main" }),
+    ensureBinary: ensureTestUngitBinary,
     spawnImpl: () => {
       spawnCount += 1;
       return {};
@@ -380,6 +449,7 @@ test("Ungit-Go shares concurrent startup and records state only after readiness"
       fetchImpl: async () => new Response("{}", { status: 503 }),
       ensureLaunchCwd: () => {},
       resolveRevision: async () => ({ sha: TEST_UNGIT_SHA, source: "remote-main" }),
+      ensureBinary: ensureTestUngitBinary,
       spawnImpl: () => ({}),
       waitForRuntime: async () => {
         throw new Error("readiness timeout");
@@ -400,6 +470,7 @@ test("Ungit-Go reports an early launcher exit without waiting for the readiness 
       fetchImpl: async () => new Response("{}", { status: 503 }),
       ensureLaunchCwd: () => {},
       resolveRevision: async () => ({ sha: TEST_UNGIT_SHA, source: "remote-main" }),
+      ensureBinary: ensureTestUngitBinary,
       spawnImpl: () => ({ exited: Promise.resolve(17) }),
       waitForRuntime: () => new Promise(() => {}),
       loadLastKnownGood: () => null,
@@ -421,6 +492,7 @@ test("Ungit-Go retries last-known-good after a newly resolved revision fails rea
     fetchImpl: async () => new Response("{}", { status: 503 }),
     ensureLaunchCwd: () => {},
     resolveRevision: async () => ({ sha: TEST_UNGIT_SHA, source: "remote-main" }),
+    ensureBinary: ensureTestUngitBinary,
     spawnImpl: (command) => {
       launchedCommands.push(command);
       return {};

@@ -1,7 +1,11 @@
 import {
+  chmodSync,
+  existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   renameSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -29,6 +33,7 @@ export const UNGIT_REQUIRED_ASSET_URLS = Object.freeze([
 ]);
 
 const UNGIT_GO_IDENTITY_MARKER = "<title>Ungit-Go</title>";
+const UNGIT_GO_BINARY_NAME = process.platform === "win32" ? "ungit-go.exe" : "ungit-go";
 const UNGIT_LAUNCH_STATE_VERSION = 2;
 const UNGIT_LAUNCH_IMPLEMENTATION = "ungit-go";
 const UNGIT_SERVER_ARGUMENTS = Object.freeze([
@@ -70,6 +75,10 @@ interface CommandResult {
 type Environment = Record<string, string | undefined>;
 type FetchImplementation = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 type RunGitImplementation = (command: string[], timeoutMs: number) => Promise<CommandResult>;
+type RunGoInstallImplementation = (
+  command: string[],
+  options: { cwd: string; env: Environment; timeoutMs: number },
+) => Promise<CommandResult>;
 export type SpawnedUngitProcess = {
   pid?: number;
   exited?: Promise<number>;
@@ -94,6 +103,7 @@ export interface StartUngitOptions {
   ensureLaunchCwd?: (cwd: string) => void;
   launchCwd?: string;
   resolveRevision?: () => Promise<ResolvedUngitRevision>;
+  ensureBinary?: (revision: ResolvedUngitRevision, launchCwd: string) => Promise<string>;
   waitForRuntime?: () => Promise<void>;
   loadLastKnownGood?: () => string | null;
   cleanupFailedLaunch?: (child?: SpawnedUngitProcess) => Promise<void> | void;
@@ -254,15 +264,109 @@ export async function resolveUngitRevision(
   }
 }
 
-export function buildUngitStartCommand(shaValue: string): string[] {
+export function buildUngitInstallCommand(shaValue: string): string[] {
   const sha = normalizeUngitSha(shaValue);
-  if (!sha) throw new Error("Cannot build the Ungit-Go startup command from an invalid Git SHA.");
-  return [
-    "go",
-    "run",
-    `${UNGIT_GO_PACKAGE}@${sha}`,
-    ...UNGIT_SERVER_ARGUMENTS,
-  ];
+  if (!sha) throw new Error("Cannot build the Ungit-Go install command from an invalid Git SHA.");
+  return ["go", "install", `${UNGIT_GO_PACKAGE}@${sha}`];
+}
+
+export function resolveUngitBinaryPath(
+  shaValue: string,
+  launchCwd = UNGIT_LAUNCH_CWD,
+): string {
+  const sha = normalizeUngitSha(shaValue);
+  if (!sha) throw new Error("Cannot resolve an Ungit-Go binary path from an invalid Git SHA.");
+  return join(launchCwd, "bin", "ungit-go", sha, UNGIT_GO_BINARY_NAME);
+}
+
+export function buildUngitStartCommand(
+  shaValue: string,
+  launchCwd = UNGIT_LAUNCH_CWD,
+): string[] {
+  return [resolveUngitBinaryPath(shaValue, launchCwd), ...UNGIT_SERVER_ARGUMENTS];
+}
+
+export async function runGoInstallCommand(
+  command: string[],
+  options: { cwd: string; env: Environment; timeoutMs: number },
+): Promise<CommandResult> {
+  const child = Bun.spawn(command, {
+    cwd: options.cwd,
+    env: options.env,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const stdoutPromise = new Response(child.stdout).text();
+  const stderrPromise = new Response(child.stderr).text();
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // The installer may have exited between the timeout firing and kill().
+    }
+  }, options.timeoutMs);
+
+  try {
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      stdoutPromise,
+      stderrPromise,
+    ]);
+    if (timedOut) throw new Error(`Timed out after ${options.timeoutMs}ms installing Ungit-Go.`);
+    return { exitCode, stdout, stderr };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function ensureUngitBinary(
+  shaValue: string,
+  launchCwd = UNGIT_LAUNCH_CWD,
+  options: { runInstallImpl?: RunGoInstallImplementation; timeoutMs?: number } = {},
+): Promise<string> {
+  const sha = normalizeUngitSha(shaValue);
+  if (!sha) throw new Error("Cannot install Ungit-Go from an invalid Git SHA.");
+  const binaryPath = resolveUngitBinaryPath(sha, launchCwd);
+  if (existsSync(binaryPath)) return binaryPath;
+
+  const binaryDirectory = dirname(binaryPath);
+  mkdirSync(dirname(binaryDirectory), { recursive: true });
+  const temporaryDirectory = mkdtempSync(
+    join(dirname(binaryDirectory), `.${sha}.${process.pid}.`),
+  );
+  const temporaryBinaryPath = join(temporaryDirectory, UNGIT_GO_BINARY_NAME);
+  try {
+    const cacheRoot = join(launchCwd, "cache", "ungit-go");
+    const result = await (options.runInstallImpl ?? runGoInstallCommand)(
+      buildUngitInstallCommand(sha),
+      {
+        cwd: launchCwd,
+        env: {
+          ...process.env,
+          CGO_ENABLED: "0",
+          GOBIN: temporaryDirectory,
+          GOCACHE: join(cacheRoot, "build"),
+          GOMODCACHE: join(cacheRoot, "modules"),
+        },
+        timeoutMs: options.timeoutMs ?? STARTUP_TIMEOUT_MS,
+      },
+    );
+    if (result.exitCode !== 0) {
+      const detail = result.stderr.trim() || result.stdout.trim() || "no error output";
+      throw new Error(`go install failed with exit code ${result.exitCode}: ${detail}`);
+    }
+    if (!existsSync(temporaryBinaryPath)) {
+      throw new Error("go install completed without producing the Ungit-Go executable.");
+    }
+    if (process.platform !== "win32") chmodSync(temporaryBinaryPath, 0o755);
+    mkdirSync(binaryDirectory, { recursive: true });
+    if (!existsSync(binaryPath)) renameSync(temporaryBinaryPath, binaryPath);
+    return binaryPath;
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
 }
 
 async function hasUngitPing(
@@ -423,20 +527,13 @@ async function cleanupFailedUngitLaunch(
 
 function spawnUngitRevision(
   revision: ResolvedUngitRevision,
+  binaryPath: string,
   launchCwd: string,
   options: StartUngitOptions,
 ): SpawnedUngitProcess {
-  const command = buildUngitStartCommand(revision.sha);
+  const command = [binaryPath, ...UNGIT_SERVER_ARGUMENTS];
   const spawnImpl: SpawnImplementation =
-    options.spawnImpl ?? ((spawnCommand, spawnOptions) => Bun.spawn(spawnCommand, {
-      ...spawnOptions,
-      env: {
-        ...process.env,
-        CGO_ENABLED: "0",
-        GOCACHE: join(launchCwd, "cache", "ungit-go", "build"),
-        GOMODCACHE: join(launchCwd, "cache", "ungit-go", "modules"),
-      },
-    }));
+    options.spawnImpl ?? ((spawnCommand, spawnOptions) => Bun.spawn(spawnCommand, spawnOptions));
   const child = spawnImpl(command, {
     cwd: launchCwd,
     stdin: "ignore",
@@ -529,7 +626,10 @@ async function startUngitInternal(options: StartUngitOptions): Promise<void> {
 
   let child: SpawnedUngitProcess | undefined;
   try {
-    child = spawnUngitRevision(revision, launchCwd, options);
+    const binaryPath = await (
+      options.ensureBinary ?? ((resolved) => ensureUngitBinary(resolved.sha, launchCwd))
+    )(revision, launchCwd);
+    child = spawnUngitRevision(revision, binaryPath, launchCwd, options);
     await waitForResolvedUngitRuntime(revision, child, options);
     rememberVerifiedUngitRevision(revision, options);
     return;
@@ -553,7 +653,15 @@ async function startUngitInternal(options: StartUngitOptions): Promise<void> {
 
     let fallbackChild: SpawnedUngitProcess | undefined;
     try {
-      fallbackChild = spawnUngitRevision(fallbackRevision, launchCwd, options);
+      const fallbackBinaryPath = await (
+        options.ensureBinary ?? ((resolved) => ensureUngitBinary(resolved.sha, launchCwd))
+      )(fallbackRevision, launchCwd);
+      fallbackChild = spawnUngitRevision(
+        fallbackRevision,
+        fallbackBinaryPath,
+        launchCwd,
+        options,
+      );
       await waitForResolvedUngitRuntime(fallbackRevision, fallbackChild, options);
       rememberVerifiedUngitRevision(fallbackRevision, options);
     } catch (fallbackError) {
