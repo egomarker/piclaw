@@ -352,6 +352,11 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
     const loadingMoreRef = useRef(false);
     const initialScrollPendingRef = useRef(true);
     const initialEndFrameRef = useRef(0);
+    // A real Android session switch promises the newest message. Keep that
+    // intent across async cache refreshes, history prepends, and measurements;
+    // only an actual user scroll gesture is allowed to release it.
+    const bottomIntentRef = useRef(true);
+    const bottomIntentFrameRef = useRef(0);
     const timelineContentRef = useRef(null);
     const pinnedToEndRef = useRef(true);
     const activeRef = useRef(active);
@@ -363,6 +368,27 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
     const restoringActiveRef = useRef(false);
     const previousViewportHeightRef = useRef(null);
     activeRef.current = active;
+    const releaseBottomIntent = useCallback(() => {
+        bottomIntentRef.current = false;
+        initialScrollPendingRef.current = false;
+        cancelAnimationFrame(initialEndFrameRef.current);
+        initialEndFrameRef.current = 0;
+        cancelAnimationFrame(bottomIntentFrameRef.current);
+        bottomIntentFrameRef.current = 0;
+        restoringActiveRef.current = false;
+    }, []);
+    const maintainBottomIntent = useCallback((instance) => {
+        if (!activeRef.current || !bottomIntentRef.current || bottomIntentFrameRef.current) return;
+        bottomIntentFrameRef.current = requestAnimationFrame(() => {
+            bottomIntentFrameRef.current = 0;
+            const root = timelineRef?.current;
+            if (!activeRef.current || !bottomIntentRef.current
+                || !hasUsableTimelineViewport(root, true)) return;
+            if (getTimelineDistanceFromEnd(root) > CHAT_END_EPSILON_PX) {
+                instance.scrollToEnd({ behavior: 'auto' });
+            }
+        });
+    }, [timelineRef]);
     const observeTimelineRect = useCallback((instance, callback) => observeElementRect(instance, (rect) => {
         if (!activeRef.current) return;
         const previousHeight = previousViewportHeightRef.current;
@@ -410,6 +436,7 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
         followOnAppend: true,
         scrollEndThreshold: 80,
         enabled: Boolean(posts) && sessionReady,
+        onChange: maintainBottomIntent,
     });
 
     if (!sessionReady || !posts || displayPosts.length === 0) {
@@ -446,7 +473,10 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
     const handleScroll = useCallback((event) => {
         const root = event.currentTarget;
         if (!hasUsableTimelineViewport(root, active)) return;
-        if (!restoringActiveRef.current && !isAnchorScrolling(root)) {
+        if (bottomIntentRef.current) {
+            pinnedToEndRef.current = true;
+            maintainBottomIntent(virtualizer);
+        } else if (!restoringActiveRef.current && !isAnchorScrolling(root)) {
             const pinnedToEnd = getTimelineDistanceFromEnd(root) <= 2;
             pinnedToEndRef.current = pinnedToEnd;
             suspendedScrollTopRef.current = root.scrollTop;
@@ -455,17 +485,19 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
                 : captureTimelineViewportAnchor(root, timelineContentRef.current);
         }
         maybePreload(root);
-    }, [active, maybePreload]);
+    }, [active, maintainBottomIntent, maybePreload, virtualizer]);
 
     const handleTouchStart = useCallback((event) => {
         event.currentTarget.dataset.timelineTouchScrolling = 'true';
-        if (initialScrollPendingRef.current) {
-            initialScrollPendingRef.current = false;
-            cancelAnimationFrame(initialEndFrameRef.current);
-            initialEndFrameRef.current = 0;
-            restoringActiveRef.current = false;
-        }
     }, []);
+
+    const handleTouchMove = useCallback(() => {
+        releaseBottomIntent();
+    }, [releaseBottomIntent]);
+
+    const handleWheel = useCallback(() => {
+        releaseBottomIntent();
+    }, [releaseBottomIntent]);
 
     const handleTouchEnd = useCallback((event) => {
         delete event.currentTarget.dataset.timelineTouchScrolling;
@@ -474,7 +506,8 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
     useLayoutEffect(() => {
         cancelAnimationFrame(initialEndFrameRef.current);
         initialEndFrameRef.current = 0;
-        if (!active || !sessionReady || !initialScrollPendingRef.current
+        if (!active || !sessionReady
+            || (!initialScrollPendingRef.current && !bottomIntentRef.current)
             || displayPosts.length === 0 || !timelineRef?.current) return;
 
         let attempts = 0;
@@ -516,7 +549,7 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
             initialEndFrameRef.current = 0;
             restoringActiveRef.current = false;
         };
-    }, [active, displayPosts.length, sessionReady, timelineRef, virtualizer]);
+    }, [active, displayPosts.length, posts, sessionReady, timelineRef, virtualizer]);
 
     useLayoutEffect(() => {
         const wasActive = previousActiveRef.current;
@@ -589,15 +622,20 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
             const targetId = String(event?.detail?.id ?? '');
             if (!active || !targetId) return;
             const index = displayPosts.findIndex((post) => String(post.id) === targetId);
-            if (index >= 0) virtualizer.scrollToIndex(index, { align: 'center' });
+            if (index >= 0) {
+                releaseBottomIntent();
+                virtualizer.scrollToIndex(index, { align: 'center' });
+            }
         };
         window.addEventListener(TIMELINE_REVEAL_EVENT, reveal);
         return () => window.removeEventListener(TIMELINE_REVEAL_EVENT, reveal);
-    }, [active, displayPosts, virtualizer]);
+    }, [active, displayPosts, releaseBottomIntent, virtualizer]);
 
     useEffect(() => () => {
         cancelAnimationFrame(initialEndFrameRef.current);
         initialEndFrameRef.current = 0;
+        cancelAnimationFrame(bottomIntentFrameRef.current);
+        bottomIntentFrameRef.current = 0;
         const root = timelineRef?.current;
         if (root?.dataset) delete root.dataset.timelineTouchScrolling;
     }, [timelineRef]);
@@ -633,8 +671,10 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
             ref=${timelineRef}
             onScroll=${handleScroll}
             onTouchStart=${handleTouchStart}
+            onTouchMove=${handleTouchMove}
             onTouchEnd=${handleTouchEnd}
             onTouchCancel=${handleTouchEnd}
+            onWheel=${handleWheel}
         >
             <div
                 class="timeline-content end-anchored-canvas"
