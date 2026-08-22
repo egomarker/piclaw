@@ -94,7 +94,9 @@ vendor: ## Build the checked-in vendored bundles + metadata
 		runtime/extensions/viewers/office-viewer/vendor/jszip.min.js \
 		runtime/extensions/viewers/office-viewer/vendor/inter-latin.woff2 \
 		runtime/extensions/viewers/office-viewer/vendor/inter-latin-ext.woff2 \
-		runtime/extensions/viewers/office-viewer/vendor/office-viewer-libs.meta.json
+		runtime/extensions/viewers/office-viewer/vendor/office-viewer-libs.meta.json \
+		runtime/web/static/common/pdfjs/pdf_viewer.css \
+		runtime/web/static/common/pdfjs/pdfjs-assets.meta.json
 
 update-mermaid-vendor: ## Rebuild or upgrade vendored mermaid (use MERMAID_VERSION=1.2.3 to upgrade)
 	cd runtime && bun run update:vendor:mermaid $(if $(MERMAID_VERSION),--version $(MERMAID_VERSION),)
@@ -116,7 +118,10 @@ build-web: ## Build web JS/CSS bundles (+ sourcemaps) into static/classic/dist, 
 		runtime/web/static/classic/dist/editor.bundle.js.map \
 		runtime/web/static/common/dist/login.bundle.js \
 		runtime/web/static/common/dist/login.bundle.js.map \
-		runtime/web/static/common/dist/login.bundle.css
+		runtime/web/static/common/dist/login.bundle.css \
+		runtime/web/static/common/dist/pdf-viewer-mobile.bundle.js \
+		runtime/web/static/common/dist/pdf-viewer-worker.bundle.js \
+		runtime/web/static/common/pdfjs/pdf_viewer.css
 
 build-ts: ## Type-check TypeScript / validate emit (generated/dist is cleaned up after the run)
 	cd runtime && bun run build
