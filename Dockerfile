@@ -121,7 +121,7 @@ RUN set -eux; \
     bash-completion sudo less man \
     git vim tmux htop tree ripgrep jq \
     net-tools iproute2 dnsutils \
-    rsync file strace make \
+    rsync file strace make golang-go \
     procps psmisc supervisor sqlite3 openssh-client sshfs fuse3 && \
     case "${TARGETARCH}" in \
       amd64) tailscale_arch='amd64' ;; \

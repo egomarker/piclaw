@@ -43,7 +43,7 @@ if (typeof registerAddonConfigApi === "function") {
       const body = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
       if (body.action === "start") await startUngitIfNeeded();
       else if (body.action === "stop") stopUngit();
-      else throw new Error("Ungit health action must be start or stop.");
+      else throw new Error("Ungit-Go health action must be start or stop.");
       return { live: await isUngitLive() };
     },
   }, import.meta.dir);

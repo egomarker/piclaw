@@ -112,7 +112,7 @@ export function createUngitProxyHandler(options: UngitProxyOptions = {}): Extens
     if (!isProxyPath(incomingUrl.pathname)) return null;
 
     if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
-      return new Response("Ungit WebSocket upgrades are not proxied; Socket.IO should continue over HTTP polling.", {
+      return new Response("Ungit-Go WebSocket upgrades are not proxied; its compatibility transport uses same-origin EventSource and HTTP requests.", {
         status: 426,
         headers: {
           "Cache-Control": "no-store",
@@ -145,8 +145,8 @@ export function createUngitProxyHandler(options: UngitProxyOptions = {}): Extens
           headers,
         });
       } catch (error) {
-        console.warn("[ungit] same-origin proxy could not reach the loopback Ungit service", error);
-        return new Response("Unable to reach Ungit on 127.0.0.1:8448.", {
+        console.warn("[ungit-go] same-origin proxy could not reach the loopback Ungit-Go service", error);
+        return new Response("Unable to reach Ungit-Go on 127.0.0.1:8448.", {
           status: 502,
           headers: {
             "Cache-Control": "no-store",
