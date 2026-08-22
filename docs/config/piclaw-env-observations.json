@@ -78,13 +78,13 @@
       "semanticReaderOccurrences": 0
     },
     "tooling": {
-      "referencedNames": 77,
-      "directReaderNames": 42,
-      "directReaderOccurrences": 81,
+      "referencedNames": 80,
+      "directReaderNames": 45,
+      "directReaderOccurrences": 90,
       "helperReaderNames": 0,
       "helperReaderOccurrences": 0,
-      "semanticReaderNames": 42,
-      "semanticReaderOccurrences": 81
+      "semanticReaderNames": 45,
+      "semanticReaderOccurrences": 90
     },
     "docsDeploy": {
       "referencedNames": 122,
@@ -1697,16 +1697,20 @@
       "scopes": {
         "tooling": {
           "referenced": true,
-          "directReaders": 4,
+          "directReaders": 6,
           "helperReaders": 0,
-          "semanticReaders": 4,
+          "semanticReaders": 6,
           "files": [
+            "runtime/scripts/playwright/local-app-proxy-smoke.ts",
+            "runtime/scripts/playwright/markdown-table-alignment.ts",
             "runtime/scripts/playwright/mobile-interface.ts",
             "runtime/scripts/playwright/mobile-terminal-controls.ts",
             "runtime/scripts/playwright/terminal-reopen.ts",
             "runtime/scripts/playwright/timeline-virtualization.ts"
           ],
           "readerFiles": [
+            "runtime/scripts/playwright/local-app-proxy-smoke.ts",
+            "runtime/scripts/playwright/markdown-table-alignment.ts",
             "runtime/scripts/playwright/mobile-interface.ts",
             "runtime/scripts/playwright/mobile-terminal-controls.ts",
             "runtime/scripts/playwright/terminal-reopen.ts",
@@ -1756,13 +1760,15 @@
       "scopes": {
         "tooling": {
           "referenced": true,
-          "directReaders": 1,
+          "directReaders": 2,
           "helperReaders": 0,
-          "semanticReaders": 1,
+          "semanticReaders": 2,
           "files": [
+            "runtime/scripts/playwright/markdown-table-alignment.ts",
             "runtime/scripts/playwright/timeline-virtualization.ts"
           ],
           "readerFiles": [
+            "runtime/scripts/playwright/markdown-table-alignment.ts",
             "runtime/scripts/playwright/timeline-virtualization.ts"
           ]
         }
@@ -2985,10 +2991,12 @@
       "scopes": {
         "tooling": {
           "referenced": true,
-          "directReaders": 6,
+          "directReaders": 8,
           "helperReaders": 0,
-          "semanticReaders": 6,
+          "semanticReaders": 8,
           "files": [
+            "runtime/scripts/playwright/local-app-proxy-smoke.ts",
+            "runtime/scripts/playwright/markdown-table-alignment.ts",
             "runtime/scripts/playwright/mobile-interface.ts",
             "runtime/scripts/playwright/mobile-terminal-controls.ts",
             "runtime/scripts/playwright/terminal-reopen-multicycle.ts",
@@ -2997,6 +3005,8 @@
             "runtime/scripts/playwright/timeline-virtualization.ts"
           ],
           "readerFiles": [
+            "runtime/scripts/playwright/local-app-proxy-smoke.ts",
+            "runtime/scripts/playwright/markdown-table-alignment.ts",
             "runtime/scripts/playwright/mobile-interface.ts",
             "runtime/scripts/playwright/mobile-terminal-controls.ts",
             "runtime/scripts/playwright/terminal-reopen-multicycle.ts",
@@ -3463,6 +3473,57 @@
             "runtime/src/extensions/smart-compaction/config.ts"
           ],
           "readerFiles": []
+        }
+      }
+    },
+    {
+      "name": "PICLAW_PROXY_TEST_NAME",
+      "scopes": {
+        "tooling": {
+          "referenced": true,
+          "directReaders": 1,
+          "helperReaders": 0,
+          "semanticReaders": 1,
+          "files": [
+            "runtime/scripts/playwright/local-app-proxy-smoke.ts"
+          ],
+          "readerFiles": [
+            "runtime/scripts/playwright/local-app-proxy-smoke.ts"
+          ]
+        }
+      }
+    },
+    {
+      "name": "PICLAW_PROXY_TEST_PORT",
+      "scopes": {
+        "tooling": {
+          "referenced": true,
+          "directReaders": 2,
+          "helperReaders": 0,
+          "semanticReaders": 2,
+          "files": [
+            "runtime/scripts/playwright/local-app-proxy-smoke.ts"
+          ],
+          "readerFiles": [
+            "runtime/scripts/playwright/local-app-proxy-smoke.ts"
+          ]
+        }
+      }
+    },
+    {
+      "name": "PICLAW_PROXY_TEST_SLUG",
+      "scopes": {
+        "tooling": {
+          "referenced": true,
+          "directReaders": 1,
+          "helperReaders": 0,
+          "semanticReaders": 1,
+          "files": [
+            "runtime/scripts/playwright/local-app-proxy-smoke.ts"
+          ],
+          "readerFiles": [
+            "runtime/scripts/playwright/local-app-proxy-smoke.ts"
+          ]
         }
       }
     },
