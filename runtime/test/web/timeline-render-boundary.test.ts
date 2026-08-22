@@ -6,10 +6,12 @@ import {
   getAnchoredTimelineScrollTop,
   getLatestTimelineWindow,
   getTimelineContentOffset,
+  getTimelineDistanceFromEnd,
   getTimelineWindowAroundIndex,
   hasUsableTimelineViewport,
   haveSameTimelineProps,
   isAndroidTimelinePlatform,
+  isTimelineSessionReady,
   windowFromScrollOffset,
 } from '../../web/src/components/timeline.js';
 
@@ -30,6 +32,18 @@ test('TanStack timeline is restricted to Android user agents', () => {
   expect(isAndroidTimelinePlatform({
     userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15',
   })).toBe(false);
+});
+
+test('Android timeline waits for posts owned by the selected session', () => {
+  expect(isTimelineSessionReady('web:b', 'web:a')).toBe(false);
+  expect(isTimelineSessionReady('web:b', 'web:b')).toBe(true);
+  expect(isTimelineSessionReady('web:b', null)).toBe(true);
+});
+
+test('timeline distance from end uses positive scroll coordinates', () => {
+  expect(getTimelineDistanceFromEnd({ scrollHeight: 2000, clientHeight: 600, scrollTop: 1400 })).toBe(0);
+  expect(getTimelineDistanceFromEnd({ scrollHeight: 2000, clientHeight: 600, scrollTop: 1350 })).toBe(50);
+  expect(getTimelineDistanceFromEnd(null)).toBe(Infinity);
 });
 
 test('timeline render boundary ignores parent updates when timeline props retain identity', () => {

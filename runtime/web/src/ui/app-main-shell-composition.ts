@@ -96,6 +96,7 @@ export function composeMainAppShellOptions(input: ComposeMainAppShellOptionsInpu
     handleDismissProviderMissingOobe: shellState.handleDismissProviderMissingOobe,
     handleCompleteProviderReadyOobe: shellState.handleCompleteProviderReadyOobe,
     posts: shellState.posts,
+    postsChatJid: shellState.postsChatJid,
     hasMore: shellState.hasMore,
     loadMore: shellState.loadMore,
     timelineRef: shellState.timelineRef,

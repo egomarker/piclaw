@@ -218,6 +218,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
     handleDismissProviderMissingOobe,
     handleCompleteProviderReadyOobe,
     posts,
+    postsChatJid,
     isMainTimelineView,
     hasMore,
     loadMore,
@@ -647,6 +648,8 @@ export function renderMainShell(options: MainShellRenderOptions): any {
         `}
         <${Timeline}
           key=${currentChatJid}
+          chatJid=${currentChatJid}
+          postsChatJid=${postsChatJid}
           posts=${posts}
           active=${timelineSurfaceActive}
           hasMore=${isMainTimelineView ? hasMore : false}

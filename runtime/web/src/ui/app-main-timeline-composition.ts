@@ -24,6 +24,18 @@ export function syncScrollToBottomRef(options: {
   options.scrollToBottomRef.current = options.scrollToBottom;
 }
 
+export function resolveTimelinePostsChatJid(options: {
+  ownerRef: RefBox<{ posts: any[] | null; chatJid: string } | null>;
+  rawPosts: any[] | null;
+  currentChatJid: string;
+}): string {
+  const { ownerRef, rawPosts, currentChatJid } = options;
+  if (!ownerRef.current || !Object.is(ownerRef.current.posts, rawPosts)) {
+    ownerRef.current = { posts: rawPosts, chatJid: currentChatJid };
+  }
+  return ownerRef.current.chatJid;
+}
+
 export function useMainAppTimelineComposition(options: {
   timelineRef: RefBox<any>;
   viewStateRef: RefBox<any>;
@@ -44,6 +56,7 @@ export function useMainAppTimelineComposition(options: {
   } = options;
 
   const scrollToBottomRef = useRef<(() => void) | null>(null);
+  const postsOwnerRef = useRef<{ posts: any[] | null; chatJid: string } | null>(null);
   const {
     scrollToBottom,
     preserveTimelineScroll,
@@ -77,6 +90,11 @@ export function useMainAppTimelineComposition(options: {
     searchQuery,
   });
 
+  const postsChatJid = resolveTimelinePostsChatJid({
+    ownerRef: postsOwnerRef,
+    rawPosts,
+    currentChatJid,
+  });
   const posts = useMemo(() => deriveVisibleTimelinePosts({
     rawPosts,
     followupQueueItems,
@@ -89,6 +107,7 @@ export function useMainAppTimelineComposition(options: {
     preserveTimelineScroll,
     preserveTimelineScrollTop,
     rawPosts,
+    postsChatJid,
     setPosts,
     hasMore,
     setHasMore,

@@ -118,6 +118,7 @@ export function composeRenderedMainAppOptions(input: {
       handleDismissProviderMissingOobe: input.surface.handleDismissProviderMissingOobe,
       handleCompleteProviderReadyOobe: input.surface.handleCompleteProviderReadyOobe,
       posts: input.timeline.posts,
+      postsChatJid: input.timeline.postsChatJid,
       hasMore: input.timeline.hasMore,
       loadMore: input.timeline.loadMore,
       timelineRef: input.surface.timelineRef,

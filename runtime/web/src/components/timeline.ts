@@ -17,11 +17,25 @@ const TIMELINE_TOUCH_SCROLL_IDLE_MS = 200;
 const CHAT_VIRTUAL_OVERSCAN_ROWS = 6;
 const CHAT_PRELOAD_VIEWPORTS = 8;
 const CHAT_HISTORY_PAGE_SIZE = 30;
+const CHAT_INITIAL_END_MAX_FRAMES = 48;
+const CHAT_INITIAL_END_STABLE_FRAMES = 2;
+const CHAT_END_EPSILON_PX = 1;
 
 export function isAndroidTimelinePlatform(navigatorLike = typeof navigator === 'undefined' ? null : navigator) {
     const userAgent = String(navigatorLike?.userAgent || '');
     const userAgentPlatform = String(navigatorLike?.userAgentData?.platform || '');
     return /\bAndroid\b/i.test(userAgent) || /^Android$/i.test(userAgentPlatform);
+}
+
+export function isTimelineSessionReady(chatJid, postsChatJid) {
+    const requestedChatJid = String(chatJid || '').trim();
+    const ownerChatJid = String(postsChatJid || '').trim();
+    return !requestedChatJid || !ownerChatJid || requestedChatJid === ownerChatJid;
+}
+
+export function getTimelineDistanceFromEnd(root) {
+    if (!root) return Infinity;
+    return Math.max(0, root.scrollHeight - root.clientHeight - root.scrollTop);
 }
 
 export function haveSameTimelineProps(currentProps, nextProps) {
@@ -333,10 +347,11 @@ function usePreactVirtualizer(options) {
  * coordinates and disables native CSS anchoring; TanStack owns keyed prepend
  * anchoring, dynamic-size corrections, and end following on this path.
  */
-function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, removingPostIds, searchQuery, active = true }) {
+function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, removingPostIds, searchQuery, active = true }) {
     const [loadingMore, setLoadingMore] = useState(false);
     const loadingMoreRef = useRef(false);
     const initialScrollPendingRef = useRef(true);
+    const initialEndFrameRef = useRef(0);
     const timelineContentRef = useRef(null);
     const pinnedToEndRef = useRef(true);
     const activeRef = useRef(active);
@@ -365,13 +380,14 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
     const observeTimelineOffset = useCallback((instance, callback) => observeElementOffset(instance, (offset, isScrolling) => {
         if (activeRef.current) callback(offset, isScrolling);
     }), []);
+    const sessionReady = isTimelineSessionReady(chatJid, postsChatJid);
     const displayPosts = useMemo(
-        () => Array.isArray(posts) ? posts.slice().sort((a, b) => a.id - b.id) : [],
-        [posts],
+        () => sessionReady && Array.isArray(posts) ? posts.slice().sort((a, b) => a.id - b.id) : [],
+        [posts, sessionReady],
     );
     const activePostsRef = useRef(displayPosts);
-    if (active) activePostsRef.current = displayPosts;
-    const virtualPosts = active ? displayPosts : activePostsRef.current;
+    if (active && sessionReady) activePostsRef.current = displayPosts;
+    const virtualPosts = active && sessionReady ? displayPosts : activePostsRef.current;
     const threadInfoByIndex = useMemo(() => resolveThreadInfo(virtualPosts), [virtualPosts]);
     const getItemKey = useCallback(
         (index) => virtualPosts[index]?.id ?? `missing-${index}`,
@@ -393,10 +409,10 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
         anchorTo: 'end',
         followOnAppend: true,
         scrollEndThreshold: 80,
-        enabled: Boolean(posts),
+        enabled: Boolean(posts) && sessionReady,
     });
 
-    if (!posts || displayPosts.length === 0) {
+    if (!sessionReady || !posts || displayPosts.length === 0) {
         initialScrollPendingRef.current = true;
         pinnedToEndRef.current = true;
     }
@@ -431,8 +447,7 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
         const root = event.currentTarget;
         if (!hasUsableTimelineViewport(root, active)) return;
         if (!restoringActiveRef.current && !isAnchorScrolling(root)) {
-            const distanceFromEnd = Math.max(0, root.scrollHeight - root.clientHeight - root.scrollTop);
-            const pinnedToEnd = distanceFromEnd <= 2;
+            const pinnedToEnd = getTimelineDistanceFromEnd(root) <= 2;
             pinnedToEndRef.current = pinnedToEnd;
             suspendedScrollTopRef.current = root.scrollTop;
             suspendedAnchorRef.current = pinnedToEnd
@@ -444,6 +459,12 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
 
     const handleTouchStart = useCallback((event) => {
         event.currentTarget.dataset.timelineTouchScrolling = 'true';
+        if (initialScrollPendingRef.current) {
+            initialScrollPendingRef.current = false;
+            cancelAnimationFrame(initialEndFrameRef.current);
+            initialEndFrameRef.current = 0;
+            restoringActiveRef.current = false;
+        }
     }, []);
 
     const handleTouchEnd = useCallback((event) => {
@@ -451,11 +472,51 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
     }, []);
 
     useLayoutEffect(() => {
-        if (!active || !initialScrollPendingRef.current || displayPosts.length === 0 || !timelineRef?.current) return;
-        virtualizer.scrollToEnd();
+        cancelAnimationFrame(initialEndFrameRef.current);
+        initialEndFrameRef.current = 0;
+        if (!active || !sessionReady || !initialScrollPendingRef.current
+            || displayPosts.length === 0 || !timelineRef?.current) return;
+
+        let attempts = 0;
+        let stableFrames = 0;
+        let previousTotalSize = null;
+        restoringActiveRef.current = true;
         pinnedToEndRef.current = true;
-        initialScrollPendingRef.current = false;
-    }, [active, displayPosts.length, timelineRef, virtualizer]);
+
+        const settleAtEnd = () => {
+            const root = timelineRef?.current;
+            if (!activeRef.current || !hasUsableTimelineViewport(root, true)) {
+                restoringActiveRef.current = false;
+                return;
+            }
+
+            attempts += 1;
+            virtualizer.scrollToEnd({ behavior: 'auto' });
+            const totalSize = virtualizer.getTotalSize();
+            const totalSizeStable = Number.isFinite(previousTotalSize)
+                && Math.abs(totalSize - previousTotalSize) <= 0.5;
+            const reachedEnd = getTimelineDistanceFromEnd(root) <= CHAT_END_EPSILON_PX;
+            stableFrames = reachedEnd && totalSizeStable ? stableFrames + 1 : 0;
+            previousTotalSize = totalSize;
+
+            if (stableFrames >= CHAT_INITIAL_END_STABLE_FRAMES
+                || attempts >= CHAT_INITIAL_END_MAX_FRAMES) {
+                initialEndFrameRef.current = 0;
+                initialScrollPendingRef.current = false;
+                pinnedToEndRef.current = true;
+                restoringActiveRef.current = false;
+                return;
+            }
+            initialEndFrameRef.current = requestAnimationFrame(settleAtEnd);
+        };
+
+        settleAtEnd();
+        return () => {
+            cancelAnimationFrame(initialEndFrameRef.current);
+            initialEndFrameRef.current = 0;
+            restoringActiveRef.current = false;
+        };
+    }, [active, displayPosts.length, sessionReady, timelineRef, virtualizer]);
 
     useLayoutEffect(() => {
         const wasActive = previousActiveRef.current;
@@ -535,11 +596,13 @@ function EndAnchoredTimelineView({ posts, hasMore, onLoadMore, onPostClick, onHa
     }, [active, displayPosts, virtualizer]);
 
     useEffect(() => () => {
+        cancelAnimationFrame(initialEndFrameRef.current);
+        initialEndFrameRef.current = 0;
         const root = timelineRef?.current;
         if (root?.dataset) delete root.dataset.timelineTouchScrolling;
     }, [timelineRef]);
 
-    if (!posts) {
+    if (!sessionReady || !posts) {
         return html`<div class="loading"><div class="spinner"></div></div>`;
     }
 

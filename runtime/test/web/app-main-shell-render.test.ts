@@ -334,7 +334,13 @@ test('renderMainShell marks the timeline inactive while another Mobile surface i
   };
 
   expect(renderTimeline({ uiMode: 'classic' })?.props.active).toBe(true);
-  expect(renderTimeline({ currentChatJid: 'web:session-key' })?.key).toBe('web:session-key');
+  const sessionTimeline = renderTimeline({
+    currentChatJid: 'web:session-key',
+    postsChatJid: 'web:posts-owner',
+  });
+  expect(sessionTimeline?.key).toBe('web:session-key');
+  expect(sessionTimeline?.props.chatJid).toBe('web:session-key');
+  expect(sessionTimeline?.props.postsChatJid).toBe('web:posts-owner');
   expect(renderTimeline({
     uiMode: 'mobile',
     chatOnlyMode: false,
