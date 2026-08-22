@@ -4,9 +4,9 @@ Adds a Git-branch action to every folder row in Piclaw's workspace explorer. The
 
 ## Requirements
 
-Ungit-Go itself needs Git 2.34 or newer. This add-on launches an immutable Go module revision directly from GitHub, so the runtime also needs Go 1.22 or newer. Piclaw's container image includes the Go toolchain; host-native installs must provide it separately.
+Ungit-Go itself needs Git 2.34 or newer. This add-on provisions an immutable Go module revision directly from GitHub, so the runtime also needs Go 1.22 or newer. Piclaw's container image includes the Go toolchain; host-native installs must provide it separately.
 
-The Ungit-Go source includes its generated browser assets and has no external Go module dependencies. `go run` does not create a repository checkout, but it does download the selected module revision and compile it into Go's local caches on first use.
+The Ungit-Go source includes its generated browser assets and has no external Go module dependencies. The launcher does not create a repository checkout: it provisions the selected module revision with `go install` on first use, stores the executable by full Git SHA, and then runs that executable directly.
 
 ## Automatic startup
 
@@ -15,7 +15,15 @@ At Piclaw startup, the add-on checks both the health endpoint and the embedded d
 Otherwise the add-on resolves `egomarker/ungit-go`'s remote `main` branch to a full commit SHA and launches that immutable module revision:
 
 ```sh
-go run github.com/egomarker/ungit-go/cmd/ungit-go@<full-commit-sha> \
+sha=<full-commit-sha>
+mkdir -p "/workspace/.piclaw/bin/ungit-go/$sha"
+GOBIN="/workspace/.piclaw/bin/ungit-go/$sha" \
+GOCACHE=/workspace/.piclaw/cache/ungit-go/build \
+GOMODCACHE=/workspace/.piclaw/cache/ungit-go/modules \
+CGO_ENABLED=0 \
+  go install "github.com/egomarker/ungit-go/cmd/ungit-go@$sha"
+
+"/workspace/.piclaw/bin/ungit-go/$sha/ungit-go" \
   --ungitBindIp=127.0.0.1 \
   --port=8448 \
   --rootPath=/ungit \
@@ -24,7 +32,7 @@ go run github.com/egomarker/ungit-go/cmd/ungit-go@<full-commit-sha> \
 
 The mutable branch name is never passed to Go. Resolution uses a bounded `git ls-remote` request. After launch, the add-on waits for the health endpoint, the Ungit-Go document marker, and required browser assets before recording the revision as last known good. Concurrent startup requests share one launch attempt.
 
-The launcher runs from `/workspace/.piclaw`. Its module and build caches are kept under `/workspace/.piclaw/cache/ungit-go`, allowing the immutable revision cache to survive Piclaw and container restarts with the workspace. The add-on does not monitor or stop the process after startup verification; if it survives a Piclaw restart, the next startup check reuses it.
+The launcher runs from `/workspace/.piclaw`. Installed executables are kept under `/workspace/.piclaw/bin/ungit-go/<sha>` and the module/build caches under `/workspace/.piclaw/cache/ungit-go`. These immutable revision artifacts survive Piclaw and container restarts with the workspace. The add-on does not monitor or stop the process after startup verification; if it survives a Piclaw restart, the next startup check reuses it.
 
 ## Updates, fallback, and rollback
 
@@ -32,7 +40,7 @@ A healthy running process is deliberately reused. To load a newer revision, use 
 
 The verified revision is written atomically to `ungit-go-launch-state.json` under `PICLAW_DATA` (default `/workspace/.piclaw/data`). The state includes the implementation and repository identity, so the old Node Ungit launch state cannot be reused accidentally.
 
-If remote resolution fails, startup selects the last-known-good Go SHA. If a newly resolved revision launches but fails readiness, it is stopped and the last-known-good revision is tried once. Offline fallback depends on that immutable module revision still being present in Go's module and build caches.
+If remote resolution fails, startup selects the last-known-good Go SHA. If a newly resolved revision launches but fails readiness, it is stopped and the last-known-good revision is tried once. Offline fallback uses the installed executable for that immutable SHA; if it has not been installed yet, provisioning still depends on the revision being available through Go's module cache or the network.
 
 For an explicit rollback, set `PICLAW_UNGIT_GO_SHA` to a full 40-character commit SHA, then stop and start Ungit-Go. Invalid or abbreviated overrides fail closed. The legacy `PICLAW_UNGIT_SHA` variable is rejected to prevent a Node Ungit SHA from being applied to the Go repository.
 
