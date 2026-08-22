@@ -127,7 +127,7 @@ async function requestUngitConfig(options = {}) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload?.ok === false) {
-    throw new Error(payload?.error || `Unable to load Ungit configuration (HTTP ${response.status}).`);
+    throw new Error(payload?.error || `Unable to load Ungit-Go configuration (HTTP ${response.status}).`);
   }
   const config = normalizeUngitWebConfig(payload?.config || payload);
   cachedConfig = config;
@@ -138,7 +138,7 @@ export async function loadUngitWebConfig(force = false) {
   if (!force && cachedConfig) return cachedConfig;
   if (!force && configRequest) return configRequest;
   configRequest = requestUngitConfig().catch((error) => {
-    console.warn("[ungit] config API unavailable; using defaults", error);
+    console.warn("[ungit-go] config API unavailable; using defaults", error);
     cachedConfig = normalizeUngitWebConfig(DEFAULT_UNGIT_WEB_CONFIG);
     return cachedConfig;
   }).finally(() => {
@@ -170,7 +170,7 @@ export async function requestUngitAction(action) {
     body: JSON.stringify({ action }),
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload?.error || `Unable to ${action} Ungit (HTTP ${response.status}).`);
+  if (!response.ok) throw new Error(payload?.error || `Unable to ${action} Ungit-Go (HTTP ${response.status}).`);
   return payload;
 }
 
@@ -206,17 +206,17 @@ class UngitPaneInstance {
     this.root.className = "ungit-pane";
     this.status = this.ownerDocument.createElement("div");
     this.status.className = "ungit-pane-status";
-    this.status.textContent = "Opening Ungit…";
+    this.status.textContent = "Opening Ungit-Go…";
     this.frameViewport = this.ownerDocument.createElement("div");
     this.frameViewport.className = "ungit-pane-frame-viewport";
     this.iframe = this.ownerDocument.createElement("iframe");
-    this.iframe.title = `Ungit — ${this.workspacePath || "workspace"}`;
+    this.iframe.title = `Ungit-Go — ${this.workspacePath || "workspace"}`;
     this.iframe.setAttribute("allow", "clipboard-read; clipboard-write");
     this.iframe.setAttribute("referrerpolicy", "no-referrer");
     this.zoomPicker = this.ownerDocument.createElement("select");
     this.zoomPicker.className = "ungit-pane-zoom";
-    this.zoomPicker.title = "Ungit zoom";
-    this.zoomPicker.setAttribute("aria-label", "Ungit zoom");
+    this.zoomPicker.title = "Ungit-Go zoom";
+    this.zoomPicker.setAttribute("aria-label", "Ungit-Go zoom");
     for (const percent of UNGIT_ZOOM_PERCENTAGES) {
       const option = this.ownerDocument.createElement("option");
       option.value = String(percent);
@@ -228,8 +228,8 @@ class UngitPaneInstance {
     this.openExternal = this.ownerDocument.createElement("button");
     this.openExternal.type = "button";
     this.openExternal.className = "ungit-pane-open-external";
-    this.openExternal.title = "Open Ungit in a new browser tab";
-    this.openExternal.setAttribute("aria-label", "Open Ungit in a new browser tab");
+    this.openExternal.title = "Open Ungit-Go in a new browser tab";
+    this.openExternal.setAttribute("aria-label", "Open Ungit-Go in a new browser tab");
     this.openExternal.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>';
     this.openExternal.addEventListener("click", () => {
       if (this.frameUrl) this.ownerWindow.open(this.frameUrl, "_blank", "noopener,noreferrer");
@@ -241,7 +241,7 @@ class UngitPaneInstance {
       this.loadTimer = 0;
     });
     this.iframe.addEventListener("error", () => {
-      if (!this.disposed) this.status.textContent = "Unable to load Ungit. Use the ↗ button to open it directly.";
+      if (!this.disposed) this.status.textContent = "Unable to load Ungit-Go. Use the ↗ button to open it directly.";
     });
     this.frameViewport.appendChild(this.iframe);
     this.root.append(this.frameViewport, this.status, this.zoomPicker, this.openExternal);
@@ -261,11 +261,11 @@ class UngitPaneInstance {
 
   async load(forceConfig = false) {
     if (!this.workspacePath) {
-      this.status.textContent = "Invalid Ungit workspace path.";
+      this.status.textContent = "Invalid Ungit-Go workspace path.";
       return;
     }
     this.status.style.display = "flex";
-    this.status.textContent = "Opening Ungit…";
+    this.status.textContent = "Opening Ungit-Go…";
     const config = await loadUngitWebConfig(forceConfig);
     if (this.disposed) return;
     this.applyZoom(config.defaultZoomPercent);
@@ -274,7 +274,7 @@ class UngitPaneInstance {
     if (this.loadTimer) this.ownerWindow.clearTimeout(this.loadTimer);
     this.loadTimer = this.ownerWindow.setTimeout(() => {
       if (!this.disposed && this.status.style.display !== "none") {
-        this.status.textContent = "Ungit is still loading. Confirm that it is running, or use the ↗ button.";
+        this.status.textContent = "Ungit-Go is still loading. Confirm that it is running, or use the ↗ button.";
       }
     }, 10_000);
   }
@@ -301,7 +301,7 @@ function renderGitBranchIcon() {
 
 export const ungitPaneExtension = {
   id: "ungit",
-  label: "Ungit",
+  label: "Ungit-Go",
   icon: "git-branch",
   capabilities: ["git"],
   placement: "tabs",
@@ -316,7 +316,7 @@ export const ungitPaneExtension = {
 
 export const ungitWorkspaceRowAction = {
   id: "ungit.open-repository",
-  label: "Open in Ungit",
+  label: "Open in Ungit-Go",
   order: 100,
   icon: renderGitBranchIcon,
   canHandle(target) {
@@ -378,7 +378,7 @@ function UngitSettingsPane() {
       const config = await saveUngitWebConfig(draft || DEFAULT_UNGIT_WEB_CONFIG);
       setDraft(config);
       globalThis.dispatchEvent?.(new CustomEvent(CONFIG_CHANGED_EVENT, { detail: config }));
-      setMessage("Saved. Open Ungit tabs were reloaded.");
+      setMessage("Saved. Open Ungit-Go tabs were reloaded.");
     } catch (error) {
       setMessage(String(error?.message || error));
     } finally {
@@ -386,7 +386,7 @@ function UngitSettingsPane() {
     }
   }, [draft]);
 
-  if (!draft) return html`<div style="padding:0.5rem 0;color:var(--text-secondary)">${message || "Loading Ungit settings…"}</div>`;
+  if (!draft) return html`<div style="padding:0.5rem 0;color:var(--text-secondary)">${message || "Loading Ungit-Go settings…"}</div>`;
 
   const rowStyle = { display: "flex", alignItems: "center", gap: "0.65rem", margin: "0.6rem 0" };
   const labelStyle = { width: "130px", flex: "0 0 130px", color: "var(--text-secondary)", fontSize: "0.82rem" };
@@ -397,9 +397,9 @@ function UngitSettingsPane() {
   return html`
     <div style="padding:0.5rem 0;max-width:720px">
       <div style="display:flex;align-items:center;gap:8px;margin:0.4rem 0 0.7rem">
-        <h4 style="margin:0">Ungit workspace integration</h4>
+        <h4 style="margin:0">Ungit-Go workspace integration</h4>
         ${live ? html`<span style="display:inline-flex;align-items:center;gap:5px;color:#16a34a;font-size:0.76rem;font-weight:600"><span aria-hidden="true">●</span> Live</span>` : null}
-        <button style="margin-left:auto" onClick=${toggleService} disabled=${serviceBusy || saving}>${serviceBusy ? (live ? "Stopping…" : "Starting…") : (live ? "Stop Ungit" : "Start Ungit")}</button>
+        <button style="margin-left:auto" onClick=${toggleService} disabled=${serviceBusy || saving}>${serviceBusy ? (live ? "Stopping…" : "Starting…") : (live ? "Stop Ungit-Go" : "Start Ungit-Go")}</button>
       </div>
       <p style="margin:0 0 0.8rem;color:var(--text-secondary);font-size:0.8rem;line-height:1.45">
         Folder-row Git buttons open the selected directory in an iframe-backed Ungit tab.
@@ -408,11 +408,11 @@ function UngitSettingsPane() {
         <span style=${labelStyle}>Connection</span>
         <span style="font-size:0.82rem;line-height:1.45"><input type="checkbox" checked=${draft.proxyEnabled}
           onChange=${(event) => setDraft({ ...draft, proxyEnabled: event.target.checked })} disabled=${saving} /> Use the same-origin proxy at <code>/ungit/</code>
-          <br /><small style="color:var(--text-secondary)">Expects Ungit on 127.0.0.1:8448 with <code>--rootPath=/ungit</code>.</small>
+          <br /><small style="color:var(--text-secondary)">Expects Ungit-Go on 127.0.0.1:8448 with <code>--rootPath=/ungit</code>.</small>
         </span>
       </label>
       <label style=${rowStyle}>
-        <span style=${labelStyle}>Direct Ungit URL</span>
+        <span style=${labelStyle}>Direct Ungit-Go URL</span>
         <input style=${inputStyle} type="url" value=${draft.baseUrl} placeholder="http://127.0.0.1:8448/"
           onInput=${(event) => setDraft({ ...draft, baseUrl: event.target.value })} disabled=${saving || draft.proxyEnabled} />
       </label>
@@ -431,7 +431,7 @@ function UngitSettingsPane() {
       <label style=${{ ...rowStyle, alignItems: "flex-start" }}>
         <span style=${labelStyle}>Embedded layout</span>
         <span style="font-size:0.82rem"><input type="checkbox" checked=${draft.hideHeader}
-          onChange=${(event) => setDraft({ ...draft, hideHeader: event.target.checked })} disabled=${saving} /> Hide the Ungit header</span>
+          onChange=${(event) => setDraft({ ...draft, hideHeader: event.target.checked })} disabled=${saving} /> Hide the Ungit-Go header</span>
       </label>
       <div style="margin:0.2rem 0 0.8rem 140px;color:var(--text-secondary);font-size:0.74rem;line-height:1.4">
         The direct URL is used only when the proxy is disabled. The workspace root is the path visible to the Ungit process. Preview: <code style="word-break:break-all">${previewUrl}</code>
@@ -439,7 +439,7 @@ function UngitSettingsPane() {
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <button onClick=${save} disabled=${saving || (!draft.proxyEnabled && !draft.baseUrl.trim()) || !draft.workspaceRoot.trim()}>${saving ? "Saving…" : "Save"}</button>
         <button onClick=${load} disabled=${saving}>Reset draft</button>
-        ${previewUrl ? html`<a href=${previewUrl} target="_blank" rel="noreferrer">Open workspace in Ungit ↗</a>` : null}
+        ${previewUrl ? html`<a href=${previewUrl} target="_blank" rel="noreferrer">Open workspace in Ungit-Go ↗</a>` : null}
       </div>
       ${message ? html`<div style=${{ marginTop: "0.75rem", color: /unable|error|failed/i.test(message) ? "var(--danger-color,#dc2626)" : "var(--accent-color,#2563eb)", fontSize: "0.8rem" }}>${message}</div>` : null}
     </div>
@@ -450,7 +450,7 @@ function registerUngitSettingsPane(api) {
   if (!HAS_SETTINGS_RUNTIME || typeof api?.registerSettingsPane !== "function") return false;
   api.registerSettingsPane({
     id: ADDON_ID,
-    label: "Ungit",
+    label: "Ungit-Go",
     icon: renderGitBranchIcon(),
     component: UngitSettingsPane,
     order: 92,
@@ -465,12 +465,12 @@ export function registerUngitAddon(api = globalThis.__piclaw_web) {
     ? typeof api.registerWorkspaceRowAction(ungitWorkspaceRowAction) === "function"
     : false;
   registerUngitSettingsPane(api);
-  if (!actionRegistered) console.warn("[ungit] Piclaw workspace row-action API is unavailable");
+  if (!actionRegistered) console.warn("[ungit-go] Piclaw workspace row-action API is unavailable");
   return paneRegistered && actionRegistered;
 }
 
 try {
   registerUngitAddon();
 } catch (error) {
-  console.warn("[ungit] browser integration registration failed", error);
+  console.warn("[ungit-go] browser integration registration failed", error);
 }

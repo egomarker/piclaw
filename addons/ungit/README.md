@@ -1,38 +1,54 @@
-# Piclaw Ungit add-on
+# Piclaw Ungit-Go add-on
 
-Adds a small Git-branch action to every folder row in Piclaw's workspace explorer. The action opens that folder in an iframe-backed **Ungit** tab and reuses the same tab when clicked again.
+Adds a Git-branch action to every folder row in Piclaw's workspace explorer. The action opens that folder in an iframe-backed **Ungit-Go** tab and reuses the same tab when clicked again.
+
+## Requirements
+
+Ungit-Go itself needs Git 2.34 or newer. This add-on launches an immutable Go module revision directly from GitHub, so the runtime also needs Go 1.22 or newer. Piclaw's container image includes the Go toolchain; host-native installs must provide it separately.
+
+The Ungit-Go source includes its generated browser assets and has no external Go module dependencies. `go run` does not create a repository checkout, but it does download the selected module revision and compile it into Go's local caches on first use.
 
 ## Automatic startup
 
-At Piclaw startup, the add-on checks `http://127.0.0.1:8448/ungit/api/ping`. If Ungit is already live, it is left alone. Otherwise the add-on resolves `egomarker/ungit`'s remote `main` branch to a full commit SHA and launches that immutable GitHub package:
+At Piclaw startup, the add-on checks both the health endpoint and the embedded document identity at `127.0.0.1:8448`. If the matching Ungit-Go service is already live, it is left alone. A healthy legacy Node Ungit service is rejected with a clear stop-first error instead of being mistaken for Ungit-Go.
+
+Otherwise the add-on resolves `egomarker/ungit-go`'s remote `main` branch to a full commit SHA and launches that immutable module revision:
 
 ```sh
-bunx --bun \
-  --package github:egomarker/ungit#<full-commit-sha> \
-  ungit \
+go run github.com/egomarker/ungit-go/cmd/ungit-go@<full-commit-sha> \
   --ungitBindIp=127.0.0.1 \
   --port=8448 \
   --rootPath=/ungit \
   --no-launchBrowser
 ```
 
-The mutable branch name is never passed to Bun, avoiding stale `#main` package-cache entries. Resolution uses a bounded `git ls-remote` request. After launch, the add-on waits for the health endpoint and required browser assets before recording the revision as last known good. Concurrent startup requests share one launch attempt.
+The mutable branch name is never passed to Go. Resolution uses a bounded `git ls-remote` request. After launch, the add-on waits for the health endpoint, the Ungit-Go document marker, and required browser assets before recording the revision as last known good. Concurrent startup requests share one launch attempt.
 
-The launcher runs from `/workspace/.piclaw`, giving the Ungit server the writable `/workspace` working directory. The add-on does not monitor or stop the process after startup verification; if it survives a Piclaw restart, the next startup check reuses it.
-
-The path configured as **Workspace root** must refer to Piclaw's workspace from the Ungit process. The default is `/workspace`.
-
-Piclaw serves the browser-facing `/ungit/` route through its authenticated origin, so port `8448` does not need to be published from the container. Ungit uses Socket.IO's HTTP-polling transport through this route; WebSocket upgrades are not proxied.
+The launcher runs from `/workspace/.piclaw`. Its module and build caches are kept under `/workspace/.piclaw/cache/ungit-go`, allowing the immutable revision cache to survive Piclaw and container restarts with the workspace. The add-on does not monitor or stop the process after startup verification; if it survives a Piclaw restart, the next startup check reuses it.
 
 ## Updates, fallback, and rollback
 
-A healthy running process is deliberately reused. To load a newer fork revision, use **Settings → Ungit → Stop Ungit**, then **Start Ungit**. The new start resolves the current remote `main` SHA.
+A healthy running process is deliberately reused. To load a newer revision, use **Settings → Ungit-Go → Stop Ungit-Go**, then **Start Ungit-Go**. The new start resolves the current remote `main` SHA.
 
-The verified revision is written atomically to `ungit-launch-state.json` under `PICLAW_DATA` (default `/workspace/.piclaw/data`). If remote resolution fails, startup selects this last-known-good SHA. If a newly resolved remote revision launches but fails readiness, it is stopped and the last-known-good SHA is tried once. If no valid fallback exists, startup fails without launching an unpinned package.
+The verified revision is written atomically to `ungit-go-launch-state.json` under `PICLAW_DATA` (default `/workspace/.piclaw/data`). The state includes the implementation and repository identity, so the old Node Ungit launch state cannot be reused accidentally.
 
-For an explicit rollback, set `PICLAW_UNGIT_SHA` to a full 40-character commit SHA, then stop and start Ungit. Invalid or abbreviated overrides fail closed. Remove the override and stop/start again to resume tracking remote `main`.
+If remote resolution fails, startup selects the last-known-good Go SHA. If a newly resolved revision launches but fails readiness, it is stopped and the last-known-good revision is tried once. Offline fallback depends on that immutable module revision still being present in Go's module and build caches.
 
-The fork's selected commit must be a complete runnable package containing its current prebuilt browser assets.
+For an explicit rollback, set `PICLAW_UNGIT_GO_SHA` to a full 40-character commit SHA, then stop and start Ungit-Go. Invalid or abbreviated overrides fail closed. The legacy `PICLAW_UNGIT_SHA` variable is rejected to prevent a Node Ungit SHA from being applied to the Go repository.
+
+## Process migration
+
+Node Ungit and Ungit-Go use the same loopback port. Stop the legacy process before the first Go launch. The Settings stop action deliberately retains a broad process match during migration so it can terminate either implementation with `SIGTERM`.
+
+Old Bun package caches and `ungit-launch-state.json` are not deleted automatically. They can be removed later after the Go service and rollback path have been verified.
+
+## Same-origin proxy
+
+Piclaw serves `/ungit/` through its authenticated origin, forwarding HTTP requests to `127.0.0.1:8448`; port `8448` does not need to be published from the container.
+
+Ungit-Go's Socket.IO-compatible browser client uses same-origin EventSource/SSE plus HTTP POST requests. Piclaw forwards those streams and requests but continues to reject WebSocket upgrades. Piclaw authentication cookies and authorization headers are not forwarded to the loopback service, and the service cannot set cookies on Piclaw's origin.
+
+The path configured as **Workspace root** must refer to Piclaw's workspace as visible to the Ungit-Go process. The default is `/workspace`.
 
 ## Install from this checkout
 
@@ -45,17 +61,15 @@ Restart Piclaw after installation.
 
 ## Configuration
 
-Open **Settings → Ungit** to configure:
+Open **Settings → Ungit-Go** to configure:
 
-- **Use the same-origin proxy** — enabled by default; embeds `/ungit/` while forwarding HTTP requests to `127.0.0.1:8448`
-- **Direct Ungit URL** — used only when the same-origin proxy is disabled
-- **Workspace root** — the workspace path visible to Ungit, defaults to `/workspace`
-- **Default zoom** — initial iframe zoom for each Ungit tab, defaults to `60%`; the per-tab picker can override it
-- **Hide the Ungit header** — enabled by default for embedded tabs
+- **Use the same-origin proxy** — enabled by default; embeds `/ungit/`
+- **Direct Ungit-Go URL** — used only when the proxy is disabled
+- **Workspace root** — path visible to Ungit-Go, defaults to `/workspace`
+- **Default zoom** — initial iframe zoom, defaults to `60%`; each tab can override it
+- **Hide the Ungit-Go header** — enabled by default for embedded tabs
 
-Settings shows **Live** when its one-time health check succeeds and provides a single **Start Ungit**/**Stop Ungit** button. Stopping finds the matching loopback Ungit PIDs and sends `SIGTERM`; the status is checked once after each action, with no continuous polling.
-
-Configuration is stored in Piclaw's extension KV store and applies without a restart. Open Ungit tabs reload after saving. The proxy target is deliberately fixed to loopback rather than using the configurable direct URL, so the route cannot become an arbitrary authenticated forward proxy. Piclaw authentication cookies and authorization headers are not forwarded to Ungit.
+Configuration remains stored under the stable `ungit` add-on ID in Piclaw's extension KV store, so existing settings survive the runtime replacement. Open tabs reload when settings are saved.
 
 ## URL and tab behavior
 
@@ -65,4 +79,4 @@ With the same-origin proxy enabled, a workspace folder such as `projects/demo` m
 /ungit/?noheader=true#/repository?path=/workspace/projects/demo
 ```
 
-The internal tab id is path-specific (`piclaw://ungit/<encoded-path>`), so each repository gets one reusable Piclaw tab.
+The internal tab ID remains path-specific (`piclaw://ungit/<encoded-path>`), preserving one reusable retained tab per repository.

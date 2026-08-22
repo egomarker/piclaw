@@ -19,9 +19,10 @@ import {
   saveLastKnownGoodUngitRevision,
   startUngitIfNeeded,
   stopUngit,
+  UNGIT_GO_PACKAGE,
   UNGIT_HEALTH_URL,
+  UNGIT_IDENTITY_URL,
   UNGIT_LAUNCH_CWD,
-  UNGIT_PACKAGE_PREFIX,
   UNGIT_REPOSITORY_REF,
   UNGIT_REPOSITORY_URL,
   UNGIT_REQUIRED_ASSET_URLS,
@@ -77,30 +78,36 @@ function createFakeUngitPaneDom() {
   return { ownerDocument, container: ownerDocument.createElement("div") };
 }
 
-test("Ungit manifest declares its singleton startup runtime", async () => {
+test("Ungit-Go manifest declares its singleton startup runtime", async () => {
   const manifest = await Bun.file(new URL("../../../addons/ungit/package.json", import.meta.url)).json();
   expect(manifest?.pi?.runtime?.entries).toEqual(["runtime.ts"]);
 });
 
-test("Ungit pane opts into retention across tab switches", () => {
+test("Ungit-Go pane opts into retention across tab switches", () => {
   expect(ungitPaneExtension.retainOnTabSwitch).toBe(true);
 });
 
-test("Ungit health check recognizes only a successful JSON ping", async () => {
-  let requestedUrl = "";
+test("Ungit-Go health check requires both a JSON ping and the Go document identity", async () => {
+  const requestedUrls: string[] = [];
   expect(await isUngitLive(async (input) => {
-    requestedUrl = String(input);
-    return Response.json({});
+    const url = String(input);
+    requestedUrls.push(url);
+    if (url === UNGIT_HEALTH_URL) return Response.json({});
+    if (url === UNGIT_IDENTITY_URL) return new Response("<!doctype html><title>Ungit-Go</title>");
+    return new Response("missing", { status: 404 });
   })).toBe(true);
-  expect(requestedUrl).toBe(UNGIT_HEALTH_URL);
+  expect(requestedUrls).toEqual([UNGIT_HEALTH_URL, UNGIT_IDENTITY_URL]);
   expect(await isUngitLive(async () => new Response("{}", { status: 503 }))).toBe(false);
+  expect(await isUngitLive(async (input) => String(input) === UNGIT_HEALTH_URL
+    ? Response.json({})
+    : new Response("<!doctype html><title>ungit</title>"))).toBe(false);
   expect(await isUngitLive(async () => new Response("not json", { status: 200 }))).toBe(false);
 });
 
 const TEST_UNGIT_SHA = "7c295c1edbe37ef990461e3d2abc9eeb98b106c8";
 const OTHER_UNGIT_SHA = "55d5080fe67ea85953771c078d267e3a97c24ba2";
 
-test("Ungit parses only the requested full remote main SHA", async () => {
+test("Ungit-Go parses only the requested full remote main SHA", async () => {
   expect(normalizeUngitSha(`  ${TEST_UNGIT_SHA.toUpperCase()}  `)).toBe(TEST_UNGIT_SHA);
   expect(normalizeUngitSha(TEST_UNGIT_SHA.slice(0, 12))).toBeNull();
   expect(parseUngitLsRemote(`${TEST_UNGIT_SHA}\t${UNGIT_REPOSITORY_REF}\n`)).toBe(
@@ -151,10 +158,10 @@ test("Ungit parses only the requested full remote main SHA", async () => {
   ).rejects.toThrow("Timed out after 25ms");
 });
 
-test("Ungit revision resolution supports override, remote main, and last-known-good fallback", async () => {
+test("Ungit-Go revision resolution supports override, remote main, and last-known-good fallback", async () => {
   expect(
     await resolveUngitRevision({
-      env: { PICLAW_UNGIT_SHA: TEST_UNGIT_SHA },
+      env: { PICLAW_UNGIT_GO_SHA: TEST_UNGIT_SHA },
       resolveRemoteSha: async () => {
         throw new Error("override must skip remote resolution");
       },
@@ -163,9 +170,13 @@ test("Ungit revision resolution supports override, remote main, and last-known-g
 
   await expect(
     resolveUngitRevision({
-      env: { PICLAW_UNGIT_SHA: "main" },
+      env: { PICLAW_UNGIT_GO_SHA: "main" },
     }),
   ).rejects.toThrow("full 40-character Git SHA");
+
+  await expect(
+    resolveUngitRevision({ env: { PICLAW_UNGIT_SHA: TEST_UNGIT_SHA } }),
+  ).rejects.toThrow("targets the legacy Node service");
 
   expect(
     await resolveUngitRevision({
@@ -196,9 +207,9 @@ test("Ungit revision resolution supports override, remote main, and last-known-g
   ).rejects.toThrow("offline without fallback");
 });
 
-test("Ungit persists verified state atomically and ignores malformed state", () => {
+test("Ungit-Go persists verified state atomically and ignores malformed state", () => {
   const root = mkdtempSync(join(tmpdir(), "piclaw-ungit-state-"));
-  const statePath = join(root, "nested", "ungit-launch-state.json");
+  const statePath = join(root, "nested", "ungit-go-launch-state.json");
   try {
     expect(loadLastKnownGoodUngitSha(statePath)).toBeNull();
     saveLastKnownGoodUngitRevision(
@@ -207,34 +218,51 @@ test("Ungit persists verified state atomically and ignores malformed state", () 
     );
     expect(loadLastKnownGoodUngitSha(statePath)).toBe(TEST_UNGIT_SHA);
     expect(statSync(statePath).mode & 0o777).toBe(0o600);
-    expect(readdirSync(join(root, "nested"))).toEqual(["ungit-launch-state.json"]);
+    expect(readdirSync(join(root, "nested"))).toEqual(["ungit-go-launch-state.json"]);
     expect(JSON.parse(readFileSync(statePath, "utf8"))).toMatchObject({
-      version: 1,
+      version: 2,
+      implementation: "ungit-go",
+      repositoryUrl: UNGIT_REPOSITORY_URL,
       sha: TEST_UNGIT_SHA,
       source: "remote-main",
     });
 
     writeFileSync(statePath, '{"version":1,"sha":"main","source":"remote-main"}', "utf8");
     expect(loadLastKnownGoodUngitSha(statePath)).toBeNull();
+    writeFileSync(statePath, JSON.stringify({
+      version: 2,
+      implementation: "ungit-go",
+      repositoryUrl: "https://github.com/egomarker/ungit.git",
+      sha: TEST_UNGIT_SHA,
+      source: "remote-main",
+    }), "utf8");
+    expect(loadLastKnownGoodUngitSha(statePath)).toBeNull();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("Ungit runtime verification requires health and all routed assets", async () => {
+test("Ungit-Go runtime verification requires health and all routed assets", async () => {
   const requestedUrls: string[] = [];
   const healthyFetch = async (input: string | URL | Request) => {
     const url = String(input);
     requestedUrls.push(url);
-    return url === UNGIT_HEALTH_URL ? Response.json({}) : new Response("asset");
+    if (url === UNGIT_HEALTH_URL) return Response.json({});
+    if (url === UNGIT_IDENTITY_URL) return new Response("<!doctype html><title>Ungit-Go</title>");
+    return new Response("asset");
   };
   expect(await verifyUngitRuntime(healthyFetch)).toBe(true);
-  expect(requestedUrls).toEqual([UNGIT_HEALTH_URL, ...UNGIT_REQUIRED_ASSET_URLS]);
+  expect(requestedUrls).toEqual([
+    UNGIT_HEALTH_URL,
+    UNGIT_IDENTITY_URL,
+    ...UNGIT_REQUIRED_ASSET_URLS,
+  ]);
 
   expect(
     await verifyUngitRuntime(async (input) => {
       const url = String(input);
       if (url === UNGIT_HEALTH_URL) return Response.json({});
+      if (url === UNGIT_IDENTITY_URL) return new Response("<!doctype html><title>Ungit-Go</title>");
       return new Response("missing", {
         status: url === UNGIT_REQUIRED_ASSET_URLS.at(-1) ? 404 : 200,
       });
@@ -242,10 +270,12 @@ test("Ungit runtime verification requires health and all routed assets", async (
   ).toBe(false);
 });
 
-test("Ungit autostart skips a live service and launches the resolved immutable package", async () => {
+test("Ungit-Go autostart skips a live service and launches the resolved immutable Go module", async () => {
   let spawnCount = 0;
   await startUngitIfNeeded({
-    fetchImpl: async () => Response.json({}),
+    fetchImpl: async (input) => String(input) === UNGIT_HEALTH_URL
+      ? Response.json({})
+      : new Response("<!doctype html><title>Ungit-Go</title>"),
     ensureLaunchCwd: () => {
       throw new Error("live service must not prepare a launch directory");
     },
@@ -290,12 +320,10 @@ test("Ungit autostart skips a live service and launches the resolved immutable p
   expect(spawnCount).toBe(1);
   expect(preparedCwd).toBe(UNGIT_LAUNCH_CWD);
   expect(launchedCommand).toEqual(buildUngitStartCommand(TEST_UNGIT_SHA));
-  expect(launchedCommand.slice(0, 5)).toEqual([
-    "bunx",
-    "--bun",
-    "--package",
-    `${UNGIT_PACKAGE_PREFIX}#${TEST_UNGIT_SHA}`,
-    "ungit",
+  expect(launchedCommand.slice(0, 3)).toEqual([
+    "go",
+    "run",
+    `${UNGIT_GO_PACKAGE}@${TEST_UNGIT_SHA}`,
   ]);
   expect(launchedOptions).toEqual({
     cwd: "/workspace/.piclaw",
@@ -308,7 +336,18 @@ test("Ungit autostart skips a live service and launches the resolved immutable p
   expect(savedRevision).toEqual({ sha: TEST_UNGIT_SHA, source: "remote-main" });
 });
 
-test("Ungit shares concurrent startup and records state only after readiness", async () => {
+test("Ungit-Go startup rejects a live legacy service on the shared port", async () => {
+  await expect(startUngitIfNeeded({
+    fetchImpl: async (input) => String(input) === UNGIT_HEALTH_URL
+      ? Response.json({})
+      : new Response("<!doctype html><title>ungit</title>"),
+    ensureLaunchCwd: () => {
+      throw new Error("legacy detection must happen before launch preparation");
+    },
+  })).rejects.toThrow("legacy or unidentified Ungit service");
+});
+
+test("Ungit-Go shares concurrent startup and records state only after readiness", async () => {
   let releaseRuntime!: () => void;
   const runtimeReady = new Promise<void>((resolve) => {
     releaseRuntime = resolve;
@@ -355,7 +394,7 @@ test("Ungit shares concurrent startup and records state only after readiness", a
   expect(saveCount).toBe(1);
 });
 
-test("Ungit reports an early launcher exit without waiting for the readiness timeout", async () => {
+test("Ungit-Go reports an early launcher exit without waiting for the readiness timeout", async () => {
   await expect(
     startUngitIfNeeded({
       fetchImpl: async () => new Response("{}", { status: 503 }),
@@ -372,7 +411,7 @@ test("Ungit reports an early launcher exit without waiting for the readiness tim
   ).rejects.toThrow(`revision ${TEST_UNGIT_SHA} exited with code 17 before readiness`);
 });
 
-test("Ungit retries last-known-good after a newly resolved revision fails readiness", async () => {
+test("Ungit-Go retries last-known-good after a newly resolved revision fails readiness", async () => {
   const launchedCommands: string[][] = [];
   const savedRevisions: unknown[] = [];
   let waitCount = 0;
@@ -410,7 +449,7 @@ test("Ungit retries last-known-good after a newly resolved revision fails readin
   ]);
 });
 
-test("Ungit stop finds matching PIDs and terminates them", () => {
+test("Ungit-Go stop finds matching PIDs and terminates them", () => {
   const killed: Array<{ pid: number; signal: string }> = [];
   expect(stopUngit({
     findPids: () => [101, 102, 103],
@@ -423,7 +462,7 @@ test("Ungit stop finds matching PIDs and terminates them", () => {
   ]);
 });
 
-test("Ungit web settings health request returns only the live boolean", async () => {
+test("Ungit-Go web settings health request returns only the live boolean", async () => {
   const previousFetch = globalThis.fetch;
   let requestedUrl = "";
   let requestedInit: RequestInit | undefined;
@@ -444,7 +483,7 @@ test("Ungit web settings health request returns only the live boolean", async ()
   }
 });
 
-test("Ungit web settings sends a start or stop action", async () => {
+test("Ungit-Go web settings sends a start or stop action", async () => {
   const previousFetch = globalThis.fetch;
   let requestedUrl = "";
   let requestedInit: RequestInit | undefined;
@@ -467,7 +506,7 @@ test("Ungit web settings sends a start or stop action", async () => {
   }
 });
 
-test("Ungit URLs select the repository path and hide the header by default", () => {
+test("Ungit-Go URLs select the repository path and hide the header by default", () => {
   expect(buildUngitUrl("projects/foo bar")).toBe(
     "/ungit/?noheader=true#/repository?path=/workspace/projects/foo%20bar",
   );
@@ -481,7 +520,7 @@ test("Ungit URLs select the repository path and hide the header by default", () 
   );
 });
 
-test("Ungit iframe zoom uses fixed choices and starts each tab at 60 percent", () => {
+test("Ungit-Go iframe zoom uses fixed choices and starts each tab at 60 percent", () => {
   expect([...UNGIT_ZOOM_PERCENTAGES]).toEqual([30, 40, 50, 60, 70, 80, 90, 100]);
   expect(DEFAULT_UNGIT_ZOOM_PERCENT).toBe(60);
 
@@ -500,7 +539,7 @@ test("Ungit iframe zoom uses fixed choices and starts each tab at 60 percent", (
   expect(normalizeUngitWebConfig({ defaultZoomPercent: 55 }).defaultZoomPercent).toBe(60);
 });
 
-test("Ungit applies configured default zoom inside a clipped viewport", async () => {
+test("Ungit-Go applies configured default zoom inside a clipped viewport", async () => {
   const previousFetch = globalThis.fetch;
   const { ownerDocument, container } = createFakeUngitPaneDom();
   globalThis.fetch = async () => Response.json({
@@ -533,14 +572,14 @@ test("Ungit applies configured default zoom inside a clipped viewport", async ()
   }
 });
 
-test("Ungit repository path mapping remains inside the configured workspace root", () => {
+test("Ungit-Go repository path mapping remains inside the configured workspace root", () => {
   expect(resolveUngitRepositoryPath(".", "/workspace/")).toBe("/workspace");
   expect(resolveUngitRepositoryPath("repos/demo", "/workspace/")).toBe("/workspace/repos/demo");
   expect(resolveUngitRepositoryPath("repos/demo", "C:\\workspace\\")).toBe("C:\\workspace\\repos\\demo");
   expect(() => resolveUngitRepositoryPath("../outside", "/workspace")).toThrow("escapes the workspace root");
 });
 
-test("Ungit tab paths round-trip and provide stable per-folder tab reuse keys", () => {
+test("Ungit-Go tab paths round-trip and provide stable per-folder tab reuse keys", () => {
   const first = buildUngitTabPath("repos/foo bar");
   expect(first).toBe("piclaw://ungit/repos%2Ffoo%20bar");
   expect(parseUngitTabPath(first)).toBe("repos/foo bar");
@@ -549,7 +588,7 @@ test("Ungit tab paths round-trip and provide stable per-folder tab reuse keys", 
   expect(parseUngitTabPath("piclaw://terminal")).toBeNull();
 });
 
-test("Ungit registers a tab pane and directory row action without main-bundle imports", () => {
+test("Ungit-Go registers a tab pane and directory row action without main-bundle imports", () => {
   const panes: any[] = [];
   const actions: any[] = [];
   const settings: any[] = [];
@@ -589,7 +628,7 @@ test("Ungit registers a tab pane and directory row action without main-bundle im
   ]]);
 });
 
-test("Ungit registers direct backend config and health APIs", async () => {
+test("Ungit-Go registers direct backend config and health APIs", async () => {
   const stored = new Map<string, unknown>();
   const registrations = new Map<string, { addonId: string; action: string; handlers: any }>();
   let routeRegistration: { prefix: string; handler: any; extensionPath: string } | null = null;
@@ -610,7 +649,9 @@ test("Ungit registers direct backend config and health APIs", async () => {
     return "created";
   };
 
-  globalThis.fetch = async () => Response.json({});
+  globalThis.fetch = async (input) => String(input) === UNGIT_IDENTITY_URL
+    ? new Response("<!doctype html><title>Ungit-Go</title>")
+    : Response.json({});
   try {
     await importFresh("../../../addons/ungit/index.ts", import.meta.url);
     const configRegistration = registrations.get("config");
@@ -651,7 +692,7 @@ test("Ungit registers direct backend config and health APIs", async () => {
   }
 });
 
-test("Ungit backend config normalization rejects unsafe URLs and keeps embedding defaults", () => {
+test("Ungit-Go backend config normalization rejects unsafe URLs and keeps embedding defaults", () => {
   expect(normalizeUngitConfig({
     baseUrl: "javascript:alert(1)",
     workspaceRoot: "",
@@ -675,7 +716,7 @@ test("Ungit backend config normalization rejects unsafe URLs and keeps embedding
   });
 });
 
-test("Ungit same-origin proxy forwards HTTP without leaking Piclaw credentials", async () => {
+test("Ungit-Go same-origin proxy forwards HTTP without leaking Piclaw credentials", async () => {
   let forwardedUrl = "";
   let forwardedInit: RequestInit | undefined;
   const handler = createUngitProxyHandler({
@@ -716,10 +757,10 @@ test("Ungit same-origin proxy forwards HTTP without leaking Piclaw credentials",
   expect(await response?.text()).toBe("pong");
 });
 
-test("Ungit same-origin proxy supplies the document headers required by Ungit", async () => {
+test("Ungit-Go same-origin proxy supplies the document headers required by Ungit", async () => {
   const handler = createUngitProxyHandler({
     fetchImpl: async () => new Response(
-      new TextEncoder().encode("<!doctype html><title>ungit</title>"),
+      new TextEncoder().encode("<!doctype html><title>Ungit-Go</title>"),
       { status: 200 },
     ),
   });
@@ -734,10 +775,10 @@ test("Ungit same-origin proxy supplies the document headers required by Ungit", 
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'",
   );
   expect(response?.headers.get("content-security-policy")).toContain("frame-ancestors 'self'");
-  expect(await response?.text()).toContain("<title>ungit</title>");
+  expect(await response?.text()).toContain("<title>Ungit-Go</title>");
 });
 
-test("Ungit same-origin proxy strips stale compression metadata from decoded bodies", async () => {
+test("Ungit-Go same-origin proxy strips stale compression metadata from decoded bodies", async () => {
   const handler = createUngitProxyHandler({
     fetchImpl: async () => new Response("window.io = {};", {
       status: 200,
@@ -760,7 +801,26 @@ test("Ungit same-origin proxy strips stale compression metadata from decoded bod
   expect(await response?.text()).toBe("window.io = {};");
 });
 
-test("Ungit same-origin proxy leaves unrelated paths alone and rejects WebSocket upgrades", async () => {
+test("Ungit-Go same-origin proxy preserves EventSource response headers", async () => {
+  const handler = createUngitProxyHandler({
+    fetchImpl: async () => new Response("event: connected\ndata: {}\n\n", {
+      headers: {
+        "Cache-Control": "no-cache",
+        "Content-Type": "text/event-stream",
+        "X-Accel-Buffering": "no",
+      },
+    }),
+  });
+  const response = await handler(
+    new Request("https://piclaw.example.test/ungit/realtime/connect"),
+    "/ungit/realtime/connect",
+  );
+  expect(response?.headers.get("content-type")).toBe("text/event-stream");
+  expect(response?.headers.get("x-accel-buffering")).toBe("no");
+  expect(await response?.text()).toContain("event: connected");
+});
+
+test("Ungit-Go same-origin proxy leaves unrelated paths alone and rejects WebSocket upgrades", async () => {
   const handler = createUngitProxyHandler({
     fetchImpl: async () => new Response("unexpected"),
   });
@@ -770,5 +830,5 @@ test("Ungit same-origin proxy leaves unrelated paths alone and rejects WebSocket
     headers: { Upgrade: "websocket" },
   }), "/ungit/socket.io");
   expect(websocketResponse?.status).toBe(426);
-  expect(await websocketResponse?.text()).toContain("HTTP polling");
+  expect(await websocketResponse?.text()).toContain("EventSource");
 });

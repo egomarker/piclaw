@@ -8,14 +8,16 @@ import {
 import { dirname, join } from "node:path";
 
 export const UNGIT_HEALTH_URL = "http://127.0.0.1:8448/ungit/api/ping";
+export const UNGIT_IDENTITY_URL = "http://127.0.0.1:8448/ungit/";
 export const UNGIT_LAUNCH_CWD = "/workspace/.piclaw";
-export const UNGIT_REPOSITORY_URL = "https://github.com/egomarker/ungit.git";
+export const UNGIT_REPOSITORY_URL = "https://github.com/egomarker/ungit-go.git";
 export const UNGIT_REPOSITORY_REF = "refs/heads/main";
-export const UNGIT_PACKAGE_PREFIX = "github:egomarker/ungit";
-export const UNGIT_SHA_OVERRIDE_ENV = "PICLAW_UNGIT_SHA";
+export const UNGIT_GO_PACKAGE = "github.com/egomarker/ungit-go/cmd/ungit-go";
+export const UNGIT_SHA_OVERRIDE_ENV = "PICLAW_UNGIT_GO_SHA";
+export const LEGACY_UNGIT_SHA_OVERRIDE_ENV = "PICLAW_UNGIT_SHA";
 export const UNGIT_STATE_PATH = join(
   process.env.PICLAW_DATA?.trim() || "/workspace/.piclaw/data",
-  "ungit-launch-state.json",
+  "ungit-go-launch-state.json",
 );
 export const UNGIT_REQUIRED_ASSET_URLS = Object.freeze([
   "http://127.0.0.1:8448/ungit/css/styles.css",
@@ -26,6 +28,9 @@ export const UNGIT_REQUIRED_ASSET_URLS = Object.freeze([
   "http://127.0.0.1:8448/ungit/plugins/app/app-light.css",
 ]);
 
+const UNGIT_GO_IDENTITY_MARKER = "<title>Ungit-Go</title>";
+const UNGIT_LAUNCH_STATE_VERSION = 2;
+const UNGIT_LAUNCH_IMPLEMENTATION = "ungit-go";
 const UNGIT_SERVER_ARGUMENTS = Object.freeze([
   "--ungitBindIp=127.0.0.1",
   "--port=8448",
@@ -50,7 +55,9 @@ export interface ResolvedUngitRevision {
 }
 
 interface UngitLaunchState extends ResolvedUngitRevision {
-  version: 1;
+  version: 2;
+  implementation: "ungit-go";
+  repositoryUrl: string;
   verifiedAt: string;
 }
 
@@ -163,7 +170,12 @@ export async function resolveRemoteUngitSha(options: {
 export function loadLastKnownGoodUngitSha(statePath = UNGIT_STATE_PATH): string | null {
   try {
     const state = JSON.parse(readFileSync(statePath, "utf8")) as Partial<UngitLaunchState>;
-    if (state.version !== 1 || !isUngitRevisionSource(state.source)) return null;
+    if (
+      state.version !== UNGIT_LAUNCH_STATE_VERSION ||
+      state.implementation !== UNGIT_LAUNCH_IMPLEMENTATION ||
+      state.repositoryUrl !== UNGIT_REPOSITORY_URL ||
+      !isUngitRevisionSource(state.source)
+    ) return null;
     return normalizeUngitSha(state.sha);
   } catch {
     return null;
@@ -176,13 +188,15 @@ export function saveLastKnownGoodUngitRevision(
 ): void {
   const sha = normalizeUngitSha(revision.sha);
   if (!sha || !isUngitRevisionSource(revision.source)) {
-    throw new Error("Cannot persist an invalid Ungit revision.");
+    throw new Error("Cannot persist an invalid Ungit-Go revision.");
   }
 
   mkdirSync(dirname(statePath), { recursive: true });
   const temporaryPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
   const state: UngitLaunchState = {
-    version: 1,
+    version: UNGIT_LAUNCH_STATE_VERSION,
+    implementation: UNGIT_LAUNCH_IMPLEMENTATION,
+    repositoryUrl: UNGIT_REPOSITORY_URL,
     sha,
     source: revision.source,
     verifiedAt: new Date().toISOString(),
@@ -216,11 +230,16 @@ export async function resolveUngitRevision(
     }
     return { sha, source: "override" };
   }
+  if (env[LEGACY_UNGIT_SHA_OVERRIDE_ENV]?.trim()) {
+    throw new Error(
+      `${LEGACY_UNGIT_SHA_OVERRIDE_ENV} targets the legacy Node service; use ${UNGIT_SHA_OVERRIDE_ENV} for Ungit-Go.`,
+    );
+  }
 
   try {
     const remoteValue = await (options.resolveRemoteSha ?? resolveRemoteUngitSha)();
     const sha = normalizeUngitSha(remoteValue);
-    if (!sha) throw new Error("Remote Ungit resolver returned an invalid Git SHA.");
+    if (!sha) throw new Error("Remote Ungit-Go resolver returned an invalid Git SHA.");
     return { sha, source: "remote-main" };
   } catch (error) {
     const fallbackSha = normalizeUngitSha(
@@ -228,7 +247,7 @@ export async function resolveUngitRevision(
     );
     if (!fallbackSha) throw error;
     console.warn(
-      `[ungit] remote main resolution failed; using last-known-good ${fallbackSha}`,
+      `[ungit-go] remote main resolution failed; using last-known-good ${fallbackSha}`,
       error,
     );
     return { sha: fallbackSha, source: "last-known-good" };
@@ -237,18 +256,16 @@ export async function resolveUngitRevision(
 
 export function buildUngitStartCommand(shaValue: string): string[] {
   const sha = normalizeUngitSha(shaValue);
-  if (!sha) throw new Error("Cannot build the Ungit startup command from an invalid Git SHA.");
+  if (!sha) throw new Error("Cannot build the Ungit-Go startup command from an invalid Git SHA.");
   return [
-    "bunx",
-    "--bun",
-    "--package",
-    `${UNGIT_PACKAGE_PREFIX}#${sha}`,
-    "ungit",
+    "go",
+    "run",
+    `${UNGIT_GO_PACKAGE}@${sha}`,
     ...UNGIT_SERVER_ARGUMENTS,
   ];
 }
 
-export async function isUngitLive(
+async function hasUngitPing(
   fetchImpl: FetchImplementation = globalThis.fetch,
   timeoutMs = HEALTH_TIMEOUT_MS,
 ): Promise<boolean> {
@@ -268,6 +285,34 @@ export async function isUngitLive(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function hasUngitGoIdentity(
+  fetchImpl: FetchImplementation = globalThis.fetch,
+  timeoutMs = HEALTH_TIMEOUT_MS,
+): Promise<boolean> {
+  if (typeof fetchImpl !== "function") return false;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(UNGIT_IDENTITY_URL, {
+      headers: { Accept: "text/html" },
+      signal: controller.signal,
+    });
+    return response.ok && (await response.text()).includes(UNGIT_GO_IDENTITY_MARKER);
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function isUngitLive(
+  fetchImpl: FetchImplementation = globalThis.fetch,
+  timeoutMs = HEALTH_TIMEOUT_MS,
+): Promise<boolean> {
+  return await hasUngitPing(fetchImpl, timeoutMs) &&
+    await hasUngitGoIdentity(fetchImpl, timeoutMs);
 }
 
 export async function verifyUngitRuntime(
@@ -305,7 +350,7 @@ export async function waitForUngitRuntime(options: {
     if (Date.now() >= deadline) break;
     await (options.sleepImpl ?? ((milliseconds) => Bun.sleep(milliseconds)))(pollIntervalMs);
   } while (Date.now() <= deadline);
-  throw new Error(`Ungit did not become ready within ${timeoutMs}ms.`);
+  throw new Error(`Ungit-Go did not become ready within ${timeoutMs}ms.`);
 }
 
 export function findUngitPids(): number[] {
@@ -349,7 +394,7 @@ export function stopUngit(options: {
     }
   }
   if (killed > 0) {
-    console.info(`[ungit] stopped process${killed === 1 ? "" : "es"}: ${pids.join(", ")}`);
+    console.info(`[ungit-go] stopped process${killed === 1 ? "" : "es"}: ${pids.join(", ")}`);
   }
   return killed;
 }
@@ -370,7 +415,7 @@ async function cleanupFailedUngitLaunch(
   const deadline = Date.now() + FAILED_LAUNCH_STOP_TIMEOUT_MS;
   while (await isUngitLive(fetchImpl, HEALTH_TIMEOUT_MS)) {
     if (Date.now() >= deadline) {
-      throw new Error("Failed Ungit revision remained live after SIGTERM.");
+      throw new Error("Failed Ungit-Go revision remained live after SIGTERM.");
     }
     await Bun.sleep(FAILED_LAUNCH_STOP_POLL_INTERVAL_MS);
   }
@@ -383,7 +428,15 @@ function spawnUngitRevision(
 ): SpawnedUngitProcess {
   const command = buildUngitStartCommand(revision.sha);
   const spawnImpl: SpawnImplementation =
-    options.spawnImpl ?? ((spawnCommand, spawnOptions) => Bun.spawn(spawnCommand, spawnOptions));
+    options.spawnImpl ?? ((spawnCommand, spawnOptions) => Bun.spawn(spawnCommand, {
+      ...spawnOptions,
+      env: {
+        ...process.env,
+        CGO_ENABLED: "0",
+        GOCACHE: join(launchCwd, "cache", "ungit-go", "build"),
+        GOMODCACHE: join(launchCwd, "cache", "ungit-go", "modules"),
+      },
+    }));
   const child = spawnImpl(command, {
     cwd: launchCwd,
     stdin: "ignore",
@@ -392,7 +445,7 @@ function spawnUngitRevision(
   });
   child.unref?.();
   console.info(
-    `[ungit] launching ${revision.sha} from ${revision.source}${child.pid ? ` (pid ${child.pid})` : ""}`,
+    `[ungit-go] launching ${revision.sha} from ${revision.source}${child.pid ? ` (pid ${child.pid})` : ""}`,
   );
   return child;
 }
@@ -422,7 +475,7 @@ async function waitForResolvedUngitRuntime(
   ]);
   if (outcome.kind === "ready") return;
   if (outcome.kind === "readiness-error" || outcome.kind === "exit-error") throw outcome.error;
-  throw new Error(`Ungit revision ${revision.sha} exited with code ${outcome.exitCode} before readiness.`);
+  throw new Error(`Ungit-Go revision ${revision.sha} exited with code ${outcome.exitCode} before readiness.`);
 }
 
 function rememberVerifiedUngitRevision(
@@ -432,9 +485,9 @@ function rememberVerifiedUngitRevision(
   try {
     (options.saveLastKnownGood ?? saveLastKnownGoodUngitRevision)(revision);
   } catch (error) {
-    console.warn(`[ungit] unable to persist verified revision ${revision.sha}`, error);
+    console.warn(`[ungit-go] unable to persist verified revision ${revision.sha}`, error);
   }
-  console.info(`[ungit] verified revision ${revision.sha}`);
+  console.info(`[ungit-go] verified revision ${revision.sha}`);
 }
 
 async function cleanUpFailedRevision(
@@ -451,15 +504,20 @@ async function cleanUpFailedRevision(
   } catch (cleanupError) {
     throw new AggregateError(
       [launchError, cleanupError],
-      `Ungit revision ${revision.sha} failed and could not be stopped cleanly.`,
+      `Ungit-Go revision ${revision.sha} failed and could not be stopped cleanly.`,
     );
   }
 }
 
 async function startUngitInternal(options: StartUngitOptions): Promise<void> {
   if (await isUngitLive(options.fetchImpl)) {
-    console.info("[ungit] service is already live");
+    console.info("[ungit-go] service is already live");
     return;
+  }
+  if (await hasUngitPing(options.fetchImpl)) {
+    throw new Error(
+      "A legacy or unidentified Ungit service is already using 127.0.0.1:8448. Stop it before starting Ungit-Go.",
+    );
   }
 
   const launchCwd = options.launchCwd || UNGIT_LAUNCH_CWD;
@@ -489,7 +547,7 @@ async function startUngitInternal(options: StartUngitOptions): Promise<void> {
       source: "last-known-good",
     };
     console.warn(
-      `[ungit] revision ${revision.sha} failed readiness; retrying last-known-good ${fallbackSha}`,
+      `[ungit-go] revision ${revision.sha} failed readiness; retrying last-known-good ${fallbackSha}`,
       launchError,
     );
 
@@ -502,7 +560,7 @@ async function startUngitInternal(options: StartUngitOptions): Promise<void> {
       await cleanUpFailedRevision(fallbackRevision, fallbackChild, fallbackError, options);
       throw new AggregateError(
         [launchError, fallbackError],
-        `Ungit revision ${revision.sha} and fallback ${fallbackSha} both failed readiness.`,
+        `Ungit-Go revision ${revision.sha} and fallback ${fallbackSha} both failed readiness.`,
       );
     }
   }
