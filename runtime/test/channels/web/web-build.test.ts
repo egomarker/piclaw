@@ -74,6 +74,8 @@ test("build:web produces bundle assets", async () => {
   expect(editorBundle).toContain('#editor-vendor/codemirror');
   expect(pdfViewerBundle).toContain("mountMobilePdfViewer");
   expect(pdfViewerBundle).toContain("[pdf-viewer] Replacing broken");
+  expect(pdfViewerBundle).toContain("Starting Android compatibility mode");
+  expect(pdfViewerBundle).toContain("pdfWorkerMode");
   expect(pdfViewerMap).toContain("pdfjs-dist/legacy/build/pdf.mjs");
   expect(pdfViewerMap).toContain("pdfjs-dist/legacy/web/pdf_viewer.mjs");
   expect(pdfWorkerBundle).toContain("WorkerMessageHandler");

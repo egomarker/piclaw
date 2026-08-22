@@ -174,7 +174,7 @@ interface WorkerCompatibilityResult {
 async function probeWorkerCompatibility(page: Page): Promise<WorkerCompatibilityResult> {
   return page.evaluate(async () => {
     const workerBundleUrl = new URL(
-      "/static/common/dist/pdf-viewer-worker.bundle.js?v=6.2.108-piclaw2-worker-probe",
+      "/static/common/dist/pdf-viewer-worker.bundle.js?v=6.2.108-piclaw3-worker-probe",
       location.href,
     ).href;
     const source = `
@@ -382,11 +382,17 @@ async function runMobileScenario(
         iteratorType: typeof Reflect.get(globalThis, "Iterator"),
         mapComputedWorks: mapValue === marker && map.get("key") === marker,
         weakMapComputedWorks: weakMapValue === marker && weakMap.get(weakKey) === marker,
+        workerMode: document.body.dataset.pdfWorkerMode || "",
       };
     });
     assert(pageCompatibility.iteratorType === "function", `Iterator compatibility was not installed (${pageCompatibility.iteratorType})`);
     assert(pageCompatibility.mapComputedWorks, "Map.getOrInsertComputed compatibility failed");
     assert(pageCompatibility.weakMapComputedWorks, "WeakMap.getOrInsertComputed compatibility failed");
+    const expectedWorkerMode = args.emulateLegacyRuntime ? "fake" : "worker";
+    assert(
+      pageCompatibility.workerMode === expectedWorkerMode,
+      `Unexpected PDF worker mode: ${pageCompatibility.workerMode} (expected ${expectedWorkerMode})`,
+    );
 
     const workerCompatibility = await probeWorkerCompatibility(page);
     assert(workerCompatibility.ok, `Worker compatibility failed: ${workerCompatibility.error || "unknown error"}`);

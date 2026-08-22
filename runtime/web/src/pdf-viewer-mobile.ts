@@ -12,13 +12,14 @@ import {
 } from "pdfjs-dist/legacy/web/pdf_viewer.mjs";
 
 const PDFJS_ASSET_ROOT = "/static/common/pdfjs";
-const PDFJS_WORKER_URL = "/static/common/dist/pdf-viewer-worker.bundle.js?v=6.2.108-piclaw2";
+const PDFJS_WORKER_URL = "/static/common/dist/pdf-viewer-worker.bundle.js?v=6.2.108-piclaw3";
 const MAX_MOBILE_CANVAS_PIXELS = 16_777_216;
 const MAX_MOBILE_CANVAS_DIMENSION = 8_192;
 
 export interface MobilePdfViewerOptions {
   sourceUrl: string;
   name?: string;
+  forceFakeWorker?: boolean;
 }
 
 interface PageChangingEvent {
@@ -67,6 +68,7 @@ export async function mountMobilePdfViewer(options: MobilePdfViewerOptions): Pro
   document.title = documentName;
   document.body.replaceChildren();
   document.body.dataset.pdfRenderer = "pdfjs";
+  document.body.dataset.pdfWorkerMode = options.forceFakeWorker ? "fake" : "worker";
 
   const shell = document.createElement("main");
   shell.className = "pdfjs-mobile-shell";
@@ -125,7 +127,11 @@ export async function mountMobilePdfViewer(options: MobilePdfViewerOptions): Pro
     link.href = options.sourceUrl;
     link.download = documentName;
   }
-  retryButton.addEventListener("click", () => location.reload());
+  retryButton.addEventListener("click", () => {
+    const retryUrl = new URL(location.href);
+    retryUrl.searchParams.set("worker", "fake");
+    location.assign(retryUrl);
+  });
 
   const showError = (message: string) => {
     state.classList.remove("is-hidden");
@@ -160,6 +166,14 @@ export async function mountMobilePdfViewer(options: MobilePdfViewerOptions): Pro
   let resizeFrame = 0;
   let pinchDistance = 0;
   let passwordCancelled = false;
+  let viewerInitializationFailed = false;
+  let initializationTimeout = 0;
+  let resolvePagesInitialized: (() => void) | null = null;
+  let rejectPagesInitialized: ((error: Error) => void) | null = null;
+  const pagesInitialized = new Promise<void>((resolvePromise, rejectPromise) => {
+    resolvePagesInitialized = resolvePromise;
+    rejectPagesInitialized = rejectPromise;
+  });
 
   const updateFitButton = () => {
     fitWidthButton.setAttribute("aria-pressed", String(fitWidth));
@@ -168,6 +182,9 @@ export async function mountMobilePdfViewer(options: MobilePdfViewerOptions): Pro
   updateFitButton();
 
   eventBus.on("pagesinit", () => {
+    if (viewerInitializationFailed) return;
+    window.clearTimeout(initializationTimeout);
+    resolvePagesInitialized?.();
     pdfViewer.currentScaleValue = "page-width";
     state.classList.add("is-hidden");
     container.focus({ preventScroll: true });
@@ -241,6 +258,16 @@ export async function mountMobilePdfViewer(options: MobilePdfViewerOptions): Pro
   container.addEventListener("touchend", finishPinch, { passive: true });
   container.addEventListener("touchcancel", finishPinch, { passive: true });
 
+  if (options.forceFakeWorker) {
+    stateDetail.textContent = "Starting Android compatibility mode…";
+    try {
+      await import(PDFJS_WORKER_URL);
+    } catch (error) {
+      showError(`Unable to start Android compatibility mode: ${friendlyError(error)}`);
+      return;
+    }
+  }
+
   const loadingTask = getDocument({
     url: options.sourceUrl,
     cMapUrl: `${PDFJS_ASSET_ROOT}/cmaps/`,
@@ -277,6 +304,7 @@ export async function mountMobilePdfViewer(options: MobilePdfViewerOptions): Pro
   const cleanup = () => {
     resizeObserver.disconnect();
     cancelAnimationFrame(resizeFrame);
+    window.clearTimeout(initializationTimeout);
     void loadingTask.destroy();
   };
   window.addEventListener("pagehide", cleanup, { once: true });
@@ -287,7 +315,14 @@ export async function mountMobilePdfViewer(options: MobilePdfViewerOptions): Pro
     pageLabel.textContent = `1 / ${pagesCount}`;
     linkService.setDocument(pdfDocument);
     pdfViewer.setDocument(pdfDocument);
+    initializationTimeout = window.setTimeout(() => {
+      viewerInitializationFailed = true;
+      rejectPagesInitialized?.(new Error("PDF viewer initialization timed out. Retry to use Android compatibility mode."));
+    }, 30_000);
+    await pagesInitialized;
   } catch (error) {
+    viewerInitializationFailed = true;
+    window.clearTimeout(initializationTimeout);
     showError(passwordCancelled ? "Password entry was cancelled." : friendlyError(error));
   }
 }

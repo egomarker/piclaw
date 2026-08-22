@@ -19,9 +19,9 @@ describe("PDF viewer route", () => {
     expect(body).toContain("document.createElement('object')");
     expect(body).toContain("document.body.dataset.pdfRenderer = 'native'");
     expect(body).toContain("shouldUsePdfJs()");
-    expect(body).toContain("/static/common/pdfjs/pdf_viewer.css?v=6.2.108-piclaw2");
-    expect(body).toContain("/static/common/dist/pdf-viewer-mobile.bundle.js?v=6.2.108-piclaw2");
-    expect(body).toContain("mountMobilePdfViewer({ sourceUrl: sourceUrl, name: name })");
+    expect(body).toContain("/static/common/pdfjs/pdf_viewer.css?v=6.2.108-piclaw3");
+    expect(body).toContain("/static/common/dist/pdf-viewer-mobile.bundle.js?v=6.2.108-piclaw3");
+    expect(body).toContain("return viewerModule.mountMobilePdfViewer({");
     expect(body).not.toContain("app.bundle.js");
   });
 
@@ -34,6 +34,11 @@ describe("PDF viewer route", () => {
     expect(body).toContain("(pointer: coarse)");
     expect(body).toContain("override === 'pdfjs'");
     expect(body).toContain("override === 'native'");
+    expect(body).toContain("shouldUseFakeWorker()");
+    expect(body).toContain("override === 'fake'");
+    expect(body).toContain("override === 'real'");
+    expect(body).toContain("/Android/i.test(navigator.userAgent || '') && typeof globalThis.Iterator !== 'function'");
+    expect(body).toContain("forceFakeWorker: forceFakeWorker");
   });
 
   test("installs collection upsert compatibility before loading PDF.js", () => {

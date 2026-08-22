@@ -358,6 +358,13 @@ export function generatePdfViewerPage(): string {
     installCollectionUpsertCompatibility(WeakMap);
   }
 
+  function shouldUseFakeWorker() {
+    var override = getFlexibleParam('worker').toLowerCase();
+    if (override === 'fake') return true;
+    if (override === 'real') return false;
+    return /Android/i.test(navigator.userAgent || '') && typeof globalThis.Iterator !== 'function';
+  }
+
   function loadStylesheet(url) {
     return new Promise(function (resolve, reject) {
       var link = document.createElement('link');
@@ -450,6 +457,7 @@ export function generatePdfViewerPage(): string {
   }
 
   document.body.dataset.pdfRenderer = 'pdfjs-loading';
+  var forceFakeWorker = shouldUseFakeWorker();
   try {
     installPdfJsCompatibility();
   } catch (error) {
@@ -457,14 +465,18 @@ export function generatePdfViewerPage(): string {
     return;
   }
   Promise.all([
-    loadStylesheet('/static/common/pdfjs/pdf_viewer.css?v=6.2.108-piclaw2'),
-    import('/static/common/dist/pdf-viewer-mobile.bundle.js?v=6.2.108-piclaw2'),
+    loadStylesheet('/static/common/pdfjs/pdf_viewer.css?v=6.2.108-piclaw3'),
+    import('/static/common/dist/pdf-viewer-mobile.bundle.js?v=6.2.108-piclaw3'),
   ]).then(function (loaded) {
     var viewerModule = loaded[1];
     if (!viewerModule || typeof viewerModule.mountMobilePdfViewer !== 'function') {
       throw new Error('The mobile PDF viewer module is invalid.');
     }
-    return viewerModule.mountMobilePdfViewer({ sourceUrl: sourceUrl, name: name });
+    return viewerModule.mountMobilePdfViewer({
+      sourceUrl: sourceUrl,
+      name: name,
+      forceFakeWorker: forceFakeWorker,
+    });
   }).catch(function (error) {
     var detail = error && error.message ? error.message : 'The mobile PDF viewer could not start.';
     showFallback(detail, sourceUrl, true);
