@@ -19,8 +19,8 @@ describe("PDF viewer route", () => {
     expect(body).toContain("document.createElement('object')");
     expect(body).toContain("document.body.dataset.pdfRenderer = 'native'");
     expect(body).toContain("shouldUsePdfJs()");
-    expect(body).toContain("/static/common/pdfjs/pdf_viewer.css?v=6.2.108-piclaw1");
-    expect(body).toContain("/static/common/dist/pdf-viewer-mobile.bundle.js?v=6.2.108-piclaw1");
+    expect(body).toContain("/static/common/pdfjs/pdf_viewer.css?v=6.2.108-piclaw2");
+    expect(body).toContain("/static/common/dist/pdf-viewer-mobile.bundle.js?v=6.2.108-piclaw2");
     expect(body).toContain("mountMobilePdfViewer({ sourceUrl: sourceUrl, name: name })");
     expect(body).not.toContain("app.bundle.js");
   });
@@ -34,6 +34,17 @@ describe("PDF viewer route", () => {
     expect(body).toContain("(pointer: coarse)");
     expect(body).toContain("override === 'pdfjs'");
     expect(body).toContain("override === 'native'");
+  });
+
+  test("installs collection upsert compatibility before loading PDF.js", () => {
+    const body = generatePdfViewerPage();
+
+    expect(body).toContain("installPdfJsCompatibility()");
+    expect(body).toContain("installCollectionUpsertCompatibility(Map)");
+    expect(body).toContain("installCollectionUpsertCompatibility(WeakMap)");
+    expect(body).toContain("getOrInsertComputed");
+    expect(body).toContain("callbackfn must be callable");
+    expect(body).toContain("This browser could not initialize PDF compatibility support.");
   });
 
   test("allows same-origin PDF.js worker, WASM, and resource fetches in CSP", () => {

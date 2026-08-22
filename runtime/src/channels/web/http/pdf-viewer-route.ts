@@ -303,6 +303,61 @@ export function generatePdfViewerPage(): string {
     return mobileUa || ipad || userAgentDataMobile || (standalone && coarsePointer);
   }
 
+  function installCollectionUpsertCompatibility(Collection) {
+    var prototype = Collection.prototype;
+    var nativeHas = prototype.has;
+    var nativeGet = prototype.get;
+    var nativeSet = prototype.set;
+    var probeKey = Collection === WeakMap ? {} : '__piclaw_pdfjs_probe__';
+
+    function methodWorks(name, computed) {
+      if (typeof prototype[name] !== 'function') return false;
+      try {
+        var probe = new Collection();
+        var marker = {};
+        var value = computed
+          ? prototype[name].call(probe, probeKey, function () { return marker; })
+          : prototype[name].call(probe, probeKey, marker);
+        return value === marker && nativeGet.call(probe, probeKey) === marker;
+      } catch (error) {
+        console.warn('[pdf-viewer] Replacing broken ' + name + ' implementation.', error);
+        return false;
+      }
+    }
+
+    if (!methodWorks('getOrInsertComputed', true)) {
+      Object.defineProperty(prototype, 'getOrInsertComputed', {
+        configurable: true,
+        writable: true,
+        value: function (key, callbackfn) {
+          var hasKey = nativeHas.call(this, key);
+          if (typeof callbackfn !== 'function') throw new TypeError('callbackfn must be callable');
+          if (hasKey) return nativeGet.call(this, key);
+          var value = callbackfn(key);
+          nativeSet.call(this, key, value);
+          return value;
+        },
+      });
+    }
+
+    if (!methodWorks('getOrInsert', false)) {
+      Object.defineProperty(prototype, 'getOrInsert', {
+        configurable: true,
+        writable: true,
+        value: function (key, value) {
+          if (nativeHas.call(this, key)) return nativeGet.call(this, key);
+          nativeSet.call(this, key, value);
+          return value;
+        },
+      });
+    }
+  }
+
+  function installPdfJsCompatibility() {
+    installCollectionUpsertCompatibility(Map);
+    installCollectionUpsertCompatibility(WeakMap);
+  }
+
   function loadStylesheet(url) {
     return new Promise(function (resolve, reject) {
       var link = document.createElement('link');
@@ -395,9 +450,15 @@ export function generatePdfViewerPage(): string {
   }
 
   document.body.dataset.pdfRenderer = 'pdfjs-loading';
+  try {
+    installPdfJsCompatibility();
+  } catch (error) {
+    showFallback('This browser could not initialize PDF compatibility support.', sourceUrl, true);
+    return;
+  }
   Promise.all([
-    loadStylesheet('/static/common/pdfjs/pdf_viewer.css?v=6.2.108-piclaw1'),
-    import('/static/common/dist/pdf-viewer-mobile.bundle.js?v=6.2.108-piclaw1'),
+    loadStylesheet('/static/common/pdfjs/pdf_viewer.css?v=6.2.108-piclaw2'),
+    import('/static/common/dist/pdf-viewer-mobile.bundle.js?v=6.2.108-piclaw2'),
   ]).then(function (loaded) {
     var viewerModule = loaded[1];
     if (!viewerModule || typeof viewerModule.mountMobilePdfViewer !== 'function') {

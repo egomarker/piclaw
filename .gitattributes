@@ -1,0 +1,2 @@
+# Generated PDF.js bundles contain intentional whitespace inside template literals.
+runtime/web/static/common/dist/pdf-viewer-*.bundle.js -whitespace

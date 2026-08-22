@@ -64,14 +64,21 @@ test("build:web produces bundle assets", async () => {
   const appBundle = readFileSync(appBundlePath, "utf8");
   const editorBundle = readFileSync(editorBundlePath, "utf8");
   const pdfViewerBundle = readFileSync(pdfViewerBundlePath, "utf8");
+  const pdfViewerMap = readFileSync(pdfViewerMapPath, "utf8");
   const pdfWorkerBundle = readFileSync(pdfWorkerBundlePath, "utf8");
+  const pdfWorkerMap = readFileSync(pdfWorkerMapPath, "utf8");
   const pdfAssetsMetadata = JSON.parse(readFileSync(pdfAssetsMetadataPath, "utf8"));
   expect(appBundle).toContain('#editor-vendor/codemirror');
   expect(appBundle).not.toContain("mountMobilePdfViewer");
   expect(appBundle).not.toContain("WorkerMessageHandler");
   expect(editorBundle).toContain('#editor-vendor/codemirror');
   expect(pdfViewerBundle).toContain("mountMobilePdfViewer");
+  expect(pdfViewerBundle).toContain("[pdf-viewer] Replacing broken");
+  expect(pdfViewerMap).toContain("pdfjs-dist/legacy/build/pdf.mjs");
+  expect(pdfViewerMap).toContain("pdfjs-dist/legacy/web/pdf_viewer.mjs");
   expect(pdfWorkerBundle).toContain("WorkerMessageHandler");
+  expect(pdfWorkerBundle).toContain("[pdf-viewer] Replacing broken");
+  expect(pdfWorkerMap).toContain("pdfjs-dist/legacy/build/pdf.worker.mjs");
   expect(pdfAssetsMetadata.package.version).toBe("6.2.108");
 
   expect(statSync(appBundlePath).size).toBeLessThan(1_500_000);

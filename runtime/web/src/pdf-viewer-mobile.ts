@@ -1,17 +1,18 @@
+import "./pdf-viewer-compatibility.js";
 import {
   getDocument,
   GlobalWorkerOptions,
   PasswordResponses,
-} from "pdfjs-dist";
+} from "pdfjs-dist/legacy/build/pdf.mjs";
 import {
   EventBus,
   LinkTarget,
   PDFLinkService,
   PDFViewer,
-} from "pdfjs-dist/web/pdf_viewer.mjs";
+} from "pdfjs-dist/legacy/web/pdf_viewer.mjs";
 
 const PDFJS_ASSET_ROOT = "/static/common/pdfjs";
-const PDFJS_WORKER_URL = "/static/common/dist/pdf-viewer-worker.bundle.js?v=6.2.108-piclaw1";
+const PDFJS_WORKER_URL = "/static/common/dist/pdf-viewer-worker.bundle.js?v=6.2.108-piclaw2";
 const MAX_MOBILE_CANVAS_PIXELS = 16_777_216;
 const MAX_MOBILE_CANVAS_DIMENSION = 8_192;
 

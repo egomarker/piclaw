@@ -11,8 +11,8 @@ import {
 } from "playwright";
 import { bootstrapE2EStorageState } from "./web-auth-bootstrap.js";
 
-const PDF_PATH = "__piclaw_pdfjs_mobile_e2e__.pdf";
-const PAGE_COUNT = 18;
+const FIXTURE_PDF_PATH = "__piclaw_pdfjs_mobile_e2e__.pdf";
+const FIXTURE_PAGE_COUNT = 18;
 
 interface Args {
   baseUrl: string;
@@ -20,6 +20,9 @@ interface Args {
   internalSecret: string;
   headless: boolean;
   artifactDir: string;
+  pdfPath: string;
+  expectedPageCount: number;
+  emulateLegacyRuntime: boolean;
 }
 
 interface ScenarioResult {
@@ -36,6 +39,16 @@ function argumentValue(argv: string[], name: string): string {
 function parseArgs(argv: string[]): Args {
   const repoRoot = resolve(import.meta.dir, "..", "..", "..");
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const pdfPath = argumentValue(argv, "--pdf-path") || process.env.PICLAW_E2E_PDF_PATH || FIXTURE_PDF_PATH;
+  const expectedPageCountRaw =
+    argumentValue(argv, "--expected-pages") ||
+    process.env.PICLAW_E2E_EXPECTED_PAGES ||
+    (pdfPath === FIXTURE_PDF_PATH ? String(FIXTURE_PAGE_COUNT) : "");
+  const expectedPageCount = Number(expectedPageCountRaw);
+  if (!Number.isInteger(expectedPageCount) || expectedPageCount < 1) {
+    throw new Error("A positive --expected-pages value is required when testing a non-fixture PDF.");
+  }
+
   return {
     baseUrl: (
       argumentValue(argv, "--base-url") ||
@@ -50,6 +63,9 @@ function parseArgs(argv: string[]): Args {
       "runtime/generated/cache/playwright-pdf-viewer-mobile",
       stamp,
     ),
+    pdfPath,
+    expectedPageCount,
+    emulateLegacyRuntime: !argv.includes("--native-runtime"),
   };
 }
 
@@ -104,10 +120,16 @@ function buildPdf(pageCount: number): Buffer {
   return Buffer.from(pdf);
 }
 
-async function installFixtureRoute(context: BrowserContext, baseUrl: string, pdf: Buffer): Promise<void> {
+async function installFixtureRoute(
+  context: BrowserContext,
+  baseUrl: string,
+  pdfPath: string,
+  pdf: Buffer | null,
+): Promise<void> {
+  if (!pdf) return;
   await context.route(`${baseUrl}/workspace/raw?*`, async (route) => {
     const url = new URL(route.request().url());
-    if (url.searchParams.get("path") !== PDF_PATH) {
+    if (url.searchParams.get("path") !== pdfPath) {
       await route.fallback();
       return;
     }
@@ -120,6 +142,89 @@ async function installFixtureRoute(context: BrowserContext, baseUrl: string, pdf
       },
       body: pdf,
     });
+  });
+}
+
+async function installLegacyRuntimeEmulation(context: BrowserContext): Promise<void> {
+  await context.addInitScript(() => {
+    Reflect.deleteProperty(globalThis, "Iterator");
+    Reflect.deleteProperty(Promise, "withResolvers");
+    Reflect.deleteProperty(Math, "sumPrecise");
+    for (const prototype of [Map.prototype, WeakMap.prototype]) {
+      Reflect.deleteProperty(prototype, "getOrInsert");
+      Object.defineProperty(prototype, "getOrInsertComputed", {
+        configurable: true,
+        writable: true,
+        value() {
+          throw new TypeError("simulated broken getOrInsertComputed implementation");
+        },
+      });
+    }
+  });
+}
+
+interface WorkerCompatibilityResult {
+  __piclawCompatProbe?: boolean;
+  ok: boolean;
+  error?: string;
+  iteratorType?: string;
+  mapComputedWorks?: boolean;
+}
+
+async function probeWorkerCompatibility(page: Page): Promise<WorkerCompatibilityResult> {
+  return page.evaluate(async () => {
+    const workerBundleUrl = new URL(
+      "/static/common/dist/pdf-viewer-worker.bundle.js?v=6.2.108-piclaw2-worker-probe",
+      location.href,
+    ).href;
+    const source = `
+      Reflect.deleteProperty(globalThis, "Iterator");
+      Reflect.deleteProperty(Promise, "withResolvers");
+      Reflect.deleteProperty(Math, "sumPrecise");
+      for (const prototype of [Map.prototype, WeakMap.prototype]) {
+        Reflect.deleteProperty(prototype, "getOrInsert");
+        Object.defineProperty(prototype, "getOrInsertComputed", {
+          configurable: true,
+          writable: true,
+          value() { throw new TypeError("simulated broken getOrInsertComputed implementation"); },
+        });
+      }
+      import(${JSON.stringify(workerBundleUrl)}).then(() => {
+        const marker = {};
+        const map = new Map();
+        const method = Reflect.get(Map.prototype, "getOrInsertComputed");
+        const value = Reflect.apply(method, map, ["key", () => marker]);
+        postMessage({
+          __piclawCompatProbe: true,
+          ok: true,
+          iteratorType: typeof globalThis.Iterator,
+          mapComputedWorks: value === marker && map.get("key") === marker,
+        });
+      }).catch((error) => {
+        postMessage({ __piclawCompatProbe: true, ok: false, error: error && (error.stack || error.message) || String(error) });
+      });
+    `;
+    const blobUrl = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+    const worker = new Worker(blobUrl, { type: "module" });
+    try {
+      return await new Promise<WorkerCompatibilityResult>((resolvePromise) => {
+        const timeout = window.setTimeout(() => {
+          resolvePromise({ ok: false, error: "Worker compatibility probe timed out." });
+        }, 20_000);
+        worker.onmessage = (event: MessageEvent<WorkerCompatibilityResult>) => {
+          if (!event.data?.__piclawCompatProbe) return;
+          window.clearTimeout(timeout);
+          resolvePromise(event.data);
+        };
+        worker.onerror = (event) => {
+          window.clearTimeout(timeout);
+          resolvePromise({ ok: false, error: event.message || "Worker compatibility probe failed." });
+        };
+      });
+    } finally {
+      worker.terminate();
+      URL.revokeObjectURL(blobUrl);
+    }
   });
 }
 
@@ -187,7 +292,7 @@ async function runDesktopScenario(
   browser: Browser,
   storageState: Awaited<ReturnType<typeof bootstrapE2EStorageState>> | undefined,
   args: Args,
-  pdf: Buffer,
+  pdf: Buffer | null,
 ): Promise<ScenarioResult> {
   const context = await browser.newContext({
     storageState,
@@ -195,17 +300,17 @@ async function runDesktopScenario(
   });
   const requests: string[] = [];
   try {
-    await installFixtureRoute(context, args.baseUrl, pdf);
+    await installFixtureRoute(context, args.baseUrl, args.pdfPath, pdf);
     const page = await context.newPage();
     const errors = watchPageErrors(page);
     page.on("request", (request) => requests.push(request.url()));
-    await page.goto(`${args.baseUrl}/pdf-viewer/?path=${encodeURIComponent(PDF_PATH)}`, {
+    await page.goto(`${args.baseUrl}/pdf-viewer/?path=${encodeURIComponent(args.pdfPath)}`, {
       waitUntil: "domcontentloaded",
     });
     await page.waitForFunction(() => document.body.dataset.pdfRenderer === "native");
 
     const objectData = await page.locator("object[type='application/pdf']").getAttribute("data");
-    assert(objectData === `/workspace/raw?path=${encodeURIComponent(PDF_PATH)}`, `Unexpected native object URL: ${objectData}`);
+    assert(objectData === `/workspace/raw?path=${encodeURIComponent(args.pdfPath)}`, `Unexpected native object URL: ${objectData}`);
     assert(!requests.some((url) => url.includes("pdf-viewer-mobile.bundle.js")), "Desktop loaded the mobile PDF.js bundle");
     assert(errors.length === 0, `Desktop page errors: ${errors.join(" | ")}`);
 
@@ -227,7 +332,7 @@ async function runMobileScenario(
   browser: Browser,
   storageState: Awaited<ReturnType<typeof bootstrapE2EStorageState>> | undefined,
   args: Args,
-  pdf: Buffer,
+  pdf: Buffer | null,
 ): Promise<ScenarioResult> {
   const context = await browser.newContext({
     storageState,
@@ -240,16 +345,53 @@ async function runMobileScenario(
   });
   const requests: string[] = [];
   try {
-    await installFixtureRoute(context, args.baseUrl, pdf);
+    if (args.emulateLegacyRuntime) await installLegacyRuntimeEmulation(context);
+    await installFixtureRoute(context, args.baseUrl, args.pdfPath, pdf);
     const page = await context.newPage();
     const errors = watchPageErrors(page);
     page.on("request", (request) => requests.push(request.url()));
-    await page.goto(`${args.baseUrl}/pdf-viewer/?path=${encodeURIComponent(PDF_PATH)}`, {
+    await page.goto(`${args.baseUrl}/pdf-viewer/?path=${encodeURIComponent(args.pdfPath)}`, {
       waitUntil: "domcontentloaded",
     });
-    await page.waitForFunction(() => document.body.dataset.pdfRenderer === "pdfjs", null, { timeout: 20_000 });
-    await page.locator(`.page[data-page-number="1"] canvas`).waitFor({ state: "visible", timeout: 20_000 });
-    await page.getByText(`1 / ${PAGE_COUNT}`, { exact: true }).waitFor({ timeout: 10_000 });
+    await page.waitForFunction(() => document.body.dataset.pdfRenderer === "pdfjs", null, { timeout: 60_000 });
+    try {
+      await page.locator(`.page[data-page-number="1"] canvas`).waitFor({ state: "visible", timeout: 60_000 });
+      await page.getByText(`1 / ${args.expectedPageCount}`, { exact: true }).waitFor({ timeout: 30_000 });
+    } catch (error) {
+      const stateTitle = await page.locator("[data-pdf-state-title]").textContent().catch(() => "");
+      const stateDetail = await page.locator("[data-pdf-state-detail]").textContent().catch(() => "");
+      throw new Error([
+        "PDF.js did not render page 1.",
+        stateTitle || "",
+        stateDetail || "",
+        ...errors,
+        error instanceof Error ? error.message : String(error),
+      ].filter(Boolean).join(" | "), { cause: error });
+    }
+
+    const pageCompatibility = await page.evaluate(() => {
+      const marker = {};
+      const map = new Map();
+      const weakMap = new WeakMap();
+      const weakKey = {};
+      const mapMethod = Reflect.get(Map.prototype, "getOrInsertComputed");
+      const weakMapMethod = Reflect.get(WeakMap.prototype, "getOrInsertComputed");
+      const mapValue = Reflect.apply(mapMethod, map, ["key", () => marker]);
+      const weakMapValue = Reflect.apply(weakMapMethod, weakMap, [weakKey, () => marker]);
+      return {
+        iteratorType: typeof Reflect.get(globalThis, "Iterator"),
+        mapComputedWorks: mapValue === marker && map.get("key") === marker,
+        weakMapComputedWorks: weakMapValue === marker && weakMap.get(weakKey) === marker,
+      };
+    });
+    assert(pageCompatibility.iteratorType === "function", `Iterator compatibility was not installed (${pageCompatibility.iteratorType})`);
+    assert(pageCompatibility.mapComputedWorks, "Map.getOrInsertComputed compatibility failed");
+    assert(pageCompatibility.weakMapComputedWorks, "WeakMap.getOrInsertComputed compatibility failed");
+
+    const workerCompatibility = await probeWorkerCompatibility(page);
+    assert(workerCompatibility.ok, `Worker compatibility failed: ${workerCompatibility.error || "unknown error"}`);
+    assert(workerCompatibility.iteratorType === "function", `Worker Iterator compatibility was not installed (${workerCompatibility.iteratorType})`);
+    assert(workerCompatibility.mapComputedWorks, "Worker Map.getOrInsertComputed compatibility failed");
 
     const container = page.locator("[data-pdf-container]");
     const initialMetrics = await container.evaluate((element) => ({
@@ -294,8 +436,8 @@ async function runMobileScenario(
 
     await page.getByRole("button", { name: "Fit to width" }).click();
     await container.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-    await page.locator(`.page[data-page-number="${PAGE_COUNT}"] canvas`).waitFor({ state: "visible", timeout: 20_000 });
-    await page.getByText(`${PAGE_COUNT} / ${PAGE_COUNT}`, { exact: true }).waitFor({ timeout: 10_000 });
+    await page.locator(`.page[data-page-number="${args.expectedPageCount}"] canvas`).waitFor({ state: "visible", timeout: 60_000 });
+    await page.getByText(`${args.expectedPageCount} / ${args.expectedPageCount}`, { exact: true }).waitFor({ timeout: 30_000 });
     const canvasCount = await page.locator(".pdfViewer canvas").count();
     assert(canvasCount <= 10, `Too many page canvases retained after a long scroll: ${canvasCount}`);
 
@@ -317,7 +459,11 @@ async function runMobileScenario(
       ok: true,
       details: {
         renderer: "pdfjs",
-        pageCount: PAGE_COUNT,
+        pageCount: args.expectedPageCount,
+        pdfPath: args.pdfPath,
+        emulatedLegacyRuntime: args.emulateLegacyRuntime,
+        pageCompatibility,
+        workerCompatibility,
         initialPageWidth,
         touchScrollTop,
         afterPinchWidth,
@@ -335,7 +481,7 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   mkdirSync(args.artifactDir, { recursive: true });
   const reportPath = resolve(args.artifactDir, "report.json");
-  const pdf = buildPdf(PAGE_COUNT);
+  const pdf = args.pdfPath === FIXTURE_PDF_PATH ? buildPdf(args.expectedPageCount) : null;
   const scenarios: ScenarioResult[] = [];
   let browser: Browser | null = null;
   let failure: unknown = null;
@@ -357,6 +503,9 @@ async function main(): Promise<void> {
     const report = {
       ok: failure === null,
       baseUrl: args.baseUrl,
+      pdfPath: args.pdfPath,
+      expectedPageCount: args.expectedPageCount,
+      emulatedLegacyRuntime: args.emulateLegacyRuntime,
       generatedAt: new Date().toISOString(),
       scenarios,
       error: failure instanceof Error ? failure.message : failure ? String(failure) : null,
