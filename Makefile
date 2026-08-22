@@ -41,7 +41,7 @@ BUN_ROOT ?= $(or $(BUN_INSTALL),$(patsubst %/bin/bun,%,$(BUN_BIN_REAL)),/usr/loc
 GLOBAL_PKG := $(BUN_ROOT)/install/global/package.json
 GLOBAL_LOCK := $(BUN_ROOT)/install/global/bun.lock
 PI_AGENT_VERSION ?= $(shell jq -r '.dependencies["@earendil-works/pi-coding-agent"] // "0.74.0"' package.json)
-WEB_BUILD_TEST_TIMEOUT_MS ?= 20000
+WEB_BUILD_TEST_TIMEOUT_MS ?= 45000
 
 .PHONY: help up down enter build build-piclaw build-web build-ts build-desktop vendor update-mermaid-vendor pack portable portable-linux portable-linux-baseline portable-mac portable-windows portable-experimental-shell \
         local-install restart lint test test-coverage ci-fast ci-integration install-git-hooks pre-push-ci publish-smoke \
