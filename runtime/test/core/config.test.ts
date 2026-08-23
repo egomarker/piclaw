@@ -164,6 +164,11 @@ describe("core config", () => {
           addons: { apiFailureBackoffMs: 45000 },
           agentControl: { abortSettleTimeoutMs: 750 },
           sessionRecordings: { directory: "/tmp/persisted-recordings" },
+          providerRequestCapture: {
+            enabled: true,
+            directory: "/tmp/provider-request-captures",
+            sessionIds: "session-a, session-b",
+          },
         },
       });
       const persisted = runConfigSubprocess(workspace, [
@@ -171,6 +176,7 @@ describe("core config", () => {
         "call:getAddonsConfig",
         "call:getAgentControlConfig",
         "call:getSessionRecordingsConfig",
+        "call:getProviderRequestCaptureConfig",
       ], { noEnvFile: true, env: {
         PICLAW_WEB_MAX_CONTENT_CHARS: undefined,
         PICLAW_WEB_PREVIEW_CHARS: undefined,
@@ -182,6 +188,11 @@ describe("core config", () => {
       expect(persisted.snapshot["call:getAddonsConfig"]).toEqual({ apiFailureBackoffMs: 45000 });
       expect(persisted.snapshot["call:getAgentControlConfig"]).toEqual({ abortSettleTimeoutMs: 750 });
       expect(persisted.snapshot["call:getSessionRecordingsConfig"]).toEqual({ directory: "/tmp/persisted-recordings" });
+      expect(persisted.snapshot["call:getProviderRequestCaptureConfig"]).toEqual({
+        enabled: true,
+        directory: "/tmp/provider-request-captures",
+        sessionIds: "session-a, session-b",
+      });
 
       const compat = runConfigSubprocess(workspace, [
         "call:getWebContentConfig",

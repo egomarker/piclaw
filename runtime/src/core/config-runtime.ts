@@ -323,6 +323,49 @@ export function getSessionRecordingsConfig(): Readonly<SessionRecordingsConfig> 
   return Object.freeze(readDomainConfig(sessionRecordingsDomainSchema, getDomainConfigOptions()));
 }
 
+/** Opt-in, sensitive capture of the final provider request body for diagnostics. */
+export interface ProviderRequestCaptureConfig {
+  enabled: boolean;
+  directory: string;
+  /** Comma- or whitespace-delimited session IDs. Empty means all sessions. */
+  sessionIds: string;
+}
+
+const providerRequestCaptureDomainSchema = registerDomainConfig<ProviderRequestCaptureConfig>({
+  domain: "providerRequestCapture",
+  fields: {
+    enabled: boolField({
+      key: "enabled",
+      owner: "provider-diagnostics",
+      defaultValue: false,
+      persistence: "json-config",
+      precedence: ["persisted", "default"],
+      secretClass: "none",
+    }),
+    directory: stringField({
+      key: "directory",
+      owner: "provider-diagnostics",
+      defaultValue: resolve(DATA_DIR, "provider-request-captures"),
+      nonEmpty: true,
+      persistence: "json-config",
+      precedence: ["persisted", "default"],
+      secretClass: "none",
+    }),
+    sessionIds: stringField({
+      key: "sessionIds",
+      owner: "provider-diagnostics",
+      defaultValue: "",
+      persistence: "json-config",
+      precedence: ["persisted", "default"],
+      secretClass: "none",
+    }),
+  },
+});
+
+export function getProviderRequestCaptureConfig(): Readonly<ProviderRequestCaptureConfig> {
+  return Object.freeze(readDomainConfig(providerRequestCaptureDomainSchema, getDomainConfigOptions()));
+}
+
 /** Directory for persisted Pi session files. */
 export const SESSIONS_DIR = resolve(DATA_DIR, "sessions");
 

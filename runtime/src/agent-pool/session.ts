@@ -37,6 +37,7 @@ import { buildChannelSystemPromptAppendix } from "../channels/formatting.js";
 import { detectChannel } from "../router.js";
 import { createBuiltinExtensionFactories } from "../extensions/index.js";
 import { sanitizePersistedSessionMessage } from "../extensions/persisted-tool-result-sanitizer.js";
+import { providerRequestCapture } from "../extensions/provider-request-capture.js";
 import { freezeExtensionRoutes } from "../channels/web/http/extension-routes.js";
 import { ensureExtensionNodeModulesLink } from "./session-node-modules-link.js";
 import { createLogger, debugSuppressedError } from "../utils/logger.js";
@@ -555,9 +556,13 @@ export async function createSessionInDir(
       cwd,
       agentDir,
       settingsManager: options.settingsManager,
-      extensionFactories: options.extensionFactories?.length
-        ? [...builtinExtensionFactories, ...options.extensionFactories]
-        : builtinExtensionFactories,
+      // Keep request capture last so it sees the exact payload returned by all
+      // project, bundled, built-in, and per-session provider-request hooks.
+      extensionFactories: [
+        ...builtinExtensionFactories,
+        ...(options.extensionFactories ?? []),
+        providerRequestCapture,
+      ],
       additionalExtensionPaths,
       ...(appendSystemPromptOverride ? { appendSystemPromptOverride } : {}),
     });

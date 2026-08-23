@@ -102,13 +102,18 @@ Bootstrap environment variables are reviewed as an allowlist in the inventory. T
 
 If `PICLAW_WEB_TLS_CERT` and `PICLAW_WEB_TLS_KEY` are both omitted, piclaw checks for `.piclaw/certs/sandbox.local.crt` and `.piclaw/certs/sandbox.local.key` and enables HTTPS automatically if both exist.
 
-The following operational settings are persisted under typed domains in `.piclaw/config.json`; their legacy variables remain compatibility aliases until 3.0.0:
+The following operational settings are persisted under typed domains in `.piclaw/config.json`. Where shown, legacy variables remain compatibility aliases until 3.0.0:
 
 | Typed setting | Compatibility variable | Default | Purpose |
 |---------------|------------------------|---------|---------|
 | `domains.sessionRecordings.directory` | `PICLAW_RECORDINGS_DIR` | `<PICLAW_DATA>/session-recordings` | Root directory for opt-in session trace recordings. |
 | `domains.addons.apiFailureBackoffMs` | `PICLAW_ADDON_API_FAILURE_BACKOFF_MS` | `60000` | Suppression period for repeated identical add-on API failures. |
 | `domains.agentControl.abortSettleTimeoutMs` | `PICLAW_ABORT_SETTLE_TIMEOUT_MS` | `1000` | Bounded `0..10000` ms wait for abort cleanup to settle. |
+| `domains.providerRequestCapture.enabled` | — | `false` | Opt in to final provider-request body capture for diagnostics. |
+| `domains.providerRequestCapture.directory` | — | `<PICLAW_DATA>/provider-request-captures` | Owner-only capture root, keyed by session ID. |
+| `domains.providerRequestCapture.sessionIds` | — | _(empty)_ | Optional comma- or whitespace-delimited session allowlist; empty captures every session when enabled. |
+
+Provider-request captures contain the exact serialized conversation and tool payload sent to the model. Treat the directory as sensitive and disable capture immediately after diagnosis.
 
 ### VNC target examples
 
