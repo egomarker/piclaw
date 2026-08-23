@@ -21,6 +21,7 @@ import { readJsonConfig, writeJsonConfig } from "../core/config-store.js";
 import { getChatJid } from "../core/chat-context.js";
 import { isContextPressureFailure } from "../agent-pool/automatic-recovery.js";
 import { finalizeRecoveryCompactionOutcome, runCompactionWithTimeout } from "../agent-pool/compaction.js";
+import { retainTransientToolResultImages } from "../extensions/persisted-tool-result-sanitizer.js";
 import {
   didPromptAdvanceSession,
   getSessionLeafId,
@@ -388,6 +389,7 @@ export async function runPromptAndCapture(
   };
 
   const unsub = session.subscribe(onEvent);
+  const releaseTransientImages = retainTransientToolResultImages(session.sessionManager);
   try {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       providerError = null;
@@ -419,6 +421,7 @@ export async function runPromptAndCapture(
       break;
     }
   } finally {
+    releaseTransientImages();
     unsub();
   }
 

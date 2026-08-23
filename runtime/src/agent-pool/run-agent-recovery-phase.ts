@@ -31,6 +31,7 @@ import { RECOVERY_CONTINUATION_PROMPT } from "./context-pressure-retry.js";
 import type { AgentOutput, AgentRecoveryDiagnosticEntry, AgentRecoveryMetadata, RunAgentOptions } from "./contracts.js";
 import { getRecoveryPolicyConfig } from "../core/config.js";
 import { writeAgentLog } from "./logging.js";
+import { retainTransientToolResultImages } from "../extensions/persisted-tool-result-sanitizer.js";
 import { heartbeatTrackedPhase } from "../runtime/progress-watchdog.js";
 import { isRotationFallbackCompactionError } from "../session-rotation.js";
 
@@ -406,7 +407,7 @@ async function runRecoveryCompaction(
   return { ok: true };
 }
 
-export async function runAgentRecoveryPhase(options: RunAgentRecoveryPhaseOptions): Promise<AgentOutput> {
+async function runAgentRecoveryPhaseRetained(options: RunAgentRecoveryPhaseOptions): Promise<AgentOutput> {
   const {
     prompt,
     chatJid,
@@ -841,5 +842,15 @@ export async function runAgentRecoveryPhase(options: RunAgentRecoveryPhaseOption
       attempt: recoveryAttemptsUsed,
     });
     options.clearAttachments(chatJid);
+  }
+}
+
+/** Keep transient tool-result images available across all prompts in one recovery phase. */
+export async function runAgentRecoveryPhase(options: RunAgentRecoveryPhaseOptions): Promise<AgentOutput> {
+  const releaseTransientImages = retainTransientToolResultImages(options.session.sessionManager);
+  try {
+    return await runAgentRecoveryPhaseRetained(options);
+  } finally {
+    releaseTransientImages();
   }
 }

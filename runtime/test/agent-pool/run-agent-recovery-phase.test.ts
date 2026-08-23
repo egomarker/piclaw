@@ -10,6 +10,7 @@ import {
 } from "../../src/agent-pool/run-agent-recovery-phase.js";
 import { RECOVERY_CONTINUATION_PROMPT } from "../../src/agent-pool/context-pressure-retry.js";
 import type { AgentOutput } from "../../src/agent-pool/contracts.js";
+import { persistedToolResultSanitizer } from "../../src/extensions/persisted-tool-result-sanitizer.js";
 import { endTrackedPhase } from "../../src/runtime/progress-watchdog.js";
 
 const TEST_CHAT_JIDS = [
@@ -131,6 +132,80 @@ describe("runAgentRecoveryPhase", () => {
       expect.objectContaining({ type: "recovery_start", attempt: 1, strategy: "retry" }),
       expect.objectContaining({ type: "recovery_end", outcome: "recovered", attemptsUsed: 1 }),
     ]));
+  });
+
+  test("retains transient tool-result images across Piclaw recovery prompts", async () => {
+    const handlers = new Map<string, (event: any, ctx: any) => any>();
+    persistedToolResultSanitizer({
+      on: (event: string, handler: (event: any, ctx: any) => any) => handlers.set(event, handler),
+    } as any);
+
+    const sessionManager = {} as any;
+    const extensionContext = { sessionManager } as any;
+    const session = { sessionManager } as any;
+    let sanitizedToolResult: any;
+    let calls = 0;
+
+    const contextHasImage = async () => {
+      const result = await handlers.get("context")?.({ messages: [sanitizedToolResult] }, extensionContext);
+      const messages = result?.messages ?? [sanitizedToolResult];
+      return messages[0]?.content?.some((block: any) => block?.type === "image") ?? false;
+    };
+
+    const result = await runAgentRecoveryPhase({
+      prompt: "original prompt",
+      chatJid: "web:test-recovery-phase",
+      session,
+      sessionCtrl: null,
+      timeoutMs: 0,
+      startTime: Date.now(),
+      modelLabel: "test/model",
+      recoveryConfig: recoveryConfig(),
+      runOptions: {},
+      logsDir: "/tmp/nonexistent-piclaw-test-logs",
+      clearAttachments: () => {},
+      runPromptAttempt: async () => {
+        calls += 1;
+        if (calls === 1) {
+          const sanitized = await handlers.get("message_end")?.({
+            type: "message_end",
+            message: {
+              role: "toolResult",
+              toolCallId: "call-image-recovery",
+              toolName: "read",
+              content: [
+                { type: "text", text: "image result" },
+                { type: "image", data: "AAAA", mimeType: "image/png" },
+              ],
+              timestamp: Date.now(),
+            },
+          }, extensionContext);
+          sanitizedToolResult = sanitized?.message;
+          await handlers.get("agent_settled")?.({ type: "agent_settled" }, extensionContext);
+          expect(await contextHasImage()).toBe(true);
+          return attempt({
+            output: output("error", "429 Too Many Requests"),
+            snapshot: {
+              hadToolActivity: true,
+              hadPartialOutput: false,
+              hadCompletedTurnOutput: false,
+              hadTerminalTurnOutput: false,
+              sawCompactionIntent: false,
+              hasUnresolvedToolExecution: false,
+            },
+            promptWasPersisted: true,
+          });
+        }
+
+        expect(await contextHasImage()).toBe(true);
+        await handlers.get("agent_settled")?.({ type: "agent_settled" }, extensionContext);
+        return attempt({ output: output("success", undefined, "recovered") });
+      },
+    });
+
+    expect(result.status).toBe("success");
+    expect(calls).toBe(2);
+    expect(await contextHasImage()).toBe(false);
   });
 
   test("disables and restores tools when transient recovery tools are opted out", async () => {

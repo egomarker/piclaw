@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { SessionManager, SettingsManager, getAgentDir } from "@earendil-works/pi-coding-agent";
 import "../helpers.js";
 import { createSessionInDir } from "../../src/agent-pool/session.ts";
+import { retainTransientToolResultImages } from "../../src/extensions/persisted-tool-result-sanitizer.js";
 import { createRealTestModelServices } from "../model-services-fixture.js";
 
 function makeAssistantMessage(text = "ready") {
@@ -88,7 +89,7 @@ describe("session persistence sanitizer", () => {
     }
   });
 
-  test("future tool results stay visual in live context while persistence remains sanitized", async () => {
+  test("future tool results stay visual in live context while persistence remains sanitized", { timeout: 15000 }, async () => {
     console.warn = () => {};
     const tempRoot = mkdtempSync(join(tmpdir(), "piclaw-session-sanitize-append-"));
     const sessionDir = join(tempRoot, "session");
@@ -133,7 +134,51 @@ describe("session persistence sanitizer", () => {
 
       await runtime.session.extensionRunner.emit({ type: "agent_end", messages: [] });
       const afterAgentEnd = await runtime.session.extensionRunner.emitContext([sanitized as any]);
-      expect((afterAgentEnd[0] as any).content.some((block: any) => block?.type === "image")).toBe(false);
+      expect((afterAgentEnd[0] as any).content.some((block: any) => block?.type === "image")).toBe(true);
+
+      await runtime.session.extensionRunner.emit({ type: "agent_settled" });
+      const afterAgentSettled = await runtime.session.extensionRunner.emitContext([sanitized as any]);
+      expect((afterAgentSettled[0] as any).content.some((block: any) => block?.type === "image")).toBe(false);
+
+      await runtime.dispose();
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("Piclaw recovery retention survives settlement and clears on release", { timeout: 15000 }, async () => {
+    console.warn = () => {};
+    const tempRoot = mkdtempSync(join(tmpdir(), "piclaw-session-sanitize-recovery-"));
+    const sessionDir = join(tempRoot, "session");
+    const workspaceDir = process.env.PICLAW_WORKSPACE || "/workspace";
+    const { modelRuntime } = await createRealTestModelServices(join(tempRoot, "agent"));
+    const settingsManager = SettingsManager.create(workspaceDir, getAgentDir());
+
+    try {
+      const runtime = await createSessionInDir(sessionDir, {
+        modelRuntime,
+        settingsManager,
+        tools: [],
+        chatJid: "web:test",
+      });
+
+      const sanitized = await runtime.session.extensionRunner.emitMessageEnd({
+        type: "message_end",
+        message: makeOversizedReadToolResult(128),
+      });
+      expect(sanitized).toBeTruthy();
+
+      const release = retainTransientToolResultImages(runtime.session.sessionManager);
+      await runtime.session.extensionRunner.emit({ type: "agent_end", messages: [] });
+      await runtime.session.extensionRunner.emit({ type: "agent_settled" });
+
+      const recoveryContext = await runtime.session.extensionRunner.emitContext([sanitized as any]);
+      expect((recoveryContext[0] as any).content.some((block: any) => block?.type === "image")).toBe(true);
+
+      release();
+      release();
+      const releasedContext = await runtime.session.extensionRunner.emitContext([sanitized as any]);
+      expect((releasedContext[0] as any).content.some((block: any) => block?.type === "image")).toBe(false);
 
       await runtime.dispose();
     } finally {

@@ -7,6 +7,7 @@ import {
   promptWithContextPressureRetry,
   RECOVERY_CONTINUATION_PROMPT,
 } from "../../src/agent-pool/context-pressure-retry.js";
+import { persistedToolResultSanitizer } from "../../src/extensions/persisted-tool-result-sanitizer.js";
 
 const CONTEXT_ERROR = "OpenAI API error (400): Your input exceeds the context window of this model.";
 
@@ -75,6 +76,55 @@ describe("promptWithContextPressureRetry compaction lifecycle", () => {
     await expect(promptWithContextPressureRetry(session as any, "continue"))
       .resolves.toEqual({ compacted: true });
     expect(session.promptTexts).toEqual(["continue", RECOVERY_CONTINUATION_PROMPT]);
+  });
+
+  it("retains transient tool-result images across the direct retry", async () => {
+    const handlers = new Map<string, (event: any, ctx: any) => any>();
+    persistedToolResultSanitizer({
+      on: (event: string, handler: (event: any, ctx: any) => any) => handlers.set(event, handler),
+    } as any);
+
+    let sanitizedToolResult: any;
+    class ImageContextPressureSession extends ContextPressureSession {
+      override async prompt(text: string) {
+        await super.prompt(text);
+        const extensionContext = { sessionManager: this.sessionManager };
+        if (this.promptCalls === 1) {
+          const sanitized = await handlers.get("message_end")?.({
+            type: "message_end",
+            message: {
+              role: "toolResult",
+              toolCallId: "call-direct-image-retry",
+              toolName: "read",
+              content: [
+                { type: "text", text: "image result" },
+                { type: "image", data: "AAAA", mimeType: "image/png" },
+              ],
+              timestamp: Date.now(),
+            },
+          }, extensionContext);
+          sanitizedToolResult = sanitized?.message;
+        } else {
+          const liveContext = await handlers.get("context")?.({ messages: [sanitizedToolResult] }, extensionContext);
+          const liveMessages = liveContext?.messages ?? [sanitizedToolResult];
+          expect(liveMessages[0]?.content?.some((block: any) => block?.type === "image")).toBe(true);
+        }
+        await handlers.get("agent_settled")?.({ type: "agent_settled" }, extensionContext);
+      }
+    }
+
+    const session = new ImageContextPressureSession();
+    const extensionContext = { sessionManager: session.sessionManager };
+    const contextHasImage = async () => {
+      const result = await handlers.get("context")?.({ messages: [sanitizedToolResult] }, extensionContext);
+      const messages = result?.messages ?? [sanitizedToolResult];
+      return messages[0]?.content?.some((block: any) => block?.type === "image") ?? false;
+    };
+
+    await expect(promptWithContextPressureRetry(session as any, "continue"))
+      .resolves.toEqual({ compacted: true });
+    expect(session.promptCalls).toBe(2);
+    expect(await contextHasImage()).toBe(false);
   });
 
   it("surfaces a recorded smart-compaction cancellation reason and does not retry", async () => {

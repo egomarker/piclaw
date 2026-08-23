@@ -10,6 +10,7 @@
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
 import { getChatJid } from "../core/chat-context.js";
+import { retainTransientToolResultImages } from "../extensions/persisted-tool-result-sanitizer.js";
 import { isContextPressureFailure } from "./automatic-recovery.js";
 import { finalizeRecoveryCompactionOutcome, runCompactionWithTimeout } from "./compaction.js";
 
@@ -44,7 +45,7 @@ function getAssistantErrorFromEvent(event: AgentSessionEvent): string | null {
  * Run a direct prompt and, if the provider rejects it for context pressure,
  * compact the session once and retry without replaying a persisted user turn.
  */
-export async function promptWithContextPressureRetry(
+async function promptWithContextPressureRetryRetained(
   session: AgentSession,
   text: string,
   options?: DirectPromptOptions,
@@ -92,4 +93,17 @@ export async function promptWithContextPressureRetry(
   }
 
   return { compacted };
+}
+
+export async function promptWithContextPressureRetry(
+  session: AgentSession,
+  text: string,
+  options?: DirectPromptOptions,
+): Promise<{ compacted: boolean; errorMessage?: string }> {
+  const releaseTransientImages = retainTransientToolResultImages(session.sessionManager);
+  try {
+    return await promptWithContextPressureRetryRetained(session, text, options);
+  } finally {
+    releaseTransientImages();
+  }
 }

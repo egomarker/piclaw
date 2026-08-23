@@ -10,7 +10,46 @@ type TransientImageBlock = {
   block: MessageContentBlock;
 };
 
+type TransientImageState = {
+  imagesByToolCallId: Map<string, TransientImageBlock[]>;
+  retainCount: number;
+};
+
 const IMAGE_SANITIZE_NOTICE_PREFIX = "[Persisted tool result sanitized: removed ";
+const transientImageStates = new WeakMap<object, TransientImageState>();
+
+function getTransientImageState(sessionManager: object): TransientImageState {
+  const existing = transientImageStates.get(sessionManager);
+  if (existing) return existing;
+
+  const state: TransientImageState = {
+    imagesByToolCallId: new Map(),
+    retainCount: 0,
+  };
+  transientImageStates.set(sessionManager, state);
+  return state;
+}
+
+/**
+ * Keep transient tool-result images alive across multiple AgentSession.prompt()
+ * calls that belong to one Piclaw-owned recovery phase.
+ */
+export function retainTransientToolResultImages(
+  sessionManager: object | null | undefined,
+): () => void {
+  if (!sessionManager) return () => {};
+
+  const state = getTransientImageState(sessionManager);
+  state.retainCount += 1;
+  let released = false;
+
+  return () => {
+    if (released) return;
+    released = true;
+    state.retainCount = Math.max(0, state.retainCount - 1);
+    if (state.retainCount === 0) state.imagesByToolCallId.clear();
+  };
+}
 
 export type PersistedToolResultSanitizeResult = {
   message: PersistableSessionMessage;
@@ -150,26 +189,27 @@ export function sanitizePersistedSessionMessage(message: PersistableSessionMessa
 
 /**
  * Sanitize finalized messages before AgentSession persists them while retaining
- * tool-returned images only in the active agent run's provider context.
+ * tool-returned images through SDK retries, queued continuations, and bounded
+ * Piclaw-owned recovery prompts.
  */
 export const persistedToolResultSanitizer: ExtensionFactory = (pi) => {
-  const transientImagesByToolCallId = new Map<string, TransientImageBlock[]>();
-
-  pi.on("message_end", (event) => {
+  pi.on("message_end", (event, ctx) => {
+    const state = getTransientImageState(ctx.sessionManager);
     const toolCallId = getToolResultCallId(event.message);
     const transientImages = toolCallId ? collectTransientImageBlocks(event.message) : [];
     const result = sanitizePersistedSessionMessage(event.message as PersistableSessionMessage);
     if (result.changed && toolCallId && transientImages.length > 0) {
-      transientImagesByToolCallId.set(toolCallId, transientImages);
+      state.imagesByToolCallId.set(toolCallId, transientImages);
     }
     return result.changed ? { message: result.message as AgentMessage } : undefined;
   });
 
-  pi.on("context", (event) => {
+  pi.on("context", (event, ctx) => {
+    const state = getTransientImageState(ctx.sessionManager);
     let changed = false;
     const messages = event.messages.map((message) => {
       const toolCallId = getToolResultCallId(message);
-      const transientImages = toolCallId ? transientImagesByToolCallId.get(toolCallId) : undefined;
+      const transientImages = toolCallId ? state.imagesByToolCallId.get(toolCallId) : undefined;
       if (!transientImages?.length) return message;
       changed = true;
       return rehydrateTransientImages(message, transientImages);
@@ -177,7 +217,13 @@ export const persistedToolResultSanitizer: ExtensionFactory = (pi) => {
     return changed ? { messages } : undefined;
   });
 
-  pi.on("agent_end", () => {
-    transientImagesByToolCallId.clear();
+  pi.on("agent_settled", (_event, ctx) => {
+    const state = getTransientImageState(ctx.sessionManager);
+    if (state.retainCount === 0) state.imagesByToolCallId.clear();
+  });
+
+  pi.on("session_shutdown", (_event, ctx) => {
+    transientImageStates.get(ctx.sessionManager)?.imagesByToolCallId.clear();
+    transientImageStates.delete(ctx.sessionManager);
   });
 };
