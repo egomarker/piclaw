@@ -30,6 +30,7 @@ beforeAll(async () => {
     agentPool: {
       isStreaming: () => false,
       isActive: () => false,
+      subscribeActivityChanges: () => () => {},
       getContextUsageForChat: async () => null,
       getAvailableModels: async () => ({
         current: "anthropic/claude-sonnet-4",

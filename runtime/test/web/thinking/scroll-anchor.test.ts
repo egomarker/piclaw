@@ -101,6 +101,7 @@ describe("attachHeaderAnchor", () => {
     scrollHeight?: number;
     clientWidth?: number;
     scrollTop?: number;
+    timelineTouchScrolling?: string;
   } = {}) {
     const listeners = { add: 0, remove: 0 };
     return {
@@ -109,6 +110,7 @@ describe("attachHeaderAnchor", () => {
       scrollHeight: opts.scrollHeight ?? 5000,
       clientWidth: opts.clientWidth ?? 300,
       scrollTop: opts.scrollTop ?? 1000,
+      dataset: { timelineTouchScrolling: opts.timelineTouchScrolling ?? "false" },
       listeners,
       addEventListener() { listeners.add++; },
       removeEventListener() { listeners.remove++; },
@@ -191,6 +193,19 @@ describe("attachHeaderAnchor", () => {
     s.scrollHeight = 5200;
     roCallbacks[0]();
     expect(s.scrollTop).toBe(1000); // stale target not applied
+  });
+
+  it("abandons compensation while touch scrolling preserves native momentum", () => {
+    const s = makeScroller({ timelineTouchScrolling: "true", scrollTop: 1000, scrollHeight: 5000 });
+    const h = attachHeaderAnchor(asEl(s), asEl({}));
+    h.mark();
+    s.scrollHeight = 5120;
+    roCallbacks[0]();
+    expect(s.scrollTop).toBe(1000);
+
+    s.dataset.timelineTouchScrolling = "false";
+    roCallbacks[0]();
+    expect(s.scrollTop).toBe(1000); // the marked session remains abandoned
   });
 
   it("shares one scroll listener across pills and removes it only on last dispose", () => {
