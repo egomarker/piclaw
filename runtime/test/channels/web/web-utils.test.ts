@@ -93,7 +93,7 @@ test("static helpers serve files and not-found", async () => {
   const indexHtml = await okRes.text();
   expect(indexHtml).not.toContain("__APP_ASSET_VERSION__");
   expect(indexHtml).not.toContain("__PICLAW_NOTIFICATION_SOURCE_LABELS_FLAG__");
-  expect(indexHtml).toMatch(/\/static\/classic\/dist\/app\.bundle\.js\?v=[a-z0-9]+/i);
+  expect(indexHtml).toMatch(/\/static\/mobile\/dist\/app\.bundle\.js\?v=[a-z0-9]+/i);
   expect(indexHtml).toMatch(/\/manifest\.json\?v=[a-z0-9]+/i);
   expect(indexHtml).toContain('window.__PICLAW_NOTIFICATION_SOURCE_LABELS_ENABLED__ = "0" === "1";');
 
@@ -103,7 +103,7 @@ test("static helpers serve files and not-found", async () => {
   expect(loginHtml).not.toContain("__LOGIN_ASSET_VERSION__");
   expect(loginHtml).toMatch(/\/static\/(common\/)?dist\/login\.bundle\.js\?v=[a-z0-9]+/i);
 
-  const appBundleRes = await serveStatic("classic/dist/app.bundle.js", () => new Response("nope", { status: 404 }));
+  const appBundleRes = await serveStatic("mobile/dist/app.bundle.js", () => new Response("nope", { status: 404 }));
   expect(appBundleRes.status).toBe(200);
   expect(appBundleRes.headers.get("Cache-Control")).toBe("no-cache, no-store, must-revalidate");
 

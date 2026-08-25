@@ -41,7 +41,7 @@ const MIME_TYPES: Record<string, string> = {
 const APP_ASSET_VERSION_PLACEHOLDER = "__APP_ASSET_VERSION__";
 const LOGIN_ASSET_VERSION_PLACEHOLDER = "__LOGIN_ASSET_VERSION__";
 const NOTIFICATION_SOURCE_LABELS_PLACEHOLDER = "__PICLAW_NOTIFICATION_SOURCE_LABELS_FLAG__";
-const APP_VERSION_FILES = ["classic/dist/app.bundle.js", "classic/dist/app.bundle.css"];
+const APP_VERSION_FILES = ["mobile/dist/app.bundle.js", "mobile/dist/app.bundle.css"];
 const LOGIN_VERSION_FILES = ["common/dist/login.bundle.js", "common/dist/login.bundle.css"];
 const TEXT_ASSET_CACHE = new Map<string, { mtimeMs: number; text: string }>();
 const GZIP_ASSET_CACHE = new Map<string, { mtimeMs: number; data: Uint8Array }>();
@@ -90,6 +90,17 @@ export function getAppAssetVersion(): string {
 
 export function getLoginAssetVersion(): string {
   return readAssetVersion(LOGIN_VERSION_FILES);
+}
+
+const LEGACY_CLASSIC_DIST_PREFIX = "classic/dist/";
+
+/**
+ * Keep already-open Classic/Visual clients able to lazy-load shared bundles
+ * after the canonical authenticated app output moves under Mobile ownership.
+ */
+export function resolveStaticCompatibilityPath(relPath: string): string {
+  if (!relPath.startsWith(LEGACY_CLASSIC_DIST_PREFIX)) return relPath;
+  return `mobile/dist/${relPath.slice(LEGACY_CLASSIC_DIST_PREFIX.length)}`;
 }
 
 function renderHtmlTemplate(relPath: string, html: string): string {
@@ -172,7 +183,8 @@ import { isPathWithin } from "../../../utils/path-safety.js";
  * @returns Static-file response with content-type/cache headers, or the provided not-found response.
  */
 export async function serveStatic(relPath: string, notFound: () => Response, req?: Request): Promise<Response> {
-  const filePath = resolve(STATIC_DIR, relPath);
+  const resolvedRelPath = resolveStaticCompatibilityPath(relPath);
+  const filePath = resolve(STATIC_DIR, resolvedRelPath);
   if (!isPathWithin(STATIC_DIR, filePath)) return notFound();
 
   const file = Bun.file(filePath);

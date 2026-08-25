@@ -14,15 +14,15 @@
   Bundles:
   ────────
   The authenticated SPA is shipped as app bundles:
-    - /static/classic/dist/app.bundle.js
-    - /static/classic/dist/app.bundle.css
+    - /static/mobile/dist/app.bundle.js
+    - /static/mobile/dist/app.bundle.css
   Login is a separate minimal bundle set:
     - /static/common/dist/login.bundle.js (loaded only by login.html)
     - /static/common/dist/login.bundle.css (loaded only by login.html)
 
   Vendor JS globals (marked, KaTeX, Mermaid) remain separate prebuilt files.
-  App CSS is bundled into /static/classic/dist/*.bundle.css; login CSS uses /static/common/dist/.
-  request-router-service.ts auth-gates /static/classic/dist/app.bundle.{js,css} and only
+  App CSS is bundled into /static/mobile/dist/*.bundle.css; login CSS uses /static/common/dist/.
+  request-router-service.ts auth-gates /static/mobile/dist/app.bundle.{js,css} and only
   exposes /static/common/dist/login.bundle.{js,css} to unauthenticated visitors.
 -->
 <head>
@@ -87,8 +87,8 @@
             } catch(e) {}
         })();
     </script>
-    <link rel="stylesheet" href="/static/classic/dist/app.bundle.css?v=4333b0051b21">
-    <link id="dynamic-manifest" rel="manifest" href="/manifest.json?v=4333b0051b21">
+    <link rel="stylesheet" href="/static/mobile/dist/app.bundle.css?v=a02fb583ccc8">
+    <link id="dynamic-manifest" rel="manifest" href="/manifest.json?v=a02fb583ccc8">
     <link id="dynamic-favicon" rel="icon" href="/favicon.ico">
     <link id="dynamic-apple-touch-icon" rel="apple-touch-icon" href="/apple-touch-icon.png">
     <link id="dynamic-apple-touch-icon-180" rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-180x180.png">
@@ -205,6 +205,6 @@
       }
     }
     </script>
-    <script type="module" src="/static/classic/dist/app.bundle.js?v=4333b0051b21"></script>
+    <script type="module" src="/static/mobile/dist/app.bundle.js?v=a02fb583ccc8"></script>
 </body>
 </html>

@@ -9,7 +9,7 @@ function cssRuleBody(css: string, selector: string): string {
 }
 
 test('post highlights inherit foreground color so dark-mode text remains readable', () => {
-  const overlaysCss = readFileSync(join(import.meta.dir, '../../web/static/classic/css/overlays.css'), 'utf8');
+  const overlaysCss = readFileSync(join(import.meta.dir, '../../web/src/styles/shared/overlays.css'), 'utf8');
   const highlight = cssRuleBody(overlaysCss, 'mark.post-highlight');
 
   expect(highlight).toContain('color: inherit;');

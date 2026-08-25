@@ -147,7 +147,7 @@ export function getCurrentAppAssetVersion(options: CurrentAppAssetVersionOptions
 
   try {
     const script = Array.from(doc?.querySelectorAll?.('script[type="module"][src]') || [])
-      .find((node) => String(node?.getAttribute?.('src') || '').includes('/static/classic/dist/app.bundle.js'));
+      .find((node) => String(node?.getAttribute?.('src') || '').includes('/static/mobile/dist/app.bundle.js'));
     const src = script?.getAttribute?.('src') || '';
     if (!src) return null;
     const resolved = new URL(src, origin);

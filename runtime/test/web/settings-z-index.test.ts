@@ -15,9 +15,9 @@ function zIndexFor(css: string, selector: string): number {
 }
 
 test('settings overlay stays above workspace/editor chrome and transient menus', () => {
-  const settingsCss = readFileSync(join(import.meta.dir, '../../web/static/classic/css/settings.css'), 'utf8');
-  const editorCss = readFileSync(join(import.meta.dir, '../../web/static/classic/css/editor.css'), 'utf8');
-  const workspaceCss = readFileSync(join(import.meta.dir, '../../web/static/classic/css/workspace.css'), 'utf8');
+  const settingsCss = readFileSync(join(import.meta.dir, '../../web/src/styles/shared/settings.css'), 'utf8');
+  const editorCss = readFileSync(join(import.meta.dir, '../../web/src/styles/shared/editor.css'), 'utf8');
+  const workspaceCss = readFileSync(join(import.meta.dir, '../../web/src/styles/shared/workspace.css'), 'utf8');
 
   const settingsPortalZ = zIndexFor(settingsCss, '.settings-portal');
   const settingsBackdropZ = zIndexFor(settingsCss, '.settings-dialog-backdrop');
@@ -34,7 +34,7 @@ test('settings overlay stays above workspace/editor chrome and transient menus',
 });
 
 test('settings status bar is height-capped so long add-on errors cannot cover the dialog', () => {
-  const settingsCss = readFileSync(join(import.meta.dir, '../../web/static/classic/css/settings.css'), 'utf8');
+  const settingsCss = readFileSync(join(import.meta.dir, '../../web/src/styles/shared/settings.css'), 'utf8');
   const body = cssRuleBody(settingsCss, '.settings-status-bar');
 
   expect(body).toContain('max-height: min(18vh, 160px);');
@@ -43,7 +43,7 @@ test('settings status bar is height-capped so long add-on errors cannot cover th
 });
 
 test('add-on busy indicator sticks to the visible add-on list viewport', () => {
-  const settingsCss = readFileSync(join(import.meta.dir, '../../web/static/classic/css/settings.css'), 'utf8');
+  const settingsCss = readFileSync(join(import.meta.dir, '../../web/src/styles/shared/settings.css'), 'utf8');
   const overlay = cssRuleBody(settingsCss, '.settings-addon-panel-overlay');
   const card = cssRuleBody(settingsCss, '.settings-addon-panel-overlay-card');
   const source = readFileSync(join(import.meta.dir, '../../web/src/components/settings/addons.ts'), 'utf8');

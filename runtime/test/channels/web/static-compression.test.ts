@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
 import { gunzipSync } from "bun";
 
-import { serveStatic } from "../../../src/channels/web/http/static.js";
+import {
+  resolveStaticCompatibilityPath,
+  serveStatic,
+} from "../../../src/channels/web/http/static.js";
 
 function notFound(): Response {
   return new Response("not found", { status: 404 });
@@ -13,15 +16,40 @@ test("serveStatic renders the Mobile shell marker", async () => {
   expect(response.status).toBe(200);
   expect(response.headers.get("Content-Type")).toContain("text/html");
   expect(response.headers.get("Cache-Control")).toContain("no-cache");
-  expect(await response.text()).toContain('data-piclaw-ui="mobile"');
+  const html = await response.text();
+  expect(html).toContain('data-piclaw-ui="mobile"');
+  expect(html).toContain('/static/mobile/dist/app.bundle.css');
+  expect(html).toContain('/static/mobile/dist/app.bundle.js');
+});
+
+test("serveStatic renders the Classic shell with canonical Mobile bundles", async () => {
+  const response = await serveStatic("classic/index.html", notFound);
+  const html = await response.text();
+
+  expect(response.status).toBe(200);
+  expect(html).not.toContain('data-piclaw-ui="mobile"');
+  expect(html).toContain('/static/mobile/dist/app.bundle.css');
+  expect(html).toContain('/static/mobile/dist/app.bundle.js');
+});
+
+test("serveStatic maps legacy Classic dist URLs to canonical Mobile assets", async () => {
+  expect(resolveStaticCompatibilityPath("classic/dist/editor.bundle.js")).toBe("mobile/dist/editor.bundle.js");
+  expect(resolveStaticCompatibilityPath("mobile/dist/editor.bundle.js")).toBe("mobile/dist/editor.bundle.js");
+
+  const legacy = await serveStatic("classic/dist/app.bundle.css", notFound);
+  const canonical = await serveStatic("mobile/dist/app.bundle.css", notFound);
+
+  expect(legacy.status).toBe(200);
+  expect(legacy.headers.get("Cache-Control")).toContain("no-cache");
+  expect(await legacy.text()).toBe(await canonical.text());
 });
 
 test("serveStatic gzip-compresses compressible assets when requested", async () => {
-  const req = new Request("https://example.test/static/classic/dist/app.bundle.css", {
+  const req = new Request("https://example.test/static/mobile/dist/app.bundle.css", {
     headers: { "Accept-Encoding": "gzip" },
   });
 
-  const response = await serveStatic("classic/dist/app.bundle.css", notFound, req);
+  const response = await serveStatic("mobile/dist/app.bundle.css", notFound, req);
 
   expect(response.status).toBe(200);
   expect(response.headers.get("Content-Encoding")).toBe("gzip");
@@ -34,11 +62,11 @@ test("serveStatic gzip-compresses compressible assets when requested", async () 
 });
 
 test("serveStatic falls back to runtime gzip when brotli is accepted but no sidecar exists", async () => {
-  const req = new Request("https://example.test/static/classic/dist/app.bundle.css", {
+  const req = new Request("https://example.test/static/mobile/dist/app.bundle.css", {
     headers: { "Accept-Encoding": "br, gzip" },
   });
 
-  const response = await serveStatic("classic/dist/app.bundle.css", notFound, req);
+  const response = await serveStatic("mobile/dist/app.bundle.css", notFound, req);
 
   expect(response.status).toBe(200);
   expect(response.headers.get("Content-Encoding")).toBe("gzip");
@@ -83,7 +111,7 @@ test("serveStatic leaves already-compressed assets unencoded", async () => {
 });
 
 test("serveStatic adds Vary for compressible assets even without compression", async () => {
-  const response = await serveStatic("classic/dist/app.bundle.css", notFound);
+  const response = await serveStatic("mobile/dist/app.bundle.css", notFound);
 
   expect(response.status).toBe(200);
   expect(response.headers.get("Content-Encoding")).toBeNull();

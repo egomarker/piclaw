@@ -20,16 +20,16 @@ const INDEXES = [
   resolve(import.meta.dir, "../web/static/classic/index.html"),
   resolve(import.meta.dir, "../web/static/mobile/index.html"),
 ];
-const CLASSIC_DIST = resolve(import.meta.dir, "../web/static/classic/dist");
+const APP_DIST = resolve(import.meta.dir, "../web/static/mobile/dist");
 const COMMON_DIST = resolve(import.meta.dir, "../web/static/common/dist");
 
 // Build a content hash from the main bundle files so the stamp is
 // deterministic and tied to actual content, not wall-clock time.
 function computeBundleContentHash(): string {
   const bundleFiles = [
-    resolve(CLASSIC_DIST, "app.bundle.js"),
-    resolve(CLASSIC_DIST, "app.bundle.css"),
-    resolve(CLASSIC_DIST, "editor.bundle.js"),
+    resolve(APP_DIST, "app.bundle.js"),
+    resolve(APP_DIST, "app.bundle.css"),
+    resolve(APP_DIST, "editor.bundle.js"),
     resolve(COMMON_DIST, "login.bundle.js"),
     resolve(COMMON_DIST, "login.bundle.css"),
   ];

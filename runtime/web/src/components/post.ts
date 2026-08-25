@@ -1908,7 +1908,7 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
                     </div>
                 `}
                 ${shouldRenderContent && html`
-                    <div 
+                    <div
                         ref=${contentRef}
                         class="post-content"
                         dangerouslySetInnerHTML=${{ __html: renderedHtml }}

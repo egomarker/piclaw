@@ -3861,7 +3861,7 @@ export function ComposeBox({
                     `}
                     ${!searchMode && html`
                         <div class="compose-send-stack">
-                                <button 
+                                <button
                                     class=${submitButtonState.className}
                                     data-testid="send-button"
                                     type="button"
@@ -3875,7 +3875,7 @@ export function ComposeBox({
                                     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
                                 </button>
                                 ${abortButtonState && html`
-                                    <button 
+                                    <button
                                         class=${abortButtonState.className}
                                         data-testid="stop-button"
                                         type="button"

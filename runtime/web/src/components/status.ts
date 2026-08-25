@@ -1172,7 +1172,7 @@ export function AgentRequestModal({ request, onRespond }) {
                 <div class="agent-request-actions">
                     ${hasOptions ? (
                         options.map(opt => html`
-                            <button 
+                            <button
                                 key=${opt.optionId || opt.id || String(opt)}
                                 class="agent-request-btn ${opt.kind === 'allow_once' || opt.kind === 'allow_always' ? 'primary' : ''}"
                                 onClick=${() => handleResponse(opt.optionId || opt.id || opt)}
