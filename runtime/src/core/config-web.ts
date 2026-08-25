@@ -15,6 +15,7 @@ import {
 } from "./config-context.js";
 import { getNetworkBootstrapConfig } from "./config-network-bootstrap.js";
 import { getWebSecretBootstrapConfig, setWebSecretCompatibilityValue } from "./config-secrets.js";
+import { createLogger } from "../utils/logger.js";
 import {
   boolField,
   integerField,
@@ -25,6 +26,8 @@ import {
   type DomainConfigField,
   type DomainConfigRuntimeOptions,
 } from "./domain-config.js";
+
+const log = createLogger("core.config");
 
 const configWebTotpSecret = pickString(webConfig, [
   "totpSecret",
@@ -163,6 +166,7 @@ export interface WebServerConfig {
 
 /** Mutable web auth/session/runtime settings grouped for auth and UI wiring. */
 export type WebUiMode = "classic" | "visual" | "mobile";
+const DEPRECATED_WEB_UI_MODES = new Set<WebUiMode>(["classic", "visual"]);
 const WEB_PASSKEY_MODES = ["totp-fallback", "totp-only", "passkey-only"] as const;
 export type WebPasskeyMode = (typeof WEB_PASSKEY_MODES)[number];
 
@@ -171,6 +175,16 @@ function parseWebPasskeyMode(value: unknown): WebPasskeyMode {
   const normalized = value.trim().toLowerCase();
   if ((WEB_PASSKEY_MODES as readonly string[]).includes(normalized)) return normalized as WebPasskeyMode;
   throw new Error("Domain config value is not allowed for passkeyMode");
+}
+
+function warnDeprecatedWebUiMode(uiMode: WebUiMode): void {
+  if (!DEPRECATED_WEB_UI_MODES.has(uiMode)) return;
+  log.warn("Deprecated web UI mode selected", {
+    operation: "core_config.warn_deprecated_web_ui_mode",
+    uiMode,
+    replacement: "mobile",
+    removalVersion: "3.0.0",
+  });
 }
 
 export interface WebRuntimeConfig {
@@ -271,7 +285,7 @@ type WebOrdinaryDomainConfig = Pick<
 const webOrdinaryDomainSchema = registerDomainConfig<WebOrdinaryDomainConfig>({
   domain: "web",
   fields: {
-    uiMode: stringField({ key: "uiMode", owner: "web", defaultValue: "classic", allowedValues: ["classic", "visual", "mobile"], persistence: "json-config", precedence: ["compat-env", "persisted", "default"], secretClass: "none", compatibilityEnv: [{ envKey: "PICLAW_WEB_UI_MODE", replacement: "domains.web.uiMode", removalVersion: "3.0.0" }] }) as DomainConfigField<WebUiMode>,
+    uiMode: stringField({ key: "uiMode", owner: "web", defaultValue: "mobile", allowedValues: ["classic", "visual", "mobile"], persistence: "json-config", precedence: ["compat-env", "persisted", "default"], secretClass: "none", compatibilityEnv: [{ envKey: "PICLAW_WEB_UI_MODE", replacement: "domains.web.uiMode", removalVersion: "3.0.0" }] }) as DomainConfigField<WebUiMode>,
     idleTimeout: integerField({ key: "idleTimeout", owner: "web", defaultValue: configWebIdleTimeout ?? legacyWebIdleTimeout ?? 0, min: 0, bounds: ">=0", persistence: "json-config", precedence: ["bootstrap-cli-env", "compat-env", "persisted", "default"], secretClass: "none", compatibilityEnv: [{ envKey: "PICLAW_WEB_IDLE_TIMEOUT", replacement: "domains.web.idleTimeout", removalVersion: "3.0.0" }] }),
     persistThinking: boolField({ key: "persistThinking", owner: "web", defaultValue: false, persistence: "json-config", precedence: ["compat-env", "persisted", "default"], secretClass: "none", compatibilityEnv: [{ envKey: "PICLAW_WEB_PERSIST_THINKING", replacement: "domains.web.persistThinking", removalVersion: "3.0.0" }] }),
     persistThinkingMaxChars: integerField({ key: "persistThinkingMaxChars", owner: "web", defaultValue: 100000, min: 1, bounds: "positive integer", persistence: "json-config", precedence: ["compat-env", "persisted", "default"], secretClass: "none", compatibilityEnv: [{ envKey: "PICLAW_WEB_PERSIST_THINKING_MAX_CHARS", replacement: "domains.web.persistThinkingMaxChars", removalVersion: "3.0.0", parse: (raw) => { const parsed = Number(raw); return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : 100000; } }] }),
@@ -304,6 +318,7 @@ const webOrdinaryDomainSchema = registerDomainConfig<WebOrdinaryDomainConfig>({
 });
 
 const WEB_ORDINARY_DOMAIN_CONFIG = readDomainConfig(webOrdinaryDomainSchema, getWebOrdinaryDomainConfigOptions());
+warnDeprecatedWebUiMode(WEB_ORDINARY_DOMAIN_CONFIG.uiMode);
 
 /** Grouped web server network/TLS settings. */
 const NETWORK_BOOTSTRAP_CONFIG = getNetworkBootstrapConfig();

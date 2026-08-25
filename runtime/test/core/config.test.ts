@@ -99,6 +99,20 @@ function expectCompatWarningOnce(stderr: string, envKey: string): void {
   expect(warningLines[0]).toContain('"removalVersion":"3.0.0"');
 }
 
+function deprecatedWebUiModeWarningLines(stderr: string): string[] {
+  return stderr
+    .split("\n")
+    .filter((line) => line.includes('"operation":"core_config.warn_deprecated_web_ui_mode"'));
+}
+
+function expectDeprecatedWebUiModeWarningOnce(stderr: string, uiMode: "classic" | "visual"): void {
+  const warningLines = deprecatedWebUiModeWarningLines(stderr);
+  expect(warningLines, uiMode).toHaveLength(1);
+  expect(warningLines[0]).toContain(`"uiMode":"${uiMode}"`);
+  expect(warningLines[0]).toContain('"replacement":"mobile"');
+  expect(warningLines[0]).toContain('"removalVersion":"3.0.0"');
+}
+
 describe("core config", () => {
   test("platform helpers expose the documented default remote-surface policy", async () => {
     await withFreshConfig({}, async ({ config }) => {
@@ -1198,6 +1212,64 @@ describe("core config", () => {
     }
   });
 
+  test("Mobile is the default while explicit Classic and Visual modes remain available with deprecation warnings", () => {
+    const cases: Array<{
+      name: string;
+      config?: Record<string, unknown>;
+      expected: "classic" | "visual" | "mobile";
+    }> = [
+      { name: "default", expected: "mobile" },
+      { name: "canonical-mobile", config: { domains: { web: { uiMode: "mobile" } } }, expected: "mobile" },
+      { name: "canonical-classic", config: { domains: { web: { uiMode: "classic" } } }, expected: "classic" },
+      { name: "canonical-visual", config: { domains: { web: { uiMode: "visual" } } }, expected: "visual" },
+      { name: "legacy-classic", config: { web: { uiMode: "classic" } }, expected: "classic" },
+    ];
+
+    for (const testCase of cases) {
+      const workspace = createTempWorkspace(`piclaw-web-ui-mode-${testCase.name}-`);
+      try {
+        if (testCase.config) writeWorkspaceConfig(workspace.workspace, testCase.config);
+        const { snapshot, stderr } = runConfigSubprocess(workspace, ["call:getWebRuntimeConfig"], {
+          env: { PICLAW_WEB_UI_MODE: undefined },
+        });
+        expect(snapshot["call:getWebRuntimeConfig"].uiMode).toBe(testCase.expected);
+        if (testCase.expected === "mobile") {
+          expect(deprecatedWebUiModeWarningLines(stderr)).toHaveLength(0);
+        } else {
+          expectDeprecatedWebUiModeWarningOnce(stderr, testCase.expected);
+        }
+      } finally {
+        workspace.cleanup();
+      }
+    }
+  });
+
+  test("invalid persisted web UI modes still fail startup validation", () => {
+    const workspace = createTempWorkspace("piclaw-web-ui-mode-invalid-");
+    try {
+      writeWorkspaceConfig(workspace.workspace, { domains: { web: { uiMode: "unknown" } } });
+      const proc = Bun.spawnSync({
+        cmd: ["bun", "--no-env-file", CONFIG_SUBPROCESS],
+        cwd: workspace.workspace,
+        env: {
+          PATH: process.env.PATH || "",
+          HOME: process.env.HOME || "/tmp",
+          PICLAW_WORKSPACE: workspace.workspace,
+          PICLAW_STORE: workspace.store,
+          PICLAW_DATA: workspace.data,
+          PICLAW_DB_IN_MEMORY: "1",
+          PICLAW_CONFIG_EXPORTS: "call:getWebRuntimeConfig",
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(proc.exitCode).not.toBe(0);
+      expect(proc.stderr.toString()).toContain("Domain config value is not allowed for uiMode");
+    } finally {
+      workspace.cleanup();
+    }
+  });
+
   test("persisted web domain settings win in a fresh process when compatibility aliases are absent", () => {
     const workspace = createTempWorkspace("piclaw-domain-config-restart-");
     try {
@@ -1366,6 +1438,7 @@ describe("core config", () => {
       ]) {
         expectCompatWarningOnce(stderr, envKey);
       }
+      expectDeprecatedWebUiModeWarningOnce(stderr, "visual");
     } finally {
       workspace.cleanup();
     }

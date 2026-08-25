@@ -3,11 +3,11 @@ import { handleShellRoutes, resolveWebUiIndexPath } from "../../../src/channels/
 import { buildRouteFlags } from "./helpers/route-flags.js";
 
 describe("web http shell dispatch", () => {
-  test("resolves the configured Classic, Visual, and Mobile shell paths", () => {
+  test("resolves explicit rollback shells and defaults unknown modes to Mobile", () => {
     expect(resolveWebUiIndexPath("classic")).toBe("classic/index.html");
     expect(resolveWebUiIndexPath("visual")).toBe("visual/index.html");
     expect(resolveWebUiIndexPath("mobile")).toBe("mobile/index.html");
-    expect(resolveWebUiIndexPath("unknown")).toBe("classic/index.html");
+    expect(resolveWebUiIndexPath("unknown")).toBe("mobile/index.html");
   });
 
   test("returns null when no shell route matches", async () => {
@@ -35,7 +35,7 @@ describe("web http shell dispatch", () => {
     } as any;
 
     const indexFlags = buildRouteFlags({ isIndex: true });
-    expect(await (await handleShellRoutes(channel, new Request("https://e/", { method: "GET" }), "/", indexFlags, async () => new Response()))?.text()).toBe("static:classic/index.html");
+    expect(await (await handleShellRoutes(channel, new Request("https://e/", { method: "GET" }), "/", indexFlags, async () => new Response()))?.text()).toBe("static:mobile/index.html");
 
     const manifestFlags = buildRouteFlags({ isManifest: true });
     expect(await (await handleShellRoutes(channel, new Request("https://e/manifest.json", { method: "GET" }), "/manifest.json", manifestFlags, async () => new Response()))?.text()).toBe("manifest");
@@ -47,7 +47,7 @@ describe("web http shell dispatch", () => {
 
     const staticFlags = buildRouteFlags({ isStaticAsset: true });
     expect(await (await handleShellRoutes(channel, new Request("https://e/static/x.js", { method: "GET" }), "/static/x.js", staticFlags, async () => new Response()))?.text()).toBe("static:x.js");
-    expect(staticRequests).toContain("classic/index.html:https://e/");
+    expect(staticRequests).toContain("mobile/index.html:https://e/");
     expect(staticRequests).toContain("sw.js:https://e/sw.js");
     expect(staticRequests.some((entry) => entry.includes("ghostty"))).toBe(false);
     expect(staticRequests).toContain("x.js:https://e/static/x.js");
