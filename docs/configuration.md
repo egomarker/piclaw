@@ -174,23 +174,25 @@ Prefer the Settings pane instead of editing this block by hand because IDs and t
 
 ### Web UI mode
 
-Select the authenticated shell with `web.uiMode` in `.piclaw/config.json`:
+Mobile is the default authenticated shell. During the compatibility window, select an explicit rollback shell with `domains.web.uiMode` in `.piclaw/config.json`:
 
 ```json
 {
-  "web": {
-    "uiMode": "mobile"
+  "domains": {
+    "web": {
+      "uiMode": "classic"
+    }
   }
 }
 ```
 
 The allowed values are:
 
-- `classic` — the default split-pane web interface;
-- `visual` — the alternate Visual interface;
-- `mobile` — the Classic feature set with one unified workspace. At widths below `1024px` and in every portrait viewport, Chat and Workspace are permanent, non-closeable tabs followed by file, viewer, terminal, and extension panes. Desktop-width landscape viewports use the existing Workspace rail instead.
+- `mobile` — the default interface with one unified workspace. At widths below `1024px` and in every portrait viewport, Chat and Workspace are permanent, non-closeable tabs followed by file, viewer, terminal, and extension panes. Desktop-width landscape viewports use the existing Workspace rail instead;
+- `classic` — the deprecated split-pane interface, retained temporarily as a rollback mode;
+- `visual` — the deprecated alternate Visual interface, retained temporarily as a rollback mode.
 
-`mobile` is an explicit third mode, not device detection: desktop browsers and installed PWAs use its responsive tab/rail model when it is selected. Classic and Visual defaults are unchanged, and there is no in-app mode switcher. After changing the setting, use the normal PiClaw restart/reload flow.
+Mobile is selected explicitly by configuration rather than device detection: desktop browsers and installed PWAs use its responsive tab/rail model. Existing explicit Classic or Visual settings remain effective and emit a startup deprecation warning; the default change does not rewrite user configuration. The legacy top-level `web.uiMode` setting and `PICLAW_WEB_UI_MODE` environment alias remain accepted until `3.0.0`, but new configuration should use `domains.web.uiMode`. There is no in-app mode switcher. After changing the setting, use the normal PiClaw restart/reload flow.
 
 ### Notification delivery debug labels
 

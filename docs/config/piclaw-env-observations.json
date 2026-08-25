@@ -87,7 +87,7 @@
       "semanticReaderOccurrences": 90
     },
     "docsDeploy": {
-      "referencedNames": 122,
+      "referencedNames": 123,
       "directReaderNames": 16,
       "directReaderOccurrences": 32,
       "helperReaderNames": 0,
@@ -7191,6 +7191,16 @@
     {
       "name": "PICLAW_WEB_UI_MODE",
       "scopes": {
+        "docsDeploy": {
+          "referenced": true,
+          "directReaders": 0,
+          "helperReaders": 0,
+          "semanticReaders": 0,
+          "files": [
+            "docs/configuration.md"
+          ],
+          "readerFiles": []
+        },
         "production": {
           "referenced": true,
           "directReaders": 0,

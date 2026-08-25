@@ -92,7 +92,7 @@ Common environment variables:
 | Variable | Default | Purpose |
 |---|---|---|
 | `PICLAW_WEB_PORT` | `8080` | Web UI port |
-| `PICLAW_WEB_UI_MODE` | `classic` | Select `classic`, `visual`, or the opt-in unified Chat/tab `mobile` interface (compatibility alias for `web.uiMode`). |
+| `PICLAW_WEB_UI_MODE` | `mobile` | Deprecated environment alias for `domains.web.uiMode`; Mobile is the default, while `classic` and `visual` remain temporary rollback modes. |
 | `PICLAW_WEB_TERMINAL_ENABLED` | `1` on Linux/macOS, `0` on Windows | Enable or disable the authenticated bundled web terminal |
 | `PICLAW_WEB_VNC_ALLOW_DIRECT` | `1` on Linux/macOS/Windows | Allow or disable direct VNC targets supplied at runtime |
 | `PICLAW_WEB_TOTP_SECRET` | _(empty)_ | Base32 TOTP secret; enables login gate (or initialize with `/totp`) |

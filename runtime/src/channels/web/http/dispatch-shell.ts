@@ -21,9 +21,9 @@ function appleTouchIconSize(pathname: string): string {
 
 /** Resolve the authenticated app shell for a configured web UI mode. */
 export function resolveWebUiIndexPath(uiMode: string): string {
+  if (uiMode === "classic") return "classic/index.html";
   if (uiMode === "visual") return "visual/index.html";
-  if (uiMode === "mobile") return "mobile/index.html";
-  return "classic/index.html";
+  return "mobile/index.html";
 }
 
 /**

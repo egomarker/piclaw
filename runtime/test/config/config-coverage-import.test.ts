@@ -156,7 +156,7 @@ test("plain import covers config module init branches with isolated argv and env
       trustProxy: true,
       composeUploadLimitMb: 32,
       workspaceUploadLimitMb: 256,
-      uiMode: "classic",
+      uiMode: "mobile",
     });
     expect(snapshot["same:getWebRuntimeConfig:WEB_RUNTIME_CONFIG"]).toBe(true);
     expect(snapshot.SESSION_STORAGE_CONFIG).toEqual({
