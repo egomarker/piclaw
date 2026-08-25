@@ -2,7 +2,7 @@
  * editor-vendor-route.ts — Serves editor vendor assets via the extension-route registry.
  *
  * This lets the browser-side editor bundle import CodeMirror directly from
- * /editor-vendor/* without baking the large vendor payload into classic/dist.
+ * /editor-vendor/* without baking the large vendor payload into mobile/dist.
  *
  * Registered as a side effect when imported by request-router-service.ts.
  */

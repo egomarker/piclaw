@@ -6,7 +6,7 @@ import { buildAttachmentPreviewModalClassName, HTML_ATTACHMENT_PREVIEW_SANDBOX }
 import { getAttachmentPreviewKind, getAttachmentPreviewLabel } from "../../web/src/ui/attachment-preview.js";
 import { inferDelimitedPreviewDelimiter, parseDelimitedPreview } from "../../web/src/ui/delimited-preview.js";
 
-const overlaysCss = readFileSync(path.join(import.meta.dir, "../../web/static/classic/css/overlays.css"), "utf8");
+const overlaysCss = readFileSync(path.join(import.meta.dir, "../../web/src/styles/shared/overlays.css"), "utf8");
 
 describe("attachment preview kind", () => {
   test("classifies ZIP files as archive previews", () => {

@@ -498,11 +498,11 @@ window.matchMedia('(display-mode: standalone)').matches
 | File | Role | Key properties |
 |---|---|---|
 | `runtime/web/static/classic/index.html`<br>`runtime/web/static/mobile/index.html`<br>`runtime/web/static/visual/index.html` | Meta tags + pre-CSS bootstrap | `viewport-fit=cover`, mobile web-app capability metadata, `status-bar-style=black-translucent`, inline standalone `--app-height: 100vh` before bundled CSS |
-| `runtime/web/static/classic/css/base.css` | Root layout | `--app-height: 100dvh`, `body { height: var(--app-height) }` (normal flow), `#app { height: var(--app-height) }` (normal flow), `text-size-adjust: 100%` |
-| `runtime/web/static/classic/css/editor.css` | Container & editor pane | `.container { height: var(--app-height, 100dvh); padding-top: env(safe-area-inset-top) }`, `.editor-pane-container { height: var(--app-height, 100dvh) }` |
-| `runtime/web/static/classic/css/workspace.css` | Workspace sidebar | `.workspace-sidebar { height: var(--app-height, 100dvh) }` |
-| `runtime/web/static/classic/css/agent.css` | Agent panel | `max-height: calc(var(--app-height, 100dvh) - 32px)` |
-| `runtime/web/static/classic/css/chat.css` | Compose box | `.compose-box { padding: var(--spacing-sm) var(--spacing-md) 2px }` |
+| `runtime/web/src/styles/shared/base.css` | Root layout | `--app-height: 100dvh`, `body { height: var(--app-height) }` (normal flow), `#app { height: var(--app-height) }` (normal flow), `text-size-adjust: 100%` |
+| `runtime/web/src/styles/shared/editor.css` | Container & editor pane | `.container { height: var(--app-height, 100dvh); padding-top: env(safe-area-inset-top) }`, `.editor-pane-container { height: var(--app-height, 100dvh) }` |
+| `runtime/web/src/styles/shared/workspace.css` | Workspace sidebar | `.workspace-sidebar { height: var(--app-height, 100dvh) }` |
+| `runtime/web/src/styles/shared/agent.css` | Agent panel | `max-height: calc(var(--app-height, 100dvh) - 32px)` |
+| `runtime/web/src/styles/shared/chat.css` | Compose box | `.compose-box { padding: var(--spacing-sm) var(--spacing-md) 2px }` |
 | `runtime/web/src/ui/mobile-viewport.ts` | Standalone viewport fix | Sets `--app-height: 100vh` on init; syncs from `visualViewport.height` on keyboard open; resets scroll to `(0,0)` on focus/focusout to counteract iOS keyboard visual-viewport scroll |
 | `runtime/test/web/mobile-viewport.test.ts` | Tests | Covers `shouldUseStandaloneMobileViewportFix`, `readViewportHeight`, `syncStandaloneMobileViewport` |
 | `runtime/web/static/manifest.json` | PWA manifest | `display: standalone`, `display_override: [window-controls-overlay]` |

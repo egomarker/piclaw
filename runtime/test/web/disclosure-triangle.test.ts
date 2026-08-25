@@ -8,11 +8,11 @@ const sourceFiles = [
   "runtime/web/src/components/status.ts",
   "runtime/web/src/components/system-meters-hud.ts",
   "runtime/web/src/components/workspace-explorer.ts",
-  "runtime/web/static/classic/css/base.css",
-  "runtime/web/static/classic/css/agent.css",
-  "runtime/web/static/classic/css/content.css",
-  "runtime/web/static/classic/css/shell.css",
-  "runtime/web/static/classic/css/workspace.css",
+  "runtime/web/src/styles/shared/base.css",
+  "runtime/web/src/styles/shared/agent.css",
+  "runtime/web/src/styles/shared/content.css",
+  "runtime/web/src/styles/shared/shell.css",
+  "runtime/web/src/styles/shared/workspace.css",
 ].map((file) => ({ file, text: readFileSync(path.join(repoRoot, file), "utf8") }));
 
 test("disclosure triangles use one shared 10px primitive", () => {

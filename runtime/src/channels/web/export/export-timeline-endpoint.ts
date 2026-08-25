@@ -5,7 +5,7 @@
  * Access: localhost only + valid internal secret header/bearer token.
  */
 
-import { existsSync, readFileSync, readdirSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { marked } from "marked";
 import { getWebRuntimeConfig } from "../../../core/config.js";
@@ -174,16 +174,8 @@ function queryExportMessages(
 }
 
 function loadAllCss(runtimeDir: string): string {
-  const parts: string[] = [];
-  const bundlePath = join(runtimeDir, "web/static/classic/dist/app.bundle.css");
-  if (existsSync(bundlePath)) parts.push(readFileSync(bundlePath, "utf8"));
-  const cssDir = join(runtimeDir, "web/static/classic/css");
-  if (existsSync(cssDir)) {
-    for (const entry of readdirSync(cssDir).sort()) {
-      if (entry.endsWith(".css")) parts.push(readFileSync(join(cssDir, entry), "utf8"));
-    }
-  }
-  return parts.join("\n");
+  const bundlePath = join(runtimeDir, "web/static/mobile/dist/app.bundle.css");
+  return existsSync(bundlePath) ? readFileSync(bundlePath, "utf8") : "";
 }
 
 function loadConfig(): any {

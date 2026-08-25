@@ -9,7 +9,7 @@ function cssRuleBody(css: string, selector: string): string {
 }
 
 const THEME_WORKSPACE_CSS = [
-  "../../web/static/classic/css/workspace.css",
+  "../../web/src/styles/shared/workspace.css",
   "../../web/static/visual/css/workspace.css",
 ];
 

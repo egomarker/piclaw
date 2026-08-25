@@ -262,7 +262,7 @@ test('session popup scroll helpers preserve the exact menu scrollTop', () => {
 
 test('session rows render an in-place Archive to the shared OK confirmation control', () => {
   const source = readFileSync(join(import.meta.dir, '../../web/src/components/compose-box.ts'), 'utf8');
-  const css = readFileSync(join(import.meta.dir, '../../web/static/classic/css/chat.css'), 'utf8');
+  const css = readFileSync(join(import.meta.dir, '../../web/src/styles/shared/chat.css'), 'utf8');
   expect(source).toContain('class="compose-session-archive-request"');
   expect(source).toContain('>Archive</button>');
   expect(source).toContain('data-delete-kind="archive"');
@@ -359,13 +359,13 @@ test('parseQueuedContent normalizes backtick-wrapped file refs from Files blocks
     '  ',
     '  Files:',
     '  - `piclaw/runtime/extensions/viewers/editor/markdown/code-block.ts`',
-    '  - `piclaw/runtime/web/static/classic/dist/editor.bundle.js`',
+    '  - `piclaw/runtime/web/static/mobile/dist/editor.bundle.js`',
   ].join('\n'));
 
   expect(parsed.text).toBe('Fixed it.');
   expect(parsed.fileRefs).toEqual([
     'piclaw/runtime/extensions/viewers/editor/markdown/code-block.ts',
-    'piclaw/runtime/web/static/classic/dist/editor.bundle.js',
+    'piclaw/runtime/web/static/mobile/dist/editor.bundle.js',
   ]);
 });
 
@@ -576,7 +576,7 @@ test('resolveComposeModelPickerState keeps the model picker visible for cold cha
 });
 
 test('resolveComposeExtensionWorkingDisplay renders default working state with a spinner and preserves custom/hidden indicators', () => {
-  const css = readFileSync(join(import.meta.dir, '../../web/static/classic/css/chat.css'), 'utf8');
+  const css = readFileSync(join(import.meta.dir, '../../web/src/styles/shared/chat.css'), 'utf8');
   expect(css).toContain('.compose-inline-status-spinner');
   expect(css).toContain('animation: spin 1s linear infinite;');
 

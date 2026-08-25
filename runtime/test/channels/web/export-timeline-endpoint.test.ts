@@ -186,6 +186,7 @@ describe("export timeline endpoint", () => {
     expect(html).toContain('id="export-root"');
     expect(html).toContain('data-render-done="true"');
     expect(html).toContain('data-theme="dark"');
+    expect(html).toContain('.mobile-interface');
     expect(html).toContain('second message');
     expect(html).not.toContain('first message');
     expect(html).not.toContain('other chat message');

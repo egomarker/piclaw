@@ -32,8 +32,8 @@ test('getCurrentAppAssetVersion prefers import.meta query and falls back to scri
     origin: 'https://example.test',
     document: {
       querySelectorAll: () => [
-        createScript('/static/classic/dist/other.bundle.js?v=skip'),
-        createScript('/static/classic/dist/app.bundle.js?v=fallback456'),
+        createScript('/static/mobile/dist/other.bundle.js?v=skip'),
+        createScript('/static/mobile/dist/app.bundle.js?v=fallback456'),
       ],
     },
   });
@@ -42,7 +42,7 @@ test('getCurrentAppAssetVersion prefers import.meta query and falls back to scri
     importMetaUrl: 'not a valid url',
     origin: 'https://example.test',
     document: {
-      querySelectorAll: () => [createScript('/static/classic/dist/app.bundle.js?v=malformed789')],
+      querySelectorAll: () => [createScript('/static/mobile/dist/app.bundle.js?v=malformed789')],
     },
   })).toBe('malformed789');
   expect(getCurrentAppAssetVersion({ importMetaUrl: null, document: { querySelectorAll: () => [] } })).toBeNull();

@@ -62,8 +62,8 @@ describe("web http route classification", () => {
     expect(faviconFlags.isFavicon).toBe(true);
     expect(shouldSkipAuthCheck(faviconFlags, false)).toBe(true);
 
-    const appReq = new Request("https://example.com/static/classic/dist/app.bundle.js", { method: "GET" });
-    const appFlags = getRouteFlags(appReq, "/static/classic/dist/app.bundle.js");
+    const appReq = new Request("https://example.com/static/mobile/dist/app.bundle.js", { method: "GET" });
+    const appFlags = getRouteFlags(appReq, "/static/mobile/dist/app.bundle.js");
     expect(appFlags.isStaticAsset).toBe(true);
     expect(appFlags.isPublicStatic).toBe(false);
     expect(shouldSkipAuthCheck(appFlags, false)).toBe(false);

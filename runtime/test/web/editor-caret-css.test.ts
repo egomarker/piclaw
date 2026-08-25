@@ -9,7 +9,7 @@ function cssRuleBody(css: string, selector: string): string {
 }
 
 test('editor caret is accent-colored and visibly wider than the default CodeMirror cursor', () => {
-  const editorCss = readFileSync(join(import.meta.dir, '../../web/static/classic/css/editor.css'), 'utf8');
+  const editorCss = readFileSync(join(import.meta.dir, '../../web/src/styles/shared/editor.css'), 'utf8');
   const content = cssRuleBody(editorCss, '.editor-codemirror .cm-content');
   const cursor = cssRuleBody(editorCss, '.editor-codemirror .cm-cursor,\n.editor-codemirror .cm-dropCursor');
 

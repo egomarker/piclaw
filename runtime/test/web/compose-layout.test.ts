@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { shouldShowComposeAgentAffordance } from "../../web/src/ui/compose-layout.js";
 
-const responsiveCss = readFileSync(path.join(import.meta.dir, "../../web/static/classic/css/responsive.css"), "utf8");
+const responsiveCss = readFileSync(path.join(import.meta.dir, "../../web/src/styles/shared/responsive.css"), "utf8");
 
 test("shows compose agent affordance when the footer is wide enough", () => {
   expect(shouldShowComposeAgentAffordance({

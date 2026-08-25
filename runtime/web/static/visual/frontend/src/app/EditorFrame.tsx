@@ -23,7 +23,7 @@ function loadEditorBundle(): Promise<any> {
   if (!editorBundlePromise) {
     editorBundlePromise = import(
       /* @vite-ignore */
-      "/static/classic/dist/editor.bundle.js"
+      "/static/mobile/dist/editor.bundle.js"
     ).catch((err) => {
       editorBundlePromise = null;
       throw err;

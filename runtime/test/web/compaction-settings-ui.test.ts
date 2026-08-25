@@ -11,7 +11,7 @@ function source(path: string): string {
 test("classic compaction settings expose and persist both canonical processing methods", () => {
   const component = source("web/src/components/settings/compaction.ts");
   const i18n = source("web/src/utils/i18n.ts");
-  const bundle = source("web/static/classic/dist/app.bundle.js");
+  const bundle = source("web/static/mobile/dist/app.bundle.js");
 
   expect(component).toContain("smartCompactionMethod: normalizeSmartCompactionMethod(data.smartCompactionMethod)");
   expect(component).toContain("smartCompactionMethod,\n        remoteCompactionEnabled,\n        remoteCompactionTimeoutSec,\n        compactionTimeoutSec");

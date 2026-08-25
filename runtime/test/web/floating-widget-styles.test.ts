@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { buildFloatingWidgetBackdropClassName, buildFloatingWidgetPaneClassName } from '../../web/src/components/floating-widget-pane.ts';
 
-const overlaysCss = readFileSync(path.join(import.meta.dir, '../../web/static/classic/css/overlays.css'), 'utf8');
+const overlaysCss = readFileSync(path.join(import.meta.dir, '../../web/src/styles/shared/overlays.css'), 'utf8');
 
 test('floating widget overlay includes a narrow-layout breakpoint', () => {
   expect(overlaysCss).toContain('@media (max-width: 820px)');

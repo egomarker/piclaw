@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
-const repoRoot = "/workspace/piclaw";
+const repoRoot = resolve(import.meta.dir, "../../..");
 const vendorDir = join(repoRoot, "runtime/web/static/common/js/vendor");
 const xtermDir = join(vendorDir, "xterm");
 
@@ -40,7 +40,7 @@ test("package scripts, lockfile, and built web bundle do not fetch Ghostty into 
   const lockfile = readFileSync(join(repoRoot, "bun.lock"), "utf8");
   expect(lockfile).not.toContain("ghostty-web");
 
-  const appBundle = readFileSync(join(repoRoot, "runtime/web/static/classic/dist/app.bundle.js"), "utf8");
+  const appBundle = readFileSync(join(repoRoot, "runtime/web/static/mobile/dist/app.bundle.js"), "utf8");
   expect(appBundle).not.toContain("ghostty-web.js");
   expect(appBundle).not.toContain("ghostty-vt.wasm");
 });

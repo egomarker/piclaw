@@ -38,9 +38,9 @@ function getEditorBundleUrl(): string {
     try {
         const currentUrl = new URL(import.meta.url);
         const query = currentUrl.search || '';
-        return `/static/classic/dist/editor.bundle.js${query}`;
+        return `/static/mobile/dist/editor.bundle.js${query}`;
     } catch {
-        return '/static/classic/dist/editor.bundle.js';
+        return '/static/mobile/dist/editor.bundle.js';
     }
 }
 

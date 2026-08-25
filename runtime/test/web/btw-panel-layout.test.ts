@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-const contentCss = readFileSync(path.join(import.meta.dir, "../../web/static/classic/css/content.css"), "utf8");
+const contentCss = readFileSync(path.join(import.meta.dir, "../../web/src/styles/shared/content.css"), "utf8");
 
 function ruleFor(selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

@@ -143,7 +143,7 @@ afterEach(() => {
 });
 
 test('thought, draft, and live tool-output panels scroll with their configured line limits', () => {
-  const css = readFileSync(join(import.meta.dir, '../../web/static/classic/css/agent.css'), 'utf8');
+  const css = readFileSync(join(import.meta.dir, '../../web/src/styles/shared/agent.css'), 'utf8');
   expect(css).toContain('.agent-thinking[data-panel-key="thought"] .agent-thinking-body-collapsible');
   expect(css).toContain('.agent-thinking[data-panel-key="draft"] .agent-thinking-body-collapsible');
   expect(css).toContain('.agent-thinking[data-panel-key="tool-output"] .agent-thinking-body-collapsible');
@@ -172,7 +172,7 @@ test('thinking and draft panels use 9 lines while tool output uses 6 lines', () 
 });
 
 test('thinking panel markdown tables match post table formatting while inheriting pane text attributes', () => {
-  const css = readFileSync(join(import.meta.dir, '../../web/static/classic/css/agent.css'), 'utf8');
+  const css = readFileSync(join(import.meta.dir, '../../web/src/styles/shared/agent.css'), 'utf8');
   expect(css).toContain('.agent-thinking-body table');
   expect(css).toContain('.agent-thinking-body th,');
   expect(css).toContain('.agent-thinking-body td');
@@ -259,7 +259,7 @@ function installStatusDomStubs(fakeDocument: FakeDocument): void {
 }
 
 test('AgentStatus renders bash tool command lines as generic monospace tool arguments', async () => {
-  const css = readFileSync(join(import.meta.dir, '../../web/static/classic/css/agent.css'), 'utf8');
+  const css = readFileSync(join(import.meta.dir, '../../web/src/styles/shared/agent.css'), 'utf8');
   expect(css).toContain('.agent-tool-argument');
   expect(css).toContain('font-family: var(--font-mono, monospace);');
   expect(css).toContain('.agent-thinking-intent .agent-tool-argument');

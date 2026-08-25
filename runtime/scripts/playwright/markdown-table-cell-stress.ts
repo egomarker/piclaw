@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 const runtimeRoot = join(import.meta.dir, '../../');
-const staticClassicDist = join(runtimeRoot, 'web/static/classic/dist');
+const staticMobileDist = join(runtimeRoot, 'web/static/mobile/dist');
 const vendorDir = join(runtimeRoot, 'extensions/viewers/editor/vendor');
 const workDir = join(runtimeRoot, '../.piclaw/tmp/markdown-table-cell-stress');
 mkdirSync(workDir, { recursive: true });
@@ -45,12 +45,12 @@ function buildFixture(): string {
 const source = buildFixture();
 const html = `<!doctype html>
 <html data-theme="dark"><head><meta charset="utf-8">
-<link rel="stylesheet" href="/static/classic/dist/app.bundle.css">
+<link rel="stylesheet" href="/static/mobile/dist/app.bundle.css">
 <script type="importmap">{"imports":{"#editor-vendor/codemirror":"/editor-vendor/codemirror.js"}}</script>
 </head><body>
 <div id="editor-container" style="width:1600px;height:9000px"></div>
 <script type="module">
-const editorModule = await import('/static/classic/dist/editor.bundle.js');
+const editorModule = await import('/static/mobile/dist/editor.bundle.js');
 const vendor = await import('/editor-vendor/codemirror.js');
 const source = ${JSON.stringify(source)};
 const editor = new editorModule.StandaloneEditorInstance(document.getElementById('editor-container'), {
@@ -76,8 +76,8 @@ const server = Bun.serve({
     if (url.pathname === '/editor-vendor/codemirror.js') {
       return new Response(Bun.file(join(vendorDir, 'codemirror.js')), { headers: { 'content-type': 'application/javascript; charset=utf-8' } });
     }
-    if (url.pathname.startsWith('/static/classic/dist/')) {
-      const filePath = join(staticClassicDist, url.pathname.replace('/static/classic/dist/', ''));
+    if (url.pathname.startsWith('/static/mobile/dist/')) {
+      const filePath = join(staticMobileDist, url.pathname.replace('/static/mobile/dist/', ''));
       if (existsSync(filePath)) {
         return new Response(Bun.file(filePath), { headers: { 'content-type': filePath.endsWith('.js') ? 'application/javascript; charset=utf-8' : 'text/css; charset=utf-8' } });
       }

@@ -44,14 +44,14 @@ test('shouldUseStandaloneMobileViewportFix only enables for standalone mobile ru
 test('index bootstraps standalone app height before loading bundled CSS', () => {
   const html = readFileSync(new URL('../../web/static/classic/index.html', import.meta.url), 'utf8');
   const bootstrapIndex = html.indexOf('iOS standalone PWA guard: set --app-height before CSS loads');
-  const cssIndex = html.indexOf('rel="stylesheet" href="/static/classic/dist/app.bundle.css');
+  const cssIndex = html.indexOf('rel="stylesheet" href="/static/mobile/dist/app.bundle.css');
   expect(bootstrapIndex).toBeGreaterThan(0);
   expect(cssIndex).toBeGreaterThan(bootstrapIndex);
   expect(html).toContain("document.documentElement.style.setProperty('--app-height', '100vh')");
 });
 
 test('container CSS has a single --app-height height declaration', () => {
-  const css = readFileSync(new URL('../../web/static/classic/css/editor.css', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../../web/src/styles/shared/editor.css', import.meta.url), 'utf8');
   const rule = readCssRule(css, '.container');
   // Container must not also declare height:100%; the app-height variable must win.
   expect(rule).toContain('height: var(--app-height, 100dvh);');
@@ -59,7 +59,7 @@ test('container CSS has a single --app-height height declaration', () => {
 });
 
 test('body stays in normal flow and uses --app-height (not fixed/inset)', () => {
-  const css = readFileSync(new URL('../../web/static/classic/css/base.css', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../../web/src/styles/shared/base.css', import.meta.url), 'utf8');
   const rule = readCssRule(css, 'body');
   const declarations = rule.replace(/\/\*[\s\S]*?\*\//g, '');
   expect(declarations).toMatch(/height\s*:\s*var\(--app-height,\s*100dvh\)/);

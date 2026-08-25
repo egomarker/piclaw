@@ -2,7 +2,7 @@
 #
 # Targets:
 #   vendor         – Bundle vendored mermaid (minified ESM).
-#   build-web      – Build web bundles into static/classic/dist and static/common/dist (+ sourcemaps).
+#   build-web      – Build web bundles into static/mobile/dist and static/common/dist (+ sourcemaps).
 #   build-ts       – Type-check TypeScript (tsc --noEmit). No generated/dist/ output.
 #   build-piclaw   – Full build: build-web (vendor + bundles) + build-ts.
 #   build-desktop  – Build the optional Electrobun desktop shell.
@@ -22,7 +22,7 @@
 #   push           – Push commits and current tag to origin.
 #
 # Web build notes:
-#   The web frontend builds authenticated UI assets under web/static/classic/dist
+#   The web frontend builds authenticated UI assets under web/static/mobile/dist
 #   and shared/login assets under web/static/common/dist.
 #
 #   Vendor libs remain separate pre-built assets where useful (e.g. codemirror,
@@ -100,7 +100,7 @@ update-mermaid-vendor: ## Rebuild or upgrade vendored mermaid (use MERMAID_VERSI
 	cd runtime && bun run update:vendor:mermaid $(if $(MERMAID_VERSION),--version $(MERMAID_VERSION),)
 	@ls -lh runtime/web/static/common/js/vendor/beautiful-mermaid.js runtime/web/static/common/js/vendor/beautiful-mermaid.meta.json
 
-build-web: ## Build web JS/CSS bundles (+ sourcemaps) into static/classic/dist, static/common/dist, and static/visual/dist
+build-web: ## Build web JS/CSS bundles (+ sourcemaps) into static/mobile/dist, static/common/dist, and static/visual/dist
 	cd runtime && bun run build:web
 	bun run build:web:visual
 	@cd runtime && bun test --timeout $(WEB_BUILD_TEST_TIMEOUT_MS) test/channels/web/web-build.test.ts test/channels/web/post-link-preview-content.test.ts
@@ -109,11 +109,11 @@ build-web: ## Build web JS/CSS bundles (+ sourcemaps) into static/classic/dist, 
 		! -name '*.gz' ! -name '*.br' -size +1k \
 		-exec sh -c 'gzip -9 -k -f "$$1"' _ {} \;
 	@ls -lh \
-		runtime/web/static/classic/dist/app.bundle.js \
-		runtime/web/static/classic/dist/app.bundle.js.map \
-		runtime/web/static/classic/dist/app.bundle.css \
-		runtime/web/static/classic/dist/editor.bundle.js \
-		runtime/web/static/classic/dist/editor.bundle.js.map \
+		runtime/web/static/mobile/dist/app.bundle.js \
+		runtime/web/static/mobile/dist/app.bundle.js.map \
+		runtime/web/static/mobile/dist/app.bundle.css \
+		runtime/web/static/mobile/dist/editor.bundle.js \
+		runtime/web/static/mobile/dist/editor.bundle.js.map \
 		runtime/web/static/common/dist/login.bundle.js \
 		runtime/web/static/common/dist/login.bundle.js.map \
 		runtime/web/static/common/dist/login.bundle.css
@@ -122,7 +122,7 @@ build-ts: ## Type-check TypeScript / validate emit (generated/dist is cleaned up
 	cd runtime && bun run build
 # NOTE: generated/dist/ is produced transiently by tsc for validation, then
 # removed immediately because Bun runs runtime/src/*.ts directly and release
-# artifacts only need runtime/web/static/{classic,common}/dist bundles plus packaged sources.
+# artifacts only need runtime/web/static/{mobile,common}/dist bundles plus packaged sources.
 
 build-piclaw: build-web build-ts ## Full build: vendor + web + ts
 
