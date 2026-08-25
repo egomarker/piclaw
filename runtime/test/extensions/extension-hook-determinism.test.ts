@@ -26,12 +26,18 @@ describe("built-in extension hook determinism", () => {
       "chatTool",
       "sessionControl",
       "openWorkspaceFile",
+      "localAppProxyTool",
       "envTools",
       "exitProcess",
       "imageProcessing",
       "localLitePromptProfile",
     ]);
-    expect(audit.context_hook_order).toEqual(["fileAttachments", "contextPrune", "llmContextNormalizer"]);
+    expect(audit.context_hook_order).toEqual([
+      "fileAttachments",
+      "persistedToolResultSanitizer",
+      "contextPrune",
+      "llmContextNormalizer",
+    ]);
     expect(audit.final_system_prompt).toContain("## File Attachments");
     expect(audit.final_system_prompt).toContain("## Script discovery");
     expect(audit.final_system_prompt).toContain("## Database Introspection");

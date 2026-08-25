@@ -15,15 +15,19 @@ interface RegisteredBeforeAgentStartHandler {
 
 interface RegisteredContextHandler {
   extensionName: string;
-  handler: (event: {
-    type: "context";
-    messages: Array<Record<string, unknown>>;
-  }) => Promise<{ messages?: Array<Record<string, unknown>> } | void>;
+  handler: (
+    event: {
+      type: "context";
+      messages: Array<Record<string, unknown>>;
+    },
+    context: { sessionManager: object },
+  ) => Promise<{ messages?: Array<Record<string, unknown>> } | void>;
 }
 
 interface RegistrationSnapshot {
   beforeAgentStart: RegisteredBeforeAgentStartHandler[];
   contextHandlers: RegisteredContextHandler[];
+  context: { sessionManager: object };
   tools: string[];
   commands: string[];
 }
@@ -77,7 +81,13 @@ function createRegistrationSnapshot(factories: ExtensionFactory[]): Registration
     factory(api);
   }
 
-  return { beforeAgentStart, contextHandlers, tools, commands };
+  return {
+    beforeAgentStart,
+    contextHandlers,
+    context: { sessionManager: {} },
+    tools,
+    commands,
+  };
 }
 
 async function emitBeforeAgentStart(snapshot: RegistrationSnapshot) {
@@ -132,7 +142,7 @@ async function emitContext(snapshot: RegistrationSnapshot) {
     const result = await entry.handler({
       type: "context",
       messages,
-    });
+    }, snapshot.context);
     if (result && typeof result === "object" && Array.isArray(result.messages)) {
       messages = result.messages;
     }

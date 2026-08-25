@@ -1,7 +1,10 @@
 #!/usr/bin/env bun
 
 import { chromium, type Browser } from "playwright";
+import { createLogger, debugSuppressedError } from "../../src/utils/logger.js";
 import { bootstrapE2EStorageState } from "./web-auth-bootstrap.js";
+
+const log = createLogger("local-app-proxy-smoke");
 
 const baseUrl = (process.env.PICLAW_E2E_BASE_URL || "http://127.0.0.1:8080").replace(/\/+$/, "");
 const appName = process.env.PICLAW_PROXY_TEST_NAME || "Proxy Test";
@@ -26,7 +29,15 @@ async function apiRequest(
     : await request.get(`${baseUrl}${path}`);
   const body = await response.text();
   let json: any = null;
-  try { json = JSON.parse(body); } catch { /* preserve text for diagnostics */ }
+  try {
+    json = JSON.parse(body);
+  } catch (error) {
+    debugSuppressedError(log, "Failed to parse Local App Proxy API response as JSON; preserving raw text for diagnostics.", error, {
+      method: init.method || "GET",
+      path,
+      status: response.status(),
+    });
+  }
   if (!response.ok()) {
     throw new Error(`${init.method || "GET"} ${path} failed: HTTP ${response.status()} ${json?.error || body}`);
   }
