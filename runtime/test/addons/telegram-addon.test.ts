@@ -484,36 +484,6 @@ test("telegram channel renders progress replies as escaped HTML blocks", async (
   ]);
 });
 
-test("telegram channel renders commentary as an escaped HTML blockquote", async () => {
-  const channel = new TelegramChannel({
-    botToken: "test",
-    onUpdate: async () => {},
-  }) as any;
-
-  const calls: Array<{ chatId: string; text: string; options?: Record<string, unknown> }> = [];
-  channel.api = {
-    sendMessage: async (chatId: string, text: string, options?: Record<string, unknown>) => {
-      calls.push({ chatId, text, options });
-      return {
-        message_id: 42,
-        date: 0,
-        chat: { id: Number(chatId), type: "private" },
-      };
-    },
-  };
-  channel.connected = true;
-
-  await channel.sendMessage("telegram:123456", "Checking <docs> & repo\nThen I’ll run lint.", {
-    blockquote: true,
-  });
-
-  expect(calls).toEqual([{
-    chatId: "123456",
-    text: "<blockquote>Checking &lt;docs&gt; &amp; repo\nThen I’ll run lint.</blockquote>",
-    options: { parseMode: "HTML" },
-  }]);
-});
-
 test("telegram channel splits oversized text replies into multiple messages", async () => {
   const channel = new TelegramChannel({
     botToken: "test",
@@ -651,22 +621,25 @@ test("telegram pollLoop routes update handler failures through the reconnect pat
   expect(disconnects[0]).toContain("update handler failed");
 });
 
-test("telegram runtime recognizes classified agent commentary for quote rendering", async () => {
+test("telegram runtime prefixes only classified agent commentary", async () => {
   restoreEnv = setEnv({
     PICLAW_TELEGRAM_ENABLED: "false",
     PICLAW_TELEGRAM_BOT_TOKEN: undefined,
   });
 
   const runtime = await importFresh<typeof import("../../../addons/telegram/runtime/index.ts")>("../../../addons/telegram/runtime/index.ts", import.meta.url);
-
-  expect(runtime.shouldQuoteOutboundCommentary({ source: "agent-commentary" })).toBe(true);
-  expect(runtime.shouldQuoteOutboundCommentary({
+  const commentaryOptions = {
     contentBlocks: [{ type: "agent_commentary", reply_kind: "commentary" }],
-  })).toBe(true);
-  expect(runtime.shouldQuoteOutboundCommentary({
+  };
+
+  expect(runtime.isOutboundAgentCommentary({ source: "agent-commentary" })).toBe(true);
+  expect(runtime.isOutboundAgentCommentary(commentaryOptions)).toBe(true);
+  expect(runtime.isOutboundAgentCommentary({
     source: "agent",
     contentBlocks: [{ type: "text" }],
   })).toBe(false);
+  expect(runtime.formatOutboundTelegramText("Inspecting now.", commentaryOptions)).toBe("Commentary: Inspecting now.");
+  expect(runtime.formatOutboundTelegramText("Done.", { source: "agent" })).toBe("Done.");
 });
 
 test("telegram runtime imports native video messages as file attachments", async () => {

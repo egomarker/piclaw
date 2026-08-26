@@ -22,7 +22,7 @@ import type { RunAgentOptions, TurnOutput } from "../agent-pool/contracts.js";
 import { parseControlCommand, type AgentControlCommand } from "../agent-control/index.js";
 import { stripTrigger } from "../agent-control/parser-utils.js";
 import { isSlashCommandInvocation } from "../agent-pool/slash-command.js";
-import { getShowCommentaryInTimeline } from "../core/config.js";
+import { getShowCommentaryInAddons } from "../core/config.js";
 import {
   getAgentCommentaryRowIdBySourceKey,
   getMessageThreadRootIdById,
@@ -496,7 +496,7 @@ export async function processMessages(
 
 
   const progressReporter = await createTransportProgressReporter(chatJid, channel, lastPrompt?.id);
-  const shouldPersistToolUseCommentary = getShowCommentaryInTimeline();
+  const shouldPersistToolUseCommentary = getShowCommentaryInAddons();
   const commentarySourceKeys = new Set<string>();
   let commentaryDeliveryQueue = Promise.resolve();
   const replyThreadId = lastPrompt ? getReplyThreadId(chatJid, lastPrompt) : undefined;

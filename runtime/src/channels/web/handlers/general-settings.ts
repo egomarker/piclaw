@@ -15,6 +15,7 @@ import {
   getToolUseBudget,
   getWebRuntimeConfig,
   getShowCommentaryInTimeline,
+  getShowCommentaryInAddons,
   getSearchMatchMode,
   getScopedModelsOnly,
   setAssistantAvatar,
@@ -32,6 +33,7 @@ import {
   rotateWebWidgetToken,
   setWebComposeUploadLimitMb,
   setShowCommentaryInTimeline,
+  setShowCommentaryInAddons,
   setWebTerminalEnabled,
   setWebWorkspaceUploadLimitMb,
   type SearchMatchMode,
@@ -51,6 +53,7 @@ export interface GeneralSettingsData {
   sessionMaxLines: number;
   webTerminalEnabled: boolean;
   showCommentaryInTimeline: boolean;
+  showCommentaryInAddons: boolean;
   composeUploadLimitMb: number;
   workspaceUploadLimitMb: number;
   toolUseBudget: number;
@@ -86,6 +89,7 @@ export interface GeneralSettingsInput {
   sessionMaxLines?: unknown;
   webTerminalEnabled?: unknown;
   showCommentaryInTimeline?: unknown;
+  showCommentaryInAddons?: unknown;
   composeUploadLimitMb?: unknown;
   workspaceUploadLimitMb?: unknown;
   toolUseBudget?: unknown;
@@ -208,6 +212,7 @@ export function getGeneralSettingsData(): GeneralSettingsData {
     sessionMaxLines: session.maxLines,
     webTerminalEnabled: web.terminalEnabled,
     showCommentaryInTimeline: getShowCommentaryInTimeline(),
+    showCommentaryInAddons: getShowCommentaryInAddons(),
     composeUploadLimitMb: web.composeUploadLimitMb,
     workspaceUploadLimitMb: web.workspaceUploadLimitMb,
     toolUseBudget: getToolUseBudget(),
@@ -285,6 +290,11 @@ export async function saveGeneralSettings(input: GeneralSettingsInput): Promise<
   const nextShowCommentaryInTimeline = normalizeOptionalBoolean(input.showCommentaryInTimeline);
   if (nextShowCommentaryInTimeline !== undefined) {
     setShowCommentaryInTimeline(nextShowCommentaryInTimeline);
+  }
+
+  const nextShowCommentaryInAddons = normalizeOptionalBoolean(input.showCommentaryInAddons);
+  if (nextShowCommentaryInAddons !== undefined) {
+    setShowCommentaryInAddons(nextShowCommentaryInAddons);
   }
 
   const nextComposeUploadLimitMb = normalizeOptionalInt(input.composeUploadLimitMb, 1, 512);

@@ -669,11 +669,7 @@ export class TelegramChannel {
     this.options.setLastUpdateId?.(this.lastUpdateId);
   }
 
-  async sendMessage(
-    chatJid: string,
-    text: string,
-    options?: { attachments?: TelegramBinaryAttachment[]; blockquote?: boolean },
-  ): Promise<void> {
+  async sendMessage(chatJid: string, text: string, options?: { attachments?: TelegramBinaryAttachment[] }): Promise<void> {
     if (!this.api || !this.connected) {
       throw new Error("Telegram channel is not connected.");
     }
@@ -683,13 +679,7 @@ export class TelegramChannel {
     const textChunks = splitTelegramText(text);
 
     for (const chunk of textChunks) {
-      if (options?.blockquote) {
-        await this.api.sendMessage(chatId, `<blockquote>${escapeTelegramHtml(chunk)}</blockquote>`, {
-          parseMode: "HTML",
-        });
-      } else {
-        await this.api.sendMessage(chatId, chunk);
-      }
+      await this.api.sendMessage(chatId, chunk);
     }
 
     for (const attachment of attachments) {
