@@ -18,10 +18,13 @@
 
 import type { AgentPool } from "../agent-pool.js";
 import { formatRecoverySummary } from "../agent-pool/automatic-recovery.js";
+import type { RunAgentOptions, TurnOutput } from "../agent-pool/contracts.js";
 import { parseControlCommand, type AgentControlCommand } from "../agent-control/index.js";
 import { stripTrigger } from "../agent-control/parser-utils.js";
 import { isSlashCommandInvocation } from "../agent-pool/slash-command.js";
+import { getShowCommentaryInTimeline } from "../core/config.js";
 import {
+  getAgentCommentaryRowIdBySourceKey,
   getMessageThreadRootIdById,
   getRuntimeMessagesSince,
   getRuntimeNewMessages,
@@ -493,22 +496,74 @@ export async function processMessages(
 
 
   const progressReporter = await createTransportProgressReporter(chatJid, channel, lastPrompt?.id);
+  const shouldPersistToolUseCommentary = getShowCommentaryInTimeline();
+  const commentarySourceKeys = new Set<string>();
+  let commentaryDeliveryQueue = Promise.resolve();
+  const replyThreadId = lastPrompt ? getReplyThreadId(chatJid, lastPrompt) : undefined;
+
+  const deliverCommentaryTurn = (turn: TurnOutput): void => {
+    if (turn.kind !== "commentary" || !turn.followedByToolUse) return;
+    const text = formatOutbound(turn.text, channel);
+    if (!text) return;
+
+    const sourceKey = typeof turn.sourceKey === "string" ? turn.sourceKey.trim() : "";
+    if (sourceKey) {
+      if (commentarySourceKeys.has(sourceKey)) return;
+      commentarySourceKeys.add(sourceKey);
+      if (getAgentCommentaryRowIdBySourceKey(chatJid, sourceKey) !== null) return;
+    }
+
+    commentaryDeliveryQueue = commentaryDeliveryQueue.then(async () => {
+      await deps.sendMessage(chatJid, text, {
+        ...(replyThreadId !== undefined ? { threadId: replyThreadId } : {}),
+        source: "agent-commentary",
+        contentBlocks: [{
+          type: "agent_commentary",
+          reply_kind: "commentary",
+          ...(sourceKey ? { source_key: sourceKey } : {}),
+        }],
+      });
+    }).catch((error) => {
+      log.warn("Failed to deliver display-only tool commentary", {
+        operation: "process_messages.commentary.deliver",
+        chatJid,
+        channel,
+        sourceKey: sourceKey || null,
+        err: error,
+      });
+    });
+  };
+
+  const runOptions: RunAgentOptions | undefined = progressReporter || shouldPersistToolUseCommentary
+    ? {
+        ...(progressReporter
+          ? {
+              onEvent: (event) => {
+                progressReporter.onEvent(event);
+              },
+            }
+          : {}),
+        ...(shouldPersistToolUseCommentary
+          ? {
+              emitToolUseCommentary: true,
+              onTurnComplete: deliverCommentaryTurn,
+            }
+          : {}),
+      }
+    : undefined;
+
   const stopTyping = startChannelTyping(chatJid, channel);
   let output;
   try {
-    output = await deps.agentPool.runAgent(prompt, chatJid, progressReporter
-      ? {
-          onEvent: (event) => {
-            progressReporter.onEvent(event);
-          },
-        }
-      : undefined);
+    output = await deps.agentPool.runAgent(prompt, chatJid, runOptions);
   } catch (error) {
+    await commentaryDeliveryQueue;
     await progressReporter?.remove();
     throw error;
   } finally {
     stopTyping();
   }
+  await commentaryDeliveryQueue;
 
   const recoverySummary = formatRecoverySummary(output.recovery);
   const finalizeDeliveredAgentTurn = () => {
@@ -543,9 +598,8 @@ export async function processMessages(
 
     if (visibleErrorMessage) {
       const text = formatOutbound(visibleErrorMessage, channel);
-      const threadId = lastPrompt ? getReplyThreadId(chatJid, lastPrompt) : undefined;
       await deps.sendMessage(chatJid, text || visibleErrorMessage, {
-        ...(threadId !== undefined ? { threadId } : {}),
+        ...(replyThreadId !== undefined ? { threadId: replyThreadId } : {}),
         source: "agent",
       });
     }
@@ -557,9 +611,8 @@ export async function processMessages(
   let finalReplySent = false;
   if (output.result || output.attachments?.length) {
     const text = formatOutbound(output.result || "", channel);
-    const threadId = lastPrompt ? getReplyThreadId(chatJid, lastPrompt) : undefined;
     await deps.sendMessage(chatJid, text || "", {
-      ...(threadId !== undefined ? { threadId } : {}),
+      ...(replyThreadId !== undefined ? { threadId: replyThreadId } : {}),
       source: "agent",
       attachments: output.attachments,
     });
