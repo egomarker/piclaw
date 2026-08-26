@@ -82,9 +82,27 @@ export function GeneralSection({
           }
         />
         <label htmlFor="showCommentaryInTimeline" className="settings-panel__label">
-          Show tool commentary in timeline
+          Tool commentary in web timeline
         </label>
         <span className="settings-panel__description">Keep confirmed pre-tool narration as display-only messages. Commentary never counts as a completed reply.</span>
+      </div>
+
+      <div className="settings-panel__field settings-panel__checkbox-row">
+        <input
+          id="showCommentaryInAddons"
+          type="checkbox"
+          checked={data.showCommentaryInAddons ?? false}
+          onChange={(e) =>
+            onSaveGeneral(
+              "showCommentaryInAddons",
+              (e.target as HTMLInputElement).checked
+            )
+          }
+        />
+        <label htmlFor="showCommentaryInAddons" className="settings-panel__label">
+          Tool commentary in messaging add-ons
+        </label>
+        <span className="settings-panel__description">Send confirmed pre-tool narration as separate messages in Telegram and other chat add-ons. This may generate channel notifications.</span>
       </div>
 
       <h3 className="settings-panel__subsection-title">Instance Configuration</h3>

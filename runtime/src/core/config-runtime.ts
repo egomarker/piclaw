@@ -249,12 +249,21 @@ export function getSessionPoolConfig(): Readonly<SessionPoolConfig> {
 // ---------------------------------------------------------------------------
 
 export interface AddonsConfig {
+  showCommentary: boolean;
   apiFailureBackoffMs: number;
 }
 
 const addonsDomainSchema = registerDomainConfig<AddonsConfig>({
   domain: "addons",
   fields: {
+    showCommentary: boolField({
+      key: "showCommentary",
+      owner: "addons",
+      defaultValue: false,
+      persistence: "json-config",
+      precedence: ["persisted", "default"],
+      secretClass: "none",
+    }),
     apiFailureBackoffMs: integerField({
       key: "apiFailureBackoffMs",
       owner: "addons",
@@ -271,6 +280,16 @@ const addonsDomainSchema = registerDomainConfig<AddonsConfig>({
 
 export function getAddonsConfig(): Readonly<AddonsConfig> {
   return Object.freeze(readDomainConfig(addonsDomainSchema, getDomainConfigOptions()));
+}
+
+/** Whether transport-backed messaging add-ons should receive display-only tool commentary. */
+export function getShowCommentaryInAddons(): boolean {
+  return getAddonsConfig().showCommentary;
+}
+
+/** Persist the messaging add-on commentary toggle for subsequent agent runs. */
+export function setShowCommentaryInAddons(enabled: boolean): boolean {
+  return writeDomainConfigField(addonsDomainSchema, getDomainConfigOptions(), "showCommentary", Boolean(enabled));
 }
 
 export interface AgentControlConfig {

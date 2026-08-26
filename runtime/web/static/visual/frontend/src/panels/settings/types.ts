@@ -64,6 +64,7 @@ export interface SettingsData {
   toolUseBudget?: number;
   webTerminalEnabled?: boolean;
   showCommentaryInTimeline?: boolean;
+  showCommentaryInAddons?: boolean;
   sessionIsolation?: "none" | "summary" | "full";
   searchMatchMode?: "or" | "and";
   composeUploadLimitMb?: number;

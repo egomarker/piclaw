@@ -38,6 +38,7 @@ test('saveGeneralSettings persists and applies general settings immediately', as
       sessionMaxSizeMb: 48,
       webTerminalEnabled: false,
       showCommentaryInTimeline: true,
+      showCommentaryInAddons: true,
       composeUploadLimitMb: 24,
       workspaceUploadLimitMb: 256,
       toolUseBudget: 23,
@@ -58,6 +59,7 @@ test('saveGeneralSettings persists and applies general settings immediately', as
       sessionMaxSizeMb: 48,
       webTerminalEnabled: false,
       showCommentaryInTimeline: true,
+      showCommentaryInAddons: true,
       composeUploadLimitMb: 24,
       workspaceUploadLimitMb: 256,
       toolUseBudget: 23,
@@ -93,6 +95,9 @@ test('saveGeneralSettings persists and applies general settings immediately', as
           showCommentaryInTimeline: true,
           composeUploadLimitMb: 24,
           workspaceUploadLimitMb: 256,
+        },
+        addons: {
+          showCommentary: true,
         },
         agent: {
           toolUseMessageBudget: 23,
@@ -150,6 +155,7 @@ test('getGeneralSettingsData exposes recovery defaults without writing configura
     expect(existsSync(configPath)).toBe(false);
     expect(handler.getGeneralSettingsData()).toMatchObject({
       showCommentaryInTimeline: false,
+      showCommentaryInAddons: false,
       automaticRecoveryEnabled: true,
       automaticRecoveryMaxAttempts: 0,
       automaticRecoveryTotalBudgetMs: 360000,

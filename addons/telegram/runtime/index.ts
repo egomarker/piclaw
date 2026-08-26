@@ -67,7 +67,7 @@ function normalizeText(value: unknown): string {
 }
 
 /** Whether a runtime outbound message is classified as display-only agent commentary. */
-export function shouldQuoteOutboundCommentary(options: unknown): boolean {
+export function isOutboundAgentCommentary(options: unknown): boolean {
   if (!options || typeof options !== "object") return false;
   const outbound = options as { source?: unknown; contentBlocks?: unknown };
   if (normalizeText(outbound.source) === "agent-commentary") return true;
@@ -78,6 +78,11 @@ export function shouldQuoteOutboundCommentary(options: unknown): boolean {
     return normalizeText(block.type) === "agent_commentary"
       || normalizeText(block.reply_kind) === "commentary";
   });
+}
+
+/** Apply Telegram-only commentary presentation without changing the mirrored message text. */
+export function formatOutboundTelegramText(text: string, options: unknown): string {
+  return isOutboundAgentCommentary(options) ? `Commentary: ${text}` : text;
 }
 
 function buildUserDisplayName(user: TelegramUser | undefined, fallback: string): string {
@@ -456,8 +461,7 @@ async function startTelegramRuntime(): Promise<void> {
     transportCleanup = interop.registerChannelTransport("telegram", {
       sendMessage: async (chatJid, text, options) => {
         const attachments = await buildOutboundAttachments(options);
-        const blockquote = shouldQuoteOutboundCommentary(options);
-        await channel.sendMessage(chatJid, text, { attachments, blockquote });
+        await channel.sendMessage(chatJid, formatOutboundTelegramText(text, options), { attachments });
         updateTelegramRuntimeState({
           connected: channel.isConnected(),
           lastError: null,

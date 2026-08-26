@@ -108,6 +108,7 @@ The following operational settings are persisted under typed domains in `.piclaw
 |---------------|------------------------|---------|---------|
 | `domains.sessionRecordings.directory` | `PICLAW_RECORDINGS_DIR` | `<PICLAW_DATA>/session-recordings` | Root directory for opt-in session trace recordings. |
 | `domains.addons.apiFailureBackoffMs` | `PICLAW_ADDON_API_FAILURE_BACKOFF_MS` | `60000` | Suppression period for repeated identical add-on API failures. |
+| `domains.addons.showCommentary` | _(none)_ | `false` | Send confirmed pre-tool commentary as separate messages in transport-backed chat add-ons. |
 | `domains.agentControl.abortSettleTimeoutMs` | `PICLAW_ABORT_SETTLE_TIMEOUT_MS` | `1000` | Bounded `0..10000` ms wait for abort cleanup to settle. |
 
 ### VNC target examples

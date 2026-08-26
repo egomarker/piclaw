@@ -13,7 +13,9 @@ import {
   markPendingShutdown,
 } from "../../src/runtime/shutdown-registry.js";
 import {
+  getShowCommentaryInAddons,
   getShowCommentaryInTimeline,
+  setShowCommentaryInAddons,
   setShowCommentaryInTimeline,
 } from "../../src/core/config.js";
 
@@ -816,11 +818,11 @@ test("processMessages delivers enabled tool-use commentary once as a permanent d
       markCommandProcessed: () => {},
       saveTimestamps: () => {},
     };
-    const previousShowCommentary = getShowCommentaryInTimeline();
+    const previousShowCommentary = getShowCommentaryInAddons();
     const unregisterDetector = registerChannelDetector((jid) => jid.startsWith("telegram:") ? "telegram" : null);
 
     try {
-      setShowCommentaryInTimeline(true);
+      setShowCommentaryInAddons(true);
       const ok = await loop.processMessages(chatJid, {
         state: state as any,
         assistantName: "Pi",
@@ -874,7 +876,53 @@ test("processMessages delivers enabled tool-use commentary once as a permanent d
       });
       expect(state.lastAgentTimestamp[chatJid]).toBe(timestamp);
     } finally {
-      setShowCommentaryInTimeline(previousShowCommentary);
+      setShowCommentaryInAddons(previousShowCommentary);
+      unregisterDetector();
+    }
+  });
+});
+
+test("processMessages does not use the web timeline toggle for transport commentary", async () => {
+  await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
+    const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
+    const loop = await importFresh<typeof import("../../src/runtime/message-loop.js")>("../src/runtime/message-loop.js");
+    db.initDatabase();
+
+    const chatJid = "telegram:commentary-independent";
+    const timestamp = "2026-04-17T01:04:26.000Z";
+    db.storeMessage(makeMessage(chatJid, "@Pi inspect runtime", timestamp));
+    const previousTimeline = getShowCommentaryInTimeline();
+    const previousAddons = getShowCommentaryInAddons();
+    const unregisterDetector = registerChannelDetector((jid) => jid.startsWith("telegram:") ? "telegram" : null);
+    let capturedRunOptions: Record<string, unknown> | undefined;
+
+    try {
+      setShowCommentaryInTimeline(true);
+      setShowCommentaryInAddons(false);
+      const ok = await loop.processMessages(chatJid, {
+        state: {
+          lastAgentTimestamp: {},
+          wasCommandProcessed: () => false,
+          markCommandProcessed: () => {},
+          saveTimestamps: () => {},
+        } as any,
+        assistantName: "Pi",
+        triggerPattern: /@Pi/i,
+        agentPool: {
+          runAgent: async (_prompt: string, _nextChatJid: string, runOptions?: Record<string, unknown>) => {
+            capturedRunOptions = runOptions;
+            return { status: "success", result: "Inspection complete." };
+          },
+        } as any,
+        sendMessage: async () => {},
+      });
+
+      expect(ok).toBe(true);
+      expect(capturedRunOptions?.emitToolUseCommentary).toBeUndefined();
+      expect(capturedRunOptions?.onTurnComplete).toBeUndefined();
+    } finally {
+      setShowCommentaryInTimeline(previousTimeline);
+      setShowCommentaryInAddons(previousAddons);
       unregisterDetector();
     }
   });
