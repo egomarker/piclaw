@@ -137,6 +137,26 @@ test("telegram api sendMessage uses Markdown parse mode", async () => {
       parse_mode: "Markdown",
     }),
   ]);
+  expect(requests[0]).not.toHaveProperty("disable_notification");
+});
+
+test("telegram api sendMessage supports silent delivery", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requests.push(JSON.parse(String(init?.body || "{}")) as Record<string, unknown>);
+    return jsonResponse({ ok: true, result: { message_id: 1 } });
+  }) as typeof fetch;
+
+  const api = new TelegramBotApi("test-token");
+  await api.sendMessage("123456", "Quiet update", { disableNotification: true });
+
+  expect(requests).toEqual([
+    expect.objectContaining({
+      chat_id: "123456",
+      text: "Quiet update",
+      disable_notification: true,
+    }),
+  ]);
 });
 
 test("telegram api surfaces plain-text upstream errors", async () => {
@@ -298,17 +318,19 @@ test("telegram api sendMessage falls back to plain text when Markdown parsing fa
   }) as typeof fetch;
 
   const api = new TelegramBotApi("test-token");
-  await api.sendMessage("123456", "I will *not* use `curl`.");
+  await api.sendMessage("123456", "I will *not* use `curl`.", { disableNotification: true });
 
   expect(requests).toEqual([
     expect.objectContaining({
       chat_id: "123456",
       text: "I will *not* use `curl`.",
       parse_mode: "Markdown",
+      disable_notification: true,
     }),
     expect.objectContaining({
       chat_id: "123456",
       text: "I will *not* use `curl`.",
+      disable_notification: true,
     }),
   ]);
   expect(requests[1]).not.toHaveProperty("parse_mode");
@@ -364,11 +386,12 @@ test("telegram api sendPhoto retries with rebuilt multipart bodies", async () =>
       contentType: "image/png",
       data: new Uint8Array([1, 2, 3]),
       kind: "image",
-    });
+    }, { disableNotification: true });
 
     expect(attempts).toBe(2);
     expect(bodies).toHaveLength(2);
     expect(bodies[0]).not.toBe(bodies[1]);
+    expect(bodies.every((body) => body instanceof FormData && body.get("disable_notification") === "true")).toBe(true);
     expect(sleepCalls).toEqual([1000]);
     expect(warnCalls).toHaveLength(1);
     expect(infoCalls).toHaveLength(1);
@@ -465,6 +488,7 @@ test("telegram channel renders progress replies as escaped HTML blocks", async (
       options: {
         parseMode: "HTML",
         replyToMessageId: 77,
+        disableNotification: true,
       },
     },
     {
@@ -490,10 +514,10 @@ test("telegram channel splits oversized text replies into multiple messages", as
     onUpdate: async () => {},
   }) as any;
 
-  const calls: string[] = [];
+  const calls: Array<{ text: string; options?: { disableNotification?: boolean } }> = [];
   channel.api = {
-    sendMessage: async (_chatId: string, text: string) => {
-      calls.push(text);
+    sendMessage: async (_chatId: string, text: string, options?: { disableNotification?: boolean }) => {
+      calls.push({ text, options });
       return {
         message_id: calls.length,
         date: 0,
@@ -504,11 +528,12 @@ test("telegram channel splits oversized text replies into multiple messages", as
   channel.connected = true;
 
   const longText = `${"A".repeat(2500)}\n${"B".repeat(2500)}\n${"C".repeat(2500)}`;
-  await channel.sendMessage("telegram:123456", longText);
+  await channel.sendMessage("telegram:123456", longText, { disableNotification: true });
 
   expect(calls.length).toBeGreaterThan(1);
-  expect(calls.every((chunk) => chunk.length <= 4000)).toBe(true);
-  expect(calls.join("")).toBe(longText);
+  expect(calls.every((call) => call.text.length <= 4000)).toBe(true);
+  expect(calls.every((call) => call.options?.disableNotification === true)).toBe(true);
+  expect(calls.map((call) => call.text).join("")).toBe(longText);
 });
 
 test("telegram channel sends SVGs as documents and PNGs as photos", async () => {
@@ -519,14 +544,14 @@ test("telegram channel sends SVGs as documents and PNGs as photos", async () => 
 
   const calls: string[] = [];
   channel.api = {
-    sendMessage: async () => {
-      calls.push("text");
+    sendMessage: async (_chatId: string, _text: string, options?: { disableNotification?: boolean }) => {
+      calls.push(`text:${options?.disableNotification === true ? "silent" : "normal"}`);
     },
-    sendPhoto: async (_chatId: string, attachment: { filename: string }) => {
-      calls.push(`photo:${attachment.filename}`);
+    sendPhoto: async (_chatId: string, attachment: { filename: string }, options?: { disableNotification?: boolean }) => {
+      calls.push(`photo:${attachment.filename}:${options?.disableNotification === true ? "silent" : "normal"}`);
     },
-    sendDocument: async (_chatId: string, attachment: { filename: string }) => {
-      calls.push(`document:${attachment.filename}`);
+    sendDocument: async (_chatId: string, attachment: { filename: string }, options?: { disableNotification?: boolean }) => {
+      calls.push(`document:${attachment.filename}:${options?.disableNotification === true ? "silent" : "normal"}`);
     },
   };
   channel.connected = true;
@@ -549,9 +574,9 @@ test("telegram channel sends SVGs as documents and PNGs as photos", async () => 
   });
 
   expect(calls).toEqual([
-    "text",
-    "document:chart.svg",
-    "photo:chart.png",
+    "text:normal",
+    "document:chart.svg:silent",
+    "photo:chart.png:silent",
   ]);
 });
 
@@ -638,7 +663,8 @@ test("telegram runtime prefixes only classified agent commentary", async () => {
     source: "agent",
     contentBlocks: [{ type: "text" }],
   })).toBe(false);
-  expect(runtime.formatOutboundTelegramText("Inspecting now.", commentaryOptions)).toBe("Commentary: Inspecting now.");
+  expect(runtime.isOutboundAgentCommentary({ source: "slash-command" })).toBe(false);
+  expect(runtime.formatOutboundTelegramText("Inspecting now.", commentaryOptions)).toBe("Commentary:\nInspecting now.");
   expect(runtime.formatOutboundTelegramText("Done.", { source: "agent" })).toBe("Done.");
 });
 

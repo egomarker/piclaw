@@ -102,6 +102,11 @@ type TelegramApiEnvelope<T> = {
 interface TelegramSendMessageOptions {
   parseMode?: "Markdown" | "HTML" | null;
   replyToMessageId?: number | null;
+  disableNotification?: boolean;
+}
+
+interface TelegramSendBinaryOptions {
+  disableNotification?: boolean;
 }
 
 // Telegram text messages are limited to ~4096 chars after entity parsing.
@@ -307,6 +312,9 @@ export class TelegramBotApi {
       payload.reply_to_message_id = Number(options.replyToMessageId);
       payload.allow_sending_without_reply = true;
     }
+    if (options.disableNotification === true) {
+      payload.disable_notification = true;
+    }
 
     try {
       return await this.requestJson<TelegramMessage>("sendMessage", payload, {
@@ -358,7 +366,13 @@ export class TelegramBotApi {
     }, options);
   }
 
-  private async sendBinary(method: "sendPhoto" | "sendDocument", field: "photo" | "document", chatId: string | number, attachment: TelegramBinaryAttachment): Promise<void> {
+  private async sendBinary(
+    method: "sendPhoto" | "sendDocument",
+    field: "photo" | "document",
+    chatId: string | number,
+    attachment: TelegramBinaryAttachment,
+    options: TelegramSendBinaryOptions = {},
+  ): Promise<void> {
     const url = this.endpoint(method);
 
     for (let attempt = 1; attempt <= TELEGRAM_REQUEST_MAX_ATTEMPTS; attempt += 1) {
@@ -366,6 +380,9 @@ export class TelegramBotApi {
         const response = await this.fetchAttempt(url, () => {
           const body = new FormData();
           body.set("chat_id", String(chatId));
+          if (options.disableNotification === true) {
+            body.set("disable_notification", "true");
+          }
           body.append(field, new Blob([attachment.data], { type: attachment.contentType || "application/octet-stream" }), attachment.filename);
           return {
             method: "POST",
@@ -410,12 +427,20 @@ export class TelegramBotApi {
     throw createTelegramRequestError(`Telegram ${method} failed after ${TELEGRAM_REQUEST_MAX_ATTEMPTS} attempts.`, true);
   }
 
-  async sendPhoto(chatId: string | number, attachment: TelegramBinaryAttachment): Promise<void> {
-    await this.sendBinary("sendPhoto", "photo", chatId, attachment);
+  async sendPhoto(
+    chatId: string | number,
+    attachment: TelegramBinaryAttachment,
+    options: TelegramSendBinaryOptions = {},
+  ): Promise<void> {
+    await this.sendBinary("sendPhoto", "photo", chatId, attachment, options);
   }
 
-  async sendDocument(chatId: string | number, attachment: TelegramBinaryAttachment): Promise<void> {
-    await this.sendBinary("sendDocument", "document", chatId, attachment);
+  async sendDocument(
+    chatId: string | number,
+    attachment: TelegramBinaryAttachment,
+    options: TelegramSendBinaryOptions = {},
+  ): Promise<void> {
+    await this.sendBinary("sendDocument", "document", chatId, attachment, options);
   }
 
   async getFile(fileId: string): Promise<TelegramFile> {
@@ -669,7 +694,14 @@ export class TelegramChannel {
     this.options.setLastUpdateId?.(this.lastUpdateId);
   }
 
-  async sendMessage(chatJid: string, text: string, options?: { attachments?: TelegramBinaryAttachment[] }): Promise<void> {
+  async sendMessage(
+    chatJid: string,
+    text: string,
+    options?: {
+      attachments?: TelegramBinaryAttachment[];
+      disableNotification?: boolean;
+    },
+  ): Promise<void> {
     if (!this.api || !this.connected) {
       throw new Error("Telegram channel is not connected.");
     }
@@ -679,14 +711,16 @@ export class TelegramChannel {
     const textChunks = splitTelegramText(text);
 
     for (const chunk of textChunks) {
-      await this.api.sendMessage(chatId, chunk);
+      await this.api.sendMessage(chatId, chunk, {
+        disableNotification: options?.disableNotification === true,
+      });
     }
 
     for (const attachment of attachments) {
       if (attachment.kind === "image" && shouldSendAsTelegramPhoto(attachment)) {
-        await this.api.sendPhoto(chatId, attachment);
+        await this.api.sendPhoto(chatId, attachment, { disableNotification: true });
       } else {
-        await this.api.sendDocument(chatId, attachment);
+        await this.api.sendDocument(chatId, attachment, { disableNotification: true });
       }
     }
   }
@@ -708,6 +742,7 @@ export class TelegramChannel {
     const sent = await api.sendMessage(chatId, initialHtml, {
       parseMode: "HTML",
       replyToMessageId,
+      disableNotification: true,
     });
     const messageId = sent.message_id;
     let lastRenderedHtml = initialHtml;
