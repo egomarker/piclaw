@@ -66,6 +66,20 @@ function normalizeText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+/** Whether a runtime outbound message is classified as display-only agent commentary. */
+export function shouldQuoteOutboundCommentary(options: unknown): boolean {
+  if (!options || typeof options !== "object") return false;
+  const outbound = options as { source?: unknown; contentBlocks?: unknown };
+  if (normalizeText(outbound.source) === "agent-commentary") return true;
+  if (!Array.isArray(outbound.contentBlocks)) return false;
+  return outbound.contentBlocks.some((value) => {
+    if (!value || typeof value !== "object") return false;
+    const block = value as { type?: unknown; reply_kind?: unknown };
+    return normalizeText(block.type) === "agent_commentary"
+      || normalizeText(block.reply_kind) === "commentary";
+  });
+}
+
 function buildUserDisplayName(user: TelegramUser | undefined, fallback: string): string {
   const first = normalizeText(user?.first_name);
   const last = normalizeText(user?.last_name);
@@ -442,7 +456,8 @@ async function startTelegramRuntime(): Promise<void> {
     transportCleanup = interop.registerChannelTransport("telegram", {
       sendMessage: async (chatJid, text, options) => {
         const attachments = await buildOutboundAttachments(options);
-        await channel.sendMessage(chatJid, text, { attachments });
+        const blockquote = shouldQuoteOutboundCommentary(options);
+        await channel.sendMessage(chatJid, text, { attachments, blockquote });
         updateTelegramRuntimeState({
           connected: channel.isConnected(),
           lastError: null,
