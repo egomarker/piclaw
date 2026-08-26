@@ -289,7 +289,12 @@ export function getShowCommentaryInAddons(): boolean {
 
 /** Persist the messaging add-on commentary toggle for subsequent agent runs. */
 export function setShowCommentaryInAddons(enabled: boolean): boolean {
-  return writeDomainConfigField(addonsDomainSchema, getDomainConfigOptions(), "showCommentary", Boolean(enabled));
+  return writeDomainConfigField(
+    addonsDomainSchema,
+    getDomainConfigOptions(),
+    "showCommentary",
+    Boolean(enabled),
+  ).showCommentary;
 }
 
 export interface AgentControlConfig {
