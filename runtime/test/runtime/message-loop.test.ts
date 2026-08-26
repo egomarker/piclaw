@@ -12,6 +12,10 @@ import {
   isPendingShutdown,
   markPendingShutdown,
 } from "../../src/runtime/shutdown-registry.js";
+import {
+  getShowCommentaryInTimeline,
+  setShowCommentaryInTimeline,
+} from "../../src/core/config.js";
 
 import { importFresh, withTempWorkspaceEnv } from "../helpers.js";
 
@@ -788,6 +792,89 @@ test("processMessages updates and removes transport progress placeholders", asyn
       expect(updates.some((text) => text.includes("Tool: grep: runtime/src/runtime/message-loop.ts"))).toBe(true);
       expect(removed).toBe(1);
     } finally {
+      unregisterDetector();
+    }
+  });
+});
+
+test("processMessages delivers enabled tool-use commentary once as a permanent display-only message", async () => {
+  await withTempWorkspaceEnv("piclaw-message-loop-", { PICLAW_KEYCHAIN_KEY: "test-key" }, async () => {
+    const db = await importFresh<typeof import("../../src/db.js")>("../src/db.js");
+    const loop = await importFresh<typeof import("../../src/runtime/message-loop.js")>("../src/runtime/message-loop.js");
+    db.initDatabase();
+
+    const chatJid = "telegram:commentary";
+    const timestamp = "2026-04-17T01:04:25.000Z";
+    const sourceRowId = db.storeMessage({
+      ...makeMessage(chatJid, "@Pi inspect runtime", timestamp),
+      id: "telegram:commentary:77",
+    });
+    const sent: Array<{ text: string; options?: Record<string, unknown> }> = [];
+    const state = {
+      lastAgentTimestamp: {} as Record<string, string>,
+      wasCommandProcessed: () => false,
+      markCommandProcessed: () => {},
+      saveTimestamps: () => {},
+    };
+    const previousShowCommentary = getShowCommentaryInTimeline();
+    const unregisterDetector = registerChannelDetector((jid) => jid.startsWith("telegram:") ? "telegram" : null);
+
+    try {
+      setShowCommentaryInTimeline(true);
+      const ok = await loop.processMessages(chatJid, {
+        state: state as any,
+        assistantName: "Pi",
+        triggerPattern: /@Pi/i,
+        agentPool: {
+          runAgent: async (_prompt: string, _nextChatJid: string, runOptions?: {
+            emitToolUseCommentary?: boolean;
+            onTurnComplete?: (turn: Record<string, unknown>) => void;
+          }) => {
+            expect(runOptions?.emitToolUseCommentary).toBe(true);
+            const commentaryTurn = {
+              text: "I’ll inspect the runtime now.",
+              attachments: [],
+              followedByToolUse: true,
+              kind: "commentary",
+              sourceKey: "msg-commentary-1",
+            };
+            runOptions?.onTurnComplete?.(commentaryTurn);
+            runOptions?.onTurnComplete?.(commentaryTurn);
+            await Promise.resolve();
+            expect(sent.map((entry) => entry.text)).toEqual(["I’ll inspect the runtime now."]);
+            return { status: "success", result: "Inspection complete." };
+          },
+        } as any,
+        sendMessage: async (_jid: string, text: string, options?: Record<string, unknown>) => {
+          sent.push({ text, options });
+        },
+      });
+
+      expect(ok).toBe(true);
+      expect(sent).toHaveLength(2);
+      expect(sent[0]).toEqual({
+        text: "I’ll inspect the runtime now.",
+        options: {
+          threadId: sourceRowId,
+          source: "agent-commentary",
+          contentBlocks: [{
+            type: "agent_commentary",
+            reply_kind: "commentary",
+            source_key: "msg-commentary-1",
+          }],
+        },
+      });
+      expect(sent[1]).toEqual({
+        text: "Inspection complete.",
+        options: {
+          threadId: sourceRowId,
+          source: "agent",
+          attachments: undefined,
+        },
+      });
+      expect(state.lastAgentTimestamp[chatJid]).toBe(timestamp);
+    } finally {
+      setShowCommentaryInTimeline(previousShowCommentary);
       unregisterDetector();
     }
   });
