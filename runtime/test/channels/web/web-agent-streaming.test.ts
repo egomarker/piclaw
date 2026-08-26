@@ -9,6 +9,7 @@ import { describe, test, expect } from "bun:test";
 import { AgentQueue } from "../../../src/queue.js";
 import { waitFor } from "../../helpers.js";
 import { createWebChannelTestFixture } from "./helpers/web-channel-fixture.js";
+import { getShowCommentaryInTimeline, setShowCommentaryInTimeline } from "../../../src/core/config.js";
 
 function makeEvent(type: string, payload: Record<string, unknown> = {}) {
   return { type, ...payload } as any;
@@ -330,6 +331,152 @@ describe("web agent streaming", () => {
       }));
       expect(events.some((event) => event.type === "agent_draft" && event.data?.text === "")).toBe(true);
     } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test("persists enabled tool-use commentary once without consuming placeholders or becoming terminal", async () => {
+    const commentary = "I’ll inspect the logs next.";
+    const sourceKey = "msg_commentary_web_1";
+    const signature = JSON.stringify({ v: 1, id: sourceKey, phase: "commentary" });
+    const agentPool = {
+      setSessionBinder: () => {},
+      runAgent: async (_prompt: string, _chatJid: string, options: any) => {
+        expect(options.emitToolUseCommentary).toBe(true);
+        options.onEvent?.(makeEvent("message_update", {
+          assistantMessageEvent: {
+            type: "text_start",
+            contentIndex: 0,
+            partial: { content: [{ type: "text", textSignature: signature }] },
+          },
+        }));
+        options.onEvent?.(makeEvent("message_update", {
+          assistantMessageEvent: {
+            type: "text_delta",
+            delta: commentary,
+            contentIndex: 0,
+            partial: { content: [{ type: "text", textSignature: signature }] },
+          },
+        }));
+        const turn = {
+          text: commentary,
+          attachments: [],
+          followedByToolUse: true,
+          kind: "commentary",
+          sourceKey,
+        };
+        options.onTurnComplete?.(turn);
+        options.onTurnComplete?.(turn);
+        return { status: "success", result: "The log review is complete.", attachments: [] };
+      },
+      getContextUsageForChat: async () => null,
+    } as any;
+
+    const fixture = await createWebChannelTestFixture({
+      workspace: "temp",
+      queue: new AgentQueue(),
+      agentPool,
+      resetSql: "DELETE FROM message_media; DELETE FROM messages; DELETE FROM chats; DELETE FROM chat_cursors;",
+    });
+
+    const previousShowCommentary = getShowCommentaryInTimeline();
+    try {
+      setShowCommentaryInTimeline(true);
+      const { channel, db } = fixture;
+      let placeholderConsumeCalls = 0;
+      channel.consumeQueuedFollowupPlaceholder = (() => {
+        placeholderConsumeCalls += 1;
+        return null;
+      }) as typeof channel.consumeQueuedFollowupPlaceholder;
+      expect(channel.storeMessage("web:default", "inspect it", false, [])).not.toBeNull();
+
+      await channel.processChat("web:default", "default");
+
+      const timeline = db.getTimeline("web:default", 20);
+      const commentaryRows = timeline.filter((row) => row.data?.content === commentary);
+      expect(commentaryRows).toHaveLength(1);
+      expect(commentaryRows[0]?.data?.content_blocks).toContainEqual(expect.objectContaining({
+        type: "agent_commentary",
+        reply_kind: "commentary",
+        source_key: sourceKey,
+      }));
+      const rawCommentary = db.getDb().prepare(`
+        SELECT is_terminal_agent_reply
+        FROM messages
+        WHERE chat_jid = ? AND content = ?
+      `).get("web:default", commentary) as { is_terminal_agent_reply: number };
+      expect(rawCommentary.is_terminal_agent_reply).toBe(0);
+      expect(timeline.filter((row) => row.data?.content === "The log review is complete.")).toHaveLength(1);
+      expect(placeholderConsumeCalls).toBe(0);
+    } finally {
+      setShowCommentaryInTimeline(previousShowCommentary);
+      fixture.cleanup();
+    }
+  });
+
+  test("keeps persisted commentary separate from provider-error fallback text", async () => {
+    const commentary = "I’ll inspect one more saved record.";
+    const sourceKey = "msg_commentary_error_1";
+    const signature = JSON.stringify({ id: sourceKey, phase: "commentary" });
+    const agentPool = {
+      setSessionBinder: () => {},
+      runAgent: async (_prompt: string, _chatJid: string, options: any) => {
+        options.onEvent?.(makeEvent("message_update", {
+          assistantMessageEvent: {
+            type: "text_start",
+            contentIndex: 0,
+            partial: { content: [{ type: "text", textSignature: signature }] },
+          },
+        }));
+        options.onEvent?.(makeEvent("message_update", {
+          assistantMessageEvent: {
+            type: "text_delta",
+            delta: commentary,
+            contentIndex: 0,
+            partial: { content: [{ type: "text", textSignature: signature }] },
+          },
+        }));
+        options.onTurnComplete?.({
+          text: commentary,
+          attachments: [],
+          followedByToolUse: true,
+          kind: "commentary",
+          sourceKey,
+        });
+        return { status: "error", result: null, error: "Temporary provider error; try again." };
+      },
+      getContextUsageForChat: async () => null,
+    } as any;
+
+    const fixture = await createWebChannelTestFixture({
+      workspace: "temp",
+      queue: new AgentQueue(),
+      agentPool,
+      resetSql: "DELETE FROM message_media; DELETE FROM messages; DELETE FROM chats; DELETE FROM chat_cursors;",
+    });
+
+    const previousShowCommentary = getShowCommentaryInTimeline();
+    try {
+      setShowCommentaryInTimeline(true);
+      const { channel, db } = fixture;
+      expect(channel.storeMessage("web:default", "inspect it", false, [])).not.toBeNull();
+
+      await channel.processChat("web:default", "default");
+
+      const timeline = db.getTimeline("web:default", 20);
+      expect(timeline.filter((row) => row.data?.content === commentary)).toHaveLength(1);
+      const errorRow = timeline.find((row) => (row.data?.content_blocks || []).some(
+        (block: any) => block?.type === "turn_outcome_marker" && block?.kind === "error"
+      ));
+      expect(errorRow).toBeDefined();
+      expect(String(errorRow?.data?.content || "")).not.toContain(commentary);
+      expect(errorRow?.data?.content_blocks).toContainEqual(expect.objectContaining({
+        type: "turn_outcome_marker",
+        kind: "error",
+        draft_recovered: false,
+      }));
+    } finally {
+      setShowCommentaryInTimeline(previousShowCommentary);
       fixture.cleanup();
     }
   });

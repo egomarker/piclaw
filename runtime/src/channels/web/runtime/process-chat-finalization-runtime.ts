@@ -1,5 +1,5 @@
 import { getIdentityConfig } from "../../../core/config.js";
-import { endChatRun, getChatCursor, getMessagesSince } from "../../../db.js";
+import { endChatRun, getAgentCommentaryRowIdBySourceKey, getChatCursor, getMessagesSince } from "../../../db.js";
 import { finalizePendingShutdownAfterTurn } from "../../../runtime/shutdown-registry.js";
 import { createLogger } from "../../../utils/logger.js";
 import type { WebChannelLike } from "../core/web-channel-contracts.js";
@@ -94,11 +94,31 @@ export interface PersistIntermediateTurnOptions {
   skipPlaceholder: boolean;
   timingBlock: Record<string, unknown>;
   followedByToolUse?: boolean;
+  commentary?: {
+    sourceKey?: string;
+  };
   clearCommittedDraft(): void;
 }
 
 /** Persist one non-terminal agent turn while preserving placeholder and draft ordering. */
 export function persistIntermediateProcessChatTurn(options: PersistIntermediateTurnOptions): number | null {
+  const commentarySourceKey = options.commentary?.sourceKey?.trim() || "";
+  if (commentarySourceKey) {
+    const existingRowId = getAgentCommentaryRowIdBySourceKey(options.chatJid, commentarySourceKey);
+    if (existingRowId !== null) {
+      if (options.followedByToolUse) options.clearCommittedDraft();
+      return existingRowId;
+    }
+  }
+
+  const commentaryBlock = options.commentary
+    ? {
+        type: "agent_commentary",
+        reply_kind: "commentary",
+        ...(commentarySourceKey ? { source_key: commentarySourceKey } : {}),
+      }
+    : null;
+
   return storeAgentTurn(options.channel, options.emitter, {
     chatJid: options.chatJid,
     text: options.text,
@@ -106,7 +126,8 @@ export function persistIntermediateProcessChatTurn(options: PersistIntermediateT
     channelName: options.channelName,
     threadId: options.threadId,
     skipPlaceholder: options.skipPlaceholder,
-    extraContentBlocks: [options.timingBlock],
+    isTerminalAgentReply: false,
+    extraContentBlocks: [options.timingBlock, ...(commentaryBlock ? [commentaryBlock] : [])],
     onMessageStored: options.followedByToolUse ? options.clearCommittedDraft : undefined,
   });
 }

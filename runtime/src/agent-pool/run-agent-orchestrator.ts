@@ -51,8 +51,13 @@ import {
   runAgentRecoveryPhase,
   type PromptAttemptResult,
 } from "./run-agent-recovery-phase.js";
-import type { AgentTurnCoordinator } from "./turn-coordinator.js";
-import type { AgentOutput, RetrySettingsProvider, RunAgentOptions } from "./contracts.js";
+import {
+  parseAssistantTextSignature,
+  resolveAssistantTextSignatureFromPartial,
+  type AgentTurnCoordinator,
+  type AssistantTextPhase,
+} from "./turn-coordinator.js";
+import type { AgentOutput, RetrySettingsProvider, RunAgentOptions, TurnOutput } from "./contracts.js";
 import { isPendingShutdown } from "../runtime/shutdown-registry.js";
 import {
   beginTrackedPhase,
@@ -386,6 +391,8 @@ async function runPromptAttempt(
   let toolExecutionCount = toolExecutionCountAtStart;
   let modelResponseSequence = 0;
   let activeModelResponse: { sequence: number; startedAt: number } | null = null;
+  let activeAssistantTextPhase: AssistantTextPhase = null;
+  let activeAssistantMessageHadTextDelta = false;
   const sessionEntryBaseline = snapshotSessionEntryCount(session);
   const baselineLeafId = getSessionLeafId(session);
   const toolUseMessageBudget = getToolUseBudget();
@@ -425,15 +432,22 @@ async function runPromptAttempt(
 
   const originalOnTurnComplete = runOptions.onTurnComplete;
   const onTurnComplete = originalOnTurnComplete
-    ? ((turn: { text: string; attachments: AttachmentInfo[]; usage?: unknown; followedByToolUse?: boolean }) => {
-        const hadOutput = !!(turn.text || turn.attachments.length > 0);
-        hadCompletedTurnOutput = hadCompletedTurnOutput || hadOutput;
-        hadTerminalTurnOutput = hadTerminalTurnOutput || (hadOutput && !turn.followedByToolUse);
-        originalOnTurnComplete(turn as Parameters<NonNullable<RunAgentOptions["onTurnComplete"]>>[0]);
+    ? ((turn: TurnOutput) => {
+        if (turn.kind !== "commentary") {
+          const hadOutput = !!(turn.text || turn.attachments.length > 0);
+          hadCompletedTurnOutput = hadCompletedTurnOutput || hadOutput;
+          hadTerminalTurnOutput = hadTerminalTurnOutput || (hadOutput && !turn.followedByToolUse);
+        }
+        originalOnTurnComplete(turn);
       })
     : undefined;
 
-  const tracker = options.turnCoordinator.createTracker(chatJid, onTurnComplete, runOptions.onTurnDiscard);
+  const tracker = options.turnCoordinator.createTracker(
+    chatJid,
+    onTurnComplete,
+    runOptions.onTurnDiscard,
+    runOptions.emitToolUseCommentary ? { emitToolUseCommentary: true } : {},
+  );
   const toolExecutionWatchdogHeartbeat = createToolExecutionWatchdogHeartbeatController(chatJid);
   const isRetrySafeToolName = (toolName: unknown): boolean => typeof toolName === "string" && [
     "read",
@@ -545,7 +559,26 @@ async function runPromptAttempt(
       }
     }
     if (event.type === "message_update") {
-      const messageEvent = (event as { assistantMessageEvent?: { type?: string; delta?: string } }).assistantMessageEvent;
+      const messageEvent = (event as {
+        assistantMessageEvent?: {
+          type?: string;
+          delta?: string;
+          contentIndex?: number;
+          partial?: unknown;
+        };
+      }).assistantMessageEvent;
+      if (messageEvent?.type === "text_start") {
+        activeAssistantMessageHadTextDelta = false;
+        activeAssistantTextPhase = resolveAssistantTextSignatureFromPartial(
+          messageEvent.partial,
+          messageEvent.contentIndex,
+        ).phase;
+      } else if (messageEvent?.type === "text_delta" || messageEvent?.type === "text_end") {
+        activeAssistantTextPhase = resolveAssistantTextSignatureFromPartial(
+          messageEvent.partial,
+          messageEvent.contentIndex,
+        ).phase ?? activeAssistantTextPhase;
+      }
       if ((messageEvent?.type === "text_start" || messageEvent?.type === "thinking_start") && !activeModelResponse) {
         modelResponseSequence += 1;
         activeModelResponse = { sequence: modelResponseSequence, startedAt: Date.now() };
@@ -558,8 +591,12 @@ async function runPromptAttempt(
           ...getRunObservabilityDetails(runOptions),
         });
       }
-      if (messageEvent?.type === "text_delta" && typeof messageEvent.delta === "string" && messageEvent.delta.length > 0) {
-        hadPartialOutput = true;
+      if (
+        messageEvent?.type === "text_delta"
+        && typeof messageEvent.delta === "string"
+        && messageEvent.delta.length > 0
+      ) {
+        activeAssistantMessageHadTextDelta = true;
       }
     }
     if (
@@ -599,6 +636,31 @@ async function runPromptAttempt(
       const estimateSnapshot = attemptContext.publishContextUsageUpdate("message_end", true);
       const message = (event as { message?: { role?: unknown; content?: unknown; stopReason?: unknown; errorMessage?: unknown; usage?: Record<string, unknown> } }).message;
       if (message?.role === "assistant") {
+        const textBlocks = Array.isArray(message.content)
+          ? message.content.filter((block): block is { type: "text"; text?: unknown; textSignature?: unknown } => (
+            Boolean(block) && typeof block === "object" && (block as { type?: unknown }).type === "text"
+          ))
+          : [];
+        const hasAuthoritativeCommentaryText = textBlocks.some((block) => (
+          typeof block.text === "string"
+          && block.text.trim().length > 0
+          && parseAssistantTextSignature(block.textSignature).phase === "commentary"
+        ));
+        const hasAuthoritativeSubstantiveText = typeof message.content === "string"
+          ? message.content.trim().length > 0
+          : textBlocks.some((block) => (
+            typeof block.text === "string"
+            && block.text.trim().length > 0
+            && parseAssistantTextSignature(block.textSignature).phase !== "commentary"
+          ));
+        const completedCommentaryOnly = hasAuthoritativeCommentaryText && !hasAuthoritativeSubstantiveText;
+        if (
+          activeAssistantMessageHadTextDelta
+          && (hasAuthoritativeSubstantiveText || (!completedCommentaryOnly && activeAssistantTextPhase !== "commentary"))
+        ) {
+          hadPartialOutput = true;
+        }
+
         const durationMs = activeModelResponse ? Math.max(0, Date.now() - activeModelResponse.startedAt) : null;
         options.onInfo?.("Assistant model response completed", {
           operation: "model.response.end",
@@ -628,6 +690,8 @@ async function runPromptAttempt(
           });
         }
         activeModelResponse = null;
+        activeAssistantTextPhase = null;
+        activeAssistantMessageHadTextDelta = false;
       }
       if (message?.role === "assistant" && Array.isArray(message.content)) {
         const toolCallBlocks = message.content.filter((block): block is Record<string, unknown> => (
@@ -752,7 +816,9 @@ async function runPromptAttempt(
   tracker.finalizeAttempt();
   const trackedFinalText = tracker.getFinalText();
   const finalUsage = tracker.getFinalUsage();
-  hadPartialOutput = hadPartialOutput || !!trackedFinalText;
+  hadPartialOutput = hadPartialOutput
+    || (activeAssistantMessageHadTextDelta && activeAssistantTextPhase !== "commentary")
+    || !!trackedFinalText;
   const finalAttachments = options.takeAttachments(chatJid);
   const timedOut = timedOutRef.value;
   const lastAssistantState = tracker.getLastAssistantState();

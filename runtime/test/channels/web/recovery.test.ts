@@ -8,6 +8,7 @@ import {
   type WebRecoveryStore,
 } from "../../../src/channels/web/runtime/recovery.js";
 import { AgentQueue } from "../../../src/queue.js";
+import { getDb, initDatabase } from "../../../src/db.js";
 import { waitFor } from "../../helpers.js";
 
 describe("web recovery helpers", () => {
@@ -375,6 +376,63 @@ describe("web recovery helpers", () => {
     recoverInflightRuns(ctx, store);
 
     expect(cleared).toEqual(["web:draft"]);
+  });
+
+  test("recoverInflightRuns treats commentary rows and commentary drafts as recovery-neutral", () => {
+    initDatabase();
+    const chatJid = `web:commentary-recovery-${Date.now()}`;
+    const clearedMarkers: string[] = [];
+    const clearedDrafts: string[] = [];
+    const ctx: WebRecoveryContext = {
+      assistantName: "Pi",
+      defaultAgentId: "default",
+      enqueue: async () => {},
+      processChat: async () => {},
+      getDraftRecovery: () => ({
+        turnId: "turn-commentary",
+        text: "Dangling commentary must not become an answer.",
+        totalLines: 1,
+        updatedAt: Date.now(),
+        kind: "commentary",
+      }),
+      clearDraftRecovery: (jid) => { clearedDrafts.push(jid); },
+      now: () => new Date("2026-01-01T00:05:00Z").getTime(),
+    };
+    const store: WebRecoveryStore = {
+      getInflightRuns: () => [{
+        chatJid,
+        prevTs: "2026-01-01T00:00:00Z",
+        messageId: "source-commentary-recovery",
+        startedAt: "2026-01-01T00:04:00Z",
+      }],
+      transaction: (run) => run(),
+      getAgentReplyStateAfter: () => "commentary",
+      clearInflightMarker: (jid) => { clearedMarkers.push(jid); },
+      rollbackInflightRun: () => {},
+      getAllChatCursors: () => ({}),
+      getKnownChatJids: () => [],
+      getDeferredQueuedFollowups: () => [],
+      getMessagesSince: () => [],
+    };
+
+    recoverInflightRuns(ctx, store);
+
+    expect(clearedMarkers).toEqual([chatJid]);
+    expect(clearedDrafts).toEqual([chatJid]);
+    const rows = getDb().prepare(`
+      SELECT content, content_blocks, is_terminal_agent_reply
+      FROM messages
+      WHERE chat_jid = ?
+      ORDER BY rowid
+    `).all(chatJid) as Array<{ content: string; content_blocks: string | null; is_terminal_agent_reply: number }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.content).toBe("");
+    expect(rows[0]?.is_terminal_agent_reply).toBe(1);
+    expect(JSON.parse(rows[0]?.content_blocks || "[]")).toContainEqual(expect.objectContaining({
+      type: "turn_outcome_marker",
+      kind: "interrupted",
+      cause: "service_restart",
+    }));
   });
 
   test("recoverInflightRuns clears stale inflight markers without replay", () => {

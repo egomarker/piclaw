@@ -382,6 +382,8 @@ type MessageKey =
   | 'settings.general.display'
   | 'settings.general.systemMeters'
   | 'settings.general.systemMetersHint'
+  | 'settings.general.commentaryTimeline'
+  | 'settings.general.commentaryTimelineHint'
   | 'settings.general.instanceConfig'
   | 'settings.general.composeUpload'
   | 'settings.general.composeUploadAria'
@@ -1073,6 +1075,8 @@ const EN: Record<MessageKey, string> = {
   'settings.general.display': 'Display',
   'settings.general.systemMeters': 'System meters',
   'settings.general.systemMetersHint': 'CPU/memory/network meters in the status bar. This browser only.',
+  'settings.general.commentaryTimeline': 'Tool commentary',
+  'settings.general.commentaryTimelineHint': 'Keep confirmed pre-tool narration as display-only timeline messages. It never counts as a completed reply.',
   'settings.general.instanceConfig': 'Instance Configuration',
   'settings.general.composeUpload': 'Compose upload (MB)',
   'settings.general.composeUploadAria': 'compose upload limit',
@@ -1763,6 +1767,8 @@ const ZH_CN: Partial<Record<MessageKey, string>> = {
   'settings.general.display': '显示',
   'settings.general.systemMeters': '系统仪表',
   'settings.general.systemMetersHint': '状态栏中的 CPU/内存/网络仪表。仅限此浏览器。',
+  'settings.general.commentaryTimeline': '工具注释',
+  'settings.general.commentaryTimelineHint': '在时间线中保留确认的工具调用前说明，仅供显示，不计为已完成回复。',
   'settings.general.instanceConfig': '实例配置',
   'settings.general.composeUpload': '撰写上传（MB）',
   'settings.general.composeUploadAria': '撰写上传限制',
@@ -2453,6 +2459,8 @@ const JA: Partial<Record<MessageKey, string>> = {
   'settings.general.display': '表示',
   'settings.general.systemMeters': 'システムメーター',
   'settings.general.systemMetersHint': 'ステータスバーの CPU/メモリ/ネットワークメーター。このブラウザのみ。',
+  'settings.general.commentaryTimeline': 'ツール注釈',
+  'settings.general.commentaryTimelineHint': '確認済みのツール実行前コメントを表示専用でタイムラインに保存します。完了した返信には数えません。',
   'settings.general.instanceConfig': 'インスタンス設定',
   'settings.general.composeUpload': '作成アップロード（MB）',
   'settings.general.composeUploadAria': '作成アップロード上限',

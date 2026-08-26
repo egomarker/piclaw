@@ -62,6 +62,10 @@ export interface TurnOutput {
   usage?: Usage;
   /** The completed assistant message committed immediately before tool dispatch. */
   followedByToolUse?: boolean;
+  /** Display-only signed commentary that must not participate in reply completion accounting. */
+  kind?: "commentary";
+  /** Stable provider text-item identity used for idempotent commentary persistence. */
+  sourceKey?: string;
 }
 
 export interface TurnDiscard {
@@ -95,6 +99,8 @@ export interface RunAgentOptions {
   onTurnComplete?: (turn: TurnOutput) => void;
   /** Called when completed provider commentary must remain transient. */
   onTurnDiscard?: (discard: TurnDiscard) => void;
+  /** Emit confirmed tool-use commentary through the display-only turn path. */
+  emitToolUseCommentary?: boolean;
   /** Stable runtime turn identifier for observability/correlation. */
   turnId?: string;
   /** Optional browser/user correlation identifier supplied by the caller. */

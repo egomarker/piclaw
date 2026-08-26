@@ -36,6 +36,7 @@ export {
   getMessageByRowId,
   getMessageByAnyRowId,
   getMessageRowIdById,
+  getAgentCommentaryRowIdBySourceKey,
   getMessageThreadRootIdById,
   deleteMessageByRowId,
   deleteThreadByRowId,

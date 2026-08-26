@@ -3832,6 +3832,97 @@ test("runAgentPrompt retries a persisted commentary-only error instead of classi
   }
 });
 
+test("runAgentPrompt emits tool-use commentary without treating it as a completed reply", async () => {
+  initDatabase();
+  const restoreEnv = setEnv({
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",
+    PICLAW_TURN_TRANSIENT_RECOVERY_TOOLS_ENABLED: "1",
+    PICLAW_TURN_AUTO_RECOVERY_MAX_ATTEMPTS: "2",
+    PICLAW_TURN_AUTO_RECOVERY_TOTAL_BUDGET_MS: "30000",
+  });
+
+  class StubSession {
+    private listeners: Array<(event: any) => void> = [];
+    private leafId = "leaf-commentary-tool-before";
+    sessionManager = { getLeafId: () => this.leafId };
+    isStreaming = false;
+    isCompacting = false;
+    isRetrying = false;
+    promptTexts: string[] = [];
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => { this.listeners = this.listeners.filter((entry) => entry !== listener); };
+    }
+    async prompt(text: string) {
+      this.promptTexts.push(text);
+      this.leafId = `leaf-commentary-tool-${this.promptTexts.length}`;
+      if (this.promptTexts.length === 1) {
+        const signature = JSON.stringify({ id: "msg-commentary-tool-1", phase: "commentary" });
+        for (const listener of this.listeners) {
+          listener({
+            type: "message_update",
+            assistantMessageEvent: {
+              type: "text_delta",
+              delta: "I’ll inspect the file now.",
+              contentIndex: 0,
+              partial: { content: [{ type: "text", textSignature: signature }] },
+            },
+          });
+          listener({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              stopReason: "toolUse",
+              content: [
+                { type: "text", text: "I’ll inspect the file now.", textSignature: signature },
+                { type: "toolCall", id: "tool-read", name: "read", arguments: { path: "README.md" } },
+              ],
+            },
+          });
+          listener({ type: "tool_execution_start", toolCallId: "tool-read", toolName: "read", args: { path: "README.md" } });
+          listener({ type: "tool_execution_end", toolCallId: "tool-read", toolName: "read", isError: false });
+          listener({ type: "message_end", message: { role: "assistant", stopReason: "stop", content: [] } });
+        }
+        return;
+      }
+      for (const listener of this.listeners) {
+        listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Inspection complete." } });
+        listener({ type: "message_end", message: createAssistantMessage("Inspection complete.") });
+      }
+    }
+    async abort() {}
+  }
+
+  try {
+    const session = new StubSession();
+    const completed: Array<{ text: string; kind?: "commentary"; sourceKey?: string }> = [];
+    const result = await runAgentPrompt("inspect", "web:default", {
+      timeoutMs: 0,
+      emitToolUseCommentary: true,
+      onTurnComplete: (turn) => completed.push({ text: turn.text, kind: turn.kind, sourceKey: turn.sourceKey }),
+    }, {
+      getOrCreateRuntime: async () => createRuntime(session, { maxRetries: 2, baseDelayMs: 1, maxDelayMs: 60000 }) as any,
+      turnCoordinator: new AgentTurnCoordinator({ takeAttachments: () => [], touchSession: () => {}, recordMessageUsage: () => {} }),
+      clearAttachments: () => {},
+      takeAttachments: () => [],
+      logsDir: createTestLogsDir(),
+      setActiveForkBaseLeaf: () => {},
+      clearActiveForkBaseLeaf: () => {},
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.result).toBe("Inspection complete.");
+    expect(session.promptTexts).toEqual(["inspect", RECOVERY_CONTINUATION_PROMPT]);
+    expect(completed).toEqual([{
+      text: "I’ll inspect the file now.",
+      kind: "commentary",
+      sourceKey: "msg-commentary-tool-1",
+    }]);
+  } finally {
+    restoreEnv();
+  }
+});
+
 test("runAgentPrompt continues with tools after a resolved side-effecting tool", async () => {
   const restoreEnv = setEnv({
     PICLAW_TURN_AUTO_RECOVERY_ENABLED: "1",

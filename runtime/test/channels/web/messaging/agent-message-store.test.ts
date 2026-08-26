@@ -160,6 +160,29 @@ describe("storeAgentTurn", () => {
     expect(emitterCalls).toEqual(["response:100"]);
   });
 
+  test("does not dispatch Web Push for display-only commentary", () => {
+    const { channel, calls } = createMockChannel([]);
+    const { emitter } = createMockEmitter();
+    let pushCalls = 0;
+
+    storeAgentTurn(channel, emitter, {
+      chatJid: "web:default",
+      text: "I’ll inspect the logs next.",
+      attachments: [],
+      channelName: "web",
+      threadId: 5,
+      skipPlaceholder: true,
+      isTerminalAgentReply: false,
+      extraContentBlocks: [{ type: "agent_commentary", reply_kind: "commentary" }],
+      dispatchWebPushNotification: async () => {
+        pushCalls += 1;
+      },
+    });
+
+    expect(calls).toEqual(["store:web:default:thread=5:terminal=0"]);
+    expect(pushCalls).toBe(0);
+  });
+
   test("marks terminal assistant replies when requested", () => {
     const { channel, calls } = createMockChannel([]);
     const { emitter } = createMockEmitter();

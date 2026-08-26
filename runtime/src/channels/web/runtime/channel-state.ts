@@ -15,12 +15,14 @@
  */
 
 import { getRouterState, setRouterState } from "../../../db.js";
+import type { WebDraftKind } from "../agent/agent-buffers.js";
 
 export interface PersistedDraftRecoveryEntry {
   turnId?: string;
   text: string;
   totalLines: number;
   updatedAt: number;
+  kind?: WebDraftKind;
 }
 
 /** Persistent per-chat state manager for the web channel. */

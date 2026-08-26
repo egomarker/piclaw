@@ -7,7 +7,7 @@
  * orchestration without changing the public WebChannel API.
  */
 
-import type { WebAgentBufferEntry } from "../agent/agent-buffers.js";
+import type { WebAgentBufferEntry, WebDraftKind } from "../agent/agent-buffers.js";
 
 const RECOVERY_REPLAY_DELAY_MS = 2000;
 import { registerPreShutdownHook } from "../../../runtime/shutdown-registry.js";
@@ -73,7 +73,7 @@ interface AgentStatusStoreLike {
 interface AgentBuffersLike {
   setPanelExpanded(turnId: string, panel: "thought" | "draft", expanded: boolean): void;
   isPanelExpanded(turnId: string, panel: "thought" | "draft"): boolean;
-  updateBuffer(turnId: string, panel: "thought" | "draft", text: string, totalLines: number): void;
+  updateBuffer(turnId: string, panel: "thought" | "draft", text: string, totalLines: number, kind?: WebDraftKind): void;
   getBuffer(turnId: string, panel: "thought" | "draft"): WebAgentBufferEntry | undefined;
 }
 
@@ -224,8 +224,8 @@ export class WebChannelRuntimeStateService {
     this.agentBuffers.updateBuffer(turnId, "thought", text, totalLines);
   }
 
-  updateDraftBuffer(turnId: string, text: string, totalLines: number): void {
-    this.agentBuffers.updateBuffer(turnId, "draft", text, totalLines);
+  updateDraftBuffer(turnId: string, text: string, totalLines: number, kind?: WebDraftKind): void {
+    this.agentBuffers.updateBuffer(turnId, "draft", text, totalLines, kind);
     const chatJid = this.draftRecoveryChatByTurnId.get(turnId);
     if (!chatJid) return;
     const normalizedText = typeof text === "string" ? text : "";
@@ -239,6 +239,7 @@ export class WebChannelRuntimeStateService {
       text: normalizedText,
       totalLines,
       updatedAt: Date.now(),
+      ...(kind ? { kind } : {}),
     });
     this.state.save();
   }

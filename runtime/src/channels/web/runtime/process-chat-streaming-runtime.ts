@@ -8,6 +8,8 @@ import { heartbeatTrackedPhase } from "../../../runtime/progress-watchdog.js";
 import { storeThinkingContent } from "../../../db/messages.js";
 import { safeTruncateUtf16 } from "../../../utils/safe-truncate.js";
 import { createLogger, debugSuppressedError } from "../../../utils/logger.js";
+import { resolveAssistantTextSignatureFromPartial } from "../../../agent-pool/turn-coordinator.js";
+import type { WebDraftKind } from "../agent/agent-buffers.js";
 
 const log = createLogger("web.runtime.process-chat-streaming");
 
@@ -56,6 +58,7 @@ export async function createProcessChatStreamingRuntime(options: {
   let pendingThinkingLines = 0;
   let pendingThinkingDurationMs = 0;
   let currentModel: string | null = null;
+  let currentDraftKind: WebDraftKind = "answer";
   const identity = getIdentityConfig();
   const withAgentProfile = createAgentProfileBuilder(chatJid, identity.assistantName, resolveAvatarUrl("agent", identity.assistantAvatar), identity.userName || null, resolveAvatarUrl("user", identity.userAvatar), identity.userAvatarBackground || null);
   const emitter = createAgentEventEmitter(channel, withAgentProfile);
@@ -101,10 +104,27 @@ export async function createProcessChatStreamingRuntime(options: {
       pendingThinkingLines += realLines;
       pendingThinkingDurationMs += durationMs;
     },
-    onDraftBuffer: (text, lines) => channel.updateDraftBuffer(turnId, text, lines),
+    onDraftBuffer: (text, lines) => channel.updateDraftBuffer(turnId, text, lines, currentDraftKind),
   });
   const streamingHandler = (event: Record<string, unknown>) => {
     const type = typeof event?.type === "string" ? event.type : "";
+    if (type === "message_update") {
+      const messageEvent = event.assistantMessageEvent && typeof event.assistantMessageEvent === "object"
+        ? event.assistantMessageEvent as Record<string, unknown>
+        : null;
+      const messageEventType = typeof messageEvent?.type === "string" ? messageEvent.type : "";
+      if (messageEventType === "text_start" || messageEventType === "text_delta" || messageEventType === "text_end") {
+        const phase = resolveAssistantTextSignatureFromPartial(
+          messageEvent?.partial,
+          typeof messageEvent?.contentIndex === "number" ? messageEvent.contentIndex : undefined,
+        ).phase;
+        if (messageEventType === "text_start") {
+          currentDraftKind = phase === "commentary" ? "commentary" : "answer";
+        } else if (phase === "commentary" || phase === "final_answer") {
+          currentDraftKind = phase === "commentary" ? "commentary" : "answer";
+        }
+      }
+    }
     if (type === "message_update") heartbeatTrackedPhase(chatJid, "streaming", { eventType: type });
     else if (type === "tool_execution_start" || type === "tool_execution_update" || type === "tool_execution_end") heartbeatTrackedPhase(chatJid, "tool_execution", { eventType: type, toolName: event.toolName });
     else if (type === "compaction_start") heartbeatTrackedPhase(chatJid, "preprompt_compaction", { eventType: type });
@@ -124,6 +144,7 @@ export async function createProcessChatStreamingRuntime(options: {
     baseHandler(event as never);
   };
   const clearCommittedDraft = () => {
+    currentDraftKind = "answer";
     channel.updateDraftBuffer(turnId, "", 0);
     trackedEmitter.draft({ thread_id: threadId, agent_id: agentId, turn_id: turnId, text: "", total_lines: 0, kind: "draft", mode: "replace" });
     if (channel.isPanelExpanded(turnId, "draft")) trackedEmitter.draftDelta({ thread_id: threadId, agent_id: agentId, turn_id: turnId, delta: "", reset: true });

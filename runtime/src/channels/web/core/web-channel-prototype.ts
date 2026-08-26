@@ -1,7 +1,7 @@
 import type { InteractionRow } from "../../../db.js";
 import type { QueuedFollowupItem } from "../runtime/followup-placeholders.js";
 import type { SendMessageOptions } from "../messaging/message-write-flows.js";
-import type { WebAgentBufferEntry } from "../agent/agent-buffers.js";
+import type { WebAgentBufferEntry, WebDraftKind } from "../agent/agent-buffers.js";
 import type { WebSessionBroadcastService } from "../sse/session-broadcast-service.js";
 import type { WebChannelLike } from "./web-channel-contracts.js";
 import {
@@ -370,8 +370,8 @@ export function installWebChannelPrototype(
     updateDraftBuffer: {
       configurable: true,
       writable: true,
-      value: withRuntimePublicSurface((service, turnId: string, text: string, totalLines: number): void => {
-        service.updateDraftBuffer(turnId, text, totalLines);
+      value: withRuntimePublicSurface((service, turnId: string, text: string, totalLines: number, kind?: WebDraftKind): void => {
+        service.updateDraftBuffer(turnId, text, totalLines, kind);
       }),
     },
     getBuffer: {

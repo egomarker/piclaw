@@ -233,6 +233,30 @@ test('handleAppSseEvent clears extension working state when the turn completes',
   expect(state.getExtensionWorkingState()).toEqual({ message: null, indicator: null, visible: true });
 });
 
+test('handleAppSseEvent keeps display-only commentary out of completion and notification state', () => {
+  const state = createDeps();
+
+  handleAppSseEvent('extension_ui_working', {
+    chat_jid: 'chat:alpha',
+    message: 'Inspecting logs…',
+  }, state.deps);
+
+  handleAppSseEvent('agent_response', {
+    id: 42,
+    chat_jid: 'chat:alpha',
+    data: {
+      content: 'I’ll inspect the logs.',
+      content_blocks: [{ type: 'agent_commentary', reply_kind: 'commentary' }],
+    },
+  }, state.deps);
+
+  expect(state.getExtensionWorkingState()).toEqual({
+    message: 'Inspecting logs…',
+    indicator: null,
+  });
+  expect(state.deps.lastAgentResponseRef.current).toBeNull();
+});
+
 test('handleAppSseEvent removes followup rows on removal events and schedules queue refresh', () => {
   const state = createDeps();
 

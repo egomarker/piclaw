@@ -63,6 +63,7 @@ export interface SettingsData {
   sessionMaxSizeMb?: number;
   toolUseBudget?: number;
   webTerminalEnabled?: boolean;
+  showCommentaryInTimeline?: boolean;
   sessionIsolation?: "none" | "summary" | "full";
   searchMatchMode?: "or" | "and";
   composeUploadLimitMb?: number;

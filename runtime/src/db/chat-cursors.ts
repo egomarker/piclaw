@@ -85,7 +85,7 @@ export interface ChatAutoCompactionWindowState {
 }
 
 /** Possible persisted assistant-output states seen after an inflight start. */
-export type AgentReplyState = "none" | "partial" | "terminal";
+export type AgentReplyState = "none" | "commentary" | "partial" | "terminal";
 
 /** Shape of a permanently-failed run record stored in chat_cursors. */
 export interface FailedRunRecord {
@@ -635,8 +635,8 @@ export function endChatRunWithError(chatJid: string, failed: FailedRunRecord): v
  * Roll back the cursor to the pre-run value while recording a failed run.
  *
  * Used when no terminal assistant reply was persisted. Partial non-terminal
- * assistant output must be discarded before the user turn is held for an
- * explicit retry/skip decision.
+ * reply output must be discarded before the user turn is held for an explicit
+ * retry/skip decision; display-only commentary remains durable.
  */
 export function rollbackChatRunWithError(chatJid: string, failed: FailedRunRecord): void {
   const db = getDb();
@@ -650,7 +650,12 @@ export function rollbackChatRunWithError(chatJid: string, failed: FailedRunRecor
        WHERE chat_jid = ?
          AND timestamp > ?
          AND is_bot_message = 1
-         AND COALESCE(is_terminal_agent_reply, 0) = 0`
+         AND COALESCE(is_terminal_agent_reply, 0) = 0
+         AND NOT EXISTS (
+           SELECT 1
+           FROM json_each(CASE WHEN json_valid(messages.content_blocks) THEN messages.content_blocks ELSE '[]' END) AS block
+           WHERE json_extract(block.value, '$.type') = 'agent_commentary'
+         )`
     ).all(chatJid, failed.prevTs) as Array<{ rowid: number }>).map((r) => r.rowid);
 
     db.prepare(`
@@ -661,6 +666,11 @@ export function rollbackChatRunWithError(chatJid: string, failed: FailedRunRecor
           AND timestamp > ?
           AND is_bot_message = 1
           AND COALESCE(is_terminal_agent_reply, 0) = 0
+          AND NOT EXISTS (
+            SELECT 1
+            FROM json_each(CASE WHEN json_valid(messages.content_blocks) THEN messages.content_blocks ELSE '[]' END) AS block
+            WHERE json_extract(block.value, '$.type') = 'agent_commentary'
+          )
       )
     `).run(chatJid, failed.prevTs);
 
@@ -672,6 +682,11 @@ export function rollbackChatRunWithError(chatJid: string, failed: FailedRunRecor
         AND timestamp > ?
         AND is_bot_message = 1
         AND COALESCE(is_terminal_agent_reply, 0) = 0
+        AND NOT EXISTS (
+          SELECT 1
+          FROM json_each(CASE WHEN json_valid(messages.content_blocks) THEN messages.content_blocks ELSE '[]' END) AS block
+          WHERE json_extract(block.value, '$.type') = 'agent_commentary'
+        )
     `).run(chatJid, failed.prevTs);
 
     db.prepare(`
@@ -955,10 +970,10 @@ export function getInflightRuns(): InflightRun[] {
  */
 export function rollbackInflightRun(chatJid: string, prevTs: string): void {
   const db = getDb();
-  // If a run died after streaming/storing intermediate assistant output but
-  // before publishing a terminal reply, those partial bot messages must be
-  // discarded before the user turn is replayed. Terminal assistant replies are
-  // preserved by the recovery gate and never reach this rollback path.
+  // If a run died after streaming/storing intermediate reply output but before
+  // publishing a terminal reply, those partial reply messages must be discarded
+  // before the user turn is replayed. Display-only commentary is exempt and
+  // terminal assistant replies never reach this rollback path.
   // Capture rowids first so we can purge associated thinking_content (no FK
   // cascade is possible — see I2 in the PR #655 issues tracker).
   const doomedRowIds = (db.prepare(
@@ -966,7 +981,12 @@ export function rollbackInflightRun(chatJid: string, prevTs: string): void {
      WHERE chat_jid = ?
        AND timestamp > ?
        AND is_bot_message = 1
-       AND COALESCE(is_terminal_agent_reply, 0) = 0`
+       AND COALESCE(is_terminal_agent_reply, 0) = 0
+       AND NOT EXISTS (
+         SELECT 1
+         FROM json_each(CASE WHEN json_valid(messages.content_blocks) THEN messages.content_blocks ELSE '[]' END) AS block
+         WHERE json_extract(block.value, '$.type') = 'agent_commentary'
+       )`
   ).all(chatJid, prevTs) as Array<{ rowid: number }>).map((r) => r.rowid);
 
   db.prepare(`
@@ -977,6 +997,11 @@ export function rollbackInflightRun(chatJid: string, prevTs: string): void {
         AND timestamp > ?
         AND is_bot_message = 1
         AND COALESCE(is_terminal_agent_reply, 0) = 0
+        AND NOT EXISTS (
+          SELECT 1
+          FROM json_each(CASE WHEN json_valid(messages.content_blocks) THEN messages.content_blocks ELSE '[]' END) AS block
+          WHERE json_extract(block.value, '$.type') = 'agent_commentary'
+        )
     )
   `).run(chatJid, prevTs);
 
@@ -988,6 +1013,11 @@ export function rollbackInflightRun(chatJid: string, prevTs: string): void {
       AND timestamp > ?
       AND is_bot_message = 1
       AND COALESCE(is_terminal_agent_reply, 0) = 0
+      AND NOT EXISTS (
+        SELECT 1
+        FROM json_each(CASE WHEN json_valid(messages.content_blocks) THEN messages.content_blocks ELSE '[]' END) AS block
+        WHERE json_extract(block.value, '$.type') = 'agent_commentary'
+      )
   `).run(chatJid, prevTs);
 
   db.prepare(`
@@ -1027,27 +1057,36 @@ export function clearInflightMarker(chatJid: string): void {
 }
 
 /**
- * Return whether assistant output after an inflight start is absent, partial,
- * or terminal.
+ * Return whether assistant output after an inflight start is absent,
+ * display-only commentary, partial reply output, or terminal reply output.
  *
- * Recovery uses this to distinguish true no-output crashes (safe to roll back
- * and replay) from interrupted runs that already committed visible assistant
- * timeline output. Once partial output is persisted it is part of user-visible
- * history and must not be deleted/replayed away on restart.
+ * Commentary is durable timeline history but recovery-neutral: it must not
+ * suppress an interrupted outcome or become a recovered reply. Ordinary
+ * partial and terminal output retain their existing completion semantics.
  */
 export function getAgentReplyStateAfter(chatJid: string, afterTs: string): AgentReplyState {
   const db = getDb();
   const row = db.prepare(`
     SELECT
       MAX(CASE WHEN is_bot_message = 1 THEN 1 ELSE 0 END) AS has_any_bot,
-      MAX(CASE WHEN is_bot_message = 1 AND COALESCE(is_terminal_agent_reply, 0) = 1 THEN 1 ELSE 0 END) AS has_terminal_bot
+      MAX(CASE WHEN is_bot_message = 1 AND COALESCE(is_terminal_agent_reply, 0) = 1 THEN 1 ELSE 0 END) AS has_terminal_bot,
+      MAX(CASE WHEN is_bot_message = 1 AND NOT EXISTS (
+        SELECT 1
+        FROM json_each(CASE WHEN json_valid(messages.content_blocks) THEN messages.content_blocks ELSE '[]' END) AS block
+        WHERE json_extract(block.value, '$.type') = 'agent_commentary'
+      ) THEN 1 ELSE 0 END) AS has_reply_output
     FROM messages
     WHERE chat_jid = ?
       AND timestamp > ?
-  `).get(chatJid, afterTs) as { has_any_bot?: number | null; has_terminal_bot?: number | null } | undefined;
+  `).get(chatJid, afterTs) as {
+    has_any_bot?: number | null;
+    has_terminal_bot?: number | null;
+    has_reply_output?: number | null;
+  } | undefined;
 
   if ((row?.has_terminal_bot ?? 0) > 0) return "terminal";
-  if ((row?.has_any_bot ?? 0) > 0) return "partial";
+  if ((row?.has_reply_output ?? 0) > 0) return "partial";
+  if ((row?.has_any_bot ?? 0) > 0) return "commentary";
   return "none";
 }
 

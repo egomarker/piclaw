@@ -7,7 +7,7 @@
  */
 
 import type { InteractionRow } from "../../../db.js";
-import type { WebAgentBufferEntry } from "../agent/agent-buffers.js";
+import type { WebAgentBufferEntry, WebDraftKind } from "../agent/agent-buffers.js";
 import type { QueuedFollowupItem } from "./followup-placeholders.js";
 import type { SendMessageOptions } from "../messaging/message-write-flows.js";
 import type { WebMessageWriteService } from "../message-write-service.js";
@@ -217,8 +217,8 @@ export class WebChannelRuntimeFollowupFacadeService {
     this.deps.getRuntimeState().updateThoughtBuffer(turnId, text, totalLines);
   }
 
-  updateDraftBuffer(turnId: string, text: string, totalLines: number): void {
-    this.deps.getRuntimeState().updateDraftBuffer(turnId, text, totalLines);
+  updateDraftBuffer(turnId: string, text: string, totalLines: number, kind?: WebDraftKind): void {
+    this.deps.getRuntimeState().updateDraftBuffer(turnId, text, totalLines, kind);
   }
 
   getBuffer(turnId: string, panel: "thought" | "draft"): WebAgentBufferEntry | undefined {

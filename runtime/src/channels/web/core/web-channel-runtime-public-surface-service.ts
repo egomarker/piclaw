@@ -1,5 +1,5 @@
 import type { InteractionRow } from "../../../db.js";
-import type { WebAgentBufferEntry } from "../agent/agent-buffers.js";
+import type { WebAgentBufferEntry, WebDraftKind } from "../agent/agent-buffers.js";
 import type { QueuedFollowupItem, QueuedFollowupSourceMetadata } from "../runtime/followup-placeholders.js";
 import type { SendMessageOptions } from "../messaging/message-write-flows.js";
 import type { WebMessageProcessingStorageService } from "../messaging/message-processing-storage-service.js";
@@ -106,6 +106,24 @@ function readEventChatJid(data: unknown): string | null {
   if (!data || typeof data !== "object") return null;
   const value = (data as Record<string, unknown>).chat_jid;
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function isDisplayOnlyAgentCommentaryEvent(data: unknown): boolean {
+  if (!data || typeof data !== "object") return false;
+  const payload = data as Record<string, unknown>;
+  const nestedData = payload.data && typeof payload.data === "object"
+    ? payload.data as Record<string, unknown>
+    : null;
+  const contentBlocks = Array.isArray(payload.content_blocks)
+    ? payload.content_blocks
+    : Array.isArray(nestedData?.content_blocks)
+      ? nestedData.content_blocks
+      : [];
+  return contentBlocks.some((block) => (
+    Boolean(block)
+    && typeof block === "object"
+    && (block as Record<string, unknown>).type === "agent_commentary"
+  ));
 }
 
 function isClearedWorkingState(state: ExtensionWorkingStateSnapshot): boolean {
@@ -249,7 +267,9 @@ export class WebChannelRuntimePublicSurfaceService {
     const payload = data as Record<string, unknown>;
 
     if (eventType === "agent_response") {
-      this.extensionWorkingStates.delete(chatJid);
+      if (!isDisplayOnlyAgentCommentaryEvent(data)) {
+        this.extensionWorkingStates.delete(chatJid);
+      }
       return;
     }
     if (eventType === "agent_status" && (payload.type === "done" || payload.type === "error")) {
@@ -565,8 +585,8 @@ export class WebChannelRuntimePublicSurfaceService {
     this.channel.runtimeFollowupFacade.updateThoughtBuffer(turnId, text, totalLines);
   }
 
-  updateDraftBuffer(turnId: string, text: string, totalLines: number): void {
-    this.channel.runtimeFollowupFacade.updateDraftBuffer(turnId, text, totalLines);
+  updateDraftBuffer(turnId: string, text: string, totalLines: number, kind?: WebDraftKind): void {
+    this.channel.runtimeFollowupFacade.updateDraftBuffer(turnId, text, totalLines, kind);
   }
 
   getBuffer(turnId: string, panel: "thought" | "draft"): WebAgentBufferEntry | undefined {

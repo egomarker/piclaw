@@ -256,6 +256,65 @@ test("AgentTurnCoordinator keeps only signed final-answer text from mixed-phase 
   expect(tracker.getFinalText()).toBe("The final result is ready.");
 });
 
+test("AgentTurnCoordinator separates commentary from substantive text in a mixed tool-use message", () => {
+  const completed: Array<{
+    text: string;
+    attachments: AttachmentInfo[];
+    followedByToolUse?: boolean;
+    kind?: "commentary";
+    sourceKey?: string;
+  }> = [];
+  const coordinator = new AgentTurnCoordinator({
+    takeAttachments: () => [],
+    touchSession: () => {},
+    recordMessageUsage: () => {},
+  });
+  const tracker = coordinator.createTracker(
+    "web:default",
+    (turn) => completed.push(turn),
+    undefined,
+    { emitToolUseCommentary: true },
+  );
+
+  tracker.handleMessageUpdate({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      stopReason: "toolUse",
+      content: [
+        {
+          type: "text",
+          text: "I’ll inspect the logs. ",
+          textSignature: JSON.stringify({ id: "msg-c-mixed", phase: "commentary" }),
+        },
+        {
+          type: "text",
+          text: "The current result is ready.",
+          textSignature: JSON.stringify({ id: "msg-f-mixed", phase: "final_answer" }),
+        },
+        { type: "toolCall", id: "tool-mixed", name: "read", arguments: {} },
+      ],
+    },
+  } as any);
+
+  expect(completed).toEqual([
+    {
+      text: "I’ll inspect the logs.",
+      attachments: [],
+      followedByToolUse: true,
+      kind: "commentary",
+      sourceKey: "msg-c-mixed",
+    },
+    {
+      text: "The current result is ready.",
+      attachments: [],
+      followedByToolUse: true,
+    },
+  ]);
+  expect(tracker.getTurnCount()).toBe(1);
+  expect(tracker.getFinalText()).toBe("");
+});
+
 test("AgentTurnCoordinator preserves unphased text while filtering signed commentary", () => {
   const coordinator = new AgentTurnCoordinator({
     takeAttachments: () => [],
@@ -524,6 +583,94 @@ test("AgentTurnCoordinator discards signed commentary at a tool-use boundary", (
   } as any);
 
   expect(completed).toHaveLength(0);
+  expect(tracker.getTurnCount()).toBe(0);
+});
+
+test("AgentTurnCoordinator emits confirmed tool-use commentary as a classified display-only turn when enabled", () => {
+  const completed: Array<{
+    text: string;
+    attachments: AttachmentInfo[];
+    followedByToolUse?: boolean;
+    kind?: "commentary";
+    sourceKey?: string;
+  }> = [];
+  const discarded: Array<{ reason: string }> = [];
+  const coordinator = new AgentTurnCoordinator({
+    takeAttachments: () => [sampleAttachment],
+    touchSession: () => {},
+    recordMessageUsage: () => {},
+  });
+  const signature = JSON.stringify({ v: 1, id: "msg_commentary_1", phase: "commentary" });
+  const tracker = coordinator.createTracker(
+    "web:default",
+    (turn) => completed.push(turn),
+    (discard) => discarded.push(discard),
+    { emitToolUseCommentary: true },
+  );
+
+  tracker.handleMessageUpdate({
+    type: "message_update",
+    assistantMessageEvent: {
+      type: "text_delta",
+      delta: "Streaming wording that is replaced.",
+      contentIndex: 0,
+      partial: { content: [{ type: "text", textSignature: signature }] },
+    },
+  } as any);
+  tracker.handleMessageUpdate({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      stopReason: "toolUse",
+      content: [
+        { type: "text", text: "I’ll inspect the logs next.", textSignature: signature },
+        { type: "toolCall", id: "tool-1", name: "read", arguments: {} },
+      ],
+    },
+  } as any);
+
+  expect(completed).toEqual([{
+    text: "I’ll inspect the logs next.",
+    attachments: [],
+    followedByToolUse: true,
+    kind: "commentary",
+    sourceKey: "msg_commentary_1",
+  }]);
+  expect(discarded).toEqual([]);
+  expect(tracker.getTurnCount()).toBe(0);
+  expect(tracker.getFinalText()).toBe("");
+});
+
+test("AgentTurnCoordinator keeps commentary transient when enabled but no tool call is confirmed", () => {
+  const completed: unknown[] = [];
+  const discarded: Array<{ reason: string }> = [];
+  const coordinator = new AgentTurnCoordinator({
+    takeAttachments: () => [],
+    touchSession: () => {},
+    recordMessageUsage: () => {},
+  });
+  const tracker = coordinator.createTracker(
+    "web:default",
+    (turn) => completed.push(turn),
+    (discard) => discarded.push(discard),
+    { emitToolUseCommentary: true },
+  );
+
+  tracker.handleMessageUpdate({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      stopReason: "stop",
+      content: [{
+        type: "text",
+        text: "Transient narration.",
+        textSignature: JSON.stringify({ id: "msg_commentary_stop", phase: "commentary" }),
+      }],
+    },
+  } as any);
+
+  expect(completed).toEqual([]);
+  expect(discarded).toEqual([{ reason: "commentary_only" }]);
   expect(tracker.getTurnCount()).toBe(0);
 });
 

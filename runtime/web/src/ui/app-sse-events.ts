@@ -121,6 +121,16 @@ export interface HandleAppSseEventDependencies {
   openEditor?: (path: string, options?: { label?: string }) => void;
 }
 
+/** Display-only commentary is timeline history, not a completed agent reply. */
+function isDisplayOnlyAgentCommentary(data: any): boolean {
+  const contentBlocks = Array.isArray(data?.content_blocks)
+    ? data.content_blocks
+    : Array.isArray(data?.data?.content_blocks)
+      ? data.data.content_blocks
+      : [];
+  return contentBlocks.some((block: any) => block?.type === 'agent_commentary');
+}
+
 /**
  * Handles authenticated shell SSE events while keeping routing and payload semantics stable.
  */
@@ -613,12 +623,14 @@ export function handleAppSseEvent(
   const onMainTimeline = isMainTimelineView(viewStateRef.current);
   if (eventType === 'agent_response') {
     if (!isCurrentChatEvent) return;
-    setExtensionWorkingState({ message: null, indicator: null, visible: true });
-    removeStalledPost();
-    lastAgentResponseRef.current = {
-      post: data,
-      turnId: currentTurnIdRef.current,
-    };
+    if (!isDisplayOnlyAgentCommentary(data)) {
+      setExtensionWorkingState({ message: null, indicator: null, visible: true });
+      removeStalledPost();
+      lastAgentResponseRef.current = {
+        post: data,
+        turnId: currentTurnIdRef.current,
+      };
+    }
   }
   if (shouldAppendRealtimeTimelinePost(eventType, isCurrentChatEvent, onMainTimeline)) {
     setPosts((prev) => appendUniqueTimelinePost(prev, data));

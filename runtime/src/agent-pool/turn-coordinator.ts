@@ -13,11 +13,48 @@ import type { AttachmentInfo } from "./attachments.js";
 
 interface AgentContentBlock {
   type?: unknown;
+  id?: unknown;
   text?: unknown;
   textSignature?: unknown;
 }
 
-type AssistantTextPhase = "commentary" | "final_answer" | null;
+export type AssistantTextPhase = "commentary" | "final_answer" | null;
+
+export interface AssistantTextSignature {
+  phase: AssistantTextPhase;
+  id: string | null;
+}
+
+/** Parse provider text metadata without trusting malformed signature JSON. */
+export function parseAssistantTextSignature(signature: unknown): AssistantTextSignature {
+  if (typeof signature !== "string" || !signature.trim()) return { phase: null, id: null };
+  try {
+    const parsed = JSON.parse(signature) as { phase?: unknown; id?: unknown };
+    return {
+      phase: parsed?.phase === "commentary" || parsed?.phase === "final_answer"
+        ? parsed.phase
+        : null,
+      id: typeof parsed?.id === "string" && parsed.id.trim() ? parsed.id.trim() : null,
+    };
+  } catch {
+    return { phase: null, id: null };
+  }
+}
+
+/** Resolve signed text metadata from a streaming assistant partial block. */
+export function resolveAssistantTextSignatureFromPartial(partial: unknown, contentIndex?: number): AssistantTextSignature {
+  if (!partial || typeof partial !== "object") return { phase: null, id: null };
+  const content = (partial as { content?: unknown }).content;
+  if (!Array.isArray(content) || typeof contentIndex !== "number") return { phase: null, id: null };
+  const block = content[contentIndex] as AgentContentBlock | undefined;
+  if (!block || block.type !== "text") return { phase: null, id: null };
+  return parseAssistantTextSignature(block.textSignature);
+}
+
+export interface AgentTurnTrackerOptions {
+  /** Surface only completed commentary that is attached to a confirmed tool-use message. */
+  emitToolUseCommentary?: boolean;
+}
 
 /** A single turn's output within a multi-turn agent run. */
 export interface AgentTurnOutput {
@@ -26,6 +63,10 @@ export interface AgentTurnOutput {
   usage?: Usage;
   /** The completed assistant message committed immediately before tool dispatch. */
   followedByToolUse?: boolean;
+  /** Display-only signed commentary that is excluded from completion accounting. */
+  kind?: "commentary";
+  /** Stable provider text-item identity used for idempotent persistence. */
+  sourceKey?: string;
 }
 
 /** A completed assistant text stream intentionally kept out of durable output. */
@@ -91,9 +132,11 @@ export class AgentTurnCoordinator {
     chatJid: string,
     onTurnComplete?: (turn: AgentTurnOutput) => void,
     onTurnDiscard?: (discard: AgentTurnDiscard) => void,
+    trackerOptions: AgentTurnTrackerOptions = {},
   ): AgentTurnTracker {
     let currentTurnText = "";
     let currentTurnPhase: AssistantTextPhase = null;
+    let currentTurnSourceKey: string | undefined;
     let turnCount = 0;
     let messageHasDelta = false;
     let messageComplete = false;
@@ -101,30 +144,13 @@ export class AgentTurnCoordinator {
     let lastError: AgentTurnError | null = null;
     let lastAssistantState: AgentTerminalAssistantState | null = null;
 
-    const parseTextPhase = (signature: unknown): AssistantTextPhase => {
-      if (typeof signature !== "string" || !signature.trim()) return null;
-      try {
-        const parsed = JSON.parse(signature) as { phase?: unknown };
-        return parsed?.phase === "commentary" || parsed?.phase === "final_answer"
-          ? parsed.phase
-          : null;
-      } catch {
-        return null;
-      }
+    const resolveTextSignatureFromBlock = (block: AgentContentBlock | undefined): AssistantTextSignature => {
+      if (!block || block.type !== "text") return { phase: null, id: null };
+      return parseAssistantTextSignature(block.textSignature);
     };
 
-    const resolveTextPhaseFromBlock = (block: AgentContentBlock | undefined): AssistantTextPhase => {
-      if (!block || block.type !== "text") return null;
-      return parseTextPhase(block.textSignature);
-    };
-
-    const resolveTextPhaseFromPartial = (partial: unknown, contentIndex?: number): AssistantTextPhase => {
-      if (!partial || typeof partial !== "object") return null;
-      const content = (partial as { content?: unknown }).content;
-      if (!Array.isArray(content)) return null;
-      const block = typeof contentIndex === "number" ? content[contentIndex] as AgentContentBlock | undefined : undefined;
-      return resolveTextPhaseFromBlock(block);
-    };
+    const resolveTextPhaseFromBlock = (block: AgentContentBlock | undefined): AssistantTextPhase =>
+      resolveTextSignatureFromBlock(block).phase;
 
     const extractAssistantTextFromContent = (content: unknown): {
       text: string;
@@ -132,6 +158,8 @@ export class AgentTurnCoordinator {
       hasText: boolean;
       hasCommentary: boolean;
       commentaryOnly: boolean;
+      commentaryText: string;
+      commentarySourceKey?: string;
     } => {
       if (!Array.isArray(content)) {
         const text = typeof content === "string" ? content : "";
@@ -141,6 +169,7 @@ export class AgentTurnCoordinator {
           hasText: Boolean(text.trim()),
           hasCommentary: false,
           commentaryOnly: false,
+          commentaryText: "",
         };
       }
 
@@ -153,10 +182,14 @@ export class AgentTurnCoordinator {
         .filter((block) => resolveTextPhaseFromBlock(block) === null)
         .map((block) => (typeof block.text === "string" ? block.text : ""))
         .join("");
-      const commentaryText = textBlocks
-        .filter((block) => resolveTextPhaseFromBlock(block) === "commentary")
+      const commentaryBlocks = textBlocks
+        .filter((block) => resolveTextPhaseFromBlock(block) === "commentary");
+      const commentaryText = commentaryBlocks
         .map((block) => (typeof block.text === "string" ? block.text : ""))
         .join("");
+      const commentarySourceIds = Array.from(new Set(commentaryBlocks
+        .map((block) => resolveTextSignatureFromBlock(block).id)
+        .filter((id): id is string => Boolean(id))));
       const allText = textBlocks
         .map((block) => (typeof block.text === "string" ? block.text : ""))
         .join("");
@@ -170,12 +203,15 @@ export class AgentTurnCoordinator {
         hasText: Boolean(allText.trim()),
         hasCommentary,
         commentaryOnly: hasCommentary && !text.trim(),
+        commentaryText,
+        ...(commentarySourceIds.length > 0 ? { commentarySourceKey: commentarySourceIds.join("|") } : {}),
       };
     };
 
     const resetCurrentTurn = () => {
       currentTurnText = "";
       currentTurnPhase = null;
+      currentTurnSourceKey = undefined;
       currentTurnUsage = undefined;
       messageHasDelta = false;
       messageComplete = false;
@@ -234,7 +270,9 @@ export class AgentTurnCoordinator {
             // than flushing it as a completed turn.
             resetCurrentTurn();
           }
-          currentTurnPhase = resolveTextPhaseFromPartial(messageEvent.partial, messageEvent.contentIndex);
+          const signature = resolveAssistantTextSignatureFromPartial(messageEvent.partial, messageEvent.contentIndex);
+          currentTurnPhase = signature.phase;
+          currentTurnSourceKey = signature.id ?? undefined;
 
           this.options.onInfo?.("Assistant text stream boundary resolved", {
             operation: "turn_coordinator.text_start_boundary",
@@ -247,11 +285,15 @@ export class AgentTurnCoordinator {
         }
         if (messageEvent.type === "text_delta") {
           messageHasDelta = true;
-          currentTurnPhase ??= resolveTextPhaseFromPartial(messageEvent.partial, messageEvent.contentIndex);
+          const signature = resolveAssistantTextSignatureFromPartial(messageEvent.partial, messageEvent.contentIndex);
+          currentTurnPhase ??= signature.phase;
+          currentTurnSourceKey ??= signature.id ?? undefined;
           currentTurnText += messageEvent.delta || "";
         }
         if (messageEvent.type === "text_end") {
-          currentTurnPhase ??= resolveTextPhaseFromPartial(messageEvent.partial, messageEvent.contentIndex);
+          const signature = resolveAssistantTextSignatureFromPartial(messageEvent.partial, messageEvent.contentIndex);
+          currentTurnPhase ??= signature.phase;
+          currentTurnSourceKey ??= signature.id ?? undefined;
         }
         return;
       }
@@ -274,10 +316,15 @@ export class AgentTurnCoordinator {
             : null;
           const contentBlocks = Array.isArray(message.content) ? message.content as AgentContentBlock[] : [];
           const extracted = extractAssistantTextFromContent(message.content);
-          const hadTextContent = typeof message.content === "string"
-            ? message.content.trim().length > 0
-            : contentBlocks.some((block) => block?.type === "text" && typeof block.text === "string" && block.text.trim().length > 0);
-          const hadToolCallContent = contentBlocks.some((block) => block?.type === "toolCall");
+          // Completion/recovery state counts only authoritative substantive
+          // text. Signed commentary remains visible metadata, not reply text.
+          const hadTextContent = Boolean(extracted.text.trim());
+          const toolCallSourceIds = Array.from(new Set(contentBlocks
+            .filter((block) => block?.type === "toolCall")
+            .map((block) => typeof block.id === "string" ? block.id.trim() : "")
+            .filter(Boolean)));
+          const hadToolCallContent = toolCallSourceIds.length > 0
+            || contentBlocks.some((block) => block?.type === "toolCall");
           const hadThinkingContent = contentBlocks.some((block: any) => block?.type === "thinking" && typeof block?.thinking === "string" && block.thinking.trim().length > 0);
           lastAssistantState = {
             stopReason: typeof message.stopReason === "string" && message.stopReason.trim() ? message.stopReason : null,
@@ -298,6 +345,10 @@ export class AgentTurnCoordinator {
             && Boolean(streamedText)
             && currentTurnPhase === "commentary";
           const commentaryOnly = extracted.commentaryOnly || streamedCommentaryOnly;
+          const visibleCommentaryText = extracted.commentaryText.trim() || streamedText;
+          const commentarySourceKey = extracted.commentarySourceKey
+            ?? currentTurnSourceKey
+            ?? (toolCallSourceIds.length > 0 ? `tool:${toolCallSourceIds.join("|")}` : undefined);
           currentTurnText = authoritativeTextSeen ? extracted.text.trim() : streamedText;
           currentTurnPhase = authoritativeTextSeen ? extracted.phase : currentTurnPhase;
 
@@ -319,16 +370,38 @@ export class AgentTurnCoordinator {
 
           messageHasDelta = false;
           messageComplete = true;
-          // Signed commentary is transient provider narration. Discard it at
-          // every completed-message boundary, not only before a tool call: an
-          // error/abort can otherwise leave it buffered for the next response
-          // to flush as a durable turn.
-          if (commentaryOnly) {
-            onTurnDiscard?.({
-              reason: message.stopReason === "toolUse" && hadToolCallContent
-                ? "tool_use_commentary"
-                : "commentary_only",
+          // Signed commentary remains non-authoritative. The optional display
+          // path is limited to a completed tool-use message, emits no
+          // attachments, and deliberately does not advance the substantive
+          // turn counter. This also preserves commentary from a mixed-phase
+          // tool-use message while final-answer/unphased text continues through
+          // the ordinary turn path below.
+          const canDisplayToolUseCommentary = Boolean(
+            trackerOptions.emitToolUseCommentary
+              && message.stopReason === "toolUse"
+              && hadToolCallContent
+              && (extracted.hasCommentary || streamedCommentaryOnly)
+              && visibleCommentaryText
+              && onTurnComplete
+          );
+          if (canDisplayToolUseCommentary) {
+            onTurnComplete?.({
+              text: visibleCommentaryText,
+              attachments: [],
+              ...(commentaryOnly && currentTurnUsage ? { usage: currentTurnUsage } : {}),
+              followedByToolUse: true,
+              kind: "commentary",
+              ...(commentarySourceKey ? { sourceKey: commentarySourceKey } : {}),
             });
+          }
+          if (commentaryOnly) {
+            if (!canDisplayToolUseCommentary) {
+              onTurnDiscard?.({
+                reason: message.stopReason === "toolUse" && hadToolCallContent
+                  ? "tool_use_commentary"
+                  : "commentary_only",
+              });
+            }
             resetCurrentTurn();
             return;
           }
