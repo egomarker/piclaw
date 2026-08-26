@@ -35,6 +35,10 @@ Use the **Settings → Telegram** pane after the add-on is installed, or set env
 
 `PICLAW_TELEGRAM_ALLOWED_CHAT_IDS` accepts comma- or newline-separated chat IDs.
 
+## Outbound notifications
+
+Telegram tool commentary, temporary progress messages, and attachments are sent silently. Final answers, visible errors, and slash-command results retain normal notifications.
+
 ## Trigger modes
 
 - `always`

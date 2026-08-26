@@ -82,7 +82,7 @@ export function isOutboundAgentCommentary(options: unknown): boolean {
 
 /** Apply Telegram-only commentary presentation without changing the mirrored message text. */
 export function formatOutboundTelegramText(text: string, options: unknown): string {
-  return isOutboundAgentCommentary(options) ? `Commentary: ${text}` : text;
+  return isOutboundAgentCommentary(options) ? `Commentary:\n${text}` : text;
 }
 
 function buildUserDisplayName(user: TelegramUser | undefined, fallback: string): string {
@@ -461,7 +461,11 @@ async function startTelegramRuntime(): Promise<void> {
     transportCleanup = interop.registerChannelTransport("telegram", {
       sendMessage: async (chatJid, text, options) => {
         const attachments = await buildOutboundAttachments(options);
-        await channel.sendMessage(chatJid, formatOutboundTelegramText(text, options), { attachments });
+        const isCommentary = isOutboundAgentCommentary(options);
+        await channel.sendMessage(chatJid, formatOutboundTelegramText(text, options), {
+          attachments,
+          disableNotification: isCommentary,
+        });
         updateTelegramRuntimeState({
           connected: channel.isConnected(),
           lastError: null,
