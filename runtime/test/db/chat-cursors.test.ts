@@ -505,6 +505,18 @@ describe("rollbackChatRunWithError", () => {
       is_bot_message: true,
       is_terminal_agent_reply: false,
     });
+    db.storeMessage({
+      id: "msg-bot-commentary-rollback-with-error",
+      chat_jid: chatJid,
+      sender: "web-agent",
+      sender_name: "Pi",
+      content: "display commentary",
+      content_blocks: [{ type: "agent_commentary", reply_kind: "commentary" }],
+      timestamp: "2024-10-01T00:00:06.500Z",
+      is_from_me: false,
+      is_bot_message: true,
+      is_terminal_agent_reply: false,
+    });
 
     db.rollbackChatRunWithError(chatJid, {
       prevTs,
@@ -525,6 +537,7 @@ describe("rollbackChatRunWithError", () => {
     });
     const timeline = db.getTimeline(chatJid, 20).map((item) => item.data.content);
     expect(timeline).toContain("hello");
+    expect(timeline).toContain("display commentary");
     expect(timeline).not.toContain("partial reply");
   });
 });
@@ -756,13 +769,32 @@ describe("idempotency", () => {
     expect(db.hasAgentRepliesAfter(chatJid, "2025-01-01T00:00:00.000Z")).toBe(false);
   });
 
-  test("getAgentReplyStateAfter distinguishes partial vs terminal replies after timestamp", () => {
+  test("getAgentReplyStateAfter keeps display-only commentary separate from partial and terminal replies", () => {
     const chatJid = jid("has-agent-replies-" + Date.now());
     const dbConn = db.getDb();
     dbConn.prepare(`
       INSERT INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_bot_message, is_terminal_agent_reply)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run("user-msg-har-1", chatJid, "user", "User", "hello", "2025-01-01T00:00:00.000Z", 0, 0);
+    dbConn.prepare(`
+      INSERT INTO messages (id, chat_jid, sender, sender_name, content, content_blocks, timestamp, is_bot_message, is_terminal_agent_reply)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "agent-msg-har-commentary",
+      chatJid,
+      "agent",
+      "Agent",
+      "commentary",
+      JSON.stringify([{ type: "agent_commentary", reply_kind: "commentary", source_key: "msg-har-c" }]),
+      "2025-01-01T00:00:30.000Z",
+      1,
+      0,
+    );
+
+    expect(db.getAgentReplyStateAfter(chatJid, "2025-01-01T00:00:00.000Z")).toBe("commentary");
+    expect(db.hasAgentRepliesAfter(chatJid, "2025-01-01T00:00:00.000Z")).toBe(false);
+    expect(db.getAgentCommentaryRowIdBySourceKey(chatJid, "msg-har-c")).not.toBeNull();
+
     dbConn.prepare(`
       INSERT INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_bot_message, is_terminal_agent_reply)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -782,7 +814,7 @@ describe("idempotency", () => {
     expect(db.hasAgentRepliesAfter(chatJid, "2025-01-01T00:03:00.000Z")).toBe(false);
   });
 
-  test("rollbackInflightRun deletes non-terminal bot messages after prevTs", () => {
+  test("rollbackInflightRun deletes reply drafts but preserves display-only commentary", () => {
     const chatJid = jid("rollback-deletes-partials-" + Date.now());
     const prevTs = "2025-01-01T00:00:00.000Z";
     const dbConn = db.getDb();
@@ -795,6 +827,20 @@ describe("idempotency", () => {
       INSERT INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_bot_message, is_terminal_agent_reply)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run("agent-msg-rir-1", chatJid, "agent", "Agent", "partial", "2025-01-01T00:01:00.000Z", 1, 0);
+    dbConn.prepare(`
+      INSERT INTO messages (id, chat_jid, sender, sender_name, content, content_blocks, timestamp, is_bot_message, is_terminal_agent_reply)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "agent-msg-rir-commentary",
+      chatJid,
+      "agent",
+      "Agent",
+      "display commentary",
+      JSON.stringify([{ type: "agent_commentary", reply_kind: "commentary" }]),
+      "2025-01-01T00:01:30.000Z",
+      1,
+      0,
+    );
 
     db.beginChatRun(chatJid, "2025-01-01T00:01:00.000Z", {
       prevTs,
@@ -806,6 +852,6 @@ describe("idempotency", () => {
     const remaining = dbConn.prepare(
       "SELECT content FROM messages WHERE chat_jid = ? ORDER BY timestamp"
     ).all(chatJid) as Array<{ content: string }>;
-    expect(remaining.map((row) => row.content)).toEqual(["hello"]);
+    expect(remaining.map((row) => row.content)).toEqual(["hello", "display commentary"]);
   });
 });

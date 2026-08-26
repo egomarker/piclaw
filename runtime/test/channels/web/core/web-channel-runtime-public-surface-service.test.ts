@@ -372,6 +372,15 @@ describe("web channel runtime public surface service", () => {
       indicator: { mode: "custom", frames: ["a", "b"], intervalMs: 80 },
       visible: true,
     });
+    service.broadcastEvent("agent_response", {
+      chat_jid: "web:test",
+      data: { content_blocks: [{ type: "agent_commentary" }] },
+    });
+    expect(service.getExtensionWorkingState("web:test")).toEqual({
+      message: "Compacting context…",
+      indicator: { mode: "custom", frames: ["a", "b"], intervalMs: 80 },
+      visible: true,
+    });
     service.broadcastEvent("agent_response", { chat_jid: "web:test" });
     expect(service.getExtensionWorkingState("web:test")).toBeNull();
     expect(service.replaceQueuedFollowupPlaceholder("web:test", 22, "updated", [1, 2], [{ type: "text" }], 6, true)?.id).toBe(4);
@@ -411,6 +420,7 @@ describe("web channel runtime public surface service", () => {
       "context-get:web:test",
       "broadcast:extension_ui_working:{\"chat_jid\":\"web:test\",\"message\":\"Compacting context…\"}",
       "broadcast:extension_ui_working_indicator:{\"chat_jid\":\"web:test\",\"frames\":[\"a\",\"b\"],\"interval_ms\":80}",
+      "broadcast:agent_response:{\"chat_jid\":\"web:test\",\"data\":{\"content_blocks\":[{\"type\":\"agent_commentary\"}]}}",
       "broadcast:agent_response:{\"chat_jid\":\"web:test\"}",
       "replace:web:test:22:updated:1,2:6:1",
       "thread-root:web:test:m-1",

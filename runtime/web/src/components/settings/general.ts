@@ -48,6 +48,7 @@ function normalizeGeneralSettings(data: Record<string, any> = {}) {
         userAvatar: data.userAvatar || '',
         assistantName: data.assistantName || '',
         assistantAvatar: data.assistantAvatar || '',
+        showCommentaryInTimeline: data.showCommentaryInTimeline ?? false,
         composeUploadLimitMb: data.composeUploadLimitMb ?? 32,
         workspaceUploadLimitMb: data.workspaceUploadLimitMb ?? 256,
         automaticRecoveryEnabled: data.automaticRecoveryEnabled ?? true,
@@ -98,6 +99,7 @@ export function GeneralSection({ settingsData, setStatus, mergeSettingsData }) {
     const [userAvatar, setUserAvatar] = useState('');
     const [assistantName, setAssistantName] = useState('');
     const [assistantAvatar, setAssistantAvatar] = useState('');
+    const [showCommentaryInTimeline, setShowCommentaryInTimeline] = useState(false);
     const [composeUploadLimitMb, setComposeUploadLimitMb] = useState(32);
     const [workspaceUploadLimitMb, setWorkspaceUploadLimitMb] = useState(256);
     const [automaticRecoveryEnabled, setAutomaticRecoveryEnabled] = useState(true);
@@ -124,6 +126,7 @@ export function GeneralSection({ settingsData, setStatus, mergeSettingsData }) {
         setUserAvatar(next.userAvatar);
         setAssistantName(next.assistantName);
         setAssistantAvatar(next.assistantAvatar);
+        setShowCommentaryInTimeline(next.showCommentaryInTimeline);
         setComposeUploadLimitMb(next.composeUploadLimitMb);
         setWorkspaceUploadLimitMb(next.workspaceUploadLimitMb);
         setAutomaticRecoveryEnabled(next.automaticRecoveryEnabled);
@@ -147,10 +150,12 @@ export function GeneralSection({ settingsData, setStatus, mergeSettingsData }) {
 
     const currentSnapshot = useMemo(() => JSON.stringify(normalizeGeneralSettings({
         userName, userAvatar, assistantName, assistantAvatar,
+        showCommentaryInTimeline,
         composeUploadLimitMb, workspaceUploadLimitMb,
         automaticRecoveryEnabled, automaticRecoveryMaxAttempts, automaticRecoveryTotalBudgetMs,
     })), [
         userName, userAvatar, assistantName, assistantAvatar,
+        showCommentaryInTimeline,
         composeUploadLimitMb, workspaceUploadLimitMb,
         automaticRecoveryEnabled, automaticRecoveryMaxAttempts, automaticRecoveryTotalBudgetMs,
     ]);
@@ -276,6 +281,14 @@ export function GeneralSection({ settingsData, setStatus, mergeSettingsData }) {
                             setMetersEnabled(next);
                         }} />
                     <span class="settings-hint" style="margin:0">${t('settings.general.systemMetersHint')}</span>
+                </div>
+            </div>
+            <div class="settings-row">
+                <label>${t('settings.general.commentaryTimeline')}</label>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <input type="checkbox" checked=${showCommentaryInTimeline}
+                        onChange=${e => setShowCommentaryInTimeline(Boolean(e.target.checked))} />
+                    <span class="settings-hint" style="margin:0">${t('settings.general.commentaryTimelineHint')}</span>
                 </div>
             </div>
 

@@ -37,6 +37,7 @@ test('saveGeneralSettings persists and applies general settings immediately', as
       sessionAutoRotate: false,
       sessionMaxSizeMb: 48,
       webTerminalEnabled: false,
+      showCommentaryInTimeline: true,
       composeUploadLimitMb: 24,
       workspaceUploadLimitMb: 256,
       toolUseBudget: 23,
@@ -56,6 +57,7 @@ test('saveGeneralSettings persists and applies general settings immediately', as
       sessionAutoRotate: false,
       sessionMaxSizeMb: 48,
       webTerminalEnabled: false,
+      showCommentaryInTimeline: true,
       composeUploadLimitMb: 24,
       workspaceUploadLimitMb: 256,
       toolUseBudget: 23,
@@ -88,6 +90,7 @@ test('saveGeneralSettings persists and applies general settings immediately', as
         },
         web: {
           terminalEnabled: false,
+          showCommentaryInTimeline: true,
           composeUploadLimitMb: 24,
           workspaceUploadLimitMb: 256,
         },
@@ -146,6 +149,7 @@ test('getGeneralSettingsData exposes recovery defaults without writing configura
     const configPath = join(workspace.workspace, '.piclaw', 'config.json');
     expect(existsSync(configPath)).toBe(false);
     expect(handler.getGeneralSettingsData()).toMatchObject({
+      showCommentaryInTimeline: false,
       automaticRecoveryEnabled: true,
       automaticRecoveryMaxAttempts: 0,
       automaticRecoveryTotalBudgetMs: 360000,

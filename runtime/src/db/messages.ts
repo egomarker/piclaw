@@ -268,6 +268,25 @@ export function getMessageRowIdById(chatJid: string, messageId: string): number 
   return row?.rowid ?? null;
 }
 
+/** Find an already-persisted display-only commentary event by provider source key. */
+export function getAgentCommentaryRowIdBySourceKey(chatJid: string, sourceKey: string): number | null {
+  const normalizedSourceKey = typeof sourceKey === "string" ? sourceKey.trim() : "";
+  if (!chatJid || !normalizedSourceKey) return null;
+  const row = getDb().prepare(`
+    SELECT m.rowid AS rowid
+    FROM messages m, json_each(
+      CASE WHEN json_valid(m.content_blocks) THEN m.content_blocks ELSE '[]' END
+    ) AS block
+    WHERE m.chat_jid = ?
+      AND m.is_bot_message = 1
+      AND json_extract(block.value, '$.type') = 'agent_commentary'
+      AND json_extract(block.value, '$.source_key') = ?
+    ORDER BY m.rowid DESC
+    LIMIT 1
+  `).get(chatJid, normalizedSourceKey) as { rowid: number } | undefined;
+  return row?.rowid ?? null;
+}
+
 /**
  * Look up the persisted thread root rowid for a message id.
  * Returns the message's own rowid when it is a root/self-threaded message.

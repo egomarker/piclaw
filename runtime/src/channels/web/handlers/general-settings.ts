@@ -14,6 +14,7 @@ import {
   getRecoveryPolicyConfig,
   getToolUseBudget,
   getWebRuntimeConfig,
+  getShowCommentaryInTimeline,
   getSearchMatchMode,
   getScopedModelsOnly,
   setAssistantAvatar,
@@ -30,6 +31,7 @@ import {
   setUserName,
   rotateWebWidgetToken,
   setWebComposeUploadLimitMb,
+  setShowCommentaryInTimeline,
   setWebTerminalEnabled,
   setWebWorkspaceUploadLimitMb,
   type SearchMatchMode,
@@ -48,6 +50,7 @@ export interface GeneralSettingsData {
   sessionMaxSizeMb: number;
   sessionMaxLines: number;
   webTerminalEnabled: boolean;
+  showCommentaryInTimeline: boolean;
   composeUploadLimitMb: number;
   workspaceUploadLimitMb: number;
   toolUseBudget: number;
@@ -82,6 +85,7 @@ export interface GeneralSettingsInput {
   sessionMaxSizeMb?: unknown;
   sessionMaxLines?: unknown;
   webTerminalEnabled?: unknown;
+  showCommentaryInTimeline?: unknown;
   composeUploadLimitMb?: unknown;
   workspaceUploadLimitMb?: unknown;
   toolUseBudget?: unknown;
@@ -203,6 +207,7 @@ export function getGeneralSettingsData(): GeneralSettingsData {
     sessionMaxSizeMb: session.maxSizeMb,
     sessionMaxLines: session.maxLines,
     webTerminalEnabled: web.terminalEnabled,
+    showCommentaryInTimeline: getShowCommentaryInTimeline(),
     composeUploadLimitMb: web.composeUploadLimitMb,
     workspaceUploadLimitMb: web.workspaceUploadLimitMb,
     toolUseBudget: getToolUseBudget(),
@@ -275,6 +280,11 @@ export async function saveGeneralSettings(input: GeneralSettingsInput): Promise<
   const nextWebTerminalEnabled = normalizeOptionalBoolean(input.webTerminalEnabled);
   if (nextWebTerminalEnabled !== undefined) {
     setWebTerminalEnabled(nextWebTerminalEnabled);
+  }
+
+  const nextShowCommentaryInTimeline = normalizeOptionalBoolean(input.showCommentaryInTimeline);
+  if (nextShowCommentaryInTimeline !== undefined) {
+    setShowCommentaryInTimeline(nextShowCommentaryInTimeline);
   }
 
   const nextComposeUploadLimitMb = normalizeOptionalInt(input.composeUploadLimitMb, 1, 512);

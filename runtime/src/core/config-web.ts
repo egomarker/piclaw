@@ -277,6 +277,7 @@ type WebOrdinaryDomainConfig = Pick<
   idleTimeout: number;
   persistThinking: boolean;
   persistThinkingMaxChars: number;
+  showCommentaryInTimeline: boolean;
   vncTargets: string;
   contentMaxChars: number;
   contentPreviewChars: number;
@@ -289,6 +290,7 @@ const webOrdinaryDomainSchema = registerDomainConfig<WebOrdinaryDomainConfig>({
     idleTimeout: integerField({ key: "idleTimeout", owner: "web", defaultValue: configWebIdleTimeout ?? legacyWebIdleTimeout ?? 0, min: 0, bounds: ">=0", persistence: "json-config", precedence: ["bootstrap-cli-env", "compat-env", "persisted", "default"], secretClass: "none", compatibilityEnv: [{ envKey: "PICLAW_WEB_IDLE_TIMEOUT", replacement: "domains.web.idleTimeout", removalVersion: "3.0.0" }] }),
     persistThinking: boolField({ key: "persistThinking", owner: "web", defaultValue: false, persistence: "json-config", precedence: ["compat-env", "persisted", "default"], secretClass: "none", compatibilityEnv: [{ envKey: "PICLAW_WEB_PERSIST_THINKING", replacement: "domains.web.persistThinking", removalVersion: "3.0.0" }] }),
     persistThinkingMaxChars: integerField({ key: "persistThinkingMaxChars", owner: "web", defaultValue: 100000, min: 1, bounds: "positive integer", persistence: "json-config", precedence: ["compat-env", "persisted", "default"], secretClass: "none", compatibilityEnv: [{ envKey: "PICLAW_WEB_PERSIST_THINKING_MAX_CHARS", replacement: "domains.web.persistThinkingMaxChars", removalVersion: "3.0.0", parse: (raw) => { const parsed = Number(raw); return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : 100000; } }] }),
+    showCommentaryInTimeline: boolField({ key: "showCommentaryInTimeline", owner: "web", defaultValue: false, persistence: "json-config", precedence: ["persisted", "default"], secretClass: "none" }),
     totpWindow: integerField({ key: "totpWindow", owner: "web", defaultValue: configWebTotpWindow ?? legacyWebTotpWindow ?? 1, min: 0, bounds: ">=0", persistence: "json-config", precedence: ["compat-env", "persisted", "default"], secretClass: "none", compatibilityEnv: [{ envKey: "PICLAW_WEB_TOTP_WINDOW", replacement: "domains.web.totpWindow", removalVersion: "3.0.0" }] }),
     sessionTtl: integerField({ key: "sessionTtl", owner: "web", defaultValue: configWebSessionTtl ?? legacyWebSessionTtl ?? (7 * 24 * 60 * 60), min: 1, bounds: "positive integer", persistence: "json-config", precedence: ["compat-env", "persisted", "default"], secretClass: "none", compatibilityEnv: [{ envKey: "PICLAW_WEB_SESSION_TTL", replacement: "domains.web.sessionTtl", removalVersion: "3.0.0" }] }),
     passkeyMode: {
@@ -373,6 +375,16 @@ export function isPersistThinkingEnabled(): boolean {
 
 export function getPersistThinkingMaxChars(): number {
   return readWebOrdinaryDomainConfig().persistThinkingMaxChars;
+}
+
+/** Whether confirmed tool-use commentary should be retained as display-only timeline output. */
+export function getShowCommentaryInTimeline(): boolean {
+  return readWebOrdinaryDomainConfig().showCommentaryInTimeline;
+}
+
+/** Persist the commentary timeline toggle for subsequent agent runs. */
+export function setShowCommentaryInTimeline(enabled: boolean): boolean {
+  return persistWebOrdinarySetting("showCommentaryInTimeline", Boolean(enabled));
 }
 
 /** Current web timeline content presentation limits. */

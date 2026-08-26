@@ -167,20 +167,35 @@ export function useTimelineStream({
     es.addEventListener("agent_response", (e: MessageEvent) => {
       try {
         const raw = JSON.parse(e.data) as Record<string, unknown>;
+        const nestedData = raw.data && typeof raw.data === "object"
+          ? raw.data as Record<string, unknown>
+          : null;
+        const contentBlocks = Array.isArray(raw.content_blocks)
+          ? raw.content_blocks
+          : Array.isArray(nestedData?.content_blocks)
+            ? nestedData.content_blocks
+            : [];
+        const isDisplayOnlyCommentary = contentBlocks.some((block) => (
+          Boolean(block)
+          && typeof block === "object"
+          && (block as { type?: unknown }).type === "agent_commentary"
+        ));
         const interaction = normalizePost({ ...raw, type: "agent" });
         setMessagesRef.current((prev) => {
           if (prev.some((m) => m.id === interaction.id)) return prev;
           return [...prev, interaction];
         });
-        setDraftRef.current("");
         scrollToBottomRef.current(true);
-        // Notify for browser notifications
-        window.dispatchEvent(new CustomEvent("piclaw:new-message", { detail: { content: interaction.content, type: "agent" } }));
-        // Signal that agent turn is complete (clears compaction badge, etc.)
-        window.dispatchEvent(new CustomEvent("piclaw:agent-turn-end"));
-        window.dispatchEvent(
-          new CustomEvent("piclaw:agent-status", { detail: { type: "done" } })
-        );
+        if (!isDisplayOnlyCommentary) {
+          setDraftRef.current("");
+          // Notify for browser notifications only when a reply completes.
+          window.dispatchEvent(new CustomEvent("piclaw:new-message", { detail: { content: interaction.content, type: "agent" } }));
+          // Signal that agent turn is complete (clears compaction badge, etc.)
+          window.dispatchEvent(new CustomEvent("piclaw:agent-turn-end"));
+          window.dispatchEvent(
+            new CustomEvent("piclaw:agent-status", { detail: { type: "done" } })
+          );
+        }
       } catch (err) {
         log.warn("SSE parse error:", err);
         setDraftRef.current("");

@@ -13,7 +13,7 @@ import type { MediaDispatchChannel } from "../http/dispatch-media.js";
 import type { RequestGuardsChannel } from "../http/request-guards.js";
 import type { AuthEndpointsContext } from "../auth/auth-endpoints.js";
 import type { InteractionRow } from "../../../db.js";
-import type { WebAgentBufferEntry } from "../agent/agent-buffers.js";
+import type { WebAgentBufferEntry, WebDraftKind } from "../agent/agent-buffers.js";
 import type { QueuedFollowupItem } from "../runtime/followup-placeholders.js";
 import type { UiBridge } from "../theming/ui-bridge.js";
 import type { TotpAuthContext } from "../auth/totp-auth.js";
@@ -90,7 +90,7 @@ export interface WebChannelLike
   setPanelExpanded(turnId: string, panel: "thought" | "draft", expanded: boolean): void;
   isPanelExpanded(turnId: string, panel: "thought" | "draft"): boolean;
   updateThoughtBuffer(turnId: string, text: string, totalLines: number): void;
-  updateDraftBuffer(turnId: string, text: string, totalLines: number): void;
+  updateDraftBuffer(turnId: string, text: string, totalLines: number, kind?: WebDraftKind): void;
 
   queueFollowupPlaceholder(chatJid: string, text: string, threadId?: number, queuedContent?: string): InteractionRow | null;
   enqueueQueuedFollowupItem(

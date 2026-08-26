@@ -180,9 +180,9 @@ describe("web runtime state service", () => {
         expandedMap.set(turnId, { ...expandedMap.get(turnId), [panel]: expanded });
       },
       isPanelExpanded: (turnId: string, panel: "thought" | "draft") => expandedMap.get(turnId)?.[panel] ?? false,
-      updateBuffer: (turnId: string, panel: "thought" | "draft", text: string, totalLines: number) => {
+      updateBuffer: (turnId: string, panel: "thought" | "draft", text: string, totalLines: number, kind?: "answer" | "commentary") => {
         calls.push(`buffer.update:${turnId}:${panel}:${totalLines}`);
-        bufferMap.set(turnId, { ...bufferMap.get(turnId), [panel]: { text, totalLines } });
+        bufferMap.set(turnId, { ...bufferMap.get(turnId), [panel]: { text, totalLines, ...(kind ? { kind } : {}) } });
       },
       getBuffer: (turnId: string, panel: "thought" | "draft") => bufferMap.get(turnId)?.[panel],
     };
@@ -212,17 +212,18 @@ describe("web runtime state service", () => {
     service.queuePendingSteering("web:1", "2026-03-27T20:05:00.000Z");
     service.setPanelExpanded("turn-1", "thought", true);
     service.updateThoughtBuffer("turn-1", "line one", 1);
-    service.updateDraftBuffer("turn-1", "draft one", 2);
+    service.updateDraftBuffer("turn-1", "draft one", 2, "commentary");
 
     expect(service.getAgentStatus("web:1")).toEqual({ type: "intent", title: "Thinking", turn_id: "turn-1" });
     expect(service.consumePendingSteering("web:1")).toEqual(["2026-03-27T20:05:00.000Z"]);
     expect(service.isPanelExpanded("turn-1", "thought")).toBe(true);
     expect(service.getBuffer("turn-1", "thought")).toEqual({ text: "line one", totalLines: 1 });
-    expect(service.getBuffer("turn-1", "draft")).toEqual({ text: "draft one", totalLines: 2 });
+    expect(service.getBuffer("turn-1", "draft")).toEqual({ text: "draft one", totalLines: 2, kind: "commentary" });
     expect(state.getDraftRecovery("web:1")).toEqual(expect.objectContaining({
       turnId: "turn-1",
       text: "draft one",
       totalLines: 2,
+      kind: "commentary",
     }));
     expect(calls).toEqual([
       "status.load",

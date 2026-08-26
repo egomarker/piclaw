@@ -67,6 +67,26 @@ export function GeneralSection({
         <span className="settings-panel__description">Use the 🔔 bell button in the compose bar to enable/disable notifications. Web Push requires HTTPS or localhost.</span>
       </div>
 
+      <h3 className="settings-panel__subsection-title">Display</h3>
+
+      <div className="settings-panel__field settings-panel__checkbox-row">
+        <input
+          id="showCommentaryInTimeline"
+          type="checkbox"
+          checked={data.showCommentaryInTimeline ?? false}
+          onChange={(e) =>
+            onSaveGeneral(
+              "showCommentaryInTimeline",
+              (e.target as HTMLInputElement).checked
+            )
+          }
+        />
+        <label htmlFor="showCommentaryInTimeline" className="settings-panel__label">
+          Show tool commentary in timeline
+        </label>
+        <span className="settings-panel__description">Keep confirmed pre-tool narration as display-only messages. Commentary never counts as a completed reply.</span>
+      </div>
+
       <h3 className="settings-panel__subsection-title">Instance Configuration</h3>
 
       <div className="settings-panel__field">

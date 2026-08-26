@@ -5,11 +5,15 @@
 /** Web UI panel keys that can store streamed model buffers. */
 export type WebAgentPanel = "thought" | "draft";
 
+/** Classification used to keep commentary drafts out of terminal fallback/recovery. */
+export type WebDraftKind = "answer" | "commentary";
+
 /** In-memory buffer payload tracked per model turn and panel. */
 export interface WebAgentBufferEntry {
   text: string;
   totalLines: number;
   updatedAt: number;
+  kind?: WebDraftKind;
 }
 
 const DEFAULT_BUFFER_LIMIT = 50;
@@ -37,10 +41,10 @@ export class AgentBuffers {
     return this.expandedPanels.get(turnId)?.[panel] ?? false;
   }
 
-  updateBuffer(turnId: string, panel: WebAgentPanel, text: string, totalLines: number): void {
+  updateBuffer(turnId: string, panel: WebAgentPanel, text: string, totalLines: number, kind?: WebDraftKind): void {
     if (!turnId) return;
     const target = panel === "draft" ? this.draftBuffers : this.thoughtBuffers;
-    target.set(turnId, { text, totalLines, updatedAt: Date.now() });
+    target.set(turnId, { text, totalLines, updatedAt: Date.now(), ...(panel === "draft" && kind ? { kind } : {}) });
     this.prune(target);
   }
 

@@ -12,6 +12,7 @@ import type { WebChannelLike } from "../core/web-channel-contracts.js";
 import {
   getIdentityConfig,
   getRoutingConfig,
+  getShowCommentaryInTimeline,
 } from "../../../core/config.js";
 import { parseControlCommand } from "../../../agent-control/index.js";
 import { isSlashCommandInvocation } from "../../../agent-pool/slash-command.js";
@@ -57,6 +58,7 @@ import "../../../extensions/generic-tool-status-hints.js";
 import { createUuid } from "../../../utils/ids.js";
 import { createLogger, debugSuppressedError } from "../../../utils/logger.js";
 import type { AttachmentInfo } from "../../../agent-pool/attachments.js";
+import type { TurnOutput } from "../../../agent-pool/contracts.js";
 import { cancelScheduledIdleAutoCompaction } from "../../../agent-pool/compaction.js";
 import { DEFAULT_BASE_RETRY_MS, getRetryAtIso } from "../../../queue/retry-policy.js";
 import { formatProviderError } from "./provider-error-format.js";
@@ -1605,6 +1607,9 @@ export async function processChat(
   let hadIntermediateOutput = false;
   let persistedIntermediateOutput = false;
   let intermediatePersistFailed = false;
+  let persistedCommentaryOutput = false;
+  let commentaryPersistFailed = false;
+  const shouldPersistToolUseCommentary = getShowCommentaryInTimeline();
   const resolvedThreadRootId = resolveThreadRootId(channel, chatJid, currentMessage.id ?? "", effectiveThreadRootId);
 
   const preflight = await runProcessChatPreflight({
@@ -1639,13 +1644,18 @@ export async function processChat(
       onMessageStored: streamRuntime.persistThinkingForRow,
     });
   };
+  const getRecoverableDraftText = (): string => {
+    const draft = channel.getBuffer(turnId, "draft");
+    if (draft?.kind === "commentary") return "";
+    return typeof draft?.text === "string" ? draft.text.trim() : "";
+  };
+
   const persistVisibleFailureOutcome = (
     markerBase: Record<string, unknown>,
     detail?: string,
     options: { requireDraft?: boolean } = {},
   ) => {
-    const draft = channel.getBuffer(turnId, "draft");
-    const draftText = typeof draft?.text === "string" ? draft.text.trim() : "";
+    const draftText = getRecoverableDraftText();
     if (options.requireDraft && !draftText) return false;
 
     const lastAction = summarizeFailureActionFromStatus(channel.getAgentStatus(chatJid));
@@ -1693,8 +1703,7 @@ export async function processChat(
     // already flushed via onTurnComplete(). For the very first turn we must
     // still skip placeholder consumption so an already-queued follow-up is not
     // accidentally stolen by the original response.
-    const draft = channel.getBuffer(turnId, "draft");
-    const draftText = typeof draft?.text === "string" ? draft.text.trim() : "";
+    const draftText = getRecoverableDraftText();
 
     const markerBase = reason === "timeout"
       ? {
@@ -1753,15 +1762,53 @@ export async function processChat(
     skipPrePromptCompaction: true,
     scheduleIdleAutoCompaction: true,
     onEvent: trackedStreamingHandler,
+    emitToolUseCommentary: shouldPersistToolUseCommentary,
     onTurnDiscard: () => {
       clearCommittedDraft();
     },
-    onTurnComplete: (turn: { text: string; attachments: unknown[]; usage?: unknown; followedByToolUse?: boolean }) => {
-      // Turn boundary: the first turn (index 0) is the original prompt's
-      // response — skip placeholder consumption so it doesn't steal a
-      // placeholder that belongs to a queued follow-up.
-      // Subsequent turns (index 1+) are follow-up responses and should
-      // consume their corresponding placeholder.
+    onTurnComplete: (turn: TurnOutput) => {
+      if (turn.kind === "commentary") {
+        if (!shouldPersistToolUseCommentary || !turn.followedByToolUse) {
+          clearCommittedDraft();
+          return;
+        }
+        const commentaryText = turn.text;
+        if (!commentaryText.trim()) {
+          clearCommittedDraft();
+          return;
+        }
+        const commentaryRowId = persistIntermediateProcessChatTurn({
+          channel,
+          emitter,
+          chatJid,
+          text: commentaryText,
+          attachments: [],
+          channelName,
+          threadId: resolvedThreadRootId,
+          skipPlaceholder: true,
+          timingBlock: streamRuntime.buildAgentTimingBlock(turn.usage),
+          followedByToolUse: true,
+          commentary: turn.sourceKey ? { sourceKey: turn.sourceKey } : {},
+          clearCommittedDraft,
+        });
+        if (commentaryRowId === null) {
+          commentaryPersistFailed = true;
+          clearCommittedDraft();
+          log.warn("Failed to persist display-only tool commentary", {
+            operation: "process_chat.persist_commentary_turn",
+            chatJid,
+            sourceKey: turn.sourceKey ?? null,
+            textLength: commentaryText.length,
+          });
+        } else {
+          persistedCommentaryOutput = true;
+        }
+        return;
+      }
+
+      // Turn boundary: the first substantive turn (index 0) is the original
+      // prompt's response. Display-only commentary never advances this index
+      // and therefore never consumes queued follow-up placeholders.
       const isFirstTurn = turnCount === 0;
       turnCount++;
       if (turn.text || turn.attachments.length > 0) {
@@ -1802,8 +1849,7 @@ export async function processChat(
     // This is not an error — emit a muted "done" pill and finalise normally.
     // If there is a draft buffer (partial streamed text), surface it so the user
     // sees the work that was done even though the model didn't emit a final reply.
-    const toolCompleteDraft = channel.getBuffer(turnId, "draft");
-    const toolCompleteDraftText = typeof toolCompleteDraft?.text === "string" ? toolCompleteDraft.text.trim() : "";
+    const toolCompleteDraftText = getRecoverableDraftText();
     const marker = buildTurnOutcomeMarker({
       kind: "tool_complete",
       label: "done",
@@ -1920,8 +1966,7 @@ export async function processChat(
   // actually persisted (either the final output itself or a draft fallback).
   const finalAttachments = output.attachments ?? [];
   const hasOutput = !!(output.result || finalAttachments.length > 0);
-  const finalDraft = channel.getBuffer(turnId, "draft");
-  const hasDraftFallback = typeof finalDraft?.text === "string" && finalDraft.text.trim().length > 0;
+  const hasDraftFallback = getRecoverableDraftText().length > 0;
   const finalized = hasOutput
     ? storeAgentTurn(channel, emitter, {
         chatJid,
@@ -1995,8 +2040,7 @@ export async function processChat(
 
     // Check if a draft buffer existed — if so, the agent DID produce content
     // but persistence failed, which is a real error worth recording.
-    const draft = channel.getBuffer(turnId, "draft");
-    const hadDraft = !!(typeof draft?.text === "string" && draft.text.trim());
+    const hadDraft = Boolean(getRecoverableDraftText());
     if (hadDraft) {
       const errorText = "Agent completed but draft response could not be persisted.";
       rollbackChatRunWithError(chatJid, {
@@ -2097,6 +2141,8 @@ export async function processChat(
       chatJid,
       hadIntermediateOutput,
       persistedIntermediateOutput,
+      persistedCommentaryOutput,
+      commentaryPersistFailed,
       hadDraft,
       recovery: streamState.lastRecoveryMeta,
     });

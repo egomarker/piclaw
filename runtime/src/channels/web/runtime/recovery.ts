@@ -33,6 +33,7 @@ import {
 import { createUuid } from "../../../utils/ids.js";
 import { createLogger } from "../../../utils/logger.js";
 import { getWebRecoveryConfig } from "../../../core/config.js";
+import type { WebDraftKind } from "../agent/agent-buffers.js";
 
 const log = createLogger("web.recovery");
 
@@ -41,6 +42,7 @@ export interface PersistedDraftRecoveryEntry {
   text: string;
   totalLines: number;
   updatedAt: number;
+  kind?: WebDraftKind;
 }
 
 export type InterruptedTurnCause = "service_restart" | "runtime_stale";
@@ -100,8 +102,13 @@ function persistInterruptedTurnOutcome(
   }
 }
 
+function getRecoverableDraftText(draft: PersistedDraftRecoveryEntry | null | undefined): string {
+  if (draft?.kind === "commentary") return "";
+  return typeof draft?.text === "string" ? draft.text.trim() : "";
+}
+
 function persistRecoveredDraft(chatJid: string, inflight: InflightRun, assistantName: string, draft: PersistedDraftRecoveryEntry): void {
-  const text = typeof draft?.text === "string" ? draft.text.trim() : "";
+  const text = getRecoverableDraftText(draft);
   if (!text) return;
   try {
     storeMessage({
@@ -305,9 +312,9 @@ export function recoverStaleInflightRun(
     return false;
   }
 
-  if (replyState === "none" && inflightAge >= minAgeMs) {
+  if ((replyState === "none" || replyState === "commentary") && inflightAge >= minAgeMs) {
     const draft = ctx.getDraftRecovery?.(inflight.chatJid) ?? null;
-    if (draft?.text?.trim()) {
+    if (draft && getRecoverableDraftText(draft)) {
       persistRecoveredDraft(inflight.chatJid, inflight, ctx.assistantName, draft);
       ctx.clearDraftRecovery?.(inflight.chatJid);
       return true;
@@ -559,7 +566,9 @@ export function recoverInflightRuns(
         }
 
         const inflightAge = now - new Date(inflight.startedAt).getTime();
-        log.info("Inflight run has no agent output yet; marking turn as interrupted", {
+        log.info(replyState === "commentary"
+          ? "Inflight run has display-only commentary but no agent reply; marking turn as interrupted"
+          : "Inflight run has no agent output yet; marking turn as interrupted", {
           operation: inflightAge > MAX_INFLIGHT_AGE_MS
             ? "recover_inflight_runs.clear_interrupted_stale"
             : "recover_inflight_runs.clear_interrupted_pending",
@@ -579,13 +588,13 @@ export function recoverInflightRuns(
   }
 
   for (const { inflight, replyState } of decisions) {
-    if (replyState !== "none") {
+    if (replyState === "terminal" || replyState === "partial") {
       ctx.clearDraftRecovery?.(inflight.chatJid);
       continue;
     }
 
     const draft = ctx.getDraftRecovery?.(inflight.chatJid) ?? null;
-    if (draft?.text?.trim()) {
+    if (draft && getRecoverableDraftText(draft)) {
       persistRecoveredDraft(inflight.chatJid, inflight, ctx.assistantName, draft);
       ctx.clearDraftRecovery?.(inflight.chatJid);
       continue;
