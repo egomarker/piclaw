@@ -62,6 +62,10 @@ function log(level: "info" | "warn" | "error", message: string, details?: unknow
   console.info(prefix, details ?? "");
 }
 
+export function logUnauthorizedTelegramChat(chatId: string | number): void {
+  log("info", "Unauthorized Telegram chat rejected.", { chatId: String(chatId) });
+}
+
 function normalizeText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -421,6 +425,7 @@ async function startTelegramRuntime(): Promise<void> {
         }
 
         if (!isAuthorizedChat(config, message)) {
+          logUnauthorizedTelegramChat(message.chat.id);
           if (config.unauthorizedMode === "reply_not_authorized") {
             await api.sendMessage(String(message.chat.id), UNAUTHORIZED_TEXT).catch((error) => {
               log("warn", "Failed to send unauthorized Telegram reply", { err: error, chatId: message.chat.id });

@@ -102,6 +102,30 @@ test("telegram addon allowlist includes model and quota control commands", async
   expect(allowedCommands).toContain("quota");
 });
 
+test("telegram runtime logs rejected unauthorized chat IDs to stdout", async () => {
+  restoreEnv = setEnv({
+    PICLAW_TELEGRAM_ENABLED: "false",
+    PICLAW_TELEGRAM_BOT_TOKEN: undefined,
+  });
+
+  const runtime = await importFresh<typeof import("../../../addons/telegram/runtime/index.ts")>("../../../addons/telegram/runtime/index.ts", import.meta.url);
+  const originalInfo = console.info;
+  const infoCalls: unknown[][] = [];
+  console.info = ((...args: unknown[]) => {
+    infoCalls.push(args);
+  }) as typeof console.info;
+
+  try {
+    runtime.logUnauthorizedTelegramChat(987654321);
+  } finally {
+    console.info = originalInfo;
+  }
+
+  expect(infoCalls).toEqual([
+    ["[telegram-addon] Unauthorized Telegram chat rejected.", { chatId: "987654321" }],
+  ]);
+});
+
 test("telegram classifier retries unknown transport failures and only stops for explicit auth/config failures", () => {
   expect(isRecoverableTelegramNetworkError(new Error("Telegram getUpdates failed: Bad Gateway"))).toBe(true);
   expect(isRecoverableTelegramNetworkError(new Error("Telegram getMe failed: Gateway Timeout"))).toBe(true);
