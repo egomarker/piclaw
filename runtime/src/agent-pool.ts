@@ -662,7 +662,14 @@ export class AgentPool {
 
   /** Execute a raw slash command in the AgentSession (extension commands). */
   async applySlashCommand(chatJid: string, rawText: string): Promise<AgentControlResult> {
-    return this.runtimeFacade.applySlashCommand(chatJid, rawText);
+    // Slash-command handlers do not flip AgentSession.isStreaming, so retain
+    // protection from session lookup through handler completion and refresh.
+    const releaseEvictionProtection = this.sessionManager.acquireEvictionProtection(chatJid);
+    try {
+      return await this.runtimeFacade.applySlashCommand(chatJid, rawText);
+    } finally {
+      releaseEvictionProtection();
+    }
   }
 
   getSshConfig(chatJid: string): SshConfig | null {

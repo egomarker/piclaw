@@ -703,6 +703,87 @@ test("agent pool protects a run before the session flips isStreaming", async () 
   await pool.shutdown();
 });
 
+test("agent pool protects an in-flight slash command from pool-limit eviction", async () => {
+  const ws = getTestWorkspace();
+  restoreEnv = setEnv({
+    PICLAW_WORKSPACE: ws.workspace,
+    PICLAW_STORE: ws.store,
+    PICLAW_DATA: ws.data,
+    PICLAW_MAIN_SESSION_IDLE_TTL_MS: "600000",
+    PICLAW_MAIN_SESSION_POOL_MAX_SIZE: "1",
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "0",
+  });
+
+  const { AgentPool } = await importFresh<typeof import("../src/agent-pool.js")>("../src/agent-pool.js");
+  let commandStarted!: () => void;
+  const commandStartedPromise = new Promise<void>((resolve) => { commandStarted = resolve; });
+  let finishCommand!: () => void;
+  const commandBlocked = new Promise<void>((resolve) => { finishCommand = resolve; });
+  const disposedByChat = new Map<string, number>();
+
+  class PendingSession {
+    isBashRunning = false;
+    isCompacting = false;
+
+    constructor(readonly chatJid: string, public isStreaming = false) {}
+
+    subscribe(_listener: (event: any) => void) { return () => {}; }
+    async prompt(_prompt: string) {}
+    async abort() {}
+    dispose() {
+      disposedByChat.set(this.chatJid, (disposedByChat.get(this.chatJid) ?? 0) + 1);
+    }
+  }
+
+  const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
+    createSession: async (chatJid: string) => createRuntime(new PendingSession(chatJid)) as any,
+  });
+
+  // Keep the sole configured pool slot occupied by another active turn. This
+  // makes the newly created slash-command session the only eviction candidate.
+  const busySession = new PendingSession("telegram:busy", true);
+  (pool as any).pool.set("telegram:busy", {
+    runtime: createRuntime(busySession) as any,
+    lastUsed: Date.now(),
+  });
+  (pool as any).runtimeFacade.applySlashCommand = async (chatJid: string, rawText: string) => {
+    expect(rawText).toBe("/tasks");
+    await (pool as any).sessionManager.getOrCreate(chatJid);
+    commandStarted();
+    await commandBlocked;
+    return { status: "success", message: "done" };
+  };
+
+  const command = pool.applySlashCommand("web:protected", "/tasks");
+  await commandStartedPromise;
+  const commandEntry = (pool as any).pool.get("web:protected");
+  expect(commandEntry).toBeDefined();
+  commandEntry.lastUsed = Date.now() - 10_000;
+
+  // Reproduce the periodic cap enforcement that previously disposed the
+  // runtime while its extension command was still executing.
+  (pool as any).evictIdle();
+  const remainedCachedDuringCommand = (pool as any).pool.has("web:protected");
+  const disposedDuringCommand = disposedByChat.get("web:protected") ?? 0;
+  const protectedDuringCommand = pool.getMemoryInstrumentationSnapshot().sessionManager.evictionProtectedChats;
+
+  finishCommand();
+  expect(await command).toEqual({ status: "success", message: "done" });
+  expect(remainedCachedDuringCommand).toBe(true);
+  expect(disposedDuringCommand).toBe(0);
+  expect(protectedDuringCommand).toBe(1);
+  expect(pool.getMemoryInstrumentationSnapshot().sessionManager.evictionProtectedChats).toBe(0);
+
+  busySession.isStreaming = false;
+  commandEntry.lastUsed = Date.now() - 10_000;
+  (pool as any).evictIdle();
+  expect((pool as any).pool.has("web:protected")).toBe(false);
+  expect(disposedByChat.get("web:protected")).toBe(1);
+
+  await pool.shutdown();
+});
+
 test("agent pool applies the pressure pool cap immediately after acquiring a second session", async () => {
   const ws = getTestWorkspace();
   restoreEnv = setEnv({
