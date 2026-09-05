@@ -17,7 +17,6 @@ import { existsSync, readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 
 const INDEXES = [
-  resolve(import.meta.dir, "../web/static/classic/index.html"),
   resolve(import.meta.dir, "../web/static/mobile/index.html"),
 ];
 const APP_DIST = resolve(import.meta.dir, "../web/static/mobile/dist");

@@ -7,25 +7,40 @@
 
 import { expect, test } from "bun:test";
 import "../../helpers.js";
-import { existsSync, readFileSync, statSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { join } from "path";
 
-const WEB_BUILD_TEST_TIMEOUT_MS = 20_000;
+const WEB_BUILD_TEST_TIMEOUT_MS = Number(process.env.WEB_BUILD_TEST_TIMEOUT_MS || 20_000);
 
 function projectRoot(): string {
   return join(import.meta.dir, "..", "..", "..");
 }
 
-test("build:web produces Mobile-owned bundle assets", async () => {
+test("build:web produces Mobile-only assets and cleans stale retired shells", async () => {
   const root = projectRoot();
+  const retiredDirs = ["classic", "visual"].map((name) => join(root, "web", "static", name));
+  for (const dir of retiredDirs) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "index.html"), "stale shell");
+    writeFileSync(join(dir, "app.bundle.js.gz"), "stale compressed asset");
+  }
   const proc = Bun.spawn(["bun", "run", "build:web"], {
     cwd: root,
     stdout: "pipe",
     stderr: "pipe",
   });
 
-  const exitCode = await proc.exited;
-  expect(exitCode).toBe(0);
+  try {
+    const [exitCode, stdout, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    expect(exitCode, stderr || stdout).toBe(0);
+    for (const dir of retiredDirs) expect(existsSync(dir)).toBe(false);
+  } finally {
+    for (const dir of retiredDirs) rmSync(dir, { recursive: true, force: true });
+  }
 
   const appBundlePath = join(root, "web", "static", "mobile", "dist", "app.bundle.js");
   const appMapPath = join(root, "web", "static", "mobile", "dist", "app.bundle.js.map");
@@ -62,26 +77,4 @@ test("build:web produces Mobile-owned bundle assets", async () => {
 
   expect(statSync(appBundlePath).size).toBeLessThan(1_500_000);
   expect(statSync(editorBundlePath).size).toBeLessThan(500_000);
-}, WEB_BUILD_TEST_TIMEOUT_MS);
-
-test("build:web:visual uses the canonical Mobile editor bundle and removes stale copies", async () => {
-  const root = projectRoot();
-  const proc = Bun.spawn(["bun", "run", "build:web:visual"], {
-    cwd: root,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-
-  const exitCode = await proc.exited;
-  expect(exitCode).toBe(0);
-
-  const visualDist = join(root, "web", "static", "visual", "dist");
-  const visualAppBundlePath = join(visualDist, "app.bundle.js");
-  const staleEditorBundlePath = join(visualDist, "editor.bundle.js");
-  const staleEditorMapPath = join(visualDist, "editor.bundle.js.map");
-
-  expect(existsSync(visualAppBundlePath)).toBe(true);
-  expect(readFileSync(visualAppBundlePath, "utf8")).toContain("/static/mobile/dist/editor.bundle.js");
-  expect(existsSync(staleEditorBundlePath)).toBe(false);
-  expect(existsSync(staleEditorMapPath)).toBe(false);
 }, WEB_BUILD_TEST_TIMEOUT_MS);

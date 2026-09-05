@@ -33,7 +33,7 @@ test("response service wraps json and static helpers", async () => {
   expect(service.parseOptionalInt("12")).toBe(12);
   expect(service.parseOptionalInt(null)).toBeNull();
 
-  const staticRes = await service.serveStatic("classic/index.html");
+  const staticRes = await service.serveStatic("mobile/index.html");
   expect(staticRes.status).toBe(200);
   expect(staticRes.headers.get("Content-Type")).toContain("text/html");
 });

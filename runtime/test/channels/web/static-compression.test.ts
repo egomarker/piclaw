@@ -22,19 +22,19 @@ test("serveStatic renders the Mobile shell marker", async () => {
   expect(html).toContain('/static/mobile/dist/app.bundle.js');
 });
 
-test("serveStatic renders the Classic shell with canonical Mobile bundles", async () => {
-  const response = await serveStatic("classic/index.html", notFound);
-  const html = await response.text();
-
-  expect(response.status).toBe(200);
-  expect(html).not.toContain('data-piclaw-ui="mobile"');
-  expect(html).toContain('/static/mobile/dist/app.bundle.css');
-  expect(html).toContain('/static/mobile/dist/app.bundle.js');
+test("serveStatic no longer serves Classic or Visual shells", async () => {
+  for (const path of ["classic/index.html", "visual/index.html", "visual/dist/app.bundle.js", "classic/css/base.css"]) {
+    expect((await serveStatic(path, notFound)).status).toBe(404);
+  }
 });
 
 test("serveStatic maps legacy Classic dist URLs to canonical Mobile assets", async () => {
   expect(resolveStaticCompatibilityPath("classic/dist/editor.bundle.js")).toBe("mobile/dist/editor.bundle.js");
   expect(resolveStaticCompatibilityPath("mobile/dist/editor.bundle.js")).toBe("mobile/dist/editor.bundle.js");
+  const editor = await serveStatic("classic/dist/editor.bundle.js", notFound);
+  expect(editor.status).toBe(200);
+  expect(await editor.text()).toBe(await (await serveStatic("mobile/dist/editor.bundle.js", notFound)).text());
+  expect((await serveStatic("classic/dist/../../../../package.json", notFound)).status).toBe(404);
 
   const legacy = await serveStatic("classic/dist/app.bundle.css", notFound);
   const canonical = await serveStatic("mobile/dist/app.bundle.css", notFound);

@@ -10,7 +10,6 @@ function cssRuleBody(css: string, selector: string): string {
 
 const THEME_WORKSPACE_CSS = [
   "../../web/src/styles/shared/workspace.css",
-  "../../web/static/visual/css/workspace.css",
 ];
 
 test("timeline hamburger dropdown uses available viewport height without a fixed desktop cap", () => {

@@ -2,7 +2,7 @@
  * web/http/dispatch-shell.ts – Shell/static/avatar route dispatch helpers.
  */
 
-import { WEB_RUNTIME_CONFIG, getRuntimeRoot } from "../../../core/config.js";
+import { getRuntimeRoot } from "../../../core/config.js";
 import type { WebChannelLike } from "../core/web-channel-contracts.js";
 import type { RouteFlags } from "./route-flags.js";
 
@@ -17,13 +17,6 @@ export type ServeStaticAsset = (req: Request, relPath: string) => Promise<Respon
 function appleTouchIconSize(pathname: string): string {
   const match = pathname.match(/apple-touch-icon-(\d+)(?:x\d+)?\.png$/i);
   return match?.[1] || "180";
-}
-
-/** Resolve the authenticated app shell for a configured web UI mode. */
-export function resolveWebUiIndexPath(uiMode: string): string {
-  if (uiMode === "classic") return "classic/index.html";
-  if (uiMode === "visual") return "visual/index.html";
-  return "mobile/index.html";
 }
 
 /**
@@ -43,7 +36,7 @@ export async function handleShellRoutes(
   serveStaticAsset: ServeStaticAsset
 ): Promise<Response | null> {
   if (flags.isIndex) {
-    return channel.serveStatic(resolveWebUiIndexPath(WEB_RUNTIME_CONFIG.uiMode), req);
+    return channel.serveStatic("mobile/index.html", req);
   }
 
   if (flags.isManifest) {

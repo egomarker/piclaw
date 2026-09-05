@@ -165,6 +165,7 @@ export interface WebServerConfig {
 }
 
 /** Mutable web auth/session/runtime settings grouped for auth and UI wiring. */
+/** Legacy selector retained for config compatibility; shell dispatch always serves Mobile. */
 export type WebUiMode = "classic" | "visual" | "mobile";
 const DEPRECATED_WEB_UI_MODES = new Set<WebUiMode>(["classic", "visual"]);
 const WEB_PASSKEY_MODES = ["totp-fallback", "totp-only", "passkey-only"] as const;
@@ -179,9 +180,10 @@ function parseWebPasskeyMode(value: unknown): WebPasskeyMode {
 
 function warnDeprecatedWebUiMode(uiMode: WebUiMode): void {
   if (!DEPRECATED_WEB_UI_MODES.has(uiMode)) return;
-  log.warn("Deprecated web UI mode selected", {
+  log.warn("Removed web UI mode ignored; serving Mobile. Remove uiMode from configuration. Rollback requires the previous build.", {
     operation: "core_config.warn_deprecated_web_ui_mode",
     uiMode,
+    ignored: true,
     replacement: "mobile",
     removalVersion: "3.0.0",
   });

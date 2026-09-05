@@ -6,8 +6,6 @@ const appCss = readFileSync(join(import.meta.dir, '../../web/src/styles/app.css'
 const sharedEditorCss = readFileSync(join(import.meta.dir, '../../web/src/styles/shared/editor.css'), 'utf8');
 const sharedWorkspaceCss = readFileSync(join(import.meta.dir, '../../web/src/styles/shared/workspace.css'), 'utf8');
 const mobileCss = readFileSync(join(import.meta.dir, '../../web/src/styles/mobile-interface.css'), 'utf8');
-const visualEditorCss = readFileSync(join(import.meta.dir, '../../web/static/visual/css/editor.css'), 'utf8');
-const visualWorkspaceCss = readFileSync(join(import.meta.dir, '../../web/static/visual/css/workspace.css'), 'utf8');
 
 test('authenticated styles load the isolated Mobile layout last', () => {
   expect(appCss.trimEnd().endsWith('@import "./mobile-interface.css";')).toBe(true);
@@ -53,11 +51,8 @@ test('Only Mobile differentiates comfortable Workspace tab and explorer rail siz
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface > \.workspace-sidebar\[data-workspace-scale="comfortable"\] \{\s*--workspace-row-height: 30px;\s*--workspace-tree-font-size: 14px;/);
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface\.mobile-workspace-active > \.workspace-sidebar\[data-workspace-scale="comfortable"\] \{\s*--workspace-row-height: 44px;\s*--workspace-tree-font-size: 16px;/);
   expect(sharedWorkspaceCss).toMatch(/\.workspace-sidebar\[data-workspace-scale="comfortable"\] \{[^}]*--workspace-tree-font-size: 13px;[^}]*--workspace-row-height: 28px;/s);
-  expect(visualWorkspaceCss).toMatch(/\.workspace-sidebar\[data-workspace-scale="comfortable"\] \{[^}]*--workspace-tree-font-size: 13px;[^}]*--workspace-row-height: 28px;/s);
   expect(sharedWorkspaceCss).not.toContain('--workspace-row-height: 44px');
-  expect(visualWorkspaceCss).not.toContain('--workspace-row-height: 44px');
   expect(sharedWorkspaceCss).not.toMatch(/--workspace-tree-font-size: (?:14|16)px/);
-  expect(visualWorkspaceCss).not.toMatch(/--workspace-tree-font-size: (?:14|16)px/);
 });
 
 test('Mobile widens the Workspace divider touch target without moving either surface', () => {
@@ -95,7 +90,6 @@ test('Active-session menu sizing and touch targets remain scoped to Mobile', () 
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface \.chat-session-menu-item \{[^}]*display: flex;[^}]*min-height: 44px;/s);
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface \.chat-session-menu-recent-title \{[^}]*border-top: 1px solid var\(--border-color\);/s);
   expect(sharedEditorCss).not.toContain('chat-session-menu');
-  expect(visualEditorCss).not.toContain('chat-session-menu');
 });
 
 test('Mobile active-session indicator morphs within the shared top-right HUD', () => {
@@ -107,19 +101,16 @@ test('Mobile active-session indicator morphs within the shared top-right HUD', (
   expect(mobileCss).toMatch(/\.active-sessions-indicator:not\(\.is-visible\) \{[^}]*min-height: 0;[^}]*max-height: 0;[^}]*opacity: 0;[^}]*pointer-events: none;/s);
   expect(mobileCss).toMatch(/\.active-sessions-indicator\.is-visible \+ \.system-meters-hud-overlay \{\s*margin-top: 8px;/);
   expect(sharedEditorCss).not.toContain('active-sessions-indicator');
-  expect(visualEditorCss).not.toContain('active-sessions-indicator');
 });
 
-test('Mobile suppresses native tab callouts without changing Classic or Visual tabs', () => {
+test('Mobile suppresses native tab callouts without changing the shared tab styles', () => {
   expect(mobileCss).toMatch(/\.app-shell\.mobile-interface \.tab-item \{\s*-webkit-touch-callout: none;/);
   expect(sharedEditorCss).not.toContain('-webkit-touch-callout');
-  expect(visualEditorCss).not.toContain('-webkit-touch-callout');
 });
 
 test('Mobile reveals enlarged tab close targets only for coarse touch-only input', () => {
   const hiddenCloseRule = /\.tab-close \{[^}]*width: 22px;[^}]*height: 22px;[^}]*min-width: 22px;[^}]*min-height: 22px;[^}]*opacity: 0;[^}]*pointer-events: none;/s;
   expect(sharedEditorCss).toMatch(hiddenCloseRule);
-  expect(visualEditorCss).toMatch(hiddenCloseRule);
   expect(mobileCss).toMatch(/@media \(pointer: coarse\) and \(not \(any-pointer: fine\)\) \{\s*\.app-shell\.mobile-interface \.tab-close \{[^}]*width: 30px;[^}]*height: 30px;[^}]*min-width: 30px;[^}]*min-height: 30px;[^}]*opacity: 1;[^}]*pointer-events: auto;/s);
   expect(mobileCss).not.toMatch(/\.tab-close > svg[^}]*width:/s);
 });

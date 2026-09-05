@@ -96,7 +96,7 @@ const LEGACY_CLASSIC_DIST_PREFIX = "classic/dist/";
 
 /**
  * Keep already-open Classic/Visual clients able to lazy-load shared bundles
- * after the canonical authenticated app output moves under Mobile ownership.
+ * for one compatibility release after the Classic/Visual shells are removed.
  */
 export function resolveStaticCompatibilityPath(relPath: string): string {
   if (!relPath.startsWith(LEGACY_CLASSIC_DIST_PREFIX)) return relPath;
@@ -108,11 +108,8 @@ function renderHtmlTemplate(relPath: string, html: string): string {
     NOTIFICATION_SOURCE_LABELS_PLACEHOLDER,
     WEB_RUNTIME_CONFIG.notificationDebugLabels ? "1" : "0"
   );
-  if (relPath === "classic/index.html" || relPath === "mobile/index.html") {
+  if (relPath === "mobile/index.html") {
     return renderedWithSharedFlags.replaceAll(APP_ASSET_VERSION_PLACEHOLDER, getAppAssetVersion());
-  }
-  if (relPath === "visual/index.html") {
-    return renderedWithSharedFlags;
   }
   if (relPath === "login.html") {
     return renderedWithSharedFlags.replaceAll(LOGIN_ASSET_VERSION_PLACEHOLDER, getLoginAssetVersion());

@@ -109,6 +109,7 @@ function expectDeprecatedWebUiModeWarningOnce(stderr: string, uiMode: "classic" 
   const warningLines = deprecatedWebUiModeWarningLines(stderr);
   expect(warningLines, uiMode).toHaveLength(1);
   expect(warningLines[0]).toContain(`"uiMode":"${uiMode}"`);
+  expect(warningLines[0]).toContain('"ignored":true');
   expect(warningLines[0]).toContain('"replacement":"mobile"');
   expect(warningLines[0]).toContain('"removalVersion":"3.0.0"');
 }
@@ -1212,7 +1213,7 @@ describe("core config", () => {
     }
   });
 
-  test("Mobile is the default while explicit Classic and Visual modes remain available with deprecation warnings", () => {
+  test("Mobile is the default while legacy mode values remain parseable with ignored-mode warnings", () => {
     const cases: Array<{
       name: string;
       config?: Record<string, unknown>;
@@ -1223,16 +1224,19 @@ describe("core config", () => {
       { name: "canonical-classic", config: { domains: { web: { uiMode: "classic" } } }, expected: "classic" },
       { name: "canonical-visual", config: { domains: { web: { uiMode: "visual" } } }, expected: "visual" },
       { name: "legacy-classic", config: { web: { uiMode: "classic" } }, expected: "classic" },
+      { name: "legacy-visual", config: { web: { uiMode: "visual" } }, expected: "visual" },
     ];
 
     for (const testCase of cases) {
       const workspace = createTempWorkspace(`piclaw-web-ui-mode-${testCase.name}-`);
       try {
-        if (testCase.config) writeWorkspaceConfig(workspace.workspace, testCase.config);
+        const configPath = testCase.config ? writeWorkspaceConfig(workspace.workspace, testCase.config) : undefined;
+        const before = configPath ? readFileSync(configPath, "utf8") : undefined;
         const { snapshot, stderr } = runConfigSubprocess(workspace, ["call:getWebRuntimeConfig"], {
           env: { PICLAW_WEB_UI_MODE: undefined },
         });
         expect(snapshot["call:getWebRuntimeConfig"].uiMode).toBe(testCase.expected);
+        if (configPath) expect(readFileSync(configPath, "utf8")).toBe(before);
         if (testCase.expected === "mobile") {
           expect(deprecatedWebUiModeWarningLines(stderr)).toHaveLength(0);
         } else {

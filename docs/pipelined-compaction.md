@@ -660,7 +660,6 @@ Treat these as implementation details:
 - `runtime/src/core/config.ts`
 - `runtime/src/channels/web/handlers/compaction-settings.ts`
 - `runtime/web/src/components/settings/compaction.ts`
-- `runtime/web/static/visual/frontend/src/panels/settings/CompactionSection.tsx`
 
 ### Focused tests
 

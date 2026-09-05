@@ -1,11 +1,7 @@
 // Framework-agnostic scroll anchoring for a disclosure panel whose header must
 // stay visually fixed while the panel below it changes height.
 //
-// SHARED by BOTH web UIs. The classic pill imports this module directly; the
-// visual pill imports a byte-for-byte MIRROR at
-// runtime/web/static/visual/frontend/src/utils/scroll-anchor.ts (the two build
-// trees don't share a source root - same convention as markdown-pipeline.ts and
-// clipboard.ts). Keep the two copies in sync. Unit-tested in
+// Used directly by the Mobile thinking pill. Unit-tested in
 // runtime/test/web/thinking/scroll-anchor.test.ts.
 //
 // Why this exists: the thinking pill lives inside a column-reverse, bottom-pinned
