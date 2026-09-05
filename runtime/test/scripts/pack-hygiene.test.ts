@@ -40,11 +40,22 @@ describe("pack-hygiene", () => {
   });
 
   test("findBlockedPackEntries allows runtime files", () => {
-    const files = ["src/index.ts", "web/static/classic/index.html", "docs/architecture.md"];
+    const files = ["src/index.ts", "runtime/web/static/mobile/index.html", "docs/architecture.md"];
     expect(findBlockedPackEntries(files)).toEqual([]);
   });
 
-  test("findMissingRequiredPackEntries flags missing required runtime files", () => {
+  test("rejects all retired shell assets, including stale compressed copies", () => {
+    const retired = [
+      "runtime/web/static/classic/index.html",
+      "runtime/web/static/classic/dist/app.bundle.js.gz",
+      "runtime/web/static/visual/index.html",
+      "runtime/web/static/visual/dist/app.bundle.js.br",
+      "runtime/web/static/visual/frontend/src/App.tsx",
+    ];
+    expect(findBlockedPackEntries([...retired, "runtime/web/static/mobile/index.html"])).toEqual(retired);
+  });
+
+  test("detects required shell and dream-memory seed entries missing from the package", () => {
     const [firstRequired] = REQUIRED_PACK_ENTRIES;
     const files = REQUIRED_PACK_ENTRIES.filter((entry) => entry !== firstRequired);
 

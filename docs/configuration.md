@@ -175,25 +175,13 @@ Prefer the Settings pane instead of editing this block by hand because IDs and t
 
 ### Web UI mode
 
-Mobile is the default authenticated shell. During the compatibility window, select an explicit rollback shell with `domains.web.uiMode` in `.piclaw/config.json`:
+Mobile is the only authenticated shell, on desktop, mobile browsers, and installed PWAs. At widths below `1024px` and in every portrait viewport, Chat and Workspace are permanent, non-closeable tabs followed by file, viewer, terminal, and extension panes. Desktop-width landscape viewports use the Workspace rail instead.
 
-```json
-{
-  "domains": {
-    "web": {
-      "uiMode": "classic"
-    }
-  }
-}
-```
+The Classic and Visual shells, their static directories, and the Visual build have been removed. There is no in-app mode switcher. **Rollback requires redeploying the previous build**; changing `uiMode` cannot restore a removed shell.
 
-The allowed values are:
+For upgrade compatibility, `domains.web.uiMode`, legacy top-level `web.uiMode`, and `PICLAW_WEB_UI_MODE` still accept `mobile`, `classic`, and `visual` until `3.0.0`. These values no longer select a shell: `/` always serves Mobile. `classic` and `visual` emit one startup warning that the value is ignored. Invalid values still fail configuration validation. Existing configuration is not rewritten; new configurations should omit the selector.
 
-- `mobile` — the default interface with one unified workspace. At widths below `1024px` and in every portrait viewport, Chat and Workspace are permanent, non-closeable tabs followed by file, viewer, terminal, and extension panes. Desktop-width landscape viewports use the existing Workspace rail instead;
-- `classic` — the deprecated split-pane interface, retained temporarily as a rollback mode;
-- `visual` — the deprecated alternate Visual interface, retained temporarily as a rollback mode.
-
-Mobile is selected explicitly by configuration rather than device detection: desktop browsers and installed PWAs use its responsive tab/rail model. Existing explicit Classic or Visual settings remain effective and emit a startup deprecation warning; the default change does not rewrite user configuration. The legacy top-level `web.uiMode` setting and `PICLAW_WEB_UI_MODE` environment alias remain accepted until `3.0.0`, but new configuration should use `domains.web.uiMode`. There is no in-app mode switcher. After changing the setting, use the normal PiClaw restart/reload flow.
+The narrow `/static/classic/dist/*` asset alias continues to resolve to `/static/mobile/dist/*` for one compatibility release so already-open clients can lazy-load the shared editor. It does not restore the old shells; Classic/Visual HTML and Visual bundles are no longer served.
 
 ### Notification delivery debug labels
 

@@ -5,23 +5,20 @@ import { resolve } from "node:path";
 const repoRoot = resolve(import.meta.dir, "../../..");
 const source = readFileSync(resolve(repoRoot, "runtime/web/src/components/image-annotator.ts"), "utf8");
 const sharedCss = readFileSync(resolve(repoRoot, "runtime/web/src/styles/shared/overlays.css"), "utf8");
-const visualCss = readFileSync(resolve(repoRoot, "runtime/web/static/visual/css/overlays.css"), "utf8");
 
 test("image annotator renders as a centered modal with a clipped stage and protected toolbar", () => {
   expect(source).toContain('role="dialog"');
   expect(source).toContain('class="image-annotator-stage"');
 
-  for (const css of [sharedCss, visualCss]) {
-    expect(css).toContain(".post-inline-annotator {");
-    expect(css).toContain("position: fixed;");
-    expect(css).toContain("align-items: center;");
-    expect(css).toContain("justify-content: center;");
-    expect(css).toContain(".image-annotator-stage {");
-    expect(css).toContain("overflow: hidden;");
-    expect(css).toContain(".image-annotator-toolbar {");
-    expect(css).toContain("z-index: 20;");
-    expect(css).toContain("pointer-events: auto;");
-  }
+  expect(sharedCss).toContain(".post-inline-annotator {");
+  expect(sharedCss).toContain("position: fixed;");
+  expect(sharedCss).toContain("align-items: center;");
+  expect(sharedCss).toContain("justify-content: center;");
+  expect(sharedCss).toContain(".image-annotator-stage {");
+  expect(sharedCss).toContain("overflow: hidden;");
+  expect(sharedCss).toContain(".image-annotator-toolbar {");
+  expect(sharedCss).toContain("z-index: 20;");
+  expect(sharedCss).toContain("pointer-events: auto;");
 });
 
 test("image annotator treats two-finger gestures as pinch instead of committed drawing", () => {
@@ -41,12 +38,10 @@ test("image annotator rasterizes SVG sources into a canvas before annotation/exp
   expect(source).toContain("const rasterSource = sourceRasterReady ? sourceCanvasRef.current : null");
   expect(source).toContain("if (rasterSource) octx.drawImage(rasterSource, 0, 0, out.width, out.height)");
 
-  for (const css of [sharedCss, visualCss]) {
-    expect(css).toContain(".image-annotator-source-raster-canvas {");
-    expect(css).toContain("display: block;");
-    expect(css).toContain(".image-annotator-source-hidden {");
-    expect(css).toContain("display: none;");
-  }
+  expect(sharedCss).toContain(".image-annotator-source-raster-canvas {");
+  expect(sharedCss).toContain("display: block;");
+  expect(sharedCss).toContain(".image-annotator-source-hidden {");
+  expect(sharedCss).toContain("display: none;");
 });
 
 test("image annotator provides a crop tool that crops raster source plus annotations", () => {

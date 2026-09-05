@@ -83,10 +83,10 @@ test("sse helper streams connection and broadcasts", async () => {
 
 test("static helpers serve files and not-found", async () => {
   const root = join(import.meta.dir, "..", "..", "..");
-  const indexPath = join(root, "web", "static", "classic", "index.html");
+  const indexPath = join(root, "web", "static", "mobile", "index.html");
   expect(existsSync(indexPath)).toBe(true);
 
-  const okRes = await serveStatic("classic/index.html", () => new Response("nope", { status: 404 }));
+  const okRes = await serveStatic("mobile/index.html", () => new Response("nope", { status: 404 }));
   expect(okRes.status).toBe(200);
   expect(okRes.headers.get("Content-Type")).toContain("text/html");
   expect(okRes.headers.get("Cache-Control")).toBe("no-cache, no-store, must-revalidate");
@@ -126,7 +126,7 @@ test("static text helpers serve repeated html and service worker reads", async (
   const responses = await Promise.all(
     Array.from({ length: 20 }, async () => {
       const [indexRes, swRes] = await Promise.all([
-        serveStatic("classic/index.html", () => new Response("nope", { status: 404 })),
+        serveStatic("mobile/index.html", () => new Response("nope", { status: 404 })),
         serveStatic("sw.js", () => new Response("nope", { status: 404 })),
       ]);
       return {

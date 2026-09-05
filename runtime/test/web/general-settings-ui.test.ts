@@ -72,17 +72,12 @@ test("general settings renders advanced recovery controls with exact millisecond
   expect(source).toContain("step=${1000}");
 });
 
-test("both settings frontends expose independent default-off web and add-on commentary toggles", () => {
+test("Mobile settings expose independent default-off web and add-on commentary toggles", () => {
   const mobileSource = readFileSync(join(runtimeRoot, "web/src/components/settings/general.ts"), "utf8");
-  const visualSource = readFileSync(join(runtimeRoot, "web/static/visual/frontend/src/panels/settings/GeneralSection.tsx"), "utf8");
   expect(mobileSource).toContain("showCommentaryInTimeline: data.showCommentaryInTimeline ?? false");
   expect(mobileSource).toContain("showCommentaryInAddons: data.showCommentaryInAddons ?? false");
   expect(mobileSource).toContain("settings.general.commentaryTimelineHint");
   expect(mobileSource).toContain("settings.general.commentaryAddonsHint");
-  expect(visualSource).toContain("checked={data.showCommentaryInTimeline ?? false}");
-  expect(visualSource).toContain("checked={data.showCommentaryInAddons ?? false}");
-  expect(visualSource).toContain('onSaveGeneral(\n              "showCommentaryInTimeline"');
-  expect(visualSource).toContain('onSaveGeneral(\n              "showCommentaryInAddons"');
 });
 
 test("general settings passes explicit avatar kinds to both identity fields", () => {

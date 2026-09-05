@@ -1,13 +1,23 @@
 import { describe, expect, test } from "bun:test";
-import { handleShellRoutes, resolveWebUiIndexPath } from "../../../src/channels/web/http/dispatch-shell.js";
+import { handleShellRoutes } from "../../../src/channels/web/http/dispatch-shell.js";
 import { buildRouteFlags } from "./helpers/route-flags.js";
+import { WEB_RUNTIME_CONFIG } from "../../../src/core/config.js";
 
 describe("web http shell dispatch", () => {
-  test("resolves explicit rollback shells and defaults unknown modes to Mobile", () => {
-    expect(resolveWebUiIndexPath("classic")).toBe("classic/index.html");
-    expect(resolveWebUiIndexPath("visual")).toBe("visual/index.html");
-    expect(resolveWebUiIndexPath("mobile")).toBe("mobile/index.html");
-    expect(resolveWebUiIndexPath("unknown")).toBe("mobile/index.html");
+  test("serves Mobile for every accepted legacy mode on GET and HEAD", async () => {
+    const originalMode = WEB_RUNTIME_CONFIG.uiMode;
+    const channel = { serveStatic: (path: string) => new Response(path) } as any;
+    try {
+      for (const mode of ["classic", "visual", "mobile"] as const) {
+        WEB_RUNTIME_CONFIG.uiMode = mode;
+        for (const method of ["GET", "HEAD"]) {
+          const response = await handleShellRoutes(channel, new Request("https://e/", { method }), "/", buildRouteFlags({ isIndex: true }), async () => new Response());
+          expect(await response?.text()).toBe("mobile/index.html");
+        }
+      }
+    } finally {
+      WEB_RUNTIME_CONFIG.uiMode = originalMode;
+    }
   });
 
   test("returns null when no shell route matches", async () => {

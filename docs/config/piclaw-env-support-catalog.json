@@ -4700,7 +4700,7 @@
       ],
       "status": "supported",
       "compatibilityAliasFor": "domains.web.uiMode",
-      "deprecation": "compatibility env alias for domains.web.uiMode",
+      "deprecation": "ignored shell selector; Mobile is the only shell (domains.web.uiMode retained for upgrade compatibility)",
       "removalVersion": "3.0.0",
       "bootstrapAllowed": false,
       "source": "runtime/src/core/config-web.ts domain schema (#752A)",

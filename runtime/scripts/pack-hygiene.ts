@@ -1,8 +1,14 @@
 #!/usr/bin/env bun
 
-const BLOCKED_PREFIXES = ["coverage/", "test/", "dist/", "runtime/generated/"];
+const BLOCKED_PREFIXES = ["coverage/", "test/", "dist/", "runtime/generated/", "runtime/web/static/classic/", "runtime/web/static/visual/"];
 const BLOCKED_EXACT = new Set(["coverage/lcov.info", "runtime/generated/coverage/lcov.info"]);
 export const REQUIRED_PACK_ENTRIES = [
+  "runtime/web/static/mobile/index.html",
+  "runtime/web/static/mobile/dist/app.bundle.js",
+  "runtime/web/static/mobile/dist/app.bundle.css",
+  "runtime/web/static/mobile/dist/editor.bundle.js",
+  "runtime/web/static/common/dist/login.bundle.js",
+  "runtime/web/static/common/dist/login.bundle.css",
   "runtime/src/dream.ts",
   "runtime/src/agent-memory/daily-notes.ts",
   "runtime/src/agent-memory/dream-prompt.ts",

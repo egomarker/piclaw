@@ -8,7 +8,7 @@ function source(path: string): string {
   return readFileSync(join(runtimeRoot, path), "utf8");
 }
 
-test("classic compaction settings expose and persist both canonical processing methods", () => {
+test("Mobile compaction settings expose and persist both canonical processing methods", () => {
   const component = source("web/src/components/settings/compaction.ts");
   const i18n = source("web/src/utils/i18n.ts");
   const bundle = source("web/static/mobile/dist/app.bundle.js");
@@ -30,25 +30,4 @@ test("classic compaction settings expose and persist both canonical processing m
   expect(i18n).toContain("'settings.compaction.remoteNative': 'Provider-native compaction'");
   expect(bundle).toContain('value="pipelined"');
   expect(bundle).toContain('remoteCompactionEnabled');
-});
-
-test("visual compaction settings use the same canonical processing-method contract", () => {
-  const component = source("web/static/visual/frontend/src/panels/settings/CompactionSection.tsx");
-  const types = source("web/static/visual/frontend/src/panels/settings/types.ts");
-  const bundle = source("web/static/visual/dist/app.bundle.js");
-
-  expect(types).toContain('smartCompactionMethod?: "selective" | "pipelined"');
-  expect(types).toContain('remoteCompactionEnabled?: boolean');
-  expect(types).toContain('remoteCompactionTimeoutSec?: number');
-  expect(component).toContain('replace(/[\\s-]+/g, "_")');
-  expect(component).toContain('normalized === "pipelined" || normalized === "traditional_pipelined" ? "pipelined" : "selective"');
-  expect(component).toContain('<option value="selective">Selective</option>');
-  expect(component).toContain('<option value="pipelined">Pipelined</option>');
-  expect(component).toContain('onSaveCompaction("smartCompactionMethod", value)');
-  expect(component).toContain('onSaveCompaction("remoteCompactionEnabled", value)');
-  expect(component).toContain('onSaveCompaction("remoteCompactionTimeoutSec", v)');
-  expect(component).toContain('saveSetting("compaction", field, value)');
-  expect(bundle).toContain("pipelined");
-  expect(bundle).toContain("Pipelined");
-  expect(bundle).toContain("remoteCompactionEnabled");
 });

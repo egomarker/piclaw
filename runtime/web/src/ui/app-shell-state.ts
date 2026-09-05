@@ -95,7 +95,7 @@ export interface RenameBranchFormLockOptions {
   window?: (Window & typeof globalThis & Record<string, unknown>) | null;
 }
 
-/** Resolve the shell variant marker embedded by Classic or Mobile index.html. */
+/** Static shell marker injected by Mobile index.html. */
 export function readAppUiMode(
   doc: DocumentLike | null = typeof document !== 'undefined' ? document : null,
 ): AppUiMode {

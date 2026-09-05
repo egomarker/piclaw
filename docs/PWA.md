@@ -497,7 +497,7 @@ window.matchMedia('(display-mode: standalone)').matches
 
 | File | Role | Key properties |
 |---|---|---|
-| `runtime/web/static/classic/index.html`<br>`runtime/web/static/mobile/index.html`<br>`runtime/web/static/visual/index.html` | Meta tags + pre-CSS bootstrap | `viewport-fit=cover`, mobile web-app capability metadata, `status-bar-style=black-translucent`, inline standalone `--app-height: 100vh` before bundled CSS |
+| `runtime/web/static/mobile/index.html` | Meta tags + pre-CSS bootstrap | `viewport-fit=cover`, mobile web-app capability metadata, `status-bar-style=black-translucent`, inline standalone `--app-height: 100vh` before bundled CSS |
 | `runtime/web/src/styles/shared/base.css` | Root layout | `--app-height: 100dvh`, `body { height: var(--app-height) }` (normal flow), `#app { height: var(--app-height) }` (normal flow), `text-size-adjust: 100%` |
 | `runtime/web/src/styles/shared/editor.css` | Container & editor pane | `.container { height: var(--app-height, 100dvh); padding-top: env(safe-area-inset-top) }`, `.editor-pane-container { height: var(--app-height, 100dvh) }` |
 | `runtime/web/src/styles/shared/workspace.css` | Workspace sidebar | `.workspace-sidebar { height: var(--app-height, 100dvh) }` |
