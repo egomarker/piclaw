@@ -89,7 +89,7 @@ function installRuntimeReadCompatibility(
     if (model) decorate([model]);
     return model;
   }) as ModelRuntime["getModel"];
-  runtime.getAvailable = (async (providerId?: string) => decorate(await originalGetAvailable(providerId))) as ModelRuntime["getAvailable"];
+  runtime.getAvailable = async (...args: Parameters<ModelRuntime["getAvailable"]>) => decorate(await originalGetAvailable(...args));
   runtime.getAvailableSnapshot = (() => decorate(originalGetAvailableSnapshot())) as ModelRuntime["getAvailableSnapshot"];
   mutable[legacySessionAffinityRuntimeCompatInstalled] = true;
 }
@@ -120,8 +120,9 @@ export function installLegacySessionAffinityCompatibility(
       : null;
     if (originalRefresh) {
       mutable.refresh = (async (...args: Parameters<ModelRegistry["refresh"]>) => {
-        await originalRefresh(...args);
+        const result = await originalRefresh(...args);
         apply();
+        return result;
       }) as ModelRegistry["refresh"];
     }
   }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -100,6 +100,47 @@ describe("legacy session affinity compatibility", () => {
     }
   }, 20_000);
 
+  test("decorates real runtime reads and reloads without rewriting JSONC or explicit affinity", async () => {
+    const root = mkdtempSync(join(tmpdir(), "piclaw-affinity-jsonc-"));
+    const path = join(root, "models.json");
+    const jsonc = `{
+      // Keep this operator comment and trailing commas.
+      "providers": {
+        "legacy": {
+          "baseUrl": "https://example.invalid/v1",
+          "api": "openai-responses",
+          "apiKey": "fixture-key",
+          "models": [
+            { "id": "disabled", "compat": { "sendSessionIdHeader": false } },
+            { "id": "enabled", "compat": { "sendSessionIdHeader": true } },
+            { "id": "explicit", "compat": { "sendSessionIdHeader": false, "sessionAffinityFormat": "openrouter" } },
+          ],
+        },
+      },
+    }\n`;
+    try {
+      writeFileSync(path, jsonc);
+      const { modelRegistry: registry, modelRuntime } = await createRuntimeModelServices({ agentDir: root });
+      const warnings: Array<Record<string, unknown>> = [];
+      installLegacySessionAffinityCompatibility(registry, (_message, details) => warnings.push(details));
+      const formats = (models: readonly Model<Api>[]) => models.filter((entry) => entry.provider === "legacy")
+        .map((entry) => [entry.id, (entry.compat as any).sessionAffinityFormat]).sort();
+      const expected = [["disabled", "openai-nosession"], ["enabled", "openai"], ["explicit", "openrouter"]];
+      expect(formats(registry.getAll())).toEqual(expected);
+      expect(formats(modelRuntime.getModels("legacy"))).toEqual(expected);
+      expect(formats(await modelRuntime.getAvailable("legacy", { signal: new AbortController().signal }))).toEqual(expected);
+      expect((modelRuntime.getModel("legacy", "enabled")?.compat as any).sessionAffinityFormat).toBe("openai");
+      const result = await registry.refresh();
+      expect(result.aborted).toBe(false);
+      expect(result.errors.size).toBe(0);
+      expect(formats(registry.getAll())).toEqual(expected);
+      expect(warnings).toHaveLength(2);
+      expect(readFileSync(path, "utf8")).toBe(jsonc);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("works with lightweight registry doubles that do not expose refresh", () => {
     const legacyModel = model("no-refresh", { sendSessionIdHeader: false });
     const warnings: Array<Record<string, unknown>> = [];
@@ -113,19 +154,23 @@ describe("legacy session affinity compatibility", () => {
     let release: (() => void) | undefined;
     const blocker = new Promise<void>((resolve) => { release = resolve; });
     const warnings: Array<Record<string, unknown>> = [];
+    const result = { aborted: true, errors: new Map([["custom-openai", new Error("catalog failed")]]) };
+    const options = { providers: ["custom-openai"], allowNetwork: false, signal: new AbortController().signal };
     const registry = {
       getAll: () => models,
-      refresh: async () => {
+      refresh: async (received: unknown) => {
+        expect(received).toBe(options);
         await blocker;
         models = [model("legacy", { sendSessionIdHeader: false }), model("new-legacy", { sendSessionIdHeader: true })];
+        return result;
       },
     } as any;
 
     installLegacySessionAffinityCompatibility(registry, (_message, details) => warnings.push(details));
-    const refreshing = registry.refresh();
+    const refreshing = registry.refresh(options);
     expect(models).toHaveLength(1);
     release?.();
-    await refreshing;
+    expect(await refreshing).toBe(result);
 
     expect((models[0].compat as any).sessionAffinityFormat).toBe("openai-nosession");
     expect((models[1].compat as any).sessionAffinityFormat).toBe("openai");

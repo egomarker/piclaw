@@ -19,6 +19,7 @@ import { fileURLToPath } from "url";
 import { createInterface } from "readline";
 import { finished } from "stream/promises";
 import {
+  buildSessionContext,
   createAgentSessionFromServices,
   createAgentSessionRuntime,
   DefaultResourceLoader,
@@ -26,6 +27,7 @@ import {
   type AgentSessionServices,
   type ExtensionFactory,
   type SessionStartEvent,
+  type SessionEntry,
   SessionManager,
   type ModelRuntime,
   type SettingsManager,
@@ -424,9 +426,9 @@ function trimPreCompactionEntries(sessionDir: string): void {
   }
   if (!compEntry || lastCompLine < 2) return;
 
-  // Find firstKeptEntryId line index
+  // Retain-none compactions use their own ID as the kept boundary.
   let keptIdx = -1;
-  for (let i = 0; i < lastCompLine; i++) {
+  for (let i = 1; i <= lastCompLine; i++) {
     try {
       const parsed = JSON.parse(lines[i]);
       if (parsed.id === compEntry.firstKeptEntryId) {
@@ -436,6 +438,41 @@ function trimPreCompactionEntries(sessionDir: string): void {
     } catch (e) { void e; continue; }
   }
   if (keptIdx <= 1) return; // nothing meaningful to trim (0 = header)
+
+  // Do not trade continuity for heap savings. Earlier selections, system state,
+  // branch ancestry or context edits can still affect the active projection.
+  // Compare through the public canonical API before opening the file in an SDK
+  // manager; keep the full file if dropping a prefix changes that context.
+  try {
+    const entries = lines.slice(1).map((line) => JSON.parse(line) as SessionEntry);
+    if (entries.some((entry) => !entry || typeof entry.id !== "string"
+      || (entry.parentId !== null && typeof entry.parentId !== "string"))) return;
+    const retained = entries.slice(keptIdx - 1);
+    const before = buildSessionContext(entries);
+    const after = buildSessionContext(retained);
+    if (JSON.stringify(before) !== JSON.stringify(after)) return;
+    // Context's inferred physical model is not the selected (possibly virtual)
+    // model. Preserve explicit branch selections independently of that inference.
+    const branchSettings = (history: SessionEntry[]) => {
+      const branch = SessionManager.inMemory(undefined, undefined, history).getBranch().reverse();
+      const model = branch.find((entry) => entry.type === "model_change");
+      const thinking = branch.find((entry) => entry.type === "thinking_level_change");
+      const info = branch.find((entry) => entry.type === "session_info");
+      const custom = new Map<string, unknown>();
+      for (const entry of branch) {
+        if (entry.type === "custom" && !custom.has(entry.customType)) custom.set(entry.customType, entry.data);
+      }
+      return {
+        model: model?.type === "model_change" ? [model.provider, model.modelId] : null,
+        thinking: thinking?.type === "thinking_level_change" ? thinking.thinkingLevel : null,
+        name: info?.type === "session_info" ? info.name : null,
+        custom: [...custom.entries()].sort(([a], [b]) => a.localeCompare(b)),
+      };
+    };
+    if (JSON.stringify(branchSettings(entries)) !== JSON.stringify(branchSettings(retained))) return;
+  } catch {
+    return; // malformed or unsupported history is preserved, never guessed
+  }
 
   // Build trimmed content: header + entries from keptIdx onward
   const trimmedLines = [lines[0], ...lines.slice(keptIdx)];
@@ -550,6 +587,18 @@ export async function createSessionInDir(
     const builtinExtensionFactories = createBuiltinExtensionFactories({
       compactionStreamFn: createCompactionStreamFn(options.modelRuntime, options.settingsManager),
       modelRuntime: options.modelRuntime,
+    });
+    // Pi 0.99 defaults to idle cache refreshes. Keep compatibility cost-neutral
+    // unless the user explicitly enabled a supported global warming mode.
+    // This public hook avoids changing or persisting their settings; later
+    // deliberate settings changes (or extension decisions) remain effective.
+    builtinExtensionFactories.push((pi) => {
+      pi.on("cache_warming_decision", () => {
+        const mode = options.settingsManager.getCacheWarmingMode();
+        if (mode === "off" || options.settingsManager.getGlobalSettings().cacheWarming !== mode) {
+          return { action: "stop" };
+        }
+      });
     });
     const resourceLoader = new DefaultResourceLoader({
       cwd,

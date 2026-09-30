@@ -25,6 +25,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import process from "node:process";
+import { normalizeContext } from "@earendil-works/pi-ai";
 import type {
   Api,
   AssistantMessage,
@@ -33,6 +34,7 @@ import type {
   Model,
   SimpleStreamOptions,
   ThinkingLevel,
+  TranscriptContext,
   Tool,
   ToolCall,
   ToolResultMessage,
@@ -46,7 +48,7 @@ type RegisteredProvider = {
   api: string;
   apiKey?: string;
   headers?: Record<string, string>;
-  streamSimple: (model: Model<Api>, context: Context, options?: SimpleStreamOptions) => AsyncIterable<any>;
+  streamSimple: (model: Model<Api>, context: TranscriptContext, options?: SimpleStreamOptions) => AsyncIterable<any>;
   models?: Array<Partial<Model<Api>> & { id: string; name: string }>;
 };
 
@@ -599,7 +601,7 @@ async function runSingleStream(
     let currentMessage: AssistantMessage | undefined;
 
     try {
-      const stream = model.providerConfig.streamSimple(model, context, {
+      const stream = model.providerConfig.streamSimple(model, normalizeContext(context), {
         apiKey: model.providerConfig.apiKey,
         headers: model.headers,
         sessionId: options.sessionId,

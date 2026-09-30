@@ -9,6 +9,7 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, truncateSync, writeFileSync } from "fs";
 import { dirname, join, resolve } from "path";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { withChatContext } from "../../src/core/chat-context.js";
 import { clearProviderUsageCache, warmProviderUsage } from "../../src/agent-pool/provider-usage.js";
 import { listTrackedProcesses, registerProcess } from "../../src/utils/process-tracker.js";
@@ -380,11 +381,19 @@ test("agent control queue, compact, and abort commands", async () => {
   const session = new TestAgentControlSession(ws.workspace, registry);
   const runtime = createTestSessionRuntime(session);
 
-  session.agent.state.messages = [
+  const history = [
     { role: "assistant", content: [{ type: "toolCall", id: "call-1" }] },
-    { role: "toolResult", toolCallId: "call-1" },
-    { role: "toolResult", toolCallId: "call-orphan" },
+    { role: "toolResult", toolCallId: "call-1", content: [] },
+    { role: "toolResult", toolCallId: "call-orphan", content: [] },
   ];
+  const canonicalManager = SessionManager.inMemory(ws.workspace);
+  for (const message of history) canonicalManager.appendMessage(message as any);
+  const rawEntries = structuredClone(canonicalManager.getEntries());
+  Object.assign(session, {
+    sessionManager: canonicalManager,
+    refreshContext: () => session.agent.replaceMessages(canonicalManager.buildSessionContext().messages),
+  });
+  session.agent.replaceMessages(canonicalManager.buildSessionContext().messages);
 
   const compact = await applyControlCommand(runtime as any, registry, { type: "compact", instructions: "shorten", raw: "/compact shorten" });
   expect(compact.message).toContain("Compaction complete.");
@@ -407,10 +416,9 @@ test("agent control queue, compact, and abort commands", async () => {
     source: "compact_command",
     phase: "after_manual_compaction",
   }));
-  expect(session.agent.state.messages).toEqual([
-    { role: "assistant", content: [{ type: "toolCall", id: "call-1" }] },
-    { role: "toolResult", toolCallId: "call-1" },
-  ]);
+  expect(session.agent.state.messages).toEqual(history.slice(0, 2));
+  expect(canonicalManager.getEntries().slice(0, rawEntries.length)).toEqual(rawEntries);
+  expect(canonicalManager.getLeafEntry()).toMatchObject({ type: "context_edit", replacement: null });
   const compactMedia = db.getMediaById(compact.mediaIds![0]);
   expect(compactMedia?.filename).toMatch(/^compaction-report-.*\.md$/);
   expect(compactMedia?.content_type).toBe("text/markdown");

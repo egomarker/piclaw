@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { normalizeContext } from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/api/bedrock-converse-stream";
 import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 
@@ -48,9 +49,9 @@ if (!live) {
 }
 
 const startedAt = Date.now();
-const stream = streamSimple(model, {
+const stream = streamSimple(model, normalizeContext({
   messages: [{ role: "user", content: "Reply with exactly: BEDROCK_OK", timestamp: Date.now() }],
-}, {
+}), {
   maxTokens: 64,
   reasoning: "minimal",
 });

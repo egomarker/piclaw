@@ -7,7 +7,7 @@
  * scoped to github-copilot only and imports chat-capable live model IDs while filtering known
  * non-chat model IDs such as embeddings and trajectory compaction helpers.
  */
-import type { Api, Model, OAuthCredential, Provider, RefreshModelsContext } from "@earendil-works/pi-ai";
+import { isModelType, type Api, type Model, type OAuthCredential, type Provider, type RefreshModelsContext } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 import { getToolsIntegrationConfig } from "../core/config.js";
@@ -32,7 +32,7 @@ const DEFAULT_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 const log = createLogger("extensions.github-copilot-dynamic-models");
 
 type ProviderConfig = Parameters<ExtensionAPI["registerProvider"]>[1];
-type ProviderModelConfig = NonNullable<ProviderConfig["models"]>[number];
+type ProviderModelConfig = Extract<NonNullable<ProviderConfig["models"]>[number], { type?: "chat" }>;
 type CopilotDynamicModelRuntime = Pick<ModelRuntime, "getModels" | "getProvider" | "registerNativeProvider">;
 type FetchLike = typeof fetch;
 
@@ -384,9 +384,17 @@ function copilotBaseUrl(credential: OAuthCredential): string {
   return DEFAULT_BASE_URL;
 }
 
-async function storedProviderModels(context: RefreshModelsContext): Promise<Model<Api>[]> {
-  const entry = await context.store.read();
-  return [...(entry?.models ?? [])].filter((model) => model.provider === PROVIDER && model.id);
+function storedProviderModels(context: RefreshModelsContext): Model<Api>[] {
+  return (context.stored?.models ?? []).filter((model): model is Model<Api> => (
+    isModelType(model, "chat") && model.provider === PROVIDER && Boolean(model.id)
+  ));
+}
+
+function copilotAccountKey(credential: RefreshModelsContext["credential"]): string | null {
+  const oauth = copilotCredential(credential);
+  // Kept only in memory, never logged or persisted. Confirmed IDs and TTL must
+  // not cross credential/endpoint changes, even when a catalog is cached.
+  return oauth ? JSON.stringify([oauth.access, copilotBaseUrl(oauth)]) : null;
 }
 
 function toStoredModel(model: ProviderModelConfig): Model<Api> {
@@ -413,18 +421,21 @@ export function createGitHubCopilotDynamicModelsProvider(
   // so stale entries can never re-enter the selectable set.
   let liveModelIds: ReadonlySet<string> = new Set<string>();
   let lastNetworkRefreshAt = 0;
-  let networkInFlight: Promise<void> | null = null;
+  let liveAccountKey: string | null = null;
+  let networkInFlight: {
+    accountKey: string;
+    signal: AbortSignal;
+    promise: Promise<{ models: ProviderModelConfig[]; liveCount: number }>;
+  } | null = null;
 
-  const publishLastGood = (models: ProviderModelConfig[]): void => {
-    lastGood = models;
-  };
-
-  const readStoredAndMerge = async (context: RefreshModelsContext): Promise<Model<Api>[]> => {
-    const cached = await storedProviderModels(context);
-    const source = cached.length > 0 ? cached : [...base.getModels()];
-    const merged = mergeGitHubCopilotDynamicModels(source, []);
-    if (merged.length > 0) publishLastGood(merged);
-    return cached;
+  const hasLiveConfirmation = (credential: RefreshModelsContext["credential"]): boolean => (
+    liveModelIds.size > 0 && copilotAccountKey(credential) === liveAccountKey
+  );
+  const filterConfirmedModels: NonNullable<Provider["filterModels"]> = (models, credential) => {
+    const upstream = base.filterModels?.(models, credential) ?? models;
+    if (!hasLiveConfirmation(credential)) return upstream;
+    const allowed = new Set(upstream.map((model) => model.id));
+    return models.filter((model) => allowed.has(model.id) || liveModelIds.has(model.id));
   };
 
   return {
@@ -435,64 +446,108 @@ export function createGitHubCopilotDynamicModelsProvider(
     // chat-capable model IDs and their context sizes, plus Copilot IDE headers.
     headers: { ...(base.headers ?? {}), ...COPILOT_HEADERS },
     getModels: () => lastGood.map(toStoredModel),
+    // The 0.99 composer prefers getAllModels. Do not inherit a base closure that
+    // would hide the dynamic chat catalog, or discard other native model types.
+    getAllModels: () => [
+      ...lastGood.map(toStoredModel),
+      ...(base.getAllModels?.() ?? []).filter((model) => !isModelType(model, "chat")),
+    ],
     // Availability filtering stays upstream. We only widen it by IDs the account's
     // own live catalog confirmed, which covers models newer than the login-time
     // `availableModelIds` snapshot. Models present only in the cached/static
     // catalog stay filtered out: requesting them returns 400 model_not_supported.
-    filterModels: (models, credential) => {
-      const upstream = base.filterModels?.(models, credential) ?? models;
-      if (liveModelIds.size === 0) return upstream;
-      const allowed = new Set(upstream.map((model) => model.id));
-      return models.filter((model) => allowed.has(model.id) || liveModelIds.has(model.id));
+    filterModels: filterConfirmedModels,
+    filterAllModels: (models, credential) => {
+      if (!base.filterAllModels) {
+        const allowed = new Set(filterConfirmedModels(models.filter((model) => isModelType(model, "chat")), credential).map((model) => model.id));
+        return models.filter((model) => !isModelType(model, "chat") || allowed.has(model.id));
+      }
+      const upstream = base.filterAllModels(models, credential);
+      if (!hasLiveConfirmation(credential)) return upstream;
+      const allowed = new Set(upstream.map((model) => `${model.type ?? "chat"}/${model.id}`));
+      return models.filter((model) => allowed.has(`${model.type ?? "chat"}/${model.id}`)
+        || (isModelType(model, "chat") && liveModelIds.has(model.id)));
     },
     refreshModels: async (context) => {
-      const cached = await readStoredAndMerge(context);
-      if (!context.allowNetwork || context.signal?.aborted) return;
+      if (context.signal.aborted) return;
+      const cached = storedProviderModels(context);
+      const accountKey = copilotAccountKey(context.credential);
+      // Every state change belongs to this refresh generation. A missing cache
+      // leaves last-good state alone; a stored empty catalog is authoritative.
+      const restored = await context.publish({
+        update: () => {
+          if (context.stored) lastGood = mergeGitHubCopilotDynamicModels(cached, []);
+          if (accountKey !== liveAccountKey) {
+            liveModelIds = new Set<string>();
+            liveAccountKey = null;
+            lastNetworkRefreshAt = 0;
+          }
+        },
+      });
+      if (!restored || !context.allowNetwork || context.signal.aborted) return;
       if (!context.force && lastNetworkRefreshAt > 0 && Date.now() - lastNetworkRefreshAt < REFRESH_TTL_MS) return;
       const credential = copilotCredential(context.credential);
-      if (!credential) return;
-      networkInFlight ??= (async () => {
-        try {
-          // Copilot's account-scoped endpoint is authoritative. Do not invoke
-          // the wrapped pi.dev catalog refresher here: it shares this provider
-          // store, adds a second network dependency, and cannot improve account
-          // availability. Preserve any existing validator fields when writing.
-          const live = await fetchGitHubCopilotLiveModels({
-            baseUrl: copilotBaseUrl(credential),
-            apiKey: credential.access,
-            signal: context.signal,
-          });
-          if (context.signal?.aborted) return;
-          const templates = [...base.getModels(), ...cached];
-          const merged = mergeGitHubCopilotDynamicModels(templates, live, { includeExisting: false });
-          publishLastGood(merged);
-          liveModelIds = new Set(merged.map((model) => model.id));
-          const stored = await context.store.read();
-          await context.store.write({
-            ...stored,
-            models: lastGood.map(toStoredModel),
-            checkedAt: Date.now(),
-          });
-          lastNetworkRefreshAt = Date.now();
-          log.info("Refreshed GitHub Copilot dynamic native provider", {
-            operation: "github_copilot_dynamic_models.refresh",
-            liveCount: live.length,
-            registeredCount: lastGood.length,
-          });
-          return;
-        } catch (error) {
-          if (!context.signal?.aborted) {
-            log.warn("GitHub Copilot dynamic model refresh failed; keeping last-good catalog", {
-              operation: "github_copilot_dynamic_models.refresh_failed",
-              error: error instanceof Error ? error.message : String(error),
+      if (!credential || !accountKey) return;
+
+      // Only callers sharing an account and operation signal can share I/O.
+      // A superseded/cancelled refresh must not block a new generation/account.
+      let request = networkInFlight;
+      if (!request || request.accountKey !== accountKey || request.signal !== context.signal || request.signal.aborted) {
+        request = {
+          accountKey,
+          signal: context.signal,
+          promise: (async () => {
+            // Keep the account endpoint authoritative; no second pi.dev fetch.
+            const live = await fetchGitHubCopilotLiveModels({
+              baseUrl: copilotBaseUrl(credential),
+              apiKey: credential.access,
+              signal: context.signal,
             });
-          }
-          return;
-        } finally {
-          networkInFlight = null;
-        }
-      })();
-      await networkInFlight;
+            const templates = [...base.getModels(), ...cached];
+            return {
+              models: mergeGitHubCopilotDynamicModels(templates, live, { includeExisting: false }),
+              liveCount: live.length,
+            };
+          })(),
+        };
+        networkInFlight = request;
+      }
+      try {
+        const catalog = await request.promise;
+        if (context.signal.aborted) return;
+        const checkedAt = Date.now();
+        const published = await context.publish({
+          persist: {
+            ...context.stored,
+            models: [
+              ...catalog.models.map(toStoredModel),
+              ...(context.stored?.models ?? []).filter((model) => !isModelType(model, "chat")),
+            ],
+            checkedAt,
+          },
+          update: () => {
+            lastGood = catalog.models;
+            liveModelIds = new Set(catalog.models.map((model) => model.id));
+            liveAccountKey = accountKey;
+            lastNetworkRefreshAt = checkedAt;
+          },
+        });
+        if (published) log.info("Refreshed GitHub Copilot dynamic native provider", {
+          operation: "github_copilot_dynamic_models.refresh",
+          liveCount: catalog.liveCount,
+          registeredCount: catalog.models.length,
+        });
+      } catch (error) {
+        if (context.signal.aborted) return;
+        log.warn("GitHub Copilot dynamic model refresh failed; keeping last-good catalog", {
+          operation: "github_copilot_dynamic_models.refresh_failed",
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Retain the catalog, but preserve provider diagnostics in refresh().
+        throw error;
+      } finally {
+        if (networkInFlight === request) networkInFlight = null;
+      }
     },
   };
 }

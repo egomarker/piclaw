@@ -79,20 +79,36 @@ function compactionGuard(session: AgentSession): AgentControlResult | null {
   };
 }
 
+/** Refresh diagnostics are returned, not necessarily thrown, by Pi 0.99. */
+async function refreshModelCatalog(registry: ModelRegistry, operation: string): Promise<string> {
+  try {
+    const result = await registry.refresh();
+    if (result && (result.aborted || result.errors.size > 0)) {
+      const providers = [...result.errors.keys()].sort();
+      log.warn("Model refresh did not complete cleanly; continuing with the cached catalog", {
+        operation, aborted: result.aborted, providers,
+      });
+      return result.aborted
+        ? "Model catalog refresh was cancelled; using the cached catalog."
+        : `Model catalog refresh failed for ${providers.join(", ")}; using the cached catalog.`;
+    }
+  } catch (error) {
+    log.warn("Model refresh failed; continuing with the cached catalog", {
+      operation,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return "Model catalog refresh failed; using the cached catalog.";
+  }
+  return "";
+}
+
 /** Handle /model: switch model, list models, or show current model. */
 export async function handleModel(session: AgentSession, modelRegistry: ModelRegistry, command: ModelCommand): Promise<AgentControlResult> {
   const blocked = compactionGuard(session);
   if (blocked) return blocked;
 
   const registry = ((session as AgentSession & { modelRegistry?: ModelRegistry }).modelRegistry ?? modelRegistry);
-  try {
-    await registry.refresh();
-  } catch (error) {
-    log.warn("Model refresh failed; continuing with the cached catalog", {
-      operation: "agent_control.model.refresh_failed",
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+  const refreshNotice = await refreshModelCatalog(registry, "agent_control.model.refresh_failed");
 
   if (!command.modelId) {
     if (command.provider) {
@@ -106,7 +122,7 @@ export async function handleModel(session: AgentSession, modelRegistry: ModelReg
     if (available.length === 0) {
       return {
         status: "error",
-        message: "No models available. Configure a provider in Pi Agent settings (run `pi /login`), then try /model again.",
+        message: [refreshNotice, "No models available. Configure a provider in Pi Agent settings (run `pi /login`), then try /model again."].filter(Boolean).join("\n\n"),
       };
     }
 
@@ -134,6 +150,7 @@ export async function handleModel(session: AgentSession, modelRegistry: ModelReg
         ...rows,
         "",
         "Use `/model <provider>/<modelId>` to switch.",
+        ...(refreshNotice ? ["", refreshNotice] : []),
       ].join("\n"),
     };
   }
@@ -246,7 +263,7 @@ export async function handleModel(session: AgentSession, modelRegistry: ModelReg
 
   return {
     status: "success",
-    message: `Model set to ${modelLabel}.${thinkingNote}${compactionNote}`,
+    message: `Model set to ${modelLabel}.${thinkingNote}${compactionNote}${refreshNotice ? ` ${refreshNotice}` : ""}`,
     model_label: modelLabel,
     thinking_level: thinkingLevel,
     thinking_level_label: thinkingLevelDisplay,
@@ -330,17 +347,10 @@ export async function handleCycleModel(session: AgentSession, modelRegistry: Mod
   if (blocked) return blocked;
 
   const registry = ((session as AgentSession & { modelRegistry?: ModelRegistry }).modelRegistry ?? modelRegistry);
-  try {
-    await registry.refresh();
-  } catch (error) {
-    log.warn("Model refresh failed before cycling; continuing with the cached catalog", {
-      operation: "agent_control.model.cycle_refresh_failed",
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+  const refreshNotice = await refreshModelCatalog(registry, "agent_control.model.cycle_refresh_failed");
   const availableModels = listUniqueAvailableModels(registry);
   if (availableModels.length <= 1) {
-    return { status: "success", message: "Only one model is available to cycle." };
+    return { status: "success", message: `Only one model is available to cycle.${refreshNotice ? ` ${refreshNotice}` : ""}` };
   }
 
   const originalModel = session.model ?? null;
@@ -351,7 +361,7 @@ export async function handleCycleModel(session: AgentSession, modelRegistry: Mod
     for (let attempts = 0; attempts < availableModels.length; attempts += 1) {
       const result = await session.cycleModel(command.direction);
       if (!result) {
-        return { status: "success", message: "Only one model is available to cycle." };
+        return { status: "success", message: `Only one model is available to cycle.${refreshNotice ? ` ${refreshNotice}` : ""}` };
       }
 
       const contextFitError = getContextFitError(session, result.model);
@@ -371,7 +381,7 @@ export async function handleCycleModel(session: AgentSession, modelRegistry: Mod
       const thinkingLevelLabel = thinkingLevel ? formatThinkingLevelForDisplay(thinkingLevel, result.model) : null;
       return {
         status: "success",
-        message: `Model set to ${label} (cycle: ${scope}). Thinking level: ${thinkingLevelLabel ?? thinkingLevel}.`,
+        message: `Model set to ${label} (cycle: ${scope}). Thinking level: ${thinkingLevelLabel ?? thinkingLevel}.${refreshNotice ? ` ${refreshNotice}` : ""}`,
         model_label: label,
         thinking_level: thinkingLevel,
         thinking_level_label: thinkingLevelLabel,

@@ -1,5 +1,6 @@
 import { join } from "node:path";
 
+import type { ModelsRefreshOptions, ModelsRefreshResult } from "@earendil-works/pi-ai";
 import {
   ModelRegistry,
   ModelRuntime,
@@ -10,15 +11,20 @@ import { getPiclawAgentDir } from "../core/agent-dir.js";
 import { FileCredentialStore, type PiclawCredentialStore } from "./credential-store.js";
 
 export class PiclawModelRegistry extends ModelRegistry {
-  private refreshInFlight: Promise<void> | null = null;
+  private refreshInFlight: Promise<ModelsRefreshResult> | null = null;
 
   constructor(readonly modelRuntime: ModelRuntime) {
     super(modelRuntime);
   }
 
-  override refresh(): Promise<void> {
+  override refresh(options?: ModelsRefreshOptions): Promise<ModelsRefreshResult> {
+    // Explicit provider/force/signal requests own their operation. Only equivalent
+    // no-argument config reloads share a promise; all refreshes stay offline by default.
+    if (options !== undefined) {
+      return this.modelRuntime.refresh({ ...options, allowNetwork: options.allowNetwork ?? false });
+    }
     if (this.refreshInFlight) return this.refreshInFlight;
-    const refresh = this.modelRuntime.refresh({ allowNetwork: false }).then(() => undefined);
+    const refresh = this.modelRuntime.refresh({ allowNetwork: false });
     const tracked = refresh.finally(() => {
       if (this.refreshInFlight === tracked) this.refreshInFlight = null;
     });

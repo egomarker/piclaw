@@ -1,7 +1,7 @@
 /** Provider-native remote compaction with opaque, persisted canonical-context replay. */
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { convertResponsesMessages, convertResponsesTools } from "@earendil-works/pi-ai/api/openai-responses-shared";
-import type { Api, Model, Tool } from "@earendil-works/pi-ai";
+import { normalizeContext, type Api, type Model, type Tool } from "@earendil-works/pi-ai";
 import { convertToLlm, type FileOperations, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { ModelRequestAuth } from "../../utils/model-auth.js";
 import { createLogger } from "../../utils/logger.js";
@@ -420,14 +420,14 @@ export async function attemptRemoteCompaction(options: {
 
   let input: unknown[];
   try {
-    const deferredTools = new Map<string, Tool>();
-    for (const tool of options.tools ?? []) deferredTools.set(tool.name, tool as Tool);
     const llmMessages = convertToLlm(withoutRemoteSummaryMarker(options.messages));
+    // Pi's converter now resolves tool declarations from the transcript rather
+    // than a side-channel map. Instructions remain in the compact request below.
     const convertedInput = convertResponsesMessages(
       options.model,
-      { messages: llmMessages, systemPrompt: "" },
+      normalizeContext({ messages: llmMessages, tools: options.tools?.map((tool) => tool as Tool) }),
       OPENAI_TOOL_CALL_PROVIDERS,
-      { includeSystemPrompt: false, deferredTools },
+      { includeSystemPrompt: false },
     );
     const previousSummary = options.previousDetails ? "" : options.previousSummary?.trim();
     input = [

@@ -302,6 +302,8 @@ async function maybeAutoRotateSession(
     }
   }
 
+  // Rotation may compact first; repair only after existing work has settled.
+  pruneOrphanToolResults(session, chatJid);
   const result = await rotateSession(session, runtime, {
     reason: "automatic",
     fallbackOnCompactionFailure: true,
@@ -380,6 +382,9 @@ async function runPromptAttempt(
   modelLabel: string | null,
   toolExecutionCountAtStart: number,
 ): Promise<PromptAttemptResult> {
+  // Recovery attempts also rebuild from canonical history. Do this before the
+  // prompt-persistence baseline so metadata edits never masquerade as a prompt.
+  pruneOrphanToolResults(session, chatJid);
   let hadToolActivity = false;
   let hadPartialOutput = false;
   let hadCompletedTurnOutput = false;
@@ -916,6 +921,8 @@ export async function runAgentPrompt(
     beginTrackedPhase(chatJid, runOptions.skipPrePromptCompaction ? "prompt" : "preprompt_compaction", {
       source: "run_agent",
     });
+    // Pre-prompt compaction must see the same repaired context as prompting.
+    pruneOrphanToolResults(session, chatJid);
     if (!runOptions.skipPrePromptCompaction) {
       let prePromptCompactionFailure: string | null = null;
       const projectedPendingInputTokens = estimatePendingInputTokens(prompt);
