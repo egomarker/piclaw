@@ -1,6 +1,6 @@
 /**
- * extensions/mcp-timeout-patch.ts – Applies Piclaw's compatibility timeout
- * and abort guard around tools registered by pi-mcp-adapter.
+ * extensions/mcp-timeout-patch.ts – Decorates public MCP tool registrations
+ * with Piclaw's absolute outer deadline and cancellation guard.
  *
  * pi-mcp-adapter 2.11 forwards abort signals and supports requestTimeoutMs for
  * MCP protocol requests. This outer guard remains for existing Piclaw installs
@@ -12,7 +12,8 @@
  * leaving upstream MCP adapter behavior untouched.
  */
 
-import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { TSchema } from "typebox";
 
 import { getToolsIntegrationConfig } from "../core/config.js";
 
@@ -21,53 +22,71 @@ export function getMcpToolTimeoutMs(): number | null {
   return timeoutMs === 0 ? null : timeoutMs;
 }
 
-/**
- * Wrap a promise with a timeout and abort signal. Rejects with a
- * descriptive error if the timeout fires or the signal is aborted
- * before the promise settles.
- */
-function withTimeoutAndSignal<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  signal: AbortSignal | undefined,
-  label: string,
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    let settled = false;
-    const settle = (fn: () => void) => {
-      if (settled) return;
-      settled = true;
-      fn();
-    };
-
-    const timer = setTimeout(() => {
-      settle(() => reject(new Error(`MCP tool call timed out after ${Math.round(timeoutMs / 1000)}s: ${label}`)));
-    }, timeoutMs);
-
-    if (signal) {
-      if (signal.aborted) {
-        clearTimeout(timer);
-        settle(() => reject(new Error(`MCP tool call aborted: ${label}`)));
-        return;
-      }
-      const onAbort = () => {
-        clearTimeout(timer);
-        settle(() => reject(new Error(`MCP tool call aborted: ${label}`)));
-      };
-      signal.addEventListener("abort", onAbort, { once: true });
-      promise.finally(() => signal.removeEventListener("abort", onAbort)).catch(() => undefined);
-    }
-
-    promise.then(
-      (value) => { clearTimeout(timer); settle(() => resolve(value)); },
-      (error) => { clearTimeout(timer); settle(() => reject(error)); },
-    );
-  });
-}
-
-/** Determine if a tool name belongs to the MCP adapter. */
-function isMcpTool(name: string): boolean {
-  return name === "mcp" || name.startsWith("mcp_");
+/** Wrap one adapter-owned definition without changing its schema or metadata. */
+export function withMcpToolDeadline<TParams extends TSchema, TDetails>(
+  tool: ToolDefinition<TParams, TDetails>,
+  getTimeoutMs: () => number | null = getMcpToolTimeoutMs,
+): ToolDefinition<TParams, TDetails> {
+  return {
+    ...tool,
+    execute(toolCallId, params, signal, onUpdate, ctx) {
+      const timeoutMs = getTimeoutMs();
+      const deadline = timeoutMs === null ? null : performance.now() + timeoutMs;
+      const label = getMcpCallLabel(tool.name, params);
+      const controller = new AbortController();
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const cleanup = () => {
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
+        };
+        const fail = (error: unknown, abort = false) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          // Settle first: abort handlers may synchronously emit progress or reject.
+          if (abort) controller.abort(error);
+          reject(error);
+        };
+        const expire = () => fail(new Error(
+          `MCP tool call timed out after ${Math.round(timeoutMs! / 1000)}s: ${label}`,
+        ), true);
+        const onError = (error: unknown) => {
+          if (deadline !== null && performance.now() >= deadline) expire();
+          fail(error);
+        };
+        const onAbort = () => fail(new Error(`MCP tool call aborted: ${label}`, {
+          cause: signal?.reason,
+        }), true);
+        if (signal?.aborted) {
+          onAbort();
+          return;
+        }
+        signal?.addEventListener("abort", onAbort, { once: true });
+        if (timeoutMs !== null) timer = setTimeout(expire, timeoutMs);
+        const update: typeof onUpdate = onUpdate ? (result) => {
+          if (deadline !== null && performance.now() >= deadline) expire();
+          if (!settled) onUpdate(result);
+        } : undefined;
+        try {
+          // Observe both outcomes even after an uncancellable call settles late.
+          Promise.resolve(tool.execute.call(tool, toolCallId, params, controller.signal, update, ctx)).then(
+            (result) => {
+              if (deadline !== null && performance.now() >= deadline) expire();
+              if (settled) return;
+              settled = true;
+              cleanup();
+              resolve(result);
+            },
+            onError,
+          );
+        } catch (error) {
+          onError(error);
+        }
+      });
+    },
+  };
 }
 
 /** Build a human-readable label for the MCP call for error messages. */
@@ -83,43 +102,16 @@ function getMcpCallLabel(toolName: string, params: unknown): string {
   return toolName;
 }
 
-export const mcpTimeoutPatch: ExtensionFactory = (pi: ExtensionAPI): void => {
-  const timeoutMs = getMcpToolTimeoutMs();
-  if (timeoutMs === null) return;
-
-  // Patch MCP tools after the MCP adapter has registered them.
-  // The MCP adapter registers tools synchronously during its own session_start
-  // handler. We run after with a microtask yield to ensure they exist.
-  pi.on("session_start", async (_event, ctx) => {
-    // Yield to ensure MCP adapter's session_start has completed
-    await new Promise(resolve => setTimeout(resolve, 0));
-
-    const session = ctx as unknown as {
-      _agent?: {
-        tools?: Array<{ name: string; execute: (...args: unknown[]) => Promise<unknown> }>;
-      };
-    };
-    const tools = session?._agent?.tools;
-    if (!Array.isArray(tools)) return;
-
-    for (const tool of tools) {
-      if (!isMcpTool(tool.name) || !tool.execute) continue;
-      const originalExecute = tool.execute.bind(tool);
-      tool.execute = async function patchedMcpExecute(
-        toolCallId: unknown,
-        params: unknown,
-        signal: unknown,
-        ...rest: unknown[]
-      ) {
-        const label = getMcpCallLabel(tool.name, params);
-        const resultPromise = originalExecute(toolCallId, params, signal, ...rest);
-        return withTimeoutAndSignal(
-          resultPromise as Promise<unknown>,
-          timeoutMs,
-          signal as AbortSignal | undefined,
-          label,
-        );
-      };
-    }
-  });
-};
+/**
+ * Only the adapter receives this API. Wrap every registration, including direct
+ * tools without an `mcp_` prefix and definitions refreshed after startup.
+ * Other extensions, events, activation, and withdrawal keep the original API.
+ */
+export function withMcpToolDeadlines(pi: ExtensionAPI): ExtensionAPI {
+  return {
+    ...pi,
+    registerTool(tool) {
+      return pi.registerTool(withMcpToolDeadline(tool));
+    },
+  };
+}

@@ -24,7 +24,7 @@
  *   - contextPrune: context_prune/context_tree_query for recoverable tool-result pruning.
  *   - providerRequestSanitizer: defensive provider payload cleanup before HTTP requests.
  *   - llmContextNormalizer: defensive LLM message-shape cleanup before provider conversion.
- *   - mcpTimeoutPatch: Piclaw-compatible outer timeout/abort guard for MCP tools.
+ *   - mcpAdapterExtension: sole MCP factory with public registration/deadline decoration.
  *   - localLitePromptProfile: compact prompt/tool profile for local OpenAI-compatible models.
  *
  * Note: bun_run, keychain, ssh, proxmox, and portainer now live as packaged
@@ -63,7 +63,7 @@ import { providerRequestSanitizer } from "./provider-request-sanitizer.js";
 import { llmContextNormalizer } from "./llm-context-normalizer.js";
 import { persistedToolResultSanitizer } from "./persisted-tool-result-sanitizer.js";
 import { createContextPruneExtension } from "./context-prune.js";
-import { mcpTimeoutPatch } from "./mcp-timeout-patch.js";
+import { mcpAdapterExtension } from "./mcp-adapter.js";
 import { localLitePromptProfile } from "./local-lite-prompt-profile.js";
 import { localAppProxyTool } from "./local-app-proxy.js";
 
@@ -102,7 +102,7 @@ export function createBuiltinExtensionFactories(options?: {
     persistedToolResultSanitizer,
     createContextPruneExtension({ modelRuntime: options?.modelRuntime }),
     llmContextNormalizer,
-    mcpTimeoutPatch,
+    mcpAdapterExtension,
     localLitePromptProfile,
   ];
 }

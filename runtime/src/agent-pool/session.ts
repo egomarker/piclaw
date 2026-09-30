@@ -108,10 +108,6 @@ const OPTIONAL_EXTENSIONS: OptionalBundledExtension[] = [
   { path: resolve(EXTENSIONS_DIR, "experimental", "m365", "index.ts"), envGate: "PICLAW_ENABLE_M365_EXPERIMENTAL" },
 ];
 
-const PACKAGED_EXTENSION_ENTRIES = [
-  { packageName: "pi-mcp-adapter", entry: "index.ts" },
-] as const;
-
 function getWorkspaceAddonNodeModulesFingerprint(workspaceDir: string): string {
   const addonNodeModulesDir = join(workspaceDir, ".pi", "extensions", "node_modules");
   try {
@@ -151,19 +147,6 @@ function findNodeModules(startDir: string): string | null {
     dir = parent;
   }
   return null;
-}
-
-function resolvePackagedExtensionEntries(nodeModulesDir: string | null): string[] {
-  if (!nodeModulesDir) return EMPTY_STRING_ARRAY;
-
-  const resolved: string[] = [];
-  for (const candidate of PACKAGED_EXTENSION_ENTRIES) {
-    const entryPath = join(nodeModulesDir, candidate.packageName, candidate.entry);
-    if (existsSync(entryPath)) {
-      resolved.push(entryPath);
-    }
-  }
-  return resolved;
 }
 
 function getExtensionNodeModulesDir(): string | null {
@@ -269,7 +252,7 @@ function getBundledExtensionPaths(chatJid?: string): string[] {
     .filter(({ platforms }) => !platforms || platforms.includes(process.platform))
     .filter(({ channels }) => !channels || !!channel && channels.includes(channel))
     .map(({ path }) => path);
-  paths.push(...resolvePackagedExtensionEntries(nodeModulesDir));
+  // MCP is owned by the built-in decorated factory, never a second stock entry.
   paths.push(...getInstalledAddonExtensionPaths(getWorkspaceDir()));
 
   if (paths.length === 0) {

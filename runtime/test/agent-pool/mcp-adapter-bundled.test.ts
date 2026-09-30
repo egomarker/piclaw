@@ -29,22 +29,23 @@ describe("bundled pi-mcp-adapter integration", () => {
         cwd: workspaceDir,
       });
 
-      const session: any = runtime.session;
-      const allTools = session._extensionRunner?.getAllRegisteredTools?.() ?? [];
-      const mcpTool = allTools.find((t: any) => t.definition?.name === "mcp");
-      expect(mcpTool).toBeTruthy();
-      const tool = mcpTool;
-      expect(typeof tool?.definition?.description).toBe("string");
-      expect(tool.definition.description).toContain("MCP");
+      try {
+        const session = runtime.session;
+        const tool = session.getToolDefinition("mcp");
+        expect(tool).toBeTruthy();
+        expect(typeof tool?.description).toBe("string");
+        expect(tool!.description).toContain("MCP");
+        expect(session.getAllTools().filter((entry) => entry.name === "mcp")).toHaveLength(1);
 
-      expect(typeof session.extensionRunner?.getCommand).toBe("function");
-      const mcpCommand = session.extensionRunner.getCommand("mcp");
-      expect(mcpCommand).toBeTruthy();
-      expect(typeof mcpCommand?.description).toBe("string");
-      expect(mcpCommand.description).toContain("MCP");
-      expect(session.extensionRunner.getCommand("mcp-auth")).toBeTruthy();
-
-      session.dispose?.();
+        expect(typeof session.extensionRunner?.getCommand).toBe("function");
+        const mcpCommand = session.extensionRunner.getCommand("mcp");
+        expect(mcpCommand).toBeTruthy();
+        expect(typeof mcpCommand?.description).toBe("string");
+        expect(mcpCommand!.description).toContain("MCP");
+        expect(session.extensionRunner.getCommand("mcp-auth")).toBeTruthy();
+      } finally {
+        await runtime.dispose();
+      }
     } finally {
       restoreEnv();
       rmSync(tempRoot, { recursive: true, force: true });
