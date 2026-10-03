@@ -35,6 +35,17 @@ function callProcess(fn: string, data: Uint8Array, x: number, y: number, w: numb
   const input = normalizeInput(data);
   const ptr = wasm.__pin(wasm.__newArrayBuffer(input));
   try {
+    if (fn === "processZrleTileData") {
+      return wasm[fn](
+        ptr, x, y, w, h,
+        pf.bitsPerPixel,
+        pf.depth,
+        pf.bigEndian ? 1 : 0,
+        pf.trueColor ? 1 : 0,
+        pf.redMax, pf.greenMax, pf.blueMax,
+        pf.redShift, pf.greenShift, pf.blueShift,
+      );
+    }
     return wasm[fn](
       ptr, x, y, w, h,
       pf.bitsPerPixel,
@@ -317,11 +328,59 @@ describe("WASM pipeline – direct API", () => {
     // ZRLE subencoding 1 = solid fill
     const tile = bytes(
       0x01,                         // subencoding=1 (solid)
-      0x00, 0x00, 0xff, 0x00,       // red pixel
+      0x00, 0x00, 0xff,             // compact red pixel
     );
     callProcess("processZrleTileData", tile, 0, 0, 2, 2);
     expect(pixelAt(0, 0, 2)).toEqual([255, 0, 0, 255]);
     expect(pixelAt(1, 1, 2)).toEqual([255, 0, 0, 255]);
+  });
+
+  test("processZrleTileData honors compact byte placement and ordinary pixel widths", () => {
+    const rgb888 = { ...DEFAULT_CLIENT_PIXEL_FORMAT };
+    const cases = [
+      { pf: rgb888, cpixel: bytes(0x33, 0x22, 0x11), expected: [0x11, 0x22, 0x33, 255] },
+      { pf: { ...rgb888, bigEndian: true }, cpixel: bytes(0x11, 0x22, 0x33), expected: [0x11, 0x22, 0x33, 255] },
+      { pf: { ...rgb888, redShift: 24, greenShift: 16, blueShift: 8 }, cpixel: bytes(0x33, 0x22, 0x11), expected: [0x11, 0x22, 0x33, 255] },
+      { pf: { ...rgb888, bigEndian: true, redShift: 24, greenShift: 16, blueShift: 8 }, cpixel: bytes(0x11, 0x22, 0x33), expected: [0x11, 0x22, 0x33, 255] },
+      {
+        pf: {
+          bitsPerPixel: 32, depth: 16, bigEndian: false, trueColor: true,
+          redMax: 31, greenMax: 63, blueMax: 31,
+          redShift: 19, greenShift: 13, blueShift: 8,
+        },
+        cpixel: bytes(0x00, 0x00, 0xf8),
+        expected: [255, 0, 0, 255],
+      },
+      {
+        pf: {
+          bitsPerPixel: 16, depth: 16, bigEndian: false, trueColor: true,
+          redMax: 31, greenMax: 63, blueMax: 31,
+          redShift: 11, greenShift: 5, blueShift: 0,
+        },
+        cpixel: bytes(0x00, 0xf8),
+        expected: [255, 0, 0, 255],
+      },
+      {
+        pf: {
+          bitsPerPixel: 8, depth: 8, bigEndian: false, trueColor: true,
+          redMax: 7, greenMax: 7, blueMax: 3,
+          redShift: 5, greenShift: 2, blueShift: 0,
+        },
+        cpixel: bytes(0xe0),
+        expected: [255, 0, 0, 255],
+      },
+      {
+        pf: { ...rgb888, redShift: 24, greenShift: 16, blueShift: 0 },
+        cpixel: bytes(0x33, 0x00, 0x22, 0x11),
+        expected: [0x11, 0x22, 0x33, 255],
+      },
+    ];
+
+    for (const item of cases) {
+      wasm.initFramebuffer(1, 1);
+      expect(callProcess("processZrleTileData", Uint8Array.from([0x01, ...item.cpixel]), 0, 0, 1, 1, item.pf)).toBe(0);
+      expect(pixelAt(0, 0, 1)).toEqual(item.expected);
+    }
   });
 
   test("processZrleTileData handles raw subencoding", () => {
@@ -329,8 +388,8 @@ describe("WASM pipeline – direct API", () => {
     // ZRLE subencoding 0 = raw
     const tile = bytes(
       0x00,                         // subencoding=0 (raw)
-      0x00, 0x00, 0xff, 0x00,       // pixel 0: red
-      0x00, 0xff, 0x00, 0x00,       // pixel 1: green
+      0x00, 0x00, 0xff,             // pixel 0: compact red
+      0x00, 0xff, 0x00,             // pixel 1: compact green
     );
     callProcess("processZrleTileData", tile, 0, 0, 2, 1);
     expect(pixelAt(0, 0, 2)).toEqual([255, 0, 0, 255]);
@@ -341,8 +400,8 @@ describe("WASM pipeline – direct API", () => {
     wasm.initFramebuffer(2, 2);
     const tile = bytes(
       0x02,
-      0x00, 0x00, 0xff, 0x00,       // palette[0]: red
-      0xff, 0x00, 0x00, 0x00,       // palette[1]: blue
+      0x00, 0x00, 0xff,             // palette[0]: compact red
+      0xff, 0x00, 0x00,             // palette[1]: compact blue
       0x40,                         // row 0: red, blue
       0x80,                         // row 1: blue, red
     );
@@ -357,8 +416,8 @@ describe("WASM pipeline – direct API", () => {
     wasm.initFramebuffer(3, 1);
     const tile = bytes(
       0x80,
-      0x00, 0x00, 0xff, 0x00, 0x01, // red run length 2
-      0xff, 0x00, 0x00, 0x00, 0x00, // blue run length 1
+      0x00, 0x00, 0xff, 0x01,       // compact red, run length 2
+      0xff, 0x00, 0x00, 0x00,       // compact blue, run length 1
     );
     callProcess("processZrleTileData", tile, 0, 0, 3, 1);
     expect(pixelAt(0, 0, 3)).toEqual([255, 0, 0, 255]);
@@ -370,8 +429,8 @@ describe("WASM pipeline – direct API", () => {
     wasm.initFramebuffer(3, 1);
     const tile = bytes(
       0x82,
-      0x00, 0x00, 0xff, 0x00,       // palette[0]: red
-      0xff, 0x00, 0x00, 0x00,       // palette[1]: blue
+      0x00, 0x00, 0xff,             // palette[0]: compact red
+      0xff, 0x00, 0x00,             // palette[1]: compact blue
       0x80, 0x01,                   // palette[0] run length 2
       0x01,                         // palette[1] run length 1
     );
@@ -384,22 +443,22 @@ describe("WASM pipeline – direct API", () => {
   test("processZrleTileData rejects invalid palette subencodings, runs, and trailing bytes", () => {
     wasm.initFramebuffer(2, 1);
     expect(callProcess("processZrleTileData", bytes(0x11), 0, 0, 1, 1)).toBe(-1);
-    expect(callProcess("processZrleTileData", bytes(0x81, 0x00, 0x00, 0xff, 0x00, 0x00), 0, 0, 1, 1)).toBe(-1);
+    expect(callProcess("processZrleTileData", bytes(0x81), 0, 0, 1, 1)).toBe(-1);
     expect(callProcess("processZrleTileData", bytes(
       0x03,
-      0x00, 0x00, 0xff, 0x00,
-      0xff, 0x00, 0x00, 0x00,
-      0x00, 0xff, 0x00, 0x00,
+      0x00, 0x00, 0xff,
+      0xff, 0x00, 0x00,
+      0x00, 0xff, 0x00,
       0xc0,
     ), 0, 0, 1, 1)).toBe(-1);
     expect(callProcess("processZrleTileData", bytes(
       0x82,
-      0x00, 0x00, 0xff, 0x00,
-      0xff, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0xff,
+      0xff, 0x00, 0x00,
       0x02,
     ), 0, 0, 1, 1)).toBe(-1);
-    expect(callProcess("processZrleTileData", bytes(0x80, 0x00, 0x00, 0xff, 0x00, 0x01), 0, 0, 1, 1)).toBe(-1);
-    expect(callProcess("processZrleTileData", bytes(0x01, 0x00, 0x00, 0xff, 0x00, 0xaa), 0, 0, 1, 1)).toBe(-1);
+    expect(callProcess("processZrleTileData", bytes(0x80, 0x00, 0x00, 0xff, 0x01), 0, 0, 1, 1)).toBe(-1);
+    expect(callProcess("processZrleTileData", bytes(0x01, 0x00, 0x00, 0xff, 0xaa), 0, 0, 1, 1)).toBe(-1);
   });
 
   test("encoded rectangle rejects do not partially mutate the framebuffer", () => {
@@ -436,7 +495,7 @@ describe("WASM pipeline – direct API", () => {
     expect(callProcess("processHextileRect", hextileOutOfBounds, 0, 0, 2, 2)).toBe(-1);
     expect(Array.from(readFb())).toEqual(initial);
 
-    const zrleOverflow = bytes(0x80, 0x00, 0x00, 0xff, 0x00, 0x04);
+    const zrleOverflow = bytes(0x80, 0x00, 0x00, 0xff, 0x04);
     expect(callProcess("processZrleTileData", zrleOverflow, 0, 0, 2, 2)).toBe(-1);
     expect(Array.from(readFb())).toEqual(initial);
   });
@@ -569,23 +628,23 @@ describe("WASM pipeline – through VncRemoteDisplayProtocol", () => {
   test("ZRLE solid-fill through pipeline matches JS output", () => {
     expectZrlePipelineMatchesJs(bytes(
       0x01,
-      0x00, 0x00, 0xff, 0x00,
+      0x00, 0x00, 0xff,
     ), 2, 2);
   });
 
   test("ZRLE raw tile through pipeline matches JS output", () => {
     expectZrlePipelineMatchesJs(bytes(
       0x00,
-      0x00, 0x00, 0xff, 0x00,
-      0x00, 0xff, 0x00, 0x00,
+      0x00, 0x00, 0xff,
+      0x00, 0xff, 0x00,
     ), 2, 1);
   });
 
   test("ZRLE packed palette through pipeline matches JS output", () => {
     expectZrlePipelineMatchesJs(bytes(
       0x02,
-      0x00, 0x00, 0xff, 0x00,
-      0xff, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0xff,
+      0xff, 0x00, 0x00,
       0x40,
       0x80,
     ), 2, 2);
@@ -594,16 +653,16 @@ describe("WASM pipeline – through VncRemoteDisplayProtocol", () => {
   test("ZRLE plain RLE through pipeline matches JS output", () => {
     expectZrlePipelineMatchesJs(bytes(
       0x80,
-      0x00, 0x00, 0xff, 0x00, 0x01,
-      0xff, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0xff, 0x01,
+      0xff, 0x00, 0x00, 0x00,
     ), 3, 1);
   });
 
   test("ZRLE palette RLE through pipeline matches JS output", () => {
     expectZrlePipelineMatchesJs(bytes(
       0x82,
-      0x00, 0x00, 0xff, 0x00,
-      0xff, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0xff,
+      0xff, 0x00, 0x00,
       0x80, 0x01,
       0x01,
     ), 3, 1);

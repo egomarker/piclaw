@@ -3,7 +3,7 @@
   "source_file": "assemblyscript/remote-display-decoder.ts",
   "output_file": "web/static/common/js/vendor/remote-display-decoder.wasm",
   "metadata_file": "web/static/common/js/vendor/remote-display-decoder.meta.json",
-  "sha256": "4f96821ac70ff10409aab7be93021788ef1bd1924db61b0f9530b895a723b752",
-  "size_bytes": 22618,
+  "sha256": "6b8f411e65321a2606812e8ae6b7276d006e28524c4eb15e16435db792a4328e",
+  "size_bytes": 23168,
   "toolchain": "assemblyscript"
 }

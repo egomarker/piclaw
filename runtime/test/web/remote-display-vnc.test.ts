@@ -9,6 +9,7 @@ import {
   measureRreRectPayload,
   measureZrleRectPayload,
   measureZrleTileDataPayload,
+  resolveZrlePixelLayout,
   VncRemoteDisplayProtocol,
 } from "../../web/src/panes/remote-display-vnc.js";
 
@@ -42,20 +43,28 @@ function buildContinuousZrleChunks(tiles: Uint8Array[]) {
 }
 
 function buildZrleUpdate(x: number, y: number, width: number, height: number, compressed: Uint8Array) {
-  const length = compressed.length;
-  return Uint8Array.from([
-    0, 0, 0, 1,
-    (x >>> 8) & 0xff, x & 0xff,
-    (y >>> 8) & 0xff, y & 0xff,
-    (width >>> 8) & 0xff, width & 0xff,
-    (height >>> 8) & 0xff, height & 0xff,
-    0, 0, 0, 16,
-    (length >>> 24) & 0xff,
-    (length >>> 16) & 0xff,
-    (length >>> 8) & 0xff,
-    length & 0xff,
-    ...compressed,
-  ]);
+  return buildZrleFramebufferUpdate([{ x, y, width, height, compressed }]);
+}
+
+function buildZrleFramebufferUpdate(rectangles: Array<{ x: number; y: number; width: number; height: number; compressed: Uint8Array }>) {
+  const chunks = [bytes(0, 0, (rectangles.length >>> 8) & 0xff, rectangles.length & 0xff)];
+  for (const rectangle of rectangles) {
+    const { x, y, width, height, compressed } = rectangle;
+    const length = compressed.length;
+    chunks.push(Uint8Array.from([
+      (x >>> 8) & 0xff, x & 0xff,
+      (y >>> 8) & 0xff, y & 0xff,
+      (width >>> 8) & 0xff, width & 0xff,
+      (height >>> 8) & 0xff, height & 0xff,
+      0, 0, 0, 16,
+      (length >>> 24) & 0xff,
+      (length >>> 16) & 0xff,
+      (length >>> 8) & 0xff,
+      length & 0xff,
+      ...compressed,
+    ]));
+  }
+  return concatChunks(chunks);
 }
 
 function buildServerInit({ width, height, name }: { width: number; height: number; name: string }) {
@@ -78,6 +87,17 @@ function buildServerInit({ width, height, name }: { width: number; height: numbe
   const payload = new Uint8Array(buffer);
   payload.set(nameBytes, 24);
   return payload;
+}
+
+function decodeZrleSolid(pixelFormat: Record<string, any>, cpixel: Uint8Array) {
+  const protocol = new VncRemoteDisplayProtocol();
+  protocol.receive(encoder.encode("RFB 003.008\n"));
+  protocol.receive(bytes(1, 1));
+  protocol.receive(bytes(0, 0, 0, 0));
+  protocol.receive(buildServerInit({ width: 1, height: 1, name: "CPIXEL" }));
+  protocol.clientPixelFormat = pixelFormat;
+  const result = protocol.receive(buildZrleUpdate(0, 0, 1, 1, zlibSync(concatChunks([bytes(0x01), cpixel]))));
+  return Array.from((result.events[0] as any).rects[0].rgba.slice(0, 4));
 }
 
 describe("VNC encoded rectangle payload measurement", () => {
@@ -130,26 +150,84 @@ describe("VNC encoded rectangle payload measurement", () => {
     expect(measureZrleRectPayload(payload.slice(0, -1))).toBeNull();
   });
 
-  test("measures inflated ZRLE tile payloads without mutating WASM framebuffer", () => {
+  test("resolves compact and ordinary ZRLE pixel layouts from the complete channel masks", () => {
+    const rgb888 = {
+      bitsPerPixel: 32, depth: 24, bigEndian: false, trueColor: true,
+      redMax: 255, greenMax: 255, blueMax: 255,
+      redShift: 16, greenShift: 8, blueShift: 0,
+    };
+    const upperRgb888 = { ...rgb888, redShift: 24, greenShift: 16, blueShift: 8 };
+    const bothFitRgb565 = {
+      bitsPerPixel: 32, depth: 16, bigEndian: false, trueColor: true,
+      redMax: 31, greenMax: 63, blueMax: 31,
+      redShift: 19, greenShift: 13, blueShift: 8,
+    };
+    const nonCompact = { ...rgb888, redShift: 24, greenShift: 16, blueShift: 0 };
+
+    expect(resolveZrlePixelLayout(rgb888)).toEqual({ bytesPerPixel: 3, valueShift: 0 });
+    expect(resolveZrlePixelLayout({ ...rgb888, bigEndian: true })).toEqual({ bytesPerPixel: 3, valueShift: 0 });
+    expect(resolveZrlePixelLayout(upperRgb888)).toEqual({ bytesPerPixel: 3, valueShift: 8 });
+    expect(resolveZrlePixelLayout(bothFitRgb565)).toEqual({ bytesPerPixel: 3, valueShift: 0 });
+    expect(resolveZrlePixelLayout({ ...rgb888, bitsPerPixel: 16, depth: 16 })).toEqual({ bytesPerPixel: 2, valueShift: 0 });
+    expect(resolveZrlePixelLayout({ ...rgb888, bitsPerPixel: 8, depth: 8 })).toEqual({ bytesPerPixel: 1, valueShift: 0 });
+    expect(resolveZrlePixelLayout(nonCompact)).toEqual({ bytesPerPixel: 4, valueShift: 0 });
+    expect(resolveZrlePixelLayout({ ...rgb888, trueColor: false })).toEqual({ bytesPerPixel: 4, valueShift: 0 });
+  });
+
+  test("decodes least- and most-significant compact pixels plus ordinary 8/16/32-bit pixels", () => {
+    const rgb888 = {
+      bitsPerPixel: 32, depth: 24, bigEndian: false, trueColor: true,
+      redMax: 255, greenMax: 255, blueMax: 255,
+      redShift: 16, greenShift: 8, blueShift: 0,
+    };
+    expect(decodeZrleSolid(rgb888, bytes(0x33, 0x22, 0x11))).toEqual([0x11, 0x22, 0x33, 255]);
+    expect(decodeZrleSolid({ ...rgb888, bigEndian: true }, bytes(0x11, 0x22, 0x33))).toEqual([0x11, 0x22, 0x33, 255]);
+
+    const upperRgb888 = { ...rgb888, redShift: 24, greenShift: 16, blueShift: 8 };
+    expect(decodeZrleSolid(upperRgb888, bytes(0x33, 0x22, 0x11))).toEqual([0x11, 0x22, 0x33, 255]);
+    expect(decodeZrleSolid({ ...upperRgb888, bigEndian: true }, bytes(0x11, 0x22, 0x33))).toEqual([0x11, 0x22, 0x33, 255]);
+
+    const bothFitRgb565 = {
+      bitsPerPixel: 32, depth: 16, bigEndian: false, trueColor: true,
+      redMax: 31, greenMax: 63, blueMax: 31,
+      redShift: 19, greenShift: 13, blueShift: 8,
+    };
+    expect(decodeZrleSolid(bothFitRgb565, bytes(0x00, 0x00, 0xf8))).toEqual([255, 0, 0, 255]);
+
+    const rgb565 = { ...bothFitRgb565, bitsPerPixel: 16, redShift: 11, greenShift: 5, blueShift: 0 };
+    expect(decodeZrleSolid(rgb565, bytes(0x00, 0xf8))).toEqual([255, 0, 0, 255]);
+
+    const rgb332 = {
+      bitsPerPixel: 8, depth: 8, bigEndian: false, trueColor: true,
+      redMax: 7, greenMax: 7, blueMax: 3,
+      redShift: 5, greenShift: 2, blueShift: 0,
+    };
+    expect(decodeZrleSolid(rgb332, bytes(0xe0))).toEqual([255, 0, 0, 255]);
+
+    const nonCompact = { ...rgb888, redShift: 24, greenShift: 16, blueShift: 0 };
+    expect(decodeZrleSolid(nonCompact, bytes(0x33, 0x00, 0x22, 0x11))).toEqual([0x11, 0x22, 0x33, 255]);
+  });
+
+  test("measures standards-compliant compact ZRLE tile payloads", () => {
     const validTwoTilePayload = bytes(
       0x01,
-      0x00, 0x00, 0xff, 0x00,
+      0x00, 0x00, 0xff,
       0x01,
-      0xff, 0x00, 0x00, 0x00,
+      0xff, 0x00, 0x00,
     );
     expect(measureZrleTileDataPayload(validTwoTilePayload, 65, 1)?.consumed).toBe(validTwoTilePayload.length);
     expect(measureZrleTileDataPayload(validTwoTilePayload.slice(0, -1), 65, 1)).toBeNull();
     expect(measureZrleTileDataPayload(bytes(
       0x03,
-      0, 0, 0xff, 0,
-      0xff, 0, 0, 0,
-      0, 0xff, 0, 0,
+      0, 0, 0xff,
+      0xff, 0, 0,
+      0, 0xff, 0,
       0xc0,
     ), 1, 1)).toBeNull();
-    expect(measureZrleTileDataPayload(bytes(0x82, 0, 0, 0xff, 0, 0xff, 0, 0, 0, 0x02), 1, 1)).toBeNull();
-    expect(measureZrleTileDataPayload(bytes(0x80, 0, 0, 0xff, 0, 0x01), 1, 1)).toBeNull();
-    expect(measureZrleTileDataPayload(bytes(0x81, 0, 0, 0xff, 0, 0x00), 1, 1)).toBeNull();
-    expect(measureZrleTileDataPayload(bytes(0x01, 0, 0, 0xff, 0, 0xaa), 1, 1)).toBeNull();
+    expect(measureZrleTileDataPayload(bytes(0x82, 0, 0, 0xff, 0xff, 0, 0, 0x02), 1, 1)).toBeNull();
+    expect(measureZrleTileDataPayload(bytes(0x80, 0, 0, 0xff, 0x01), 1, 1)).toBeNull();
+    expect(measureZrleTileDataPayload(bytes(0x81), 1, 1)).toBeNull();
+    expect(measureZrleTileDataPayload(bytes(0x01, 0, 0, 0xff, 0xaa), 1, 1)).toBeNull();
     expect(measureZrleTileDataPayload(bytes(0x11), 1, 1)).toBeNull();
   });
 });
@@ -383,7 +461,7 @@ describe("VncRemoteDisplayProtocol", () => {
 
     const zrleTile = bytes(
       0x01,
-      0x00, 0x00, 0xff, 0x00,
+      0x00, 0x00, 0xff,
     );
     const compressed = zlibSync(zrleTile);
     const length = compressed.length;
@@ -414,8 +492,8 @@ describe("VncRemoteDisplayProtocol", () => {
     protocol.receive(buildServerInit({ width: 1, height: 1, name: "Display" }));
 
     const [malformedChunk, validChunk] = buildContinuousZrleChunks([
-      bytes(0x81, 0, 0, 0xff, 0, 0x00),
-      bytes(0x01, 0x00, 0x00, 0xff, 0x00),
+      bytes(0x81),
+      bytes(0x01, 0x00, 0x00, 0xff),
     ]);
 
     const malformed = protocol.receive(buildZrleUpdate(0, 0, 1, 1, malformedChunk));
@@ -427,65 +505,68 @@ describe("VncRemoteDisplayProtocol", () => {
     expect(Array.from(rects[0].rgba.slice(0, 4))).toEqual([255, 0, 0, 255]);
   });
 
-  test("parses consecutive ZRLE rectangles from one continuous zlib stream", () => {
+  test("preserves a continuous ZRLE stream when a multi-rectangle update is fragmented", () => {
     const protocol = new VncRemoteDisplayProtocol();
     protocol.receive(encoder.encode("RFB 003.008\n"));
     protocol.receive(bytes(1, 1));
     protocol.receive(bytes(0, 0, 0, 0));
-    protocol.receive(buildServerInit({ width: 2, height: 1, name: "Display" }));
+    protocol.receive(buildServerInit({ width: 3, height: 1, name: "Display" }));
 
-    const [redTile, blueTile] = buildContinuousZrleChunks([
-      bytes(0x01, 0x00, 0x00, 0xff, 0x00),
-      bytes(0x01, 0xff, 0x00, 0x00, 0x00),
+    const [redChunk, blueChunk, greenChunk] = buildContinuousZrleChunks([
+      bytes(0x01, 0x00, 0x00, 0xff),
+      bytes(0x01, 0xff, 0x00, 0x00),
+      bytes(0x01, 0x00, 0xff, 0x00),
     ]);
+    const fragmented = buildZrleFramebufferUpdate([
+      { x: 0, y: 0, width: 1, height: 1, compressed: redChunk },
+      { x: 1, y: 0, width: 1, height: 1, compressed: blueChunk },
+    ]);
+    const splitAt = 4 + 12 + 4 + redChunk.length + 6;
 
-    const update1 = protocol.receive(buildZrleUpdate(0, 0, 1, 1, redTile));
-    const rects1 = (update1.events[0] as any).rects;
-    expect(rects1).toHaveLength(1);
-    expect(Array.from(rects1[0].rgba.slice(0, 4))).toEqual([255, 0, 0, 255]);
+    expect(protocol.receive(fragmented.slice(0, splitAt)).events).toEqual([]);
+    const completed = protocol.receive(fragmented.slice(splitAt));
+    const rects = (completed.events[0] as any).rects;
+    expect(rects).toHaveLength(2);
+    expect(Array.from(rects[0].rgba.slice(0, 4))).toEqual([255, 0, 0, 255]);
+    expect(Array.from(rects[1].rgba.slice(0, 4))).toEqual([0, 0, 255, 255]);
 
-    const update2 = protocol.receive(buildZrleUpdate(1, 0, 1, 1, blueTile));
-    const rects2 = (update2.events[0] as any).rects;
-    expect(rects2).toHaveLength(1);
-    expect(Array.from(rects2[0].rgba.slice(0, 4))).toEqual([0, 0, 255, 255]);
+    const subsequent = protocol.receive(buildZrleUpdate(2, 0, 1, 1, greenChunk));
+    expect(Array.from((subsequent.events[0] as any).rects[0].rgba.slice(0, 4))).toEqual([0, 255, 0, 255]);
   });
 
-  test("parses consecutive ZRLE rectangles on one continuous inflater", () => {
-    const decodedQueue = [
-      bytes(0x01, 0x00, 0x00, 0xff, 0x00),
-      bytes(0x01, 0xff, 0x00, 0x00, 0x00),
-    ];
+  test("inflates each framed ZRLE rectangle exactly once and in wire order", () => {
+    const inflateCalls: number[] = [];
+    const decodedByMarker = new Map([
+      [0x11, bytes(0x01, 0x00, 0x00, 0xff)],
+      [0x22, bytes(0x01, 0xff, 0x00, 0x00)],
+      [0x33, bytes(0x01, 0x00, 0xff, 0x00)],
+    ]);
     const protocol = new VncRemoteDisplayProtocol({
-      inflateZrle: () => decodedQueue.shift() ?? new Uint8Array(0),
+      inflateZrle(compressed: Uint8Array) {
+        const marker = compressed[0];
+        inflateCalls.push(marker);
+        return decodedByMarker.get(marker) ?? new Uint8Array(0);
+      },
     });
     protocol.receive(encoder.encode("RFB 003.008\n"));
     protocol.receive(bytes(1, 1));
     protocol.receive(bytes(0, 0, 0, 0));
-    protocol.receive(buildServerInit({ width: 2, height: 1, name: "Display" }));
+    protocol.receive(buildServerInit({ width: 3, height: 1, name: "Display" }));
 
-    const update1 = protocol.receive(Uint8Array.from([
-      0, 0, 0, 1,
-      0, 0, 0, 0,
-      0, 1, 0, 1,
-      0, 0, 0, 16,
-      0, 0, 0, 1,
-      0x11,
-    ]));
-    const rects1 = (update1.events[0] as any).rects;
-    expect(rects1).toHaveLength(1);
-    expect(Array.from(rects1[0].rgba.slice(0, 4))).toEqual([255, 0, 0, 255]);
+    const fragmented = buildZrleFramebufferUpdate([
+      { x: 0, y: 0, width: 1, height: 1, compressed: bytes(0x11) },
+      { x: 1, y: 0, width: 1, height: 1, compressed: bytes(0x22) },
+    ]);
+    const splitAt = 4 + 12 + 4 + 1 + 6;
+    expect(protocol.receive(fragmented.slice(0, splitAt)).events).toEqual([]);
+    expect(inflateCalls).toEqual([]);
 
-    const update2 = protocol.receive(Uint8Array.from([
-      0, 0, 0, 1,
-      0, 1, 0, 0,
-      0, 1, 0, 1,
-      0, 0, 0, 16,
-      0, 0, 0, 1,
-      0x22,
-    ]));
-    const rects2 = (update2.events[0] as any).rects;
-    expect(rects2).toHaveLength(1);
-    expect(Array.from(rects2[0].rgba.slice(0, 4))).toEqual([0, 0, 255, 255]);
+    const completed = protocol.receive(fragmented.slice(splitAt));
+    expect((completed.events[0] as any).rects).toHaveLength(2);
+    expect(inflateCalls).toEqual([0x11, 0x22]);
+
+    protocol.receive(buildZrleUpdate(2, 0, 1, 1, bytes(0x33)));
+    expect(inflateCalls).toEqual([0x11, 0x22, 0x33]);
   });
 
   test("parses Hextile framebuffer updates", () => {
@@ -556,7 +637,7 @@ describe("VncRemoteDisplayProtocol", () => {
       },
       {
         name: "zrle",
-        frame: buildZrleUpdate(0, 0, 2, 2, zlibSync(bytes(0x01, 0x00, 0x00, 0xff, 0x00))),
+        frame: buildZrleUpdate(0, 0, 2, 2, zlibSync(bytes(0x01, 0x00, 0x00, 0xff))),
       },
     ];
 
@@ -626,7 +707,7 @@ describe("VncRemoteDisplayProtocol", () => {
       inflateZrle() {
         return bytes(
           0x01,
-          0x00, 0x00, 0xff, 0x00,
+          0x00, 0x00, 0xff,
           0x11,
         );
       },
@@ -683,7 +764,7 @@ describe("VncRemoteDisplayProtocol", () => {
     const protocol = new VncRemoteDisplayProtocol({
       pipeline,
       decodeRawRect() { throw new Error("JS raw decoder should not run in pipeline mode"); },
-      inflateZrle() { return bytes(0x00, 0x00, 0x00, 0xff, 0x00); },
+      inflateZrle() { return bytes(0x00, 0x00, 0x00, 0xff); },
     });
     protocol.receive(encoder.encode("RFB 003.008\n"));
     protocol.receive(bytes(1, 1));

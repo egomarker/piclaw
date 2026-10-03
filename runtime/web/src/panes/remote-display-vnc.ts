@@ -251,11 +251,11 @@ export function decodeRawRectToRgba(bytes, width, height, pixelFormat) {
     return rgba;
 }
 
-function decodePixelToRgba(bytes, offset, pixelFormat) {
+function decodePixelToRgbaWithLayout(bytes, offset, pixelFormat, bytesPerPixel, valueShift = 0) {
     const format = pixelFormat || DEFAULT_CLIENT_PIXEL_FORMAT;
-    const bytesPerPixel = Math.max(1, Math.floor(Number(format.bitsPerPixel || 0) / 8));
     if (bytes.byteLength < offset + bytesPerPixel) return null;
-    const value = readPixelValue(bytes, offset, bytesPerPixel, format.bigEndian);
+    let value = readPixelValue(bytes, offset, bytesPerPixel, format.bigEndian);
+    if (valueShift > 0) value = (value << valueShift) >>> 0;
     return {
         rgba: [
             scaleChannel((value >>> format.redShift) & format.redMax, format.redMax),
@@ -265,6 +265,12 @@ function decodePixelToRgba(bytes, offset, pixelFormat) {
         ],
         bytesPerPixel,
     };
+}
+
+function decodePixelToRgba(bytes, offset, pixelFormat) {
+    const format = pixelFormat || DEFAULT_CLIENT_PIXEL_FORMAT;
+    const bytesPerPixel = Math.max(1, Math.floor(Number(format.bitsPerPixel || 0) / 8));
+    return decodePixelToRgbaWithLayout(bytes, offset, format, bytesPerPixel);
 }
 
 function rectInside(width, height, x, y, rectWidth, rectHeight) {
@@ -310,6 +316,78 @@ function parseZrleRunLength(bytes, offset) {
 function bytesPerPixelForFormat(pixelFormat) {
     const format = pixelFormat || DEFAULT_CLIENT_PIXEL_FORMAT;
     return Math.max(1, Math.floor(Number(format.bitsPerPixel || 0) / 8));
+}
+
+function channelFitsZrleByteRange(max, shift, firstBit, lastBit) {
+    const maxValue = Math.floor(Number(max));
+    const shiftValue = Math.floor(Number(shift));
+    if (!Number.isFinite(maxValue) || !Number.isFinite(shiftValue) || maxValue < 0 || shiftValue < 0 || shiftValue > 31) {
+        return false;
+    }
+    if (maxValue === 0) return true;
+    if (shiftValue < firstBit) return false;
+    const shiftedMax = maxValue * (2 ** shiftValue);
+    return Number.isSafeInteger(shiftedMax) && shiftedMax <= (2 ** (lastBit + 1)) - 1;
+}
+
+export function resolveZrlePixelLayout(pixelFormat = DEFAULT_CLIENT_PIXEL_FORMAT) {
+    const format = pixelFormat || DEFAULT_CLIENT_PIXEL_FORMAT;
+    const bytesPerPixel = bytesPerPixelForFormat(format);
+    const depth = Number(format.depth);
+    if (!format.trueColor || Number(format.bitsPerPixel) !== 32 || !Number.isFinite(depth) || depth > 24) {
+        return { bytesPerPixel, valueShift: 0 };
+    }
+
+    const channels = [
+        [format.redMax, format.redShift],
+        [format.greenMax, format.greenShift],
+        [format.blueMax, format.blueShift],
+    ];
+    const fitsLeastSignificantThreeBytes = channels.every(([max, shift]) => channelFitsZrleByteRange(max, shift, 0, 23));
+    if (fitsLeastSignificantThreeBytes) {
+        return { bytesPerPixel: 3, valueShift: 0 };
+    }
+    const fitsMostSignificantThreeBytes = channels.every(([max, shift]) => channelFitsZrleByteRange(max, shift, 8, 31));
+    if (fitsMostSignificantThreeBytes) {
+        return { bytesPerPixel: 3, valueShift: 8 };
+    }
+    return { bytesPerPixel, valueShift: 0 };
+}
+
+function decodeZrlePixelToRgba(bytes, offset, pixelFormat, layout) {
+    const resolvedLayout = layout || resolveZrlePixelLayout(pixelFormat);
+    return decodePixelToRgbaWithLayout(
+        bytes,
+        offset,
+        pixelFormat || DEFAULT_CLIENT_PIXEL_FORMAT,
+        resolvedLayout.bytesPerPixel,
+        resolvedLayout.valueShift,
+    );
+}
+
+function decodeZrlePixelsToRgba(bytes, width, height, pixelFormat, layout) {
+    const format = pixelFormat || DEFAULT_CLIENT_PIXEL_FORMAT;
+    const resolvedLayout = layout || resolveZrlePixelLayout(format);
+    const src = toUint8Array(bytes);
+    const pixels = Math.max(0, width || 0) * Math.max(0, height || 0);
+    const expected = pixels * resolvedLayout.bytesPerPixel;
+    if (src.byteLength < expected) {
+        throw new Error(`Incomplete ZRLE pixel payload: expected ${expected} byte(s), got ${src.byteLength}`);
+    }
+    if (!format.trueColor) {
+        throw new Error('Indexed-colour VNC framebuffers are not supported yet.');
+    }
+    const rgba = new Uint8ClampedArray(pixels * 4);
+    let srcOffset = 0;
+    let dstOffset = 0;
+    for (let i = 0; i < pixels; i += 1) {
+        const decoded = decodeZrlePixelToRgba(src, srcOffset, format, resolvedLayout);
+        if (!decoded) throw new Error('Incomplete ZRLE pixel payload.');
+        rgba.set(decoded.rgba, dstOffset);
+        srcOffset += resolvedLayout.bytesPerPixel;
+        dstOffset += 4;
+    }
+    return rgba;
 }
 
 export function measureRreRectPayload(bytes, offset = 0, pixelFormat = DEFAULT_CLIENT_PIXEL_FORMAT) {
@@ -387,9 +465,90 @@ export function measureZrleRectPayload(bytes, offset = 0) {
     };
 }
 
-export function measureZrleTileDataPayload(bytes, width = 0, height = 0, pixelFormat = DEFAULT_CLIENT_PIXEL_FORMAT) {
+function measureFramebufferUpdateMessage(bytes, numberOfRectangles, pixelFormat) {
     const src = toUint8Array(bytes);
     const bytesPerPixel = bytesPerPixelForFormat(pixelFormat);
+    let offset = 4;
+
+    for (let i = 0; i < numberOfRectangles; i += 1) {
+        if (src.byteLength < offset + 12) return null;
+        const rectView = new DataView(src.buffer, src.byteOffset + offset, 12);
+        const width = rectView.getUint16(4, false);
+        const height = rectView.getUint16(6, false);
+        const encoding = rectView.getInt32(8, false);
+        offset += 12;
+
+        if (encoding === 0) {
+            const dataLength = width * height * bytesPerPixel;
+            if (src.byteLength < offset + dataLength) return null;
+            offset += dataLength;
+            continue;
+        }
+        if (encoding === 1) {
+            if (src.byteLength < offset + 4) return null;
+            offset += 4;
+            continue;
+        }
+        if (encoding === 2) {
+            const measured = measureRreRectPayload(src, offset, pixelFormat);
+            if (!measured) return null;
+            offset += measured.consumed;
+            continue;
+        }
+        if (encoding === 4) {
+            const measured = measureCoRreRectPayload(src, offset, pixelFormat);
+            if (!measured) return null;
+            offset += measured.consumed;
+            continue;
+        }
+        if (encoding === 5) {
+            const measured = measureHextileRectPayload(src, offset, width, height, pixelFormat);
+            if (!measured) return null;
+            offset += measured.consumed;
+            continue;
+        }
+        if (encoding === 16) {
+            const measured = measureZrleRectPayload(src, offset);
+            if (!measured) return null;
+            offset += measured.consumed;
+            continue;
+        }
+        if (encoding === -224) {
+            return { consumed: offset };
+        }
+        if (encoding === -307) {
+            if (src.byteLength < offset + 4) return null;
+            const nameLength = new DataView(src.buffer, src.byteOffset + offset, 4).getUint32(0, false);
+            if (src.byteLength < offset + 4 + nameLength) return null;
+            offset += 4 + nameLength;
+            continue;
+        }
+        if (encoding === -308) {
+            if (src.byteLength < offset + 4) return null;
+            const payloadLength = 4 + src[offset] * 16;
+            if (src.byteLength < offset + payloadLength) return null;
+            offset += payloadLength;
+            continue;
+        }
+        if (encoding === -239) {
+            const pixelLength = width * height * bytesPerPixel;
+            const maskLength = Math.ceil(width / 8) * height;
+            if (src.byteLength < offset + pixelLength + maskLength) return null;
+            offset += pixelLength + maskLength;
+            continue;
+        }
+        if (encoding === -223) {
+            continue;
+        }
+        throw new Error(`Unsupported VNC rectangle encoding ${encoding}. This viewer currently supports ZRLE, Hextile, RRE, CoRRE, CopyRect, Cursor, LastRect, DesktopName, ExtendedDesktopSize, raw rectangles, and DesktopSize only.`);
+    }
+
+    return { consumed: offset };
+}
+
+export function measureZrleTileDataPayload(bytes, width = 0, height = 0, pixelFormat = DEFAULT_CLIENT_PIXEL_FORMAT) {
+    const src = toUint8Array(bytes);
+    const bytesPerPixel = resolveZrlePixelLayout(pixelFormat).bytesPerPixel;
     let cursor = 0;
     for (let tileY = 0; tileY < height; tileY += 64) {
         const tileHeight = Math.min(64, height - tileY);
@@ -478,9 +637,10 @@ export function measureZrleTileDataPayload(bytes, width = 0, height = 0, pixelFo
     return cursor === src.byteLength ? { consumed: cursor } : null;
 }
 
-function parseZrleRect(bytes, offset, width, height, pixelFormat, decodeRawRect, inflateZrle) {
+function parseZrleRect(bytes, offset, width, height, pixelFormat, inflateZrle) {
     const format = pixelFormat || DEFAULT_CLIENT_PIXEL_FORMAT;
-    const bytesPerPixel = Math.max(1, Math.floor(Number(format.bitsPerPixel || 0) / 8));
+    const pixelLayout = resolveZrlePixelLayout(format);
+    const bytesPerPixel = pixelLayout.bytesPerPixel;
     if (bytes.byteLength < offset + 4) return null;
     const compressedLength = new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0, false);
     if (bytes.byteLength < offset + 4 + compressedLength) return null;
@@ -514,14 +674,14 @@ function parseZrleRect(bytes, offset, width, height, pixelFormat, decodeRawRect,
 
                 if (!runLengthEncoded && paletteSize === 0) {
                     const rawLength = tileWidth * tileHeight * bytesPerPixel;
-                    const tileRgba = decodeRawRect(decoded.slice(cursor, cursor + rawLength), tileWidth, tileHeight, format);
+                    const tileRgba = decodeZrlePixelsToRgba(decoded.slice(cursor, cursor + rawLength), tileWidth, tileHeight, format, pixelLayout);
                     cursor += rawLength;
                     blitRgbaTile(rgba, width, tileX, tileY, tileWidth, tileHeight, tileRgba);
                     continue;
                 }
 
                 if (!runLengthEncoded && paletteSize === 1) {
-                    const background = decodePixelToRgba(decoded, cursor, format);
+                    const background = decodeZrlePixelToRgba(decoded, cursor, format, pixelLayout);
                     if (!background) return { consumed, skipped: true };
                     cursor += background.bytesPerPixel;
                     fillRgbaRect(rgba, width, tileX, tileY, tileWidth, tileHeight, background.rgba);
@@ -531,7 +691,7 @@ function parseZrleRect(bytes, offset, width, height, pixelFormat, decodeRawRect,
                 if (!runLengthEncoded && paletteSize > 1 && paletteSize <= 16) {
                     const palette = [];
                     for (let i = 0; i < paletteSize; i += 1) {
-                        const color = decodePixelToRgba(decoded, cursor, format);
+                        const color = decodeZrlePixelToRgba(decoded, cursor, format, pixelLayout);
                         if (!color) return { consumed, skipped: true };
                         cursor += color.bytesPerPixel;
                         palette.push(color.rgba);
@@ -559,7 +719,7 @@ function parseZrleRect(bytes, offset, width, height, pixelFormat, decodeRawRect,
                     let px = 0;
                     let py = 0;
                     while (py < tileHeight) {
-                        const color = decodePixelToRgba(decoded, cursor, format);
+                        const color = decodeZrlePixelToRgba(decoded, cursor, format, pixelLayout);
                         if (!color) return { consumed, skipped: true };
                         cursor += color.bytesPerPixel;
                         const run = parseZrleRunLength(decoded, cursor);
@@ -581,7 +741,7 @@ function parseZrleRect(bytes, offset, width, height, pixelFormat, decodeRawRect,
                 if (runLengthEncoded && paletteSize >= 2) {
                     const palette = [];
                     for (let i = 0; i < paletteSize; i += 1) {
-                        const color = decodePixelToRgba(decoded, cursor, format);
+                        const color = decodeZrlePixelToRgba(decoded, cursor, format, pixelLayout);
                         if (!color) return { consumed, skipped: true };
                         cursor += color.bytesPerPixel;
                         palette.push(color.rgba);
@@ -970,6 +1130,11 @@ export class VncRemoteDisplayProtocol implements RemoteDisplayProtocolAdapter {
                     if (this.buffer.byteLength < 4) break;
                     const headerView = new DataView(this.buffer.buffer, this.buffer.byteOffset, this.buffer.byteLength);
                     const numberOfRectangles = headerView.getUint16(2, false);
+                    // Frame the complete update before inflating ZRLE data or mutating
+                    // framebuffer state. Otherwise a later incomplete rectangle would
+                    // cause already-processed rectangles to be replayed on the next chunk.
+                    const framedUpdate = measureFramebufferUpdateMessage(this.buffer, numberOfRectangles, this.clientPixelFormat);
+                    if (!framedUpdate) break;
                     let offset = 4;
                     const rects: RemoteDisplayRect[] = [];
                     let incomplete = false;
@@ -1111,7 +1276,7 @@ export class VncRemoteDisplayProtocol implements RemoteDisplayProtocolAdapter {
                                 }
                                 continue;
                             }
-                            const zrle = parseZrleRect(this.buffer, offset, width, height, this.clientPixelFormat, this.decodeRawRect, this.inflateZrle);
+                            const zrle = parseZrleRect(this.buffer, offset, width, height, this.clientPixelFormat, this.inflateZrle);
                             if (!zrle) {
                                 incomplete = true;
                                 break;
@@ -1232,7 +1397,7 @@ export class VncRemoteDisplayProtocol implements RemoteDisplayProtocolAdapter {
                         throw new Error(`Unsupported VNC rectangle encoding ${encoding}. This viewer currently supports ZRLE, Hextile, RRE, CoRRE, CopyRect, Cursor, LastRect, DesktopName, ExtendedDesktopSize, raw rectangles, and DesktopSize only.`);
                     }
                     if (incomplete) break;
-                    this.consume(offset);
+                    this.consume(framedUpdate.consumed);
 
                     // If pipeline mode, attach the WASM framebuffer snapshot
                     const event: any = {

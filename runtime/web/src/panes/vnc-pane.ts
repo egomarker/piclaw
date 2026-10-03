@@ -350,6 +350,7 @@ class VncPaneInstance implements PaneInstance {
     private directPortInputEl = null;
     private directPasswordInputEl = null;
     private hasRenderedFrame = false;
+    private hasPaintedCurrentConnection = false;
     private frameTimeoutId = null;
     private reconnectTimerId = null;
     private reconnectAttempts = 0;
@@ -493,6 +494,7 @@ class VncPaneInstance implements PaneInstance {
         this.directPortInputEl = null;
         this.directPasswordInputEl = null;
         this.hasRenderedFrame = false;
+        this.hasPaintedCurrentConnection = false;
         this.rawFallbackAttempted = false;
         this.protocolRecovering = false;
         if (this.frameTimeoutId) {
@@ -607,6 +609,7 @@ class VncPaneInstance implements PaneInstance {
         this.readOnly = Boolean(target.read_only);
         this.pointerButtonMask = 0;
         this.hasRenderedFrame = false;
+        this.hasPaintedCurrentConnection = false;
         this.pressedKeysyms.clear();
         this.bodyEl.innerHTML = compactWindow
             ? `
@@ -1330,6 +1333,7 @@ class VncPaneInstance implements PaneInstance {
         const imageData = new ImageData(rect.rgba, rect.width, rect.height);
         this.canvasCtx.putImageData(imageData, rect.x, rect.y);
         this.hasRenderedFrame = true;
+        this.hasPaintedCurrentConnection = true;
     }
 
     private copyCanvasRect(rect) {
@@ -1338,6 +1342,7 @@ class VncPaneInstance implements PaneInstance {
         const imageData = this.canvasCtx.getImageData(rect.srcX, rect.srcY, rect.width, rect.height);
         this.canvasCtx.putImageData(imageData, rect.x, rect.y);
         this.hasRenderedFrame = true;
+        this.hasPaintedCurrentConnection = true;
     }
 
     private applyCursorRect(rect) {
@@ -1358,13 +1363,10 @@ class VncPaneInstance implements PaneInstance {
     }
 
     private scheduleRawFallbackTimeout() {
-        if (this.frameTimeoutId) {
-            clearTimeout(this.frameTimeoutId);
-            this.frameTimeoutId = null;
-        }
-        if (this.rawFallbackAttempted || this.protocolRecovering) return;
+        if (this.frameTimeoutId || this.rawFallbackAttempted || this.protocolRecovering) return;
         this.frameTimeoutId = setTimeout(() => {
-            if (this.hasRenderedFrame || this.rawFallbackAttempted || this.protocolRecovering) return;
+            this.frameTimeoutId = null;
+            if (this.hasPaintedCurrentConnection || this.rawFallbackAttempted || this.protocolRecovering) return;
             if (this.protocol && this.socketBoundary) {
                 this.rawFallbackAttempted = true;
                 this.protocolRecovering = true;
@@ -1408,10 +1410,6 @@ class VncPaneInstance implements PaneInstance {
                 this.scheduleRawFallbackTimeout();
                 return;
             case 'framebuffer-update':
-                if (this.frameTimeoutId) {
-                    clearTimeout(this.frameTimeoutId);
-                    this.frameTimeoutId = null;
-                }
                 let painted = false;
 
                 // Pipeline mode: WASM owns the full framebuffer — paint it in one
@@ -1433,6 +1431,8 @@ class VncPaneInstance implements PaneInstance {
                         const img = new ImageData(new Uint8ClampedArray(event.framebuffer), event.width, event.height);
                         ctx.putImageData(img, 0, 0);
                         painted = true;
+                        this.hasRenderedFrame = true;
+                        this.hasPaintedCurrentConnection = true;
                     }
                 } else {
                     // Non-pipeline mode: per-rect rendering
@@ -1462,7 +1462,11 @@ class VncPaneInstance implements PaneInstance {
                         }
                     }
                 }
-                if (painted || this.hasRenderedFrame) {
+                if (painted || this.hasPaintedCurrentConnection) {
+                    if (this.frameTimeoutId) {
+                        clearTimeout(this.frameTimeoutId);
+                        this.frameTimeoutId = null;
+                    }
                     this.protocolRecovering = false;
                     this.setStatus(`Rendering live framebuffer — ${event.width}×${event.height}.`);
                     this.updateDisplayInfo(`Framebuffer update applied (${(event.rects || []).length} rect${(event.rects || []).length === 1 ? '' : 's'}).`);
@@ -1575,6 +1579,8 @@ class VncPaneInstance implements PaneInstance {
         const preserveRenderedFrame = Boolean(this.canvas && this.hasRenderedFrame);
         this.protocol = new VncRemoteDisplayProtocol(protocolOptions);
         this.hasRenderedFrame = preserveRenderedFrame;
+        this.hasPaintedCurrentConnection = false;
+        if (this.frameTimeoutId) clearTimeout(this.frameTimeoutId);
         this.frameTimeoutId = null;
 
         if (this.canvas) {

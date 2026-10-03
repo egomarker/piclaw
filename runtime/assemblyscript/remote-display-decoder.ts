@@ -73,17 +73,61 @@ function readPixelValue(src: Uint8Array, offset: i32, bpp: i32, big: bool): u32 
 
 // Decode one pixel and pack as 0xAABBGGRR (little-endian RGBA in memory)
 @inline
+function decodePixelWithValueShift(
+  src: Uint8Array, offset: i32,
+  bpp: i32, big: bool,
+  rMax: i32, gMax: i32, bMax: i32,
+  rShift: i32, gShift: i32, bShift: i32,
+  valueShift: i32,
+): u32 {
+  let v = readPixelValue(src, offset, bpp, big);
+  if (valueShift > 0) v <<= valueShift;
+  const r = <u32>scaleChannel(<i32>((v >>> rShift) & <u32>rMax), rMax);
+  const g = <u32>scaleChannel(<i32>((v >>> gShift) & <u32>gMax), gMax);
+  const b = <u32>scaleChannel(<i32>((v >>> bShift) & <u32>bMax), bMax);
+  return r | (g << 8) | (b << 16) | (0xff000000);
+}
+
+@inline
 function decodePixel(
   src: Uint8Array, offset: i32,
   bpp: i32, big: bool,
   rMax: i32, gMax: i32, bMax: i32,
   rShift: i32, gShift: i32, bShift: i32,
 ): u32 {
-  const v = readPixelValue(src, offset, bpp, big);
-  const r = <u32>scaleChannel(<i32>((v >>> rShift) & <u32>rMax), rMax);
-  const g = <u32>scaleChannel(<i32>((v >>> gShift) & <u32>gMax), gMax);
-  const b = <u32>scaleChannel(<i32>((v >>> bShift) & <u32>bMax), bMax);
-  return r | (g << 8) | (b << 16) | (0xff000000);
+  return decodePixelWithValueShift(src, offset, bpp, big, rMax, gMax, bMax, rShift, gShift, bShift, 0);
+}
+
+@inline
+function zrleChannelFits(max: i32, shift: i32, firstBit: i32, limit: u64): bool {
+  if (max < 0 || shift < 0 || shift > 31) return false;
+  if (max == 0) return true;
+  if (shift < firstBit) return false;
+  return ((<u64><u32>max) << shift) <= limit;
+}
+
+@inline
+function zrleUsesLeastSignificantThreeBytes(
+  bitsPerPixel: i32, depth: i32, trueColor: bool,
+  rMax: i32, gMax: i32, bMax: i32,
+  rShift: i32, gShift: i32, bShift: i32,
+): bool {
+  return trueColor && bitsPerPixel == 32 && depth <= 24
+    && zrleChannelFits(rMax, rShift, 0, 0x00ffffff)
+    && zrleChannelFits(gMax, gShift, 0, 0x00ffffff)
+    && zrleChannelFits(bMax, bShift, 0, 0x00ffffff);
+}
+
+@inline
+function zrleUsesMostSignificantThreeBytes(
+  bitsPerPixel: i32, depth: i32, trueColor: bool,
+  rMax: i32, gMax: i32, bMax: i32,
+  rShift: i32, gShift: i32, bShift: i32,
+): bool {
+  return trueColor && bitsPerPixel == 32 && depth <= 24
+    && zrleChannelFits(rMax, rShift, 8, 0xffffffff)
+    && zrleChannelFits(gMax, gShift, 8, 0xffffffff)
+    && zrleChannelFits(bMax, bShift, 8, 0xffffffff);
 }
 
 // Write a packed RGBA pixel directly to the framebuffer
@@ -553,13 +597,25 @@ export function processHextileRect(
 export function processZrleTileData(
   decompressedBuffer: ArrayBuffer,
   x: i32, y: i32, w: i32, h: i32,
-  bitsPerPixel: i32, bigEndian: bool, trueColor: bool,
+  bitsPerPixel: i32, depth: i32, bigEndian: bool, trueColor: bool,
   rMax: i32, gMax: i32, bMax: i32,
   rShift: i32, gShift: i32, bShift: i32,
 ): i32 {
   if (!trueColor) return -1;
   let bpp = bitsPerPixel >> 3;
   if (bpp <= 0) bpp = 1;
+  let valueShift: i32 = 0;
+  const usesLeastSignificantThreeBytes = zrleUsesLeastSignificantThreeBytes(
+    bitsPerPixel, depth, trueColor, rMax, gMax, bMax, rShift, gShift, bShift,
+  );
+  if (usesLeastSignificantThreeBytes) {
+    bpp = 3;
+  } else if (zrleUsesMostSignificantThreeBytes(
+    bitsPerPixel, depth, trueColor, rMax, gMax, bMax, rShift, gShift, bShift,
+  )) {
+    bpp = 3;
+    valueShift = 8;
+  }
   if (!fbRectInside(x, y, w, h)) return -1;
 
   const src = Uint8Array.wrap(decompressedBuffer);
@@ -583,7 +639,7 @@ export function processZrleTileData(
         for (let py: i32 = 0; py < tileH; py++) {
           for (let px: i32 = 0; px < tileW; px++) {
             fbSetPixel(x + tileX + px, y + tileY + py,
-              decodePixel(src, so, bpp, bigEndian, rMax, gMax, bMax, rShift, gShift, bShift));
+              decodePixelWithValueShift(src, so, bpp, bigEndian, rMax, gMax, bMax, rShift, gShift, bShift, valueShift));
             so += bpp;
           }
         }
@@ -594,7 +650,7 @@ export function processZrleTileData(
       // Subencoding 1: solid fill
       if (!rle && paletteSize == 1) {
         if (src.length < cursor + bpp) return -1;
-        const packed = decodePixel(src, cursor, bpp, bigEndian, rMax, gMax, bMax, rShift, gShift, bShift);
+        const packed = decodePixelWithValueShift(src, cursor, bpp, bigEndian, rMax, gMax, bMax, rShift, gShift, bShift, valueShift);
         cursor += bpp;
         fbFillRect(x + tileX, y + tileY, tileW, tileH, packed);
         continue;
@@ -605,7 +661,7 @@ export function processZrleTileData(
         const palette = new StaticArray<u32>(paletteSize);
         for (let i: i32 = 0; i < paletteSize; i++) {
           if (src.length < cursor + bpp) return -1;
-          unchecked(palette[i] = decodePixel(src, cursor, bpp, bigEndian, rMax, gMax, bMax, rShift, gShift, bShift));
+          unchecked(palette[i] = decodePixelWithValueShift(src, cursor, bpp, bigEndian, rMax, gMax, bMax, rShift, gShift, bShift, valueShift));
           cursor += bpp;
         }
         const bitsPerIdx: i32 = paletteSize <= 2 ? 1 : paletteSize <= 4 ? 2 : 4;
@@ -633,7 +689,7 @@ export function processZrleTileData(
         let py: i32 = 0;
         while (py < tileH) {
           if (src.length < cursor + bpp) return -1;
-          const packed = decodePixel(src, cursor, bpp, bigEndian, rMax, gMax, bMax, rShift, gShift, bShift);
+          const packed = decodePixelWithValueShift(src, cursor, bpp, bigEndian, rMax, gMax, bMax, rShift, gShift, bShift, valueShift);
           cursor += bpp;
           let runLen: i32 = 1;
           while (true) {
@@ -657,7 +713,7 @@ export function processZrleTileData(
         const palette = new StaticArray<u32>(paletteSize);
         for (let i: i32 = 0; i < paletteSize; i++) {
           if (src.length < cursor + bpp) return -1;
-          unchecked(palette[i] = decodePixel(src, cursor, bpp, bigEndian, rMax, gMax, bMax, rShift, gShift, bShift));
+          unchecked(palette[i] = decodePixelWithValueShift(src, cursor, bpp, bigEndian, rMax, gMax, bMax, rShift, gShift, bShift, valueShift));
           cursor += bpp;
         }
         let px: i32 = 0;

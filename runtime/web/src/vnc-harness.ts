@@ -799,7 +799,7 @@ class VncHarness {
             const state = bootstrap(2, 2);
             const zrleTile = bytes(
                 0x01,
-                0x00, 0x00, 0xff, 0x00,
+                0x00, 0x00, 0xff,
             );
             const compressed = zlibSync(zrleTile);
             const length = compressed.length;

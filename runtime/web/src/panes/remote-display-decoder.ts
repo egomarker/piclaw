@@ -84,6 +84,17 @@ export async function loadRemoteDisplayWasmDecoder(): Promise<WasmDisplayPipelin
                 const input = normalizeInput(data);
                 const ptr = ex.__pin(ex.__newArrayBuffer(input));
                 try {
+                    if (fnName === 'processZrleTileData') {
+                        return ex[fnName](
+                            ptr, x, y, w, h,
+                            pf.bitsPerPixel,
+                            pf.depth,
+                            pf.bigEndian ? 1 : 0,
+                            pf.trueColor ? 1 : 0,
+                            pf.redMax, pf.greenMax, pf.blueMax,
+                            pf.redShift, pf.greenShift, pf.blueShift,
+                        );
+                    }
                     return ex[fnName](
                         ptr, x, y, w, h,
                         pf.bitsPerPixel,
