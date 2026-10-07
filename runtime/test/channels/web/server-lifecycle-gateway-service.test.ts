@@ -38,6 +38,16 @@ function createFixture(overrides: Partial<WebServerLifecycleGatewayDeps> = {}) {
     vncResolveCalls: [] as Array<{ targetId: string; allowUnauthenticated: boolean }>,
     terminalShutdownCalls: 0,
     vncShutdownCalls: 0,
+    localAppStartCalls: 0,
+    localAppStopCalls: 0,
+    localAppPrepareCalls: [] as string[],
+    localAppAttachCalls: 0,
+    localAppMessageCalls: [] as unknown[],
+    localAppPingCalls: [] as Buffer[],
+    localAppPongCalls: [] as Buffer[],
+    localAppDrainCalls: 0,
+    localAppDetachCalls: [] as Array<{ code: number; reason: string }>,
+    localAppAbortCalls: 0,
     sseCloseCalls: 0,
     uiBridgeStopCalls: 0,
     upgradeCalls: [] as Array<{ url: string; data: unknown }>,
@@ -54,6 +64,11 @@ function createFixture(overrides: Partial<WebServerLifecycleGatewayDeps> = {}) {
 
   const terminalOwner = { kind: "terminal" as const, token: "terminal-token", userId: "user-1" };
   const vncOwner = { kind: "vnc" as const, token: "vnc-token", userId: "user-1", targetRef: "target-a" };
+  const localAppOwner = {
+    kind: "local-app" as const,
+    appId: "app-demo",
+    bridge: {} as any,
+  };
   const watcher = {
     close: async () => {
       state.watcherCloseCalls += 1;
@@ -134,6 +149,39 @@ function createFixture(overrides: Partial<WebServerLifecycleGatewayDeps> = {}) {
         state.vncShutdownCalls += 1;
       },
     },
+    localAppProxyService: {
+      start: () => {
+        state.localAppStartCalls += 1;
+      },
+      stop: () => {
+        state.localAppStopCalls += 1;
+      },
+      prepareWebSocketUpgrade: async (_req, pathname) => {
+        state.localAppPrepareCalls.push(pathname);
+        return { data: localAppOwner };
+      },
+      attachWebSocketClient: () => {
+        state.localAppAttachCalls += 1;
+      },
+      handleWebSocketMessage: (_ws, message) => {
+        state.localAppMessageCalls.push(message);
+      },
+      handleWebSocketPing: (_ws, data) => {
+        state.localAppPingCalls.push(data);
+      },
+      handleWebSocketPong: (_ws, data) => {
+        state.localAppPongCalls.push(data);
+      },
+      handleWebSocketDrain: () => {
+        state.localAppDrainCalls += 1;
+      },
+      detachWebSocketClient: (_ws, code, reason) => {
+        state.localAppDetachCalls.push({ code, reason });
+      },
+      abortWebSocketUpgrade: () => {
+        state.localAppAbortCalls += 1;
+      },
+    },
     uiBridge: {
       stop: () => {
         state.uiBridgeStopCalls += 1;
@@ -179,6 +227,7 @@ function createFixture(overrides: Partial<WebServerLifecycleGatewayDeps> = {}) {
     server,
     terminalOwner,
     vncOwner,
+    localAppOwner,
     setWorkspaceVisible: (value: boolean) => {
       workspaceVisible = value;
     },
@@ -208,15 +257,79 @@ describe("web server lifecycle gateway service", () => {
       handoffToken: "handoff-1",
     });
 
-    const appWebSocketResponse = await service.handleFetch(createRequest("/apps/demo/ws", {
+    const appWebSocketResponse = await service.handleFetch(createRequest("/apps/demo/ws?session=one", {
       headers: { upgrade: "websocket" },
     }), fixture.server);
-    expect(appWebSocketResponse?.status).toBe(426);
-    expect(fixture.state.upgradeCalls).toHaveLength(2);
+    expect(appWebSocketResponse).toBeUndefined();
+    expect(fixture.state.localAppPrepareCalls).toEqual(["/apps/demo/ws"]);
+    expect(fixture.state.upgradeCalls[2]?.data).toBe(fixture.localAppOwner);
 
     const standardResponse = await service.handleFetch(createRequest("/timeline?limit=10"));
     expect(standardResponse?.status).toBe(200);
     expect(fixture.state.handleRequestCalls).toEqual(["/timeline"]);
+  });
+
+  test("local app websocket upgrade enforces auth and origin before opening upstream", async () => {
+    const request = () => createRequest("/apps/demo/ws", { headers: { upgrade: "websocket" } });
+    const unauthenticated = createFixture({
+      authGateway: {
+        isAuthEnabled: () => true,
+        isAuthenticated: () => false,
+      },
+    });
+    expect((await unauthenticated.service.handleFetch(request(), unauthenticated.server))?.status).toBe(401);
+    expect(unauthenticated.state.localAppPrepareCalls).toHaveLength(0);
+
+    const csrfBlocked = createFixture();
+    const blocked = await csrfBlocked.service.handleFetch(createRequest("/apps/demo/ws", {
+      headers: {
+        upgrade: "websocket",
+        origin: "https://evil.example",
+        host: "localhost",
+      },
+    }), csrfBlocked.server);
+    expect(blocked?.status).toBe(403);
+    expect(csrfBlocked.state.localAppPrepareCalls).toHaveLength(0);
+
+    const upgradeFailure = createFixture();
+    const failed = await upgradeFailure.service.handleFetch(request(), {
+      ...upgradeFailure.server,
+      upgrade: () => false,
+    } as any);
+    expect(failed?.status).toBe(400);
+    expect(upgradeFailure.state.localAppAbortCalls).toBe(1);
+
+    const upgradeThrows = createFixture();
+    await expect(upgradeThrows.service.handleFetch(request(), {
+      ...upgradeThrows.server,
+      upgrade: () => { throw new Error("upgrade failed"); },
+    } as any)).rejects.toThrow("upgrade failed");
+    expect(upgradeThrows.state.localAppAbortCalls).toBe(1);
+  });
+
+  test("dispatches local app websocket lifecycle events", async () => {
+    const fixture = createFixture();
+    await fixture.service.start();
+    const handlers = fixture.state.serveCalls[0]?.websocket;
+    const ws = { data: fixture.localAppOwner } as any;
+    const binary = Buffer.from([1, 2, 3]);
+    const ping = Buffer.from("ping");
+    const pong = Buffer.from("pong");
+
+    handlers.open(ws);
+    handlers.message(ws, binary);
+    handlers.drain(ws);
+    handlers.ping(ws, ping);
+    handlers.pong(ws, pong);
+    handlers.close(ws, 4002, "done");
+
+    expect(fixture.state.localAppAttachCalls).toBe(1);
+    expect(fixture.state.localAppMessageCalls).toEqual([binary]);
+    expect(fixture.state.localAppDrainCalls).toBe(1);
+    expect(fixture.state.localAppPingCalls).toEqual([ping]);
+    expect(fixture.state.localAppPongCalls).toEqual([pong]);
+    expect(fixture.state.localAppDetachCalls).toEqual([{ code: 4002, reason: "done" }]);
+    await fixture.service.stop();
   });
 
   test("terminal websocket upgrade preserves auth, csrf, and upgrade failure responses", () => {
@@ -342,6 +455,7 @@ describe("web server lifecycle gateway service", () => {
     expect(fixture.state.logError[0]?.meta?.operation).toBe("load_tls_options");
     expect(fixture.state.serveCalls[1]?.tls).toBeUndefined();
     expect(fixture.state.startWorkspaceWatcherCalls).toBe(0);
+    expect(fixture.state.localAppStartCalls).toBe(1);
 
     fixture.setWorkspaceVisible(true);
     await fixture.service.syncWorkspaceWatcher();
@@ -365,6 +479,8 @@ describe("web server lifecycle gateway service", () => {
     expect(fixture.state.uiBridgeStopCalls).toBe(1);
     expect(fixture.state.terminalShutdownCalls).toBe(1);
     expect(fixture.state.vncShutdownCalls).toBe(1);
+    expect(fixture.state.localAppStartCalls).toBe(1);
+    expect(fixture.state.localAppStopCalls).toBe(1);
     expect(fixture.state.clearIntervalCalls).toHaveLength(1);
     expect(fixture.state.watcherCloseCalls).toBe(1);
     expect(fixture.service.server).toBeNull();

@@ -1,3 +1,5 @@
+import type { ServerWebSocket } from "bun";
+
 import { getWebServerConfig } from "../core/config-web.js";
 import { createUuid } from "../utils/ids.js";
 import { createLogger } from "../utils/logger.js";
@@ -21,6 +23,11 @@ import {
 } from "./types.js";
 import { buildLocalAppPublicPath, buildLocalAppUpstreamUrl, parseLocalAppPublicPath } from "./urls.js";
 import { normalizeLocalAppInput, validateLocalAppSlug } from "./validation.js";
+import {
+  LocalAppWebSocketProxy,
+  type LocalAppSocketData,
+  type PreparedLocalAppWebSocket,
+} from "./websocket-proxy.js";
 
 const log = createLogger("local-app-proxy.service");
 const HEALTH_TIMEOUT_MS = 2_000;
@@ -31,6 +38,7 @@ export interface LocalAppProxyServiceOptions {
   getPiclawPort?: () => number;
   now?: () => number;
   fetchImpl?: LocalAppProxyFetch;
+  webSocketProxy?: LocalAppWebSocketProxy;
 }
 
 export interface LocalAppProxyListEntry extends ResolvedLocalApp {
@@ -48,8 +56,11 @@ export class LocalAppProxyService {
   private expiryTimer: ReturnType<typeof setTimeout> | null = null;
   private started = false;
   private configError: string | null = null;
+  private readonly webSocketProxy: LocalAppWebSocketProxy;
 
-  constructor(private readonly options: LocalAppProxyServiceOptions = {}) {}
+  constructor(private readonly options: LocalAppProxyServiceOptions = {}) {
+    this.webSocketProxy = options.webSocketProxy ?? new LocalAppWebSocketProxy();
+  }
 
   start(): void {
     if (this.started) return;
@@ -62,6 +73,7 @@ export class LocalAppProxyService {
     this.started = false;
     if (this.expiryTimer) clearTimeout(this.expiryTimer);
     this.expiryTimer = null;
+    this.webSocketProxy.shutdown();
     this.leases.clear();
     for (const [id] of this.health) {
       if (!this.persistent.has(id)) this.health.delete(id);
@@ -69,6 +81,7 @@ export class LocalAppProxyService {
   }
 
   reloadPersistent(): void {
+    this.webSocketProxy.shutdown();
     try {
       const apps = this.readPersistent();
       this.persistent = new Map(apps.map((app) => [app.id, app]));
@@ -148,6 +161,7 @@ export class LocalAppProxyService {
       updatedAt: this.nowIso(),
     };
     this.commitPersistent(Array.from(this.persistent.values(), (app) => app.id === id ? updated : app));
+    this.webSocketProxy.closeApp(id);
     this.health.delete(id);
     log.info("Updated persistent local app mapping", {
       operation: "local_app_proxy.update_persistent",
@@ -165,6 +179,7 @@ export class LocalAppProxyService {
     const existing = this.persistent.get(normalizedId);
     if (!existing) throw new LocalAppProxyError("not_found", "Local app mapping not found.", 404);
     this.commitPersistent(Array.from(this.persistent.values()).filter((app) => app.id !== normalizedId));
+    this.webSocketProxy.closeApp(normalizedId);
     this.health.delete(normalizedId);
     log.info("Removed persistent local app mapping", {
       operation: "local_app_proxy.remove_persistent",
@@ -310,6 +325,61 @@ export class LocalAppProxyService {
     return { app: this.resolve(lease, "lease"), suffix: parsed.suffix, needsTrailingSlashRedirect: parsed.needsTrailingSlashRedirect };
   }
 
+  async prepareWebSocketUpgrade(
+    request: Request,
+    pathname: string,
+  ): Promise<PreparedLocalAppWebSocket | Response> {
+    const resolved = this.resolvePath(pathname);
+    if (!resolved) {
+      return new Response("Not found", {
+        status: 404,
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    if (resolved.needsTrailingSlashRedirect) {
+      return new Response("WebSocket URL must include the application path.", {
+        status: 400,
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    return await this.webSocketProxy.prepare(request, resolved.app, resolved.suffix);
+  }
+
+  attachWebSocketClient(ws: ServerWebSocket<LocalAppSocketData>): void {
+    this.webSocketProxy.attachBrowser(ws);
+  }
+
+  handleWebSocketMessage(
+    ws: ServerWebSocket<LocalAppSocketData>,
+    message: string | Buffer | Uint8Array,
+  ): void {
+    this.webSocketProxy.handleMessage(ws, message);
+  }
+
+  handleWebSocketPing(ws: ServerWebSocket<LocalAppSocketData>, data: Buffer): void {
+    this.webSocketProxy.handlePing(ws, data);
+  }
+
+  handleWebSocketPong(ws: ServerWebSocket<LocalAppSocketData>, data: Buffer): void {
+    this.webSocketProxy.handlePong(ws, data);
+  }
+
+  handleWebSocketDrain(ws: ServerWebSocket<LocalAppSocketData>): void {
+    this.webSocketProxy.handleDrain(ws);
+  }
+
+  detachWebSocketClient(
+    ws: ServerWebSocket<LocalAppSocketData>,
+    code: number,
+    reason: string,
+  ): void {
+    this.webSocketProxy.detachBrowser(ws, code, reason);
+  }
+
+  abortWebSocketUpgrade(data: LocalAppSocketData): void {
+    this.webSocketProxy.abortPrepared(data);
+  }
+
   async handleHttpRequest(request: Request, pathname: string): Promise<Response> {
     if (pathname === LOCAL_APP_PUBLIC_ROOT) {
       const url = new URL(request.url);
@@ -421,6 +491,7 @@ export class LocalAppProxyService {
 
   private removeLeaseRecord(lease: LocalAppLease, operation: string): void {
     this.leases.delete(lease.id);
+    this.webSocketProxy.closeApp(lease.id);
     this.health.delete(lease.id);
     this.scheduleExpiry();
     log.info("Removed temporary local app mapping", {
@@ -466,6 +537,7 @@ export class LocalAppProxyService {
     for (const lease of this.leases.values()) {
       if (Date.parse(lease.expiresAt) > now) continue;
       this.leases.delete(lease.id);
+      this.webSocketProxy.closeApp(lease.id);
       this.health.delete(lease.id);
       changed = true;
       log.info("Expired temporary local app mapping", {

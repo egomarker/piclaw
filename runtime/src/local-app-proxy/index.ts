@@ -8,3 +8,4 @@ export * from "./service.js";
 export * from "./http-proxy.js";
 export * from "./validation.js";
 export * from "./urls.js";
+export * from "./websocket-proxy.js";
