@@ -8,8 +8,9 @@ import { checkCsrfOrigin } from "./http/security.js";
 import type { TerminalSocketData } from "./terminal/terminal-session-service.js";
 import type { VncSocketData } from "./vnc/vnc-session-service.js";
 import {
-  localAppProxyService,
-  localAppWebSocketUnsupportedResponse,
+  localAppProxyService as defaultLocalAppProxyService,
+  type LocalAppSocketData,
+  type PreparedLocalAppWebSocket,
 } from "../../local-app-proxy/index.js";
 
 const log = createLogger("web");
@@ -17,7 +18,7 @@ const LINK_PREVIEW_CACHE_PURGE_INTERVAL_MS = 12 * 60 * 60 * 1000;
 const MAX_BIND_ATTEMPTS = 5;
 const BIND_RETRY_MS = 1500;
 
-export type WebSocketSessionData = TerminalSocketData | VncSocketData;
+export type WebSocketSessionData = TerminalSocketData | VncSocketData | LocalAppSocketData;
 
 interface JsonResponder {
   json(payload: unknown, status?: number): Response;
@@ -42,6 +43,19 @@ interface VncServiceLike {
   handleMessage(ws: ServerWebSocket<VncSocketData>, message: string | Buffer | Uint8Array): void;
   detachClient(ws: ServerWebSocket<VncSocketData>): void;
   shutdown(): void;
+}
+
+interface LocalAppProxyServiceLike {
+  start(): void;
+  stop(): void;
+  prepareWebSocketUpgrade(request: Request, pathname: string): Promise<PreparedLocalAppWebSocket | Response>;
+  attachWebSocketClient(ws: ServerWebSocket<LocalAppSocketData>): void;
+  handleWebSocketMessage(ws: ServerWebSocket<LocalAppSocketData>, message: string | Buffer | Uint8Array): void;
+  handleWebSocketPing(ws: ServerWebSocket<LocalAppSocketData>, data: Buffer): void;
+  handleWebSocketPong(ws: ServerWebSocket<LocalAppSocketData>, data: Buffer): void;
+  handleWebSocketDrain(ws: ServerWebSocket<LocalAppSocketData>): void;
+  detachWebSocketClient(ws: ServerWebSocket<LocalAppSocketData>, code: number, reason: string): void;
+  abortWebSocketUpgrade(data: LocalAppSocketData): void;
 }
 
 interface WatcherLike {
@@ -83,6 +97,7 @@ export interface WebServerLifecycleGatewayDeps extends JsonResponder {
   authGateway: AuthGatewayLike;
   terminalService: TerminalServiceLike;
   vncService: VncServiceLike;
+  localAppProxyService?: LocalAppProxyServiceLike;
   uiBridge: UiBridgeLike;
   sse: SseHubLike;
   serve?: typeof Bun.serve;
@@ -160,6 +175,10 @@ export class WebServerLifecycleGatewayService {
           fetch: (req, server) => this.handleFetch(req, server),
           websocket: {
             open: (ws) => {
+              if (ws.data?.kind === "local-app") {
+                this.localAppProxy.attachWebSocketClient(ws as ServerWebSocket<LocalAppSocketData>);
+                return;
+              }
               if (ws.data?.kind === "vnc") {
                 this.deps.vncService.attachClient(ws as ServerWebSocket<VncSocketData>);
                 return;
@@ -167,13 +186,40 @@ export class WebServerLifecycleGatewayService {
               this.deps.terminalService.attachClient(ws as ServerWebSocket<TerminalSocketData>);
             },
             message: (ws, message) => {
+              if (ws.data?.kind === "local-app") {
+                this.localAppProxy.handleWebSocketMessage(ws as ServerWebSocket<LocalAppSocketData>, message as any);
+                return;
+              }
               if (ws.data?.kind === "vnc") {
                 this.deps.vncService.handleMessage(ws as ServerWebSocket<VncSocketData>, message as any);
                 return;
               }
               this.deps.terminalService.handleMessage(ws as ServerWebSocket<TerminalSocketData>, message as any);
             },
-            close: (ws) => {
+            drain: (ws) => {
+              if (ws.data?.kind === "local-app") {
+                this.localAppProxy.handleWebSocketDrain(ws as ServerWebSocket<LocalAppSocketData>);
+              }
+            },
+            ping: (ws, data) => {
+              if (ws.data?.kind === "local-app") {
+                this.localAppProxy.handleWebSocketPing(ws as ServerWebSocket<LocalAppSocketData>, data);
+              }
+            },
+            pong: (ws, data) => {
+              if (ws.data?.kind === "local-app") {
+                this.localAppProxy.handleWebSocketPong(ws as ServerWebSocket<LocalAppSocketData>, data);
+              }
+            },
+            close: (ws, code, reason) => {
+              if (ws.data?.kind === "local-app") {
+                this.localAppProxy.detachWebSocketClient(
+                  ws as ServerWebSocket<LocalAppSocketData>,
+                  code,
+                  reason,
+                );
+                return;
+              }
               if (ws.data?.kind === "vnc") {
                 this.deps.vncService.detachClient(ws as ServerWebSocket<VncSocketData>);
                 return;
@@ -204,11 +250,11 @@ export class WebServerLifecycleGatewayService {
 
     if (lastBindError) throw lastBindError;
 
-    localAppProxyService.start();
+    this.localAppProxy.start();
     try {
       await this.syncWorkspaceWatcher();
     } catch (error) {
-      localAppProxyService.stop();
+      this.localAppProxy.stop();
       this.server?.stop(true);
       this.server = null;
       throw error;
@@ -235,7 +281,7 @@ export class WebServerLifecycleGatewayService {
   }
 
   async stop(): Promise<void> {
-    localAppProxyService.stop();
+    this.localAppProxy.stop();
     this.deps.sse.closeAll();
     this.deps.uiBridge.stop();
     this.deps.terminalService.shutdown();
@@ -256,8 +302,9 @@ export class WebServerLifecycleGatewayService {
 
   async handleFetch(req: Request, server?: Bun.Server<WebSocketSessionData>): Promise<Response | undefined> {
     const pathname = new URL(req.url).pathname;
-    if (req.headers.get("upgrade")?.toLowerCase() === "websocket" && pathname.startsWith("/apps/")) {
-      return localAppWebSocketUnsupportedResponse();
+    if (req.headers.get("upgrade")?.toLowerCase() === "websocket"
+      && (pathname === "/apps" || pathname.startsWith("/apps/"))) {
+      return await this.handleLocalAppWebSocketUpgrade(req, pathname, server);
     }
     if (pathname === "/terminal/ws") {
       return this.handleTerminalWebSocketUpgrade(req, server);
@@ -266,6 +313,37 @@ export class WebServerLifecycleGatewayService {
       return this.handleVncWebSocketUpgrade(req, server);
     }
     return this.deps.handleRequest(req);
+  }
+
+  async handleLocalAppWebSocketUpgrade(
+    req: Request,
+    pathname: string,
+    server?: Bun.Server<WebSocketSessionData>,
+  ): Promise<Response | undefined> {
+    const authEnabled = this.deps.authGateway.isAuthEnabled();
+    if (authEnabled && !this.deps.authGateway.isAuthenticated(req)) {
+      return this.deps.json({ error: "Unauthorized" }, 401);
+    }
+    if (!checkCsrfOrigin(req)) {
+      return this.deps.json({ error: "Origin not allowed" }, 403);
+    }
+    if (!server) {
+      return this.deps.json({ error: "WebSocket upgrade failed" }, 400);
+    }
+
+    const prepared = await this.localAppProxy.prepareWebSocketUpgrade(req, pathname);
+    if (prepared instanceof Response) return prepared;
+    let upgraded = false;
+    try {
+      upgraded = server.upgrade(req, {
+        data: prepared.data,
+        ...(prepared.headers ? { headers: prepared.headers } : {}),
+      });
+    } finally {
+      if (!upgraded) this.localAppProxy.abortWebSocketUpgrade(prepared.data);
+    }
+    if (!upgraded) return this.deps.json({ error: "WebSocket upgrade failed" }, 400);
+    return undefined;
   }
 
   handleTerminalWebSocketUpgrade(req: Request, server?: Bun.Server<WebSocketSessionData>): Response | undefined {
@@ -380,6 +458,10 @@ export class WebServerLifecycleGatewayService {
       });
       return null;
     }
+  }
+
+  private get localAppProxy(): LocalAppProxyServiceLike {
+    return this.deps.localAppProxyService ?? defaultLocalAppProxyService;
   }
 
   private get logger(): LoggerLike {

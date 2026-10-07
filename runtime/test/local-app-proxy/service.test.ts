@@ -61,6 +61,47 @@ describe("LocalAppProxyService", () => {
     harness.service.stop();
   });
 
+  test("closes WebSocket bridges when mappings change, reload, or stop", () => {
+    const persistent: PersistentLocalApp = {
+      id: "app-saved",
+      name: "Saved",
+      slug: "saved",
+      port: 4173,
+      upstreamBasePath: "/",
+      healthPath: "/health",
+      enabled: true,
+      createdAt: "2026-08-12T12:00:00.000Z",
+      updatedAt: "2026-08-12T12:00:00.000Z",
+    };
+    let saved = [persistent];
+    const closed: string[] = [];
+    let shutdowns = 0;
+    const webSocketProxy = {
+      shutdown: () => { shutdowns += 1; },
+      closeApp: (id: string) => { closed.push(id); },
+    } as any;
+    const service = new LocalAppProxyService({
+      now: () => Date.parse("2026-08-12T12:00:00.000Z"),
+      getPiclawPort: () => 8080,
+      readPersistent: () => structuredClone(saved),
+      writePersistent: (apps) => {
+        saved = structuredClone(apps);
+        return structuredClone(saved);
+      },
+      webSocketProxy,
+    });
+
+    service.start();
+    service.updatePersistent(persistent.id, { name: "Updated" });
+    const lease = service.createLease({ name: "Lease", slug: "lease", port: 4174 }, "web:one");
+    service.removeLease(lease.id, "web:one");
+    service.reloadPersistent();
+    service.stop();
+
+    expect(closed).toEqual([persistent.id, lease.id]);
+    expect(shutdowns).toBe(3);
+  });
+
   test("serves an index of enabled apps at /apps/", async () => {
     const harness = serviceHarness();
     harness.service.createPersistent({ name: "Demo & Reports", slug: "demo", port: 4173 });

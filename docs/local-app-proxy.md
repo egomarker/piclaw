@@ -1,6 +1,6 @@
 # Local App Proxy
 
-Piclaw can publish a trusted HTTP application listening inside the Piclaw environment at a protected path:
+Piclaw can publish a trusted HTTP and WebSocket application listening inside the Piclaw environment at a protected path:
 
 ```text
 http://127.0.0.1:4173/  →  https://piclaw.example/apps/demo/
@@ -47,7 +47,7 @@ Piclaw does not rewrite HTML, JavaScript, CSS, `Link` headers, or meta-refresh c
 
 ## Forwarding behavior
 
-V1 supports HTTP methods `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, and `OPTIONS`. Request bodies are buffered up to 32 MiB before forwarding. Responses are streamed, so SSE, long polling, and downloads can remain open.
+HTTP forwarding supports methods `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, and `OPTIONS`. Request bodies are buffered up to 32 MiB before forwarding. Responses are streamed, so SSE, long polling, and downloads can remain open.
 
 Piclaw supplies controlled forwarding metadata:
 
@@ -69,7 +69,16 @@ Assets must be self-contained or compatible with Piclaw's Content Security Polic
 
 ## WebSockets
 
-WebSocket forwarding is not available in V1. Upgrade attempts receive HTTP `426`. WebSockets, HMR, and Socket.IO bridging are planned as a separate V2.
+WebSocket upgrades below an enabled application mount are forwarded to the corresponding loopback path. For example:
+
+```text
+wss://piclaw.example/apps/demo/ws?room=one
+  → ws://127.0.0.1:4173/ws?room=one
+```
+
+The proxy preserves text and binary message boundaries, query strings, negotiated subprotocols, close codes and reasons, and Ping/Pong payloads. It applies bounded buffering and pauses the loopback connection when the browser is under backpressure. Individual messages are limited to 16 MiB.
+
+Upgrade requests pass through Piclaw authentication and same-origin checks. Piclaw session cookies, `Authorization`, client-supplied forwarding headers, and WebSocket extensions are not forwarded. Application-cookie authentication therefore remains unsupported.
 
 ## Agent tool
 
