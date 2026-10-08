@@ -14,6 +14,7 @@ const app: ResolvedLocalApp = {
   port: 4173,
   upstreamBasePath: "/workbench/",
   healthPath: "/health",
+  webSocketEnabled: true,
   cookieAllowlist: [],
   enabled: true,
   createdAt: "2026-08-12T12:00:00.000Z",

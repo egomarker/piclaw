@@ -22,7 +22,7 @@ afterEach(() => {
 });
 
 describe("local app proxy settings handler", () => {
-  test("passes cookie allowlists through create and update API aliases", async () => {
+  test("passes WebSocket and cookie controls through create and update API aliases", async () => {
     let createdInput: LocalAppInput | null = null;
     let updatedPatch: LocalAppPatch | null = null;
 
@@ -47,12 +47,14 @@ describe("local app proxy settings handler", () => {
             name: "Remotex",
             slug: "remotex",
             port: 4173,
+            websocket_enabled: false,
             cookie_allowlist: ["remotex_session"],
           },
         }),
       },
     ));
     expect(createResponse.status).toBe(201);
+    expect(createdInput?.webSocketEnabled).toBe(false);
     expect(createdInput?.cookieAllowlist).toEqual(["remotex_session"]);
 
     const updateResponse = await handleLocalAppProxySettingsAction(channel, new Request(
@@ -63,11 +65,12 @@ describe("local app proxy settings handler", () => {
         body: JSON.stringify({
           action: "update",
           id: "app-remotex",
-          patch: { cookieAllowlist: [] },
+          patch: { webSocketEnabled: true, cookieAllowlist: [] },
         }),
       },
     ));
     expect(updateResponse.status).toBe(200);
+    expect(updatedPatch?.webSocketEnabled).toBe(true);
     expect(updatedPatch?.cookieAllowlist).toEqual([]);
   });
 });

@@ -162,6 +162,7 @@ Authenticated users can map a trusted loopback HTTP app to `/apps/<slug>/` from 
         "port": 4173,
         "upstreamBasePath": "/",
         "healthPath": "/",
+        "webSocketEnabled": true,
         "cookieAllowlist": [],
         "enabled": true,
         "createdAt": "2026-08-12T12:00:00.000Z",
@@ -172,7 +173,7 @@ Authenticated users can map a trusted loopback HTTP app to `/apps/<slug>/` from 
 }
 ```
 
-Prefer the Settings pane instead of editing this block by hand because IDs and timestamps are server-generated and all entries are strictly validated. The current Settings UI does not expose `cookieAllowlist` or WebSocket-specific controls; use the settings API/config or create-and-promote an agent lease when those fields are needed. See [Local App Proxy](local-app-proxy.md) for the application base-path contract, header and cookie policy, agent leases, and WebSocket behavior.
+Prefer the Settings pane instead of editing this block by hand because IDs and timestamps are server-generated and all entries are strictly validated. The form exposes WebSocket forwarding and the per-app cookie allowlist. `webSocketEnabled` defaults to `true` for existing entries that omit it; `cookieAllowlist` defaults to `[]`, so no cookies are forwarded unless explicitly named. See [Local App Proxy](local-app-proxy.md) for the application base-path contract, header and cookie policy, agent leases, and WebSocket behavior.
 
 ### Web UI mode
 

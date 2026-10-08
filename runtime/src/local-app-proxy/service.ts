@@ -152,6 +152,7 @@ export class LocalAppProxyService {
       port: patch.port ?? existing.port,
       upstreamBasePath: patch.upstreamBasePath ?? existing.upstreamBasePath,
       healthPath: patch.healthPath ?? existing.healthPath,
+      webSocketEnabled: patch.webSocketEnabled ?? existing.webSocketEnabled,
       cookieAllowlist: patch.cookieAllowlist ?? existing.cookieAllowlist,
       enabled: patch.enabled ?? existing.enabled,
     }, { piclawPort: this.piclawPort });
@@ -288,6 +289,7 @@ export class LocalAppProxyService {
       port: lease.port,
       upstreamBasePath: lease.upstreamBasePath,
       healthPath: lease.healthPath,
+      webSocketEnabled: lease.webSocketEnabled,
       cookieAllowlist: lease.cookieAllowlist,
       enabled: lease.enabled,
       createdAt: lease.createdAt,
@@ -341,6 +343,12 @@ export class LocalAppProxyService {
     if (resolved.needsTrailingSlashRedirect) {
       return new Response("WebSocket URL must include the application path.", {
         status: 400,
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    if (!resolved.app.webSocketEnabled) {
+      return new Response("WebSocket forwarding is disabled for this local app.", {
+        status: 403,
         headers: { "content-type": "text/plain; charset=utf-8" },
       });
     }

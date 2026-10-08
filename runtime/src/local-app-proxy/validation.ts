@@ -125,6 +125,7 @@ export function normalizeLocalAppInput(
     port: validateLocalAppPort(value?.port, options.piclawPort),
     upstreamBasePath: normalizeLocalAppPath(value?.upstreamBasePath, { trailingSlash: true, fallback: "/" }),
     healthPath: normalizeLocalAppPath(value?.healthPath, { trailingSlash: false, fallback: "/" }),
+    webSocketEnabled: value?.webSocketEnabled !== false,
     cookieAllowlist: normalizeLocalAppCookieAllowlist(value?.cookieAllowlist),
     enabled: value?.enabled !== false,
   };
@@ -162,6 +163,7 @@ export function validatePersistentLocalApps(value: unknown, piclawPort?: number)
       port: Number(record.port),
       upstreamBasePath: typeof record.upstreamBasePath === "string" ? record.upstreamBasePath : "/",
       healthPath: typeof record.healthPath === "string" ? record.healthPath : "/",
+      webSocketEnabled: record.webSocketEnabled !== false,
       cookieAllowlist: record.cookieAllowlist as string[] | undefined,
       enabled: record.enabled !== false,
     }, { piclawPort });

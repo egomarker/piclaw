@@ -8,8 +8,21 @@ const EMPTY_FORM = {
     port: '',
     upstreamBasePath: '/',
     healthPath: '/',
+    webSocketEnabled: true,
+    cookieAllowlist: '',
     enabled: true,
 };
+
+function parseCookieAllowlist(value) {
+    return String(value || '')
+        .split(/[\s,]+/)
+        .map(name => name.trim())
+        .filter(Boolean);
+}
+
+function formatCookieAllowlist(value) {
+    return Array.isArray(value) ? value.join('\n') : '';
+}
 
 function formatExpiry(value) {
     if (!value) return '';
@@ -66,6 +79,7 @@ export function LocalAppsSection({ filter = '', setStatus }) {
         app.port,
         app.kind,
         app.ownerChatJid,
+        app.cookieAllowlist?.join(' '),
         app.health?.state,
     ].some(value => String(value || '').toLowerCase().includes(lf))) : apps, [apps, lf]);
 
@@ -85,6 +99,8 @@ export function LocalAppsSection({ filter = '', setStatus }) {
             port: String(app.port || ''),
             upstreamBasePath: app.upstreamBasePath || '/',
             healthPath: app.healthPath || '/',
+            webSocketEnabled: app.webSocketEnabled !== false,
+            cookieAllowlist: formatCookieAllowlist(app.cookieAllowlist),
             enabled: app.enabled !== false,
         });
     }, []);
@@ -101,6 +117,8 @@ export function LocalAppsSection({ filter = '', setStatus }) {
                 port: Number(form.port),
                 upstreamBasePath: form.upstreamBasePath || '/',
                 healthPath: form.healthPath || '/',
+                webSocketEnabled: form.webSocketEnabled !== false,
+                cookieAllowlist: parseCookieAllowlist(form.cookieAllowlist),
                 enabled: form.enabled !== false,
             };
             if (editingId) await updateLocalApp('update', { id: editingId, patch: payload });
@@ -166,7 +184,15 @@ export function LocalAppsSection({ filter = '', setStatus }) {
                     <label><span>${tr('settings.localApps.port')}</span><input required type="number" min="1024" max="65535" value=${form.port} onInput=${e => updateForm('port', e.target.value)} /></label>
                     <label><span>${tr('settings.localApps.upstreamPath')}</span><input required value=${form.upstreamBasePath} onInput=${e => updateForm('upstreamBasePath', e.target.value)} /></label>
                     <label><span>${tr('settings.localApps.healthPath')}</span><input required value=${form.healthPath} onInput=${e => updateForm('healthPath', e.target.value)} /></label>
-                    <label class="settings-local-app-enabled"><input type="checkbox" checked=${form.enabled} onChange=${e => updateForm('enabled', e.target.checked)} /><span>${tr('settings.localApps.enabled')}</span></label>
+                    <label class="settings-local-app-cookie-field settings-local-app-wide">
+                        <span>${tr('settings.localApps.cookieAllowlist')}</span>
+                        <textarea rows="2" placeholder="remotex_session" value=${form.cookieAllowlist} onInput=${e => updateForm('cookieAllowlist', e.target.value)}></textarea>
+                        <small>${tr('settings.localApps.cookieAllowlistHint')}</small>
+                    </label>
+                    <div class="settings-local-app-options settings-local-app-wide">
+                        <label class="settings-local-app-checkbox"><input type="checkbox" checked=${form.enabled} onChange=${e => updateForm('enabled', e.target.checked)} /><span>${tr('settings.localApps.enabled')}</span></label>
+                        <label class="settings-local-app-checkbox"><input type="checkbox" checked=${form.webSocketEnabled} onChange=${e => updateForm('webSocketEnabled', e.target.checked)} /><span>${tr('settings.localApps.webSocketEnabled')}</span></label>
+                    </div>
                 </div>
                 <button class="settings-local-app-primary" type="submit" disabled=${Boolean(busy)}>${editingId ? tr('settings.localApps.save') : tr('settings.localApps.add')}</button>
             </form>
@@ -190,12 +216,16 @@ export function LocalAppsSection({ filter = '', setStatus }) {
                                 <div class="settings-local-app-badges">
                                     <span class=${`settings-local-app-health ${healthClass(app.health)}`}>${healthLabel(app, tr)}</span>
                                     <span>${app.kind === 'lease' ? tr('settings.localApps.temporary') : tr('settings.localApps.persistent')}</span>
+                                    <span>${app.webSocketEnabled === false ? tr('settings.localApps.webSocketsDisabled') : tr('settings.localApps.webSocketsEnabled')}</span>
                                     ${app.enabled === false && html`<span>${tr('settings.localApps.disabled')}</span>`}
                                 </div>
                             </div>
                             <div class="settings-local-app-meta">
                                 <span>${tr('settings.localApps.loopbackPort', { port: app.port })}</span>
                                 <span>${tr('settings.localApps.basePath', { path: app.upstreamBasePath })}</span>
+                                <span>${app.cookieAllowlist?.length
+                                    ? tr('settings.localApps.forwardedCookies', { cookies: app.cookieAllowlist.join(', ') })
+                                    : tr('settings.localApps.noForwardedCookies')}</span>
                                 ${app.ownerChatJid && html`<span>${tr('settings.localApps.owner', { owner: app.ownerChatJid })}</span>`}
                                 ${app.expiresAt && html`<span>${tr('settings.localApps.expires', { when: formatExpiry(app.expiresAt) })}</span>`}
                                 ${app.health?.error && html`<span class="settings-local-app-health-error">${app.health.error}</span>`}
@@ -220,4 +250,10 @@ export function LocalAppsSection({ filter = '', setStatus }) {
     `;
 }
 
-export const __localAppsSettingsTest = { formatExpiry, healthClass, healthLabel };
+export const __localAppsSettingsTest = {
+    formatCookieAllowlist,
+    formatExpiry,
+    healthClass,
+    healthLabel,
+    parseCookieAllowlist,
+};

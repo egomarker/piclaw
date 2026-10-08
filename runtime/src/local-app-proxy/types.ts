@@ -17,6 +17,7 @@ export interface PersistentLocalApp {
   port: number;
   upstreamBasePath: string;
   healthPath: string;
+  webSocketEnabled: boolean;
   cookieAllowlist: string[];
   enabled: boolean;
   createdAt: string;
@@ -50,6 +51,7 @@ export interface LocalAppInput {
   port: number;
   upstreamBasePath?: string;
   healthPath?: string;
+  webSocketEnabled?: boolean;
   cookieAllowlist?: string[];
   enabled?: boolean;
 }

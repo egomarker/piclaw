@@ -56,32 +56,63 @@ describe("LocalAppProxyService", () => {
       name: "Demo",
       slug: "demo",
       port: 4173,
+      webSocketEnabled: false,
       cookieAllowlist: ["remotex_session"],
     }, "web:one");
     const promoted = harness.service.promoteLease(lease.id, "web:one");
     expect(promoted.kind).toBe("persistent");
     expect(promoted.id).toBe(lease.id);
+    expect(promoted.webSocketEnabled).toBe(false);
     expect(promoted.cookieAllowlist).toEqual(["remotex_session"]);
     expect(harness.saved()).toHaveLength(1);
+    expect(harness.saved()[0]?.webSocketEnabled).toBe(false);
     expect(harness.saved()[0]?.cookieAllowlist).toEqual(["remotex_session"]);
     expect(harness.service.list().filter((app) => app.id === lease.id)).toHaveLength(1);
     harness.service.stop();
   });
 
-  test("persists cookie allowlists on create and update", () => {
+  test("persists WebSocket and cookie controls on create and update", () => {
     const harness = serviceHarness();
     const created = harness.service.createPersistent({
       name: "Remotex",
       slug: "remotex",
       port: 4173,
+      webSocketEnabled: false,
       cookieAllowlist: ["remotex_session"],
     });
+    expect(created.webSocketEnabled).toBe(false);
     expect(created.cookieAllowlist).toEqual(["remotex_session"]);
+    expect(harness.saved()[0]?.webSocketEnabled).toBe(false);
     expect(harness.saved()[0]?.cookieAllowlist).toEqual(["remotex_session"]);
 
-    const updated = harness.service.updatePersistent(created.id, { cookieAllowlist: [] });
+    const updated = harness.service.updatePersistent(created.id, {
+      webSocketEnabled: true,
+      cookieAllowlist: [],
+    });
+    expect(updated.webSocketEnabled).toBe(true);
     expect(updated.cookieAllowlist).toEqual([]);
+    expect(harness.saved()[0]?.webSocketEnabled).toBe(true);
     expect(harness.saved()[0]?.cookieAllowlist).toEqual([]);
+    harness.service.stop();
+  });
+
+  test("rejects WebSocket upgrades when forwarding is disabled for a mapping", async () => {
+    const harness = serviceHarness();
+    harness.service.createPersistent({
+      name: "HTTP only",
+      slug: "http-only",
+      port: 4173,
+      webSocketEnabled: false,
+    });
+
+    const response = await harness.service.prepareWebSocketUpgrade(
+      new Request("https://piclaw.test/apps/http-only/ws"),
+      "/apps/http-only/ws",
+    );
+    expect(response).toBeInstanceOf(Response);
+    if (!(response instanceof Response)) throw new Error("Expected disabled WebSocket response");
+    expect(response.status).toBe(403);
+    expect(await response.text()).toContain("disabled");
     harness.service.stop();
   });
 
@@ -93,6 +124,7 @@ describe("LocalAppProxyService", () => {
       port: 4173,
       upstreamBasePath: "/",
       healthPath: "/health",
+      webSocketEnabled: true,
       cookieAllowlist: [],
       enabled: true,
       createdAt: "2026-08-12T12:00:00.000Z",

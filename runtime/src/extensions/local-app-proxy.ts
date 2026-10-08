@@ -25,6 +25,7 @@ const LocalAppProxySchema = Type.Object({
   port: Type.Optional(Type.Integer({ description: "Loopback HTTP port for action=create.", minimum: 1024, maximum: 65535 })),
   upstream_path: Type.Optional(Type.String({ description: "Optional upstream base path. Defaults to /." })),
   health_path: Type.Optional(Type.String({ description: "Optional health-check path. Defaults to /." })),
+  websocket_enabled: Type.Optional(Type.Boolean({ description: "Forward WebSocket upgrades for this app. Defaults to true." })),
   cookie_allowlist: Type.Optional(Type.Array(Type.String(), {
     description: "Cookie names to forward for this app. Defaults to none; piclaw_session is always blocked.",
     maxItems: MAX_LOCAL_APP_COOKIE_ALLOWLIST,
@@ -45,6 +46,7 @@ type LocalAppProxyParams = {
   port?: number;
   upstream_path?: string;
   health_path?: string;
+  websocket_enabled?: boolean;
   cookie_allowlist?: string[];
   ttl_minutes?: number;
 };
@@ -76,7 +78,7 @@ const HINT = [
   "## Local App Proxy",
   "Use local_app_proxy to publish a trusted HTTP app already listening on 127.0.0.1 through /apps/<slug>/.",
   "Create a temporary lease, verify it with action=status, then include the returned Open App URL in the final response.",
-  "HTTP and WebSocket traffic is forwarded. Cookies are default-deny; opt in names with cookie_allowlist, while piclaw_session is always blocked.",
+  "HTTP traffic is forwarded. WebSocket forwarding defaults on and can be disabled with websocket_enabled. Cookies are default-deny; opt in names with cookie_allowlist, while piclaw_session is always blocked.",
   "The tool does not start, stop, or supervise the app process.",
 ].join("\n");
 
@@ -109,6 +111,7 @@ export const localAppProxyTool: ExtensionFactory = (pi: ExtensionAPI) => {
             port: params.port!,
             upstreamBasePath: params.upstream_path || "/",
             healthPath: params.health_path || "/",
+            webSocketEnabled: params.websocket_enabled,
             cookieAllowlist: params.cookie_allowlist,
             ttlMinutes: params.ttl_minutes,
           }, chatJid);

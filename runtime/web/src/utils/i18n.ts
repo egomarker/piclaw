@@ -629,7 +629,14 @@ type MessageKey =
   | 'settings.localApps.port'
   | 'settings.localApps.upstreamPath'
   | 'settings.localApps.healthPath'
+  | 'settings.localApps.cookieAllowlist'
+  | 'settings.localApps.cookieAllowlistHint'
   | 'settings.localApps.enabled'
+  | 'settings.localApps.webSocketEnabled'
+  | 'settings.localApps.webSocketsEnabled'
+  | 'settings.localApps.webSocketsDisabled'
+  | 'settings.localApps.forwardedCookies'
+  | 'settings.localApps.noForwardedCookies'
   | 'settings.localApps.save'
   | 'settings.localApps.add'
   | 'settings.localApps.registered'
@@ -1323,7 +1330,14 @@ const EN: Record<MessageKey, string> = {
   'settings.localApps.port': 'Loopback port',
   'settings.localApps.upstreamPath': 'Upstream base path',
   'settings.localApps.healthPath': 'Health path',
+  'settings.localApps.cookieAllowlist': 'Cookie allowlist',
+  'settings.localApps.cookieAllowlistHint': 'Separate cookie names with commas or spaces. Empty forwards none; piclaw_session is always blocked.',
   'settings.localApps.enabled': 'Enabled',
+  'settings.localApps.webSocketEnabled': 'Forward WebSockets',
+  'settings.localApps.webSocketsEnabled': 'WebSockets on',
+  'settings.localApps.webSocketsDisabled': 'WebSockets off',
+  'settings.localApps.forwardedCookies': 'Cookies: {cookies}',
+  'settings.localApps.noForwardedCookies': 'Cookies: none',
   'settings.localApps.save': 'Save changes',
   'settings.localApps.add': 'Add app',
   'settings.localApps.registered': '{count} registered apps',
@@ -2017,7 +2031,14 @@ const ZH_CN: Partial<Record<MessageKey, string>> = {
   'settings.localApps.port': '回环端口',
   'settings.localApps.upstreamPath': '上游基础路径',
   'settings.localApps.healthPath': '健康检查路径',
+  'settings.localApps.cookieAllowlist': 'Cookie 允许列表',
+  'settings.localApps.cookieAllowlistHint': '用逗号或空格分隔 Cookie 名称。留空则不转发任何 Cookie；piclaw_session 始终被阻止。',
   'settings.localApps.enabled': '已启用',
+  'settings.localApps.webSocketEnabled': '转发 WebSocket',
+  'settings.localApps.webSocketsEnabled': 'WebSocket 已开启',
+  'settings.localApps.webSocketsDisabled': 'WebSocket 已关闭',
+  'settings.localApps.forwardedCookies': 'Cookie：{cookies}',
+  'settings.localApps.noForwardedCookies': 'Cookie：无',
   'settings.localApps.save': '保存更改',
   'settings.localApps.add': '添加应用',
   'settings.localApps.registered': '已注册 {count} 个应用',
@@ -2711,7 +2732,14 @@ const JA: Partial<Record<MessageKey, string>> = {
   'settings.localApps.port': 'ループバックポート',
   'settings.localApps.upstreamPath': '上流ベースパス',
   'settings.localApps.healthPath': 'ヘルスパス',
+  'settings.localApps.cookieAllowlist': 'Cookie 許可リスト',
+  'settings.localApps.cookieAllowlistHint': 'Cookie 名をカンマまたは空白で区切ります。空欄では転送せず、piclaw_session は常にブロックされます。',
   'settings.localApps.enabled': '有効',
+  'settings.localApps.webSocketEnabled': 'WebSocket を転送',
+  'settings.localApps.webSocketsEnabled': 'WebSocket オン',
+  'settings.localApps.webSocketsDisabled': 'WebSocket オフ',
+  'settings.localApps.forwardedCookies': 'Cookie: {cookies}',
+  'settings.localApps.noForwardedCookies': 'Cookie: なし',
   'settings.localApps.save': '変更を保存',
   'settings.localApps.add': 'アプリを追加',
   'settings.localApps.registered': '{count} 個の登録済みアプリ',

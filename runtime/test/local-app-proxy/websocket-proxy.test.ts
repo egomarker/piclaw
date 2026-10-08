@@ -30,6 +30,7 @@ function resolvedApp(port: number): ResolvedLocalApp {
     port,
     upstreamBasePath: "/base",
     healthPath: "/health",
+    webSocketEnabled: true,
     cookieAllowlist: [],
     enabled: true,
     createdAt: new Date(0).toISOString(),
