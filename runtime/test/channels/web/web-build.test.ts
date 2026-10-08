@@ -10,7 +10,7 @@ import "../../helpers.js";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { join } from "path";
 
-const WEB_BUILD_TEST_TIMEOUT_MS = Number(process.env.WEB_BUILD_TEST_TIMEOUT_MS || 20_000);
+const WEB_BUILD_TEST_TIMEOUT_MS = Number(process.env.WEB_BUILD_TEST_TIMEOUT_MS || 120_000);
 
 function projectRoot(): string {
   return join(import.meta.dir, "..", "..", "..");

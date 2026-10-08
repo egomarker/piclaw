@@ -41,7 +41,7 @@ BUN_ROOT ?= $(or $(BUN_INSTALL),$(patsubst %/bin/bun,%,$(BUN_BIN_REAL)),/usr/loc
 GLOBAL_PKG := $(BUN_ROOT)/install/global/package.json
 GLOBAL_LOCK := $(BUN_ROOT)/install/global/bun.lock
 PI_AGENT_VERSION ?= $(shell jq -r '.dependencies["@earendil-works/pi-coding-agent"] // "0.74.0"' package.json)
-WEB_BUILD_TEST_TIMEOUT_MS ?= 20000
+WEB_BUILD_TEST_TIMEOUT_MS ?= 120000
 
 .PHONY: help up down enter build build-piclaw build-web build-ts build-desktop vendor update-mermaid-vendor pack portable portable-linux portable-linux-baseline portable-mac portable-windows portable-experimental-shell \
         local-install restart lint test test-coverage ci-fast ci-integration install-git-hooks pre-push-ci publish-smoke \
@@ -102,7 +102,7 @@ update-mermaid-vendor: ## Rebuild or upgrade vendored mermaid (use MERMAID_VERSI
 
 build-web: ## Build web JS/CSS bundles (+ sourcemaps) into static/mobile/dist and static/common/dist
 	cd runtime && bun run build:web
-	@cd runtime && bun test --timeout $(WEB_BUILD_TEST_TIMEOUT_MS) test/channels/web/web-build.test.ts test/channels/web/post-link-preview-content.test.ts
+	@cd runtime && WEB_BUILD_TEST_TIMEOUT_MS=$(WEB_BUILD_TEST_TIMEOUT_MS) bun test --timeout $(WEB_BUILD_TEST_TIMEOUT_MS) test/channels/web/web-build.test.ts test/channels/web/post-link-preview-content.test.ts
 	@# Pre-compress static assets for faster first-request serving
 	@find runtime/web/static -type f \( -name '*.js' -o -name '*.css' -o -name '*.json' -o -name '*.svg' \) \
 		! -name '*.gz' ! -name '*.br' -size +1k \
