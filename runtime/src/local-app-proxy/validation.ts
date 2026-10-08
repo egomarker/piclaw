@@ -1,7 +1,7 @@
 import {
   MAX_LOCAL_APP_COOKIE_ALLOWLIST,
   MAX_LOCAL_APPS,
-  PICLAW_SESSION_COOKIE_NAME,
+  LOCAL_APP_PROTECTED_COOKIE_NAME,
   type LocalAppInput,
   type PersistentLocalApp,
   LocalAppProxyError,
@@ -100,10 +100,10 @@ export function normalizeLocalAppCookieAllowlist(value: unknown): string[] {
     if (!name || name.length > MAX_COOKIE_NAME_LENGTH || !COOKIE_NAME_RE.test(name)) {
       throw new LocalAppProxyError("invalid_cookie_allowlist", `Invalid cookie name in allowlist: ${name || "(empty)"}`);
     }
-    if (name.toLowerCase() === PICLAW_SESSION_COOKIE_NAME) {
+    if (name.toLowerCase() === LOCAL_APP_PROTECTED_COOKIE_NAME) {
       throw new LocalAppProxyError(
         "reserved_cookie",
-        `${PICLAW_SESSION_COOKIE_NAME} cannot be forwarded to a local app.`,
+        `${LOCAL_APP_PROTECTED_COOKIE_NAME} cannot be forwarded to a local app.`,
       );
     }
     if (!seen.has(name)) {

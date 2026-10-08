@@ -3,7 +3,7 @@ import { createLogger } from "../utils/logger.js";
 import {
   LOCAL_APP_PUBLIC_ROOT,
   MAX_PROXY_REQUEST_BODY_BYTES,
-  PICLAW_SESSION_COOKIE_NAME,
+  LOCAL_APP_PROTECTED_COOKIE_NAME,
   LocalAppProxyError,
   type ResolvedLocalApp,
 } from "./types.js";
@@ -77,7 +77,7 @@ function removeHeadersByPrefix(headers: Headers, prefixes: string[]): void {
 
 function allowedCookieNames(app: ResolvedLocalApp): Set<string> {
   return new Set(
-    (app.cookieAllowlist ?? []).filter((name) => name.toLowerCase() !== PICLAW_SESSION_COOKIE_NAME),
+    (app.cookieAllowlist ?? []).filter((name) => name.toLowerCase() !== LOCAL_APP_PROTECTED_COOKIE_NAME),
   );
 }
 
@@ -92,7 +92,7 @@ export function filterLocalAppCookieHeader(value: string | null, app: ResolvedLo
     const separator = trimmed.indexOf("=");
     if (separator <= 0) continue;
     const name = trimmed.slice(0, separator).trim();
-    if (name.toLowerCase() === PICLAW_SESSION_COOKIE_NAME || !allowlist.has(name)) continue;
+    if (name.toLowerCase() === LOCAL_APP_PROTECTED_COOKIE_NAME || !allowlist.has(name)) continue;
     cookies.push(`${name}=${trimmed.slice(separator + 1).trim()}`);
   }
   return cookies.length > 0 ? cookies.join("; ") : null;
@@ -106,7 +106,7 @@ function filterLocalAppSetCookieHeaders(headers: Headers, app: ResolvedLocalApp)
     const separator = value.indexOf("=");
     if (separator <= 0) return false;
     const name = value.slice(0, separator).trim();
-    return name.toLowerCase() !== PICLAW_SESSION_COOKIE_NAME && allowlist.has(name);
+    return name.toLowerCase() !== LOCAL_APP_PROTECTED_COOKIE_NAME && allowlist.has(name);
   });
 }
 

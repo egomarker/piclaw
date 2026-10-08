@@ -7,7 +7,7 @@ export const MAX_LEASE_MINUTES = 24 * 60;
 export const MAX_LOCAL_APPS = 64;
 export const MAX_AGENT_APPS_PER_CHAT = 8;
 export const MAX_LOCAL_APP_COOKIE_ALLOWLIST = 32;
-export const PICLAW_SESSION_COOKIE_NAME = "piclaw_session";
+export const LOCAL_APP_PROTECTED_COOKIE_NAME = "piclaw_session";
 export const MAX_PROXY_REQUEST_BODY_BYTES = 32 * 1024 * 1024;
 
 export interface PersistentLocalApp {
