@@ -3,6 +3,7 @@ import { createLogger } from "../utils/logger.js";
 import {
   LOCAL_APP_PUBLIC_ROOT,
   MAX_PROXY_REQUEST_BODY_BYTES,
+  LOCAL_APP_PROTECTED_COOKIE_NAME,
   LocalAppProxyError,
   type ResolvedLocalApp,
 } from "./types.js";
@@ -74,11 +75,48 @@ function removeHeadersByPrefix(headers: Headers, prefixes: string[]): void {
   }
 }
 
+function allowedCookieNames(app: ResolvedLocalApp): Set<string> {
+  return new Set(
+    (app.cookieAllowlist ?? []).filter((name) => name.toLowerCase() !== LOCAL_APP_PROTECTED_COOKIE_NAME),
+  );
+}
+
+export function filterLocalAppCookieHeader(value: string | null, app: ResolvedLocalApp): string | null {
+  if (!value) return null;
+  const allowlist = allowedCookieNames(app);
+  if (allowlist.size === 0) return null;
+
+  const cookies: string[] = [];
+  for (const pair of value.split(";")) {
+    const trimmed = pair.trim();
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0) continue;
+    const name = trimmed.slice(0, separator).trim();
+    if (name.toLowerCase() === LOCAL_APP_PROTECTED_COOKIE_NAME || !allowlist.has(name)) continue;
+    cookies.push(`${name}=${trimmed.slice(separator + 1).trim()}`);
+  }
+  return cookies.length > 0 ? cookies.join("; ") : null;
+}
+
+function filterLocalAppSetCookieHeaders(headers: Headers, app: ResolvedLocalApp): string[] {
+  const allowlist = allowedCookieNames(app);
+  if (allowlist.size === 0) return [];
+
+  return headers.getSetCookie().filter((value) => {
+    const separator = value.indexOf("=");
+    if (separator <= 0) return false;
+    const name = value.slice(0, separator).trim();
+    return name.toLowerCase() !== LOCAL_APP_PROTECTED_COOKIE_NAME && allowlist.has(name);
+  });
+}
+
 export function buildLocalAppUpstreamHeaders(request: Request, app: ResolvedLocalApp): Headers {
+  const cookie = filterLocalAppCookieHeader(request.headers.get("cookie"), app);
   const headers = new Headers(request.headers);
   removeConnectionNamedHeaders(headers);
   for (const name of REQUEST_BLOCKED_HEADERS) headers.delete(name);
   removeHeadersByPrefix(headers, ["proxy-", "sec-websocket-", "x-forwarded-"]);
+  if (cookie) headers.set("cookie", cookie);
 
   const { proto, host } = getRequestOriginParts(request);
   headers.set("x-forwarded-prefix", `${LOCAL_APP_PUBLIC_ROOT}/${app.slug}`);
@@ -88,10 +126,12 @@ export function buildLocalAppUpstreamHeaders(request: Request, app: ResolvedLoca
 }
 
 export function buildLocalAppDownstreamHeaders(headersLike: Headers, app: ResolvedLocalApp): Headers {
+  const setCookie = filterLocalAppSetCookieHeaders(headersLike, app);
   const headers = new Headers(headersLike);
   removeConnectionNamedHeaders(headers);
   for (const name of RESPONSE_BLOCKED_HEADERS) headers.delete(name);
   removeHeadersByPrefix(headers, ["access-control-"]);
+  for (const value of setCookie) headers.append("set-cookie", value);
 
   // Bun fetch may transparently decode an upstream body while retaining stale
   // encoding metadata. Browsers would otherwise attempt to decode it twice.

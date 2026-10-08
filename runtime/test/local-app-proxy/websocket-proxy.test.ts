@@ -30,6 +30,7 @@ function resolvedApp(port: number): ResolvedLocalApp {
     port,
     upstreamBasePath: "/base",
     healthPath: "/health",
+    cookieAllowlist: [],
     enabled: true,
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString(),
@@ -149,6 +150,46 @@ describe("LocalAppWebSocketProxy", () => {
     proxy.handleMessage(browser, "close-upstream");
     await waitFor(() => browserCloses.length === 1, "browser did not receive upstream close");
     expect(browserCloses).toEqual([{ code: 4002, reason: "fixture close" }]);
+  });
+
+  test("forwards only allowlisted cookies during an upgrade", async () => {
+    let upstreamCookie: string | null = null;
+    const upstream = Bun.serve<{ fixture: true }>({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request, server) {
+        upstreamCookie = request.headers.get("cookie");
+        if (!server.upgrade(request, { data: { fixture: true } })) {
+          return new Response("upgrade failed", { status: 400 });
+        }
+        return undefined;
+      },
+      websocket: {
+        open() {},
+        message() {},
+      },
+    });
+    servers.push(upstream);
+    const proxy = new LocalAppWebSocketProxy();
+    proxies.push(proxy);
+    const app = {
+      ...resolvedApp(upstream.port),
+      // piclaw_session is included deliberately to verify the proxy's defense in depth.
+      cookieAllowlist: ["remotex_session", "piclaw_session"],
+    };
+
+    const prepared = await proxy.prepare(new Request("http://piclaw.test/apps/demo/ws", {
+      headers: {
+        connection: "Upgrade",
+        cookie: "other=secret; remotex_session=allowed; piclaw_session=must-not-leak",
+        upgrade: "websocket",
+      },
+    }), app, "/ws");
+
+    expect(prepared).not.toBeInstanceOf(Response);
+    if (prepared instanceof Response) throw new Error(await prepared.text());
+    expect(upstreamCookie).toBe("remotex_session=allowed");
+    proxy.abortPrepared(prepared.data);
   });
 
   test("returns a bounded HTTP error when the upstream refuses its handshake", async () => {

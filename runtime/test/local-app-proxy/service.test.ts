@@ -52,12 +52,36 @@ describe("LocalAppProxyService", () => {
 
   test("promotes a lease transactionally to persistent config", () => {
     const harness = serviceHarness();
-    const lease = harness.service.createLease({ name: "Demo", slug: "demo", port: 4173 }, "web:one");
+    const lease = harness.service.createLease({
+      name: "Demo",
+      slug: "demo",
+      port: 4173,
+      cookieAllowlist: ["remotex_session"],
+    }, "web:one");
     const promoted = harness.service.promoteLease(lease.id, "web:one");
     expect(promoted.kind).toBe("persistent");
     expect(promoted.id).toBe(lease.id);
+    expect(promoted.cookieAllowlist).toEqual(["remotex_session"]);
     expect(harness.saved()).toHaveLength(1);
+    expect(harness.saved()[0]?.cookieAllowlist).toEqual(["remotex_session"]);
     expect(harness.service.list().filter((app) => app.id === lease.id)).toHaveLength(1);
+    harness.service.stop();
+  });
+
+  test("persists cookie allowlists on create and update", () => {
+    const harness = serviceHarness();
+    const created = harness.service.createPersistent({
+      name: "Remotex",
+      slug: "remotex",
+      port: 4173,
+      cookieAllowlist: ["remotex_session"],
+    });
+    expect(created.cookieAllowlist).toEqual(["remotex_session"]);
+    expect(harness.saved()[0]?.cookieAllowlist).toEqual(["remotex_session"]);
+
+    const updated = harness.service.updatePersistent(created.id, { cookieAllowlist: [] });
+    expect(updated.cookieAllowlist).toEqual([]);
+    expect(harness.saved()[0]?.cookieAllowlist).toEqual([]);
     harness.service.stop();
   });
 
@@ -69,6 +93,7 @@ describe("LocalAppProxyService", () => {
       port: 4173,
       upstreamBasePath: "/",
       healthPath: "/health",
+      cookieAllowlist: [],
       enabled: true,
       createdAt: "2026-08-12T12:00:00.000Z",
       updatedAt: "2026-08-12T12:00:00.000Z",

@@ -1,11 +1,15 @@
 import {
+  MAX_LOCAL_APP_COOKIE_ALLOWLIST,
   MAX_LOCAL_APPS,
+  LOCAL_APP_PROTECTED_COOKIE_NAME,
   type LocalAppInput,
   type PersistentLocalApp,
   LocalAppProxyError,
 } from "./types.js";
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const COOKIE_NAME_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const MAX_COOKIE_NAME_LENGTH = 256;
 
 export function validateLocalAppName(value: unknown): string {
   const name = String(value || "").trim();
@@ -74,6 +78,42 @@ export function normalizeLocalAppPath(
   return path.length > 1 ? path.replace(/\/+$/, "") || "/" : "/";
 }
 
+export function normalizeLocalAppCookieAllowlist(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new LocalAppProxyError("invalid_cookie_allowlist", "Cookie allowlist must be an array of cookie names.");
+  }
+  if (value.length > MAX_LOCAL_APP_COOKIE_ALLOWLIST) {
+    throw new LocalAppProxyError(
+      "invalid_cookie_allowlist",
+      `Cookie allowlist may contain at most ${MAX_LOCAL_APP_COOKIE_ALLOWLIST} names.`,
+    );
+  }
+
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    if (typeof raw !== "string") {
+      throw new LocalAppProxyError("invalid_cookie_allowlist", "Cookie allowlist entries must be strings.");
+    }
+    const name = raw.trim();
+    if (!name || name.length > MAX_COOKIE_NAME_LENGTH || !COOKIE_NAME_RE.test(name)) {
+      throw new LocalAppProxyError("invalid_cookie_allowlist", `Invalid cookie name in allowlist: ${name || "(empty)"}`);
+    }
+    if (name.toLowerCase() === LOCAL_APP_PROTECTED_COOKIE_NAME) {
+      throw new LocalAppProxyError(
+        "reserved_cookie",
+        `${LOCAL_APP_PROTECTED_COOKIE_NAME} cannot be forwarded to a local app.`,
+      );
+    }
+    if (!seen.has(name)) {
+      seen.add(name);
+      names.push(name);
+    }
+  }
+  return names;
+}
+
 export function normalizeLocalAppInput(
   value: LocalAppInput,
   options: { piclawPort?: number; fallbackSlug?: string } = {},
@@ -85,6 +125,7 @@ export function normalizeLocalAppInput(
     port: validateLocalAppPort(value?.port, options.piclawPort),
     upstreamBasePath: normalizeLocalAppPath(value?.upstreamBasePath, { trailingSlash: true, fallback: "/" }),
     healthPath: normalizeLocalAppPath(value?.healthPath, { trailingSlash: false, fallback: "/" }),
+    cookieAllowlist: normalizeLocalAppCookieAllowlist(value?.cookieAllowlist),
     enabled: value?.enabled !== false,
   };
 }
@@ -121,6 +162,7 @@ export function validatePersistentLocalApps(value: unknown, piclawPort?: number)
       port: Number(record.port),
       upstreamBasePath: typeof record.upstreamBasePath === "string" ? record.upstreamBasePath : "/",
       healthPath: typeof record.healthPath === "string" ? record.healthPath : "/",
+      cookieAllowlist: record.cookieAllowlist as string[] | undefined,
       enabled: record.enabled !== false,
     }, { piclawPort });
     if (slugs.has(normalized.slug)) {
