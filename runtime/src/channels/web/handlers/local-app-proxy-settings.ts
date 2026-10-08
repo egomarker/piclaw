@@ -42,6 +42,9 @@ export async function handleLocalAppProxySettingsAction(
         healthPath: typeof raw.healthPath === "string"
           ? raw.healthPath
           : typeof raw.health_path === "string" ? raw.health_path : undefined,
+        webSocketEnabled: Object.prototype.hasOwnProperty.call(raw, "webSocketEnabled")
+          ? raw.webSocketEnabled !== false
+          : raw.websocket_enabled !== false,
         cookieAllowlist: (Object.prototype.hasOwnProperty.call(raw, "cookieAllowlist")
           ? raw.cookieAllowlist
           : raw.cookie_allowlist) as string[] | undefined,
@@ -60,6 +63,8 @@ export async function handleLocalAppProxySettingsAction(
       if (Object.prototype.hasOwnProperty.call(raw, "upstream_path")) patch.upstreamBasePath = String(raw.upstream_path || "");
       if (Object.prototype.hasOwnProperty.call(raw, "healthPath")) patch.healthPath = String(raw.healthPath || "");
       if (Object.prototype.hasOwnProperty.call(raw, "health_path")) patch.healthPath = String(raw.health_path || "");
+      if (Object.prototype.hasOwnProperty.call(raw, "webSocketEnabled")) patch.webSocketEnabled = raw.webSocketEnabled !== false;
+      if (Object.prototype.hasOwnProperty.call(raw, "websocket_enabled")) patch.webSocketEnabled = raw.websocket_enabled !== false;
       if (Object.prototype.hasOwnProperty.call(raw, "cookieAllowlist")) patch.cookieAllowlist = raw.cookieAllowlist as string[];
       if (Object.prototype.hasOwnProperty.call(raw, "cookie_allowlist")) patch.cookieAllowlist = raw.cookie_allowlist as string[];
       if (Object.prototype.hasOwnProperty.call(raw, "enabled")) patch.enabled = raw.enabled !== false;

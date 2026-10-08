@@ -38,6 +38,7 @@ describe("local app proxy validation", () => {
       port: 4173,
       upstreamBasePath: "/workbench/",
       healthPath: "/health",
+      webSocketEnabled: true,
       cookieAllowlist: ["remotex_session"],
       enabled: true,
     });
@@ -59,8 +60,10 @@ describe("local app proxy validation", () => {
     expect(() => normalizeLocalAppCookieAllowlist(Array.from({ length: 33 }, (_, index) => `cookie_${index}`))).toThrow(/at most 32/);
   });
 
-  test("migrates persisted apps without an allowlist to default-deny", () => {
-    expect(validatePersistentLocalApps([app()], 8080)[0]?.cookieAllowlist).toEqual([]);
+  test("migrates persisted apps without proxy controls to safe compatible defaults", () => {
+    const migrated = validatePersistentLocalApps([app()], 8080)[0];
+    expect(migrated?.webSocketEnabled).toBe(true);
+    expect(migrated?.cookieAllowlist).toEqual([]);
   });
 
   test("rejects duplicate ids and slugs in persisted config", () => {

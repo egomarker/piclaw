@@ -17,11 +17,12 @@ Open **Settings → Local Apps** and provide:
 - the loopback HTTP port (`1024`–`65535`)
 - an optional upstream base path (default `/`)
 - an optional health path (default `/`)
-- an optional cookie-name allowlist (default `[]`, configured through the API/config or the agent tool)
+- whether to forward WebSocket upgrades (default on)
+- an optional cookie-name allowlist (default `[]`)
 
 Persistent mappings are stored under `domains.localAppProxy.apps` in `.piclaw/config.json`. Agent-created mappings are temporary in-memory leases and disappear when Piclaw restarts. Removing a mapping never stops its application process.
 
-The Local Apps Settings UI does not currently expose cookie-allowlist or WebSocket-specific controls. Cookie allowlists can be supplied as `cookieAllowlist` in persistent config/the settings API, or as `cookie_allowlist` when creating an agent lease. WebSocket forwarding is automatic for enabled mappings.
+The Settings form exposes both proxy controls. Cookie names may be separated with commas or whitespace; an empty allowlist forwards no cookies. Existing mappings without `webSocketEnabled` retain the previous behavior and default to WebSocket forwarding on. The settings API/config use `webSocketEnabled` and `cookieAllowlist`; agent lease creation uses `websocket_enabled` and `cookie_allowlist`.
 
 Open `/apps/` to browse all enabled mappings, copy their public URLs, or launch them.
 
@@ -74,7 +75,7 @@ Assets must be self-contained or compatible with Piclaw's Content Security Polic
 
 ## WebSockets
 
-WebSocket upgrades below an enabled application mount are forwarded to the corresponding loopback path. For example:
+WebSocket upgrades below an enabled application mount are forwarded to the corresponding loopback path when **Forward WebSockets** is on for that mapping. For example:
 
 ```text
 wss://piclaw.example/apps/demo/ws?room=one
@@ -87,4 +88,4 @@ Upgrade requests pass through Piclaw authentication and same-origin checks. `Aut
 
 ## Agent tool
 
-The on-demand `local_app_proxy` tool lets an agent create a temporary mapping, list its chat-owned mappings, probe status, renew a lease, and remove it. Pass `cookie_allowlist` during creation to opt specific application cookies into HTTP and WebSocket forwarding. The tool does not start, kill, or supervise app processes. Default lease duration is two hours; the maximum is 24 hours.
+The on-demand `local_app_proxy` tool lets an agent create a temporary mapping, list its chat-owned mappings, probe status, renew a lease, and remove it. Pass `websocket_enabled: false` during creation for an HTTP-only mapping. Pass `cookie_allowlist` to opt specific application cookies into HTTP and WebSocket forwarding. The tool does not start, kill, or supervise app processes. Default lease duration is two hours; the maximum is 24 hours.
