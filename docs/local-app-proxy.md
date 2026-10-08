@@ -17,8 +17,11 @@ Open **Settings → Local Apps** and provide:
 - the loopback HTTP port (`1024`–`65535`)
 - an optional upstream base path (default `/`)
 - an optional health path (default `/`)
+- an optional cookie-name allowlist (default `[]`, configured through the API/config or the agent tool)
 
 Persistent mappings are stored under `domains.localAppProxy.apps` in `.piclaw/config.json`. Agent-created mappings are temporary in-memory leases and disappear when Piclaw restarts. Removing a mapping never stops its application process.
+
+The Local Apps Settings UI does not currently expose cookie-allowlist or WebSocket-specific controls. Cookie allowlists can be supplied as `cookieAllowlist` in persistent config/the settings API, or as `cookie_allowlist` when creating an agent lease. WebSocket forwarding is automatic for enabled mappings.
 
 Open `/apps/` to browse all enabled mappings, copy their public URLs, or launch them.
 
@@ -63,7 +66,9 @@ Same-upstream redirects are rewritten below the application mount. Redirects tha
 
 Path-based apps execute on Piclaw's browser origin. **Only publish code you trust.** A proxied app can call same-origin Piclaw APIs from the browser, and shares origin-wide browser state such as `localStorage`. When Piclaw authentication is disabled, enabled apps are also unauthenticated. Use a separate origin to isolate untrusted code.
 
-Piclaw never forwards browser cookies, `Authorization`, `Origin`, `Referer`, or client-supplied forwarding headers upstream. It drops upstream cookies, CORS policy headers, and origin-wide destructive response headers. HTTP Authorization and application cookies are therefore unsupported in V1.
+Piclaw never forwards `Authorization`, `Origin`, `Referer`, client-supplied forwarding headers, or cookies by default. A mapping may opt in to specific application cookie names through its `cookieAllowlist`. The filter applies to inbound HTTP and WebSocket upgrade `Cookie` headers and outbound HTTP `Set-Cookie` headers. All other cookies are dropped, and `piclaw_session` is always blocked even if it appears in an allowlist.
+
+Allowlisted `Set-Cookie` attributes are preserved. The upstream app should scope each cookie's `Path` to its public mount (for example `/apps/demo/`). Piclaw still drops CORS policy headers and origin-wide destructive response headers. HTTP Authorization remains unsupported.
 
 Assets must be self-contained or compatible with Piclaw's Content Security Policy. A badly configured upstream can still expose its own files; the proxy cannot determine which upstream resources are intended to be public.
 
@@ -78,8 +83,8 @@ wss://piclaw.example/apps/demo/ws?room=one
 
 The proxy preserves text and binary message boundaries, query strings, negotiated subprotocols, close codes and reasons, and Ping/Pong payloads. It applies bounded buffering and pauses the loopback connection when the browser is under backpressure. Individual messages are limited to 16 MiB.
 
-Upgrade requests pass through Piclaw authentication and same-origin checks. Piclaw session cookies, `Authorization`, client-supplied forwarding headers, and WebSocket extensions are not forwarded. Application-cookie authentication therefore remains unsupported.
+Upgrade requests pass through Piclaw authentication and same-origin checks. `Authorization`, client-supplied forwarding headers, and WebSocket extensions are not forwarded. Only cookies named in the mapping's allowlist are forwarded; `piclaw_session` is unconditionally removed.
 
 ## Agent tool
 
-The on-demand `local_app_proxy` tool lets an agent create a temporary mapping, list its chat-owned mappings, probe status, renew a lease, and remove it. The tool does not start, kill, or supervise app processes. Default lease duration is two hours; the maximum is 24 hours.
+The on-demand `local_app_proxy` tool lets an agent create a temporary mapping, list its chat-owned mappings, probe status, renew a lease, and remove it. Pass `cookie_allowlist` during creation to opt specific application cookies into HTTP and WebSocket forwarding. The tool does not start, kill, or supervise app processes. Default lease duration is two hours; the maximum is 24 hours.

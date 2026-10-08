@@ -152,6 +152,7 @@ export class LocalAppProxyService {
       port: patch.port ?? existing.port,
       upstreamBasePath: patch.upstreamBasePath ?? existing.upstreamBasePath,
       healthPath: patch.healthPath ?? existing.healthPath,
+      cookieAllowlist: patch.cookieAllowlist ?? existing.cookieAllowlist,
       enabled: patch.enabled ?? existing.enabled,
     }, { piclawPort: this.piclawPort });
     this.assertSlugAvailable(normalized.slug, existing.id);
@@ -287,6 +288,7 @@ export class LocalAppProxyService {
       port: lease.port,
       upstreamBasePath: lease.upstreamBasePath,
       healthPath: lease.healthPath,
+      cookieAllowlist: lease.cookieAllowlist,
       enabled: lease.enabled,
       createdAt: lease.createdAt,
       updatedAt: this.nowIso(),

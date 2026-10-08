@@ -5,6 +5,7 @@ import { getWebOrigin } from "../channels/web/auth/request-origin.js";
 import { localAppProxyService } from "../local-app-proxy/index.js";
 import {
   MAX_LEASE_MINUTES,
+  MAX_LOCAL_APP_COOKIE_ALLOWLIST,
   MIN_LEASE_MINUTES,
   LocalAppProxyError,
   type LocalAppProxyError as LocalAppProxyErrorType,
@@ -24,6 +25,11 @@ const LocalAppProxySchema = Type.Object({
   port: Type.Optional(Type.Integer({ description: "Loopback HTTP port for action=create.", minimum: 1024, maximum: 65535 })),
   upstream_path: Type.Optional(Type.String({ description: "Optional upstream base path. Defaults to /." })),
   health_path: Type.Optional(Type.String({ description: "Optional health-check path. Defaults to /." })),
+  cookie_allowlist: Type.Optional(Type.Array(Type.String(), {
+    description: "Cookie names to forward for this app. Defaults to none; piclaw_session is always blocked.",
+    maxItems: MAX_LOCAL_APP_COOKIE_ALLOWLIST,
+    uniqueItems: true,
+  })),
   ttl_minutes: Type.Optional(Type.Integer({
     description: "Temporary lease duration in minutes.",
     minimum: MIN_LEASE_MINUTES,
@@ -39,6 +45,7 @@ type LocalAppProxyParams = {
   port?: number;
   upstream_path?: string;
   health_path?: string;
+  cookie_allowlist?: string[];
   ttl_minutes?: number;
 };
 
@@ -69,7 +76,8 @@ const HINT = [
   "## Local App Proxy",
   "Use local_app_proxy to publish a trusted HTTP app already listening on 127.0.0.1 through /apps/<slug>/.",
   "Create a temporary lease, verify it with action=status, then include the returned Open App URL in the final response.",
-  "The tool does not start, stop, or supervise the app process. V1 does not forward WebSockets.",
+  "HTTP and WebSocket traffic is forwarded. Cookies are default-deny; opt in names with cookie_allowlist, while piclaw_session is always blocked.",
+  "The tool does not start, stop, or supervise the app process.",
 ].join("\n");
 
 /** Built-in agent tool for temporary, chat-owned local app proxy leases. */
@@ -101,6 +109,7 @@ export const localAppProxyTool: ExtensionFactory = (pi: ExtensionAPI) => {
             port: params.port!,
             upstreamBasePath: params.upstream_path || "/",
             healthPath: params.health_path || "/",
+            cookieAllowlist: params.cookie_allowlist,
             ttlMinutes: params.ttl_minutes,
           }, chatJid);
           const health = await localAppProxyService.probe(app.id);

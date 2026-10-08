@@ -14,6 +14,7 @@ const app: ResolvedLocalApp = {
   port: 4173,
   upstreamBasePath: "/workbench/",
   healthPath: "/health",
+  cookieAllowlist: [],
   enabled: true,
   createdAt: "2026-08-12T12:00:00.000Z",
   updatedAt: "2026-08-12T12:00:00.000Z",
@@ -56,6 +57,54 @@ describe("local app HTTP proxy", () => {
     expect(downstream.get("access-control-allow-origin")).toBeNull();
     expect(downstream.get("content-security-policy")).toBeNull();
     expect(downstream.get("service-worker-allowed")).toBe("/apps/demo/");
+  });
+
+  test("forwards only allowlisted cookies in requests and responses", () => {
+    const cookieApp: ResolvedLocalApp = {
+      ...app,
+      cookieAllowlist: ["remotex_session", "piclaw_session"],
+    };
+    const upstream = buildLocalAppUpstreamHeaders(new Request("https://piclaw.test/apps/demo/", {
+      headers: {
+        cookie: "theme=dark; remotex_session=abc==; piclaw_session=secret; other=value",
+      },
+    }), cookieApp);
+    expect(upstream.get("cookie")).toBe("remotex_session=abc==");
+
+    const upstreamResponse = new Headers();
+    upstreamResponse.append("set-cookie", "remotex_session=fresh; Path=/apps/demo/; HttpOnly; SameSite=Strict");
+    upstreamResponse.append("set-cookie", "other=secret; Path=/");
+    upstreamResponse.append("set-cookie", "piclaw_session=replaced; Path=/; HttpOnly");
+    upstreamResponse.append("set-cookie2", "remotex_session=legacy");
+    const downstream = buildLocalAppDownstreamHeaders(upstreamResponse, cookieApp);
+    expect(downstream.getSetCookie()).toEqual([
+      "remotex_session=fresh; Path=/apps/demo/; HttpOnly; SameSite=Strict",
+    ]);
+    expect(downstream.get("set-cookie2")).toBeNull();
+  });
+
+  test("applies the cookie allowlist through the complete HTTP proxy flow", async () => {
+    const cookieApp = { ...app, cookieAllowlist: ["remotex_session"] };
+    let upstreamCookie: string | null = null;
+    const response = await proxyLocalAppHttpRequest(new Request("https://piclaw.test/apps/demo/login", {
+      headers: {
+        cookie: "other=secret; remotex_session=request-token; piclaw_session=must-not-leak",
+      },
+    }), cookieApp, "/login", {
+      fetchImpl: async (_input, init) => {
+        upstreamCookie = new Headers(init?.headers).get("cookie");
+        const headers = new Headers();
+        headers.append("set-cookie", "remotex_session=response-token; Path=/apps/demo/; HttpOnly");
+        headers.append("set-cookie", "other=blocked; Path=/");
+        headers.append("set-cookie", "piclaw_session=blocked; Path=/; HttpOnly");
+        return new Response("ok", { headers });
+      },
+    });
+
+    expect(upstreamCookie).toBe("remotex_session=request-token");
+    expect(response.headers.getSetCookie()).toEqual([
+      "remotex_session=response-token; Path=/apps/demo/; HttpOnly",
+    ]);
   });
 
   test("rewrites same-port loopback aliases and blocks redirects escaping the configured base", () => {

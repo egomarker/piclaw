@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  normalizeLocalAppCookieAllowlist,
   normalizeLocalAppInput,
   normalizeLocalAppPath,
   validateLocalAppPort,
@@ -30,12 +31,14 @@ describe("local app proxy validation", () => {
       port: 4173,
       upstreamBasePath: "/workbench",
       healthPath: "/health/",
+      cookieAllowlist: ["remotex_session", "remotex_session"],
     }, { piclawPort: 8080 })).toEqual({
       name: "Demo App",
       slug: "demo-app",
       port: 4173,
       upstreamBasePath: "/workbench/",
       healthPath: "/health",
+      cookieAllowlist: ["remotex_session"],
       enabled: true,
     });
   });
@@ -46,6 +49,18 @@ describe("local app proxy validation", () => {
     expect(() => validateLocalAppPort(8080, 8080)).toThrow();
     expect(() => normalizeLocalAppPath("/%2e%2e/secrets", { trailingSlash: true, fallback: "/" })).toThrow();
     expect(() => normalizeLocalAppPath("//remote/path", { trailingSlash: true, fallback: "/" })).toThrow();
+  });
+
+  test("defaults cookie forwarding to none and rejects unsafe allowlists", () => {
+    expect(normalizeLocalAppCookieAllowlist(undefined)).toEqual([]);
+    expect(() => normalizeLocalAppCookieAllowlist("remotex_session")).toThrow(/array/);
+    expect(() => normalizeLocalAppCookieAllowlist(["bad cookie"])).toThrow(/Invalid cookie name/);
+    expect(() => normalizeLocalAppCookieAllowlist(["PICLAW_SESSION"])).toThrow(/cannot be forwarded/);
+    expect(() => normalizeLocalAppCookieAllowlist(Array.from({ length: 33 }, (_, index) => `cookie_${index}`))).toThrow(/at most 32/);
+  });
+
+  test("migrates persisted apps without an allowlist to default-deny", () => {
+    expect(validatePersistentLocalApps([app()], 8080)[0]?.cookieAllowlist).toEqual([]);
   });
 
   test("rejects duplicate ids and slugs in persisted config", () => {
