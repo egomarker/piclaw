@@ -314,7 +314,7 @@ Use this EXACT format:
 1. [What remains]
 
 ## Critical Context
-- [Important state/context needed to continue]
+- [Important state/context needed to continue] (Format rule: every line in this section must be a list item, a numbered item, a "### " sub-heading, or a file tag. No plain prose lines.)
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`;
 
