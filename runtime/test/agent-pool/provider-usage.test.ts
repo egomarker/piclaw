@@ -395,6 +395,49 @@ describe("provider usage", () => {
     }
   });
 
+  test("fetches OpenCode Go quota usage from the Zen usage API", async () => {
+    const fetchMock = mock(async () => new Response(JSON.stringify({
+      usage: {
+        rolling: { status: "ok", percent: 1, resetsAt: new Date(Date.now() + 3600_000).toISOString() },
+        weekly: { status: "ok", percent: 10, resetsAt: new Date(Date.now() + 5 * 86400_000).toISOString() },
+        monthly: { status: "ok", percent: 6, resetsAt: new Date(Date.now() + 26 * 86400_000).toISOString() },
+      },
+    })));
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock as any;
+
+    try {
+      const usage = await getProviderUsage(
+        createAuthStorage({
+          "opencode-go": { type: "api_key", key: "opencode-go-token" },
+        }),
+        "opencode-go"
+      );
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect((fetchMock as any).mock.calls[0][0]).toBe("https://opencode.ai/zen/go/v1/usage");
+      expect((fetchMock as any).mock.calls[0][1]).toMatchObject({
+        headers: {
+          Authorization: "Bearer opencode-go-token",
+          Accept: "application/json",
+          "User-Agent": "PiClaw",
+        },
+      });
+      expect(usage?.provider).toBe("opencode-go");
+      expect(usage?.primary?.label).toBe("5h");
+      expect(usage?.primary?.used_percent).toBe(1);
+      expect(usage?.primary?.remaining_percent).toBe(99);
+      expect(usage?.primary?.window_minutes).toBe(300);
+      expect(usage?.secondary?.label).toBe("wk");
+      expect(usage?.secondary?.used_percent).toBe(10);
+      expect(usage?.secondary?.remaining_percent).toBe(90);
+      expect(usage?.hint_short).toContain("5h 99%");
+      expect(usage?.hint_short).toContain("wk 90%");
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
   test("returns null for unsupported providers", async () => {
     const usage = await getProviderUsage(createAuthStorage({}), "openai");
     expect(usage).toBeNull();

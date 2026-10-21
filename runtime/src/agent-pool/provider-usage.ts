@@ -15,7 +15,7 @@ export interface ProviderUsageWindow {
 }
 
 export interface ProviderUsageSnapshot {
-  provider: "openai-codex" | "github-copilot" | "zai";
+  provider: "openai-codex" | "github-copilot" | "zai" | "opencode-go";
   source: string;
   plan: string | null;
   fetched_at: string;
@@ -110,6 +110,13 @@ function buildZaiHint(primary: ProviderUsageWindow | null, secondary: ProviderUs
   ].filter(Boolean).join(" • ");
 }
 
+function buildOpencodeHint(primary: ProviderUsageWindow | null, secondary: ProviderUsageWindow | null): string {
+  return [
+    primary?.remaining_percent != null ? `5h ${compactPercent(primary.remaining_percent)}` : null,
+    secondary?.remaining_percent != null ? `wk ${compactPercent(secondary.remaining_percent)}` : null,
+  ].filter(Boolean).join(" • ");
+}
+
 async function fetchCodexUsage(modelRuntime: UsageModelRuntime, authPath: string): Promise<ProviderUsageSnapshot | null> {
   const resolved = await modelRuntime.getAuth("openai-codex");
   const stored = readStoredCredential("openai-codex", authPath) as { accountId?: unknown } | undefined;
@@ -170,12 +177,40 @@ async function fetchZaiUsage(modelRuntime: UsageModelRuntime): Promise<ProviderU
 }
 
 function isSupportedProviderId(providerId: string): providerId is SupportedProviderId {
-  return providerId === "openai-codex" || providerId === "github-copilot" || providerId === "zai";
+  return providerId === "openai-codex" || providerId === "github-copilot" || providerId === "zai" || providerId === "opencode-go";
+}
+
+async function fetchOpencodeUsage(modelRuntime: UsageModelRuntime): Promise<ProviderUsageSnapshot | null> {
+  const token = (await modelRuntime.getAuth("opencode-go"))?.auth.apiKey;
+  if (!token) return null;
+  const res = await fetch("https://opencode.ai/zen/go/v1/usage", {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json", "User-Agent": "PiClaw" },
+  });
+  if (!res.ok) return null;
+  const payload = (await res.json()) as any;
+  const usage = payload?.usage;
+  if (!usage || typeof usage !== "object") return null;
+  // The Go API reports used percent per window; makeWindow inverts to remaining.
+  const primary = makeWindow("5h", usage?.rolling?.percent, usage?.rolling?.resetsAt, 300);
+  const secondary = makeWindow("wk", usage?.weekly?.percent, usage?.weekly?.resetsAt, null);
+  if (!primary && !secondary) return null;
+  return {
+    provider: "opencode-go",
+    source: "opencode-zen-usage-api",
+    plan: null,
+    fetched_at: new Date().toISOString(),
+    primary,
+    secondary,
+    credits_remaining: null,
+    credits_unlimited: false,
+    hint_short: buildOpencodeHint(primary, secondary),
+  };
 }
 
 async function fetchProviderUsage(modelRuntime: UsageModelRuntime, providerId: SupportedProviderId, authPath: string): Promise<ProviderUsageSnapshot | null> {
   if (providerId === "openai-codex") return fetchCodexUsage(modelRuntime, authPath);
   if (providerId === "github-copilot") return fetchGitHubCopilotUsage(modelRuntime, authPath);
+  if (providerId === "opencode-go") return fetchOpencodeUsage(modelRuntime);
   return fetchZaiUsage(modelRuntime);
 }
 
