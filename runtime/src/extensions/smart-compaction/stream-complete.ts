@@ -10,6 +10,8 @@
  * compaction summary calls through custom agent stream functions.
  */
 
+import { randomUUID } from "node:crypto";
+
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type { AssistantMessage, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { normalizeLlmContext } from "../../agent-pool/llm-context-normalizer.js";
@@ -45,6 +47,8 @@ export interface StreamCompleteOptions {
   onPayload?: SimpleStreamOptions["onPayload"];
   /** Custom stream function for proxy-routed providers. Falls back to streamSimple. */
   streamFn?: CompactionStreamFn;
+  /** Provider routing/session id (OpenCode Go requires x-opencode-session on every call). */
+  sessionId?: string;
   /** Called periodically with the number of text characters generated so far. */
   onProgress?: (generatedChars: number) => void;
   /** Interval in ms between progress reports (default: 5000ms). */
@@ -71,8 +75,8 @@ export async function streamComplete(opts: StreamCompleteOptions): Promise<Assis
   };
 
   const streamOptions: SimpleStreamOptions = reasoning
-    ? { maxTokens, signal, apiKey, headers, env, reasoning, onPayload, cacheRetention: "none" }
-    : { maxTokens, signal, apiKey, headers, env, onPayload, cacheRetention: "none" };
+    ? { maxTokens, signal, apiKey, headers, env, reasoning, onPayload, cacheRetention: "none", sessionId: opts.sessionId ?? randomUUID() }
+    : { maxTokens, signal, apiKey, headers, env, onPayload, cacheRetention: "none", sessionId: opts.sessionId ?? randomUUID() };
 
   const normalizedContext = normalizeLlmContext(context);
 

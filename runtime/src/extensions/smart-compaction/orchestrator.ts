@@ -106,6 +106,10 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
 
   pi.on("session_before_compact", async (event, rawCtx) => {
     const ctx = makeResilientCtx(rawCtx as any) as typeof rawCtx;
+    // Routing-aware providers (OpenCode Go) require a session id on every provider
+    // call, including compaction side-calls (x-opencode-session). Reuse the agent
+    // session's own id so compaction routes with the conversation it belongs to.
+    const compactionSessionId: string | undefined = ctx.sessionManager.getSessionId() || undefined;
     const { preparation, signal, customInstructions, branchEntries } = event;
     // Runtime settings can change without restart. Capture the lifecycle
     // settings exactly once so an in-flight generation never switches method
@@ -671,6 +675,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
             model: compactionModel,
             auth,
             settings,
+            sessionId: compactionSessionId,
             previousSummary: localPreviousSummary,
             keptMessagesSummary,
             turnPrefixSummary: "",
@@ -859,6 +864,7 @@ export function createSmartCompactionExtension(options: { streamFn?: CompactionS
       const methodResult = await runCompactionModelExecution({
         model: compactionModel,
         auth,
+        sessionId: compactionSessionId,
         promptText,
         requestedMaxTokens: requestedOutputTokens,
         abortSignal,

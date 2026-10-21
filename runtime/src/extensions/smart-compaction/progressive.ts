@@ -88,6 +88,7 @@ async function completeCompactionPrompt(
   reasoning?: CompactionReasoningEffort,
   onModelRequest?: () => void,
   onPayload?: SimpleStreamOptions["onPayload"],
+  sessionId?: string,
 ): Promise<string> {
   const runOnce = async (activePromptText: string, retryCount: number): Promise<string> => {
     if (abortSignal.aborted) throw new Error("Compaction cancelled");
@@ -104,6 +105,7 @@ async function completeCompactionPrompt(
       env: auth.env,
       reasoning: (model as any).reasoning ? reasoning ?? getCompactionReasoningEffort(model, "selective") : undefined,
       onPayload,
+      sessionId,
       streamFn,
       onProgress,
     });
@@ -258,6 +260,8 @@ async function mergeProgressiveSummaries(input: {
   budget: ProgressiveCompactionBudget;
   maxTokens: number;
   abortSignal: AbortSignal;
+  /** Provider routing/session id (OpenCode Go x-opencode-session). */
+  sessionId?: string;
   ctx: { ui: { setStatus?: (key: string, text: string | undefined) => void } };
   finalPromptExtras: Omit<Parameters<typeof buildMergePrompt>[0], "summaries" | "rangeLabel" | "final">;
   publishEstimate?: (tokens: number | null, phase: string, completionPercent?: number | null) => void;
@@ -346,6 +350,8 @@ async function mergeProgressiveSummaries(input: {
           input.onProgress ? (generatedChars) => input.onProgress?.(generatedChars, { phase: "progressive_merge", mergePass: pass, batchIndex }) : undefined,
           getCompactionReasoningEffort(input.model, "progressive_merge"),
           input.onModelRequest,
+          undefined,
+          input.sessionId,
         )];
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -427,6 +433,8 @@ async function mergeProgressiveSummaries(input: {
       input.onProgress ? (generatedChars) => input.onProgress?.(generatedChars, { phase: "progressive_compress", compressPass }) : undefined,
       getCompactionReasoningEffort(input.model, "progressive_compress"),
       input.onModelRequest,
+      undefined,
+      input.sessionId,
     )];
     finalPrompt = buildFinalPrompt();
   }
@@ -442,6 +450,8 @@ async function mergeProgressiveSummaries(input: {
     input.onProgress ? (generatedChars) => input.onProgress?.(generatedChars, { phase: "progressive_final" }) : undefined,
     getCompactionReasoningEffort(input.model, "progressive_final"),
     input.onModelRequest,
+    undefined,
+    input.sessionId,
   );
 }
 
@@ -454,6 +464,8 @@ export async function runProgressiveCompaction(input: {
   model: any;
   auth: { apiKey?: string; headers?: Record<string, string>; env?: Record<string, string> };
   settings: { reserveTokens: number };
+  /** Provider routing/session id (OpenCode Go x-opencode-session). */
+  sessionId?: string;
   previousSummary?: string;
   keptMessagesSummary?: string;
   turnPrefixSummary?: string;
@@ -559,6 +571,7 @@ export async function runProgressiveCompaction(input: {
         getCompactionReasoningEffort(input.model, "progressive_chunk"),
         onModelRequest,
         chunk.groupIds?.includes("continuity:previous-summary") ? input.onPayload : undefined,
+        input.sessionId,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -771,6 +784,7 @@ export async function runProgressiveCompaction(input: {
       budget: input.budget,
       maxTokens,
       abortSignal: input.abortSignal,
+      sessionId: input.sessionId,
       ctx: input.ctx,
       publishEstimate: input.publishEstimate,
       timeoutMs: input.timeoutMs,

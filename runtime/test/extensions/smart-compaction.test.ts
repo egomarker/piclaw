@@ -3339,6 +3339,57 @@ describe("smart-compaction", () => {
       ).ok).toBe(true);
     });
 
+    it("passes the compaction session id to every progressive provider call", async () => {
+      const sourceUnits = Array.from({ length: 3 }, (_, index) => ({
+        id: `unit-${index}`,
+        groupId: `group-${index}`,
+        renderedText: `SOURCE_${index} ${"s".repeat(6_000)}`,
+        sourceIndexes: [index],
+        sourceEntryIds: [`entry-${index}`],
+        segmentIndex: 1,
+        segmentCount: 1,
+      }));
+      const chunkSummary = "## Chunk Range\n- 0-0\n\n## Goals / User Intent\n- test\n\n## Constraints & Preferences\n- none\n\n## Decisions\n- none\n\n## Files / Commands / Tool Outcomes\n- none\n\n## Progress\n- Done: chunk summarized\n- In progress: final merge\n- Blocked: none\n\n## Open Questions / Next Steps\n- merge\n\n## Key Continuity Facts\n- SESSION_ID_TEST";
+      const finalSummary = "## Goal\nPreserve conversation continuity\n\n## Current Active Topic\n- session id propagation\n\n## Historical / Background Context\n- none\n\n## Constraints & Preferences\n- concise\n\n## Progress\n### Done\n- [x] propagated session id\n\n### In Progress\n- [ ] continue\n\n### Blocked\n- none\n\n## Key Decisions\n- **Session id**: pass it on every provider call\n\n## Next Steps\n1. continue\n\n## Critical Context\n- provider routing id present";
+      (completeSimple as any).mockImplementation(async (_model: any, context: any, options: any) => {
+        if (options?.sessionId !== "sess-test-123") throw new Error(`missing session id: ${String(options?.sessionId)}`);
+        const isChunk = String(context?.systemPrompt ?? "").startsWith("You are producing one structured intermediate checkpoint");
+        return {
+          content: [{ type: "text", text: isChunk ? chunkSummary : finalSummary }],
+          stopReason: "stop",
+        };
+      });
+
+      const result = await runProgressiveCompaction({
+        llmMessages: [],
+        sourceUnits,
+        humanUserIndexes: new Set<number>(),
+        model: { provider: "test", id: "session-id", contextWindow: 128_000, reasoning: false },
+        auth: {},
+        settings: { reserveTokens: 8_192 },
+        sessionId: "sess-test-123",
+        fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
+        budget: {
+          contextWindow: 128_000,
+          promptBudgetChars: 7_000,
+          chunkBudgetChars: 7_000,
+          mergeBudgetChars: 7_000,
+          forceProgressive: true,
+        },
+        abortSignal: new AbortController().signal,
+        ctx: { ui: { setStatus: vi.fn() } },
+        streamFn: compactionStreamFn,
+        timeoutMs: 300_000,
+        startedAt: Date.now(),
+      });
+
+      expect(result.complete).toBe(true);
+      expect(completeSimple.mock.calls.length).toBeGreaterThan(0);
+      for (const call of completeSimple.mock.calls) {
+        expect(call[2]?.sessionId).toBe("sess-test-123");
+      }
+    });
+
     it("returns a bounded partial checkpoint when the final progressive merge runs out of time", async () => {
       const sourceUnits = Array.from({ length: 6 }, (_, index) => ({
         id: `unit-${index}`,

@@ -22,6 +22,8 @@ export async function runCompactionModelExecution(input: {
   requestedMaxTokens: number;
   abortSignal: AbortSignal;
   streamFn?: CompactionStreamFn;
+  /** Provider routing/session id (OpenCode Go x-opencode-session). */
+  sessionId?: string;
   onPayload?: (payload: unknown, model: any) => unknown | undefined | Promise<unknown | undefined>;
   onStage?: (stage: CompactionModelStage, promptTokens: number) => void;
   onProgress?: () => void;
@@ -43,6 +45,7 @@ export async function runCompactionModelExecution(input: {
       env: input.auth.env,
       reasoning: input.model?.reasoning ? getCompactionReasoningEffort(input.model, "selective") : undefined,
       onPayload: input.onPayload,
+      sessionId: input.sessionId,
       streamFn: input.streamFn,
       onProgress: input.onProgress,
     });
