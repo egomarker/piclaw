@@ -777,6 +777,7 @@ class TerminalPaneInstance {
     this.modifierKeydownListener = null;
     this.modifierBeforeInputListener = null;
     this.modifierInputListener = null;
+    this.touchFocusCleanup = null;
 
     injectStyles(this.ownerDocument);
 
@@ -1029,6 +1030,7 @@ class TerminalPaneInstance {
       terminal.open(this.host);
       this.installOutputMirror();
       this.installPostOpenAddons(runtime);
+      this.installTouchFocus();
       this.installMobileControlSelectionSync();
       this.installClipboardAndSearchShortcuts();
       this.installResizeSync();
@@ -1148,6 +1150,78 @@ class TerminalPaneInstance {
         console.warn("[terminal-pane] canvas renderer unavailable; using xterm default renderer", error);
       }
     }
+  }
+
+  installTouchFocus() {
+    const host = this.host;
+    const terminal = this.terminal;
+    if (!host || !terminal || typeof host.addEventListener !== "function") return;
+
+    // xterm 6 cancels touchstart to drive swipe scrolling, which suppresses the
+    // synthetic mousedown it used to focus its helper textarea with. Mobile
+    // browsers only raise the keyboard when focus happens inside the gesture, so
+    // focus on a completed tap and leave swipes alone.
+    const MAX_TAP_DRIFT_PX = 10;
+    let trackedTouchId = null;
+    let startX = 0;
+    let startY = 0;
+    let drifted = false;
+
+    const onTouchStart = (event) => {
+      if (this.disposed || event.touches.length !== 1) {
+        trackedTouchId = null;
+        return;
+      }
+      const touch = event.touches[0];
+      trackedTouchId = touch.identifier;
+      startX = touch.clientX;
+      startY = touch.clientY;
+      drifted = false;
+    };
+
+    const onTouchMove = (event) => {
+      if (trackedTouchId === null || event.touches.length !== 1) {
+        drifted = true;
+        return;
+      }
+      const touch = event.touches[0];
+      if (touch.identifier !== trackedTouchId) {
+        drifted = true;
+        return;
+      }
+      if (Math.hypot(touch.clientX - startX, touch.clientY - startY) > MAX_TAP_DRIFT_PX) drifted = true;
+    };
+
+    const finishTouch = (event) => {
+      if (trackedTouchId === null) return;
+      const touch = Array.from(event.changedTouches || []).find((item) => item.identifier === trackedTouchId);
+      const wasTap = Boolean(touch) && !drifted;
+      trackedTouchId = null;
+      drifted = false;
+      if (!wasTap || this.disposed) return;
+      try {
+        terminal.focus();
+      } catch (error) {
+        debugTerminalCleanup("touch focus", error);
+      }
+    };
+
+    const onTouchCancel = () => {
+      trackedTouchId = null;
+      drifted = false;
+    };
+
+    host.addEventListener("touchstart", onTouchStart, { passive: true });
+    host.addEventListener("touchmove", onTouchMove, { passive: true });
+    host.addEventListener("touchend", finishTouch, { passive: true });
+    host.addEventListener("touchcancel", onTouchCancel, { passive: true });
+
+    this.touchFocusCleanup = () => {
+      host.removeEventListener("touchstart", onTouchStart);
+      host.removeEventListener("touchmove", onTouchMove);
+      host.removeEventListener("touchend", finishTouch);
+      host.removeEventListener("touchcancel", onTouchCancel);
+    };
   }
 
   installMobileControlSelectionSync() {
@@ -1600,6 +1674,8 @@ class TerminalPaneInstance {
     this.disposed = true;
     this.setControlsEnabled(false);
     this.removeModifierInputListeners();
+    try { this.touchFocusCleanup?.(); } catch (error) { debugTerminalCleanup("touch focus cleanup", error); }
+    this.touchFocusCleanup = null;
     if (this.resizeFrame) this.ownerWindow.cancelAnimationFrame(this.resizeFrame);
     if (this.resizeSettleTimer) this.ownerWindow.clearTimeout(this.resizeSettleTimer);
     this.resizeSettleTimer = 0;
