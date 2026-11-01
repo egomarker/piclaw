@@ -702,6 +702,7 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
                                 isThreadPrev=${threadInfo.hasThreadPrev}
                                 isThreadNext=${threadInfo.hasThreadNext}
                                 isRemoving=${isRemoving}
+                                canContinue=${!searchQuery && index === displayPosts.length - 1}
                                 highlightQuery=${searchQuery}
                                 agentName=${getAgentName(post.data?.agent_id, agents || {})}
                                 agentAvatarUrl=${getAgentAvatarUrl(post.data?.agent_id, agents || {})}
@@ -1485,6 +1486,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
                         isThreadPrev=${threadInfo.hasThreadPrev}
                         isThreadNext=${threadInfo.hasThreadNext}
                         isRemoving=${isRemoving}
+                        canContinue=${!searchQuery && index === displayPosts.length - 1}
                         highlightQuery=${searchQuery}
                         agentName=${getAgentName(post.data?.agent_id, agents || {})}
                         agentAvatarUrl=${getAgentAvatarUrl(post.data?.agent_id, agents || {})}

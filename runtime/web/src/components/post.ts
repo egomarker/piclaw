@@ -1,6 +1,6 @@
 import { html, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from '../vendor/preact-htm.js';
 import { useTranslation } from '../utils/i18n.js';
-import { getMediaInfo, getMediaUrl, getThumbnailUrl, submitAdaptiveCardAction } from '../api.js';
+import { getMediaInfo, getMediaUrl, getThumbnailUrl, sendAgentMessage, submitAdaptiveCardAction } from '../api.js';
 import { renderMarkdown, renderMermaidDiagrams, renderThinkingMarkdown, sanitizeUrl } from '../markdown.js';
 import { formatCount, formatFileSize, formatTime, formatTimestamp } from '../utils/format.js';
 import { buildPostMarkdownCopyPayload } from '../utils/post-copy-markdown.js';
@@ -11,7 +11,9 @@ import { buildAdaptiveCardSubmissionFallbackText, describeAdaptiveCardSubmission
 import { buildGeneratedWidgetPayload, canRenderGeneratedWidget } from '../ui/generated-widget.js';
 import { disclosureTriangleSvgString, renderDisclosureTriangle } from '../ui/disclosure-triangle.js';
 import { attachHeaderAnchor } from '../ui/scroll-anchor.js';
+import { buildContinuePrompt } from '../ui/outcome-continue.js';
 import { ImageModal } from './image-modal.js';
+import { BodyPortal } from './body-portal.js';
 import { ImageAnnotator, canAnnotate } from './image-annotator.js';
 import { FilePill } from './file-pill.js';
 import {
@@ -289,8 +291,70 @@ export function formatOutcomeChipTooltip(marker) {
     return parts.filter(Boolean).join(' — ') + recoveredDraft;
 }
 
-function OutcomePill({ marker }) {
+function ContinueNoteDialog({ open, onCancel, onSubmit }) {
+    const [note, setNote] = useState('');
+    const inputRef = useRef(null);
+
+    useEffect(() => {
+        if (!open) return undefined;
+        setNote('');
+        const handleKeyDown = (event) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                onCancel?.();
+            }
+        };
+        document.addEventListener('keydown', handleKeyDown);
+        const frame = typeof requestAnimationFrame === 'function'
+            ? requestAnimationFrame(() => inputRef.current?.focus?.())
+            : 0;
+        return () => {
+            document.removeEventListener('keydown', handleKeyDown);
+            if (frame && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frame);
+        };
+    }, [open, onCancel]);
+
+    if (!open) return null;
+
+    return html`
+        <${BodyPortal} className="continue-note-portal-root">
+            <div class="continue-note-backdrop" onClick=${onCancel}>
+                <div
+                    class="continue-note-dialog"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Continue with note"
+                    onClick=${(event) => event.stopPropagation()}
+                >
+                    <div class="continue-note-title">Continue with note</div>
+                    <textarea
+                        ref=${inputRef}
+                        class="continue-note-input"
+                        rows="3"
+                        placeholder="Add a note for the agent"
+                        value=${note}
+                        onInput=${(event) => setNote(event.target.value)}
+                        onKeyDown=${(event) => {
+                            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                                event.preventDefault();
+                                onSubmit?.(note);
+                            }
+                        }}
+                    ></textarea>
+                    <div class="continue-note-actions">
+                        <button type="button" class="post-outcome-action" onClick=${onCancel}>Cancel</button>
+                        <button type="button" class="post-outcome-action post-outcome-action-primary" onClick=${() => onSubmit?.(note)}>Send</button>
+                    </div>
+                </div>
+            </div>
+        </${BodyPortal}>
+    `;
+}
+
+function OutcomePill({ marker, canContinue = false, chatJid = '' }) {
     const [expanded, setExpanded] = useState(false);
+    const [noteOpen, setNoteOpen] = useState(false);
+    const [sendError, setSendError] = useState('');
     const toggle = useCallback((e) => { e.stopPropagation(); setExpanded(v => !v); }, []);
 
     const title = typeof marker?.title === 'string' ? marker.title.trim() : '';
@@ -302,6 +366,34 @@ function OutcomePill({ marker }) {
 
     const hasDetail = Boolean(detail || (title && action));
 
+    const sendContinue = useCallback(async (note) => {
+        setSendError('');
+        try {
+            await sendAgentMessage('default', buildContinuePrompt(note), null, [], null, chatJid || null);
+        } catch (error) {
+            console.warn('[post] Continue prompt failed:', error);
+            setSendError('Could not send. Try again.');
+        }
+    }, [chatJid]);
+
+    const handleContinue = useCallback((event) => {
+        event.stopPropagation();
+        void sendContinue('');
+    }, [sendContinue]);
+
+    const handleContinueWithNote = useCallback((event) => {
+        event.stopPropagation();
+        setSendError('');
+        setNoteOpen(true);
+    }, []);
+
+    const handleNoteSubmit = useCallback((note) => {
+        setNoteOpen(false);
+        void sendContinue(note);
+    }, [sendContinue]);
+
+    const handleNoteCancel = useCallback(() => setNoteOpen(false), []);
+
     return html`
         <div class=${`post-outcome-pill post-outcome-pill-${severity}`}>
             <div class="post-outcome-pill-header" onClick=${hasDetail ? toggle : undefined}>
@@ -310,13 +402,25 @@ function OutcomePill({ marker }) {
                 `}
                 <span class="post-outcome-pill-label">${label}</span>
                 ${draftRecovered && html`<span class="post-outcome-pill-badge">draft recovered</span>`}
+                ${canContinue && html`
+                    <span class="post-outcome-pill-actions">
+                        <button type="button" class="post-outcome-action" onClick=${handleContinue}>Continue</button>
+                        <button type="button" class="post-outcome-action" onClick=${handleContinueWithNote}>Continue with note</button>
+                    </span>
+                `}
             </div>
+            ${sendError && html`<div class="post-outcome-pill-send-error" role="alert">${sendError}</div>`}
             ${expanded && hasDetail && html`
                 <div class="post-outcome-pill-detail">
                     ${title && html`<div><strong>${title}</strong></div>`}
                     ${detail && detail !== title && html`<div>${detail}</div>`}
                 </div>
             `}
+            <${ContinueNoteDialog}
+                open=${noteOpen}
+                onCancel=${handleNoteCancel}
+                onSubmit=${handleNoteSubmit}
+            />
         </div>
     `;
 }
@@ -1254,7 +1358,7 @@ function highlightHtml(html, query) {
 /**
  * Single post component
  */
-export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMessage, agentName, agentAvatarUrl, userName, userAvatarUrl, userAvatarBackground, onDelete, isThreadReply, isThreadPrev, isThreadNext, isRemoving, highlightQuery, onFileRef, onOpenWidget, onOpenAttachmentPreview }) {
+export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMessage, agentName, agentAvatarUrl, userName, userAvatarUrl, userAvatarBackground, onDelete, isThreadReply, isThreadPrev, isThreadNext, isRemoving, highlightQuery, canContinue, onFileRef, onOpenWidget, onOpenAttachmentPreview }) {
     const { t } = useTranslation();
     const [zoomedImage, setZoomedImage] = useState(null);
     const [annotatingImage, setAnnotatingImage] = useState(null);
@@ -1827,7 +1931,7 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
                     `}
                 </div>
                 ${outcomeMarker && html`
-                    <${OutcomePill} marker=${outcomeMarker} />
+                    <${OutcomePill} marker=${outcomeMarker} canContinue=${Boolean(canContinue)} chatJid=${post.chat_jid || ''} />
                 `}
                 ${isAgent && thinkingRef && html`<${ThinkingVisibilityPill} messageId=${post.id} chatJid=${post.chat_jid} lines=${thinkingRef.lines || 0} durationMs=${thinkingRef.duration_ms || 0} />`}
                 ${isHardTruncated && truncatedInfo && html`
