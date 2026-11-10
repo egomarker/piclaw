@@ -784,6 +784,142 @@ test("agent pool protects an in-flight slash command from pool-limit eviction", 
   await pool.shutdown();
 });
 
+
+test("agent pool keeps Dream model setup and its nested run on the same runtime", async () => {
+  const ws = getTestWorkspace();
+  restoreEnv = setEnv({
+    PICLAW_WORKSPACE: ws.workspace,
+    PICLAW_STORE: ws.store,
+    PICLAW_DATA: ws.data,
+    PICLAW_MAIN_SESSION_IDLE_TTL_MS: "600000",
+    PICLAW_MAIN_SESSION_POOL_MAX_SIZE: "1",
+    PICLAW_MAIN_SESSION_PRESSURE_RSS_BYTES: "0",
+    PICLAW_TURN_AUTO_RECOVERY_ENABLED: "0",
+  });
+  const { AgentPool } = await importFresh<typeof import("../src/agent-pool.js")>("../src/agent-pool.js");
+  const dreamChatJid = "dream:auto:web_default:eviction-test";
+  let modelStarted!: () => void;
+  const modelStartedPromise = new Promise<void>((resolve) => { modelStarted = resolve; });
+  let finishModel!: () => void;
+  const modelBlocked = new Promise<void>((resolve) => { finishModel = resolve; });
+  let promptStarted!: () => void;
+  const promptStartedPromise = new Promise<void>((resolve) => { promptStarted = resolve; });
+  let finishPrompt!: () => void;
+  const promptBlocked = new Promise<void>((resolve) => { finishPrompt = resolve; });
+  let created = 0;
+  let disposed = 0;
+  let promptedModel: string | null = null;
+  let protectedAfterInnerRun = 0;
+
+  class PendingSession {
+    model = { provider: "openai-codex", id: "default", contextWindow: 200000 };
+    isStreaming = false;
+    isBashRunning = false;
+    isCompacting = false;
+    private listeners: Array<(event: any) => void> = [];
+    subscribe(listener: (event: any) => void) {
+      this.listeners.push(listener);
+      return () => { this.listeners = this.listeners.filter((entry) => entry !== listener); };
+    }
+    async prompt() {
+      promptedModel = this.model.provider + "/" + this.model.id;
+      promptStarted();
+      await promptBlocked;
+      for (const listener of this.listeners) {
+        listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Dream done." } });
+      }
+    }
+    async abort() {}
+    dispose() { disposed += 1; }
+  }
+
+  const pool = new AgentPool({
+    ...createAgentPoolModelOptions(),
+    createSession: async () => { created += 1; return createRuntime(new PendingSession()); },
+  });
+  const busySession = new PendingSession();
+  busySession.isStreaming = true;
+  (pool as any).pool.set("web:busy", { runtime: createRuntime(busySession), lastUsed: Date.now() });
+  (pool as any).runtimeFacade.applyControlCommand = async (chatJid: string) => {
+    const runtime = await (pool as any).getOrCreateRuntime(chatJid);
+    modelStarted();
+    await modelBlocked;
+    runtime.session.model = { provider: "zai", id: "glm-5.2", contextWindow: 200000 };
+    return { status: "success", message: "ok" };
+  };
+
+  const run = pool.withSessionEvictionProtection(dreamChatJid, async () => {
+    await pool.applyControlCommand(dreamChatJid, { type: "model", provider: "zai", modelId: "glm-5.2", raw: "/model zai/glm-5.2" });
+    const result = await pool.runAgent("Dream", dreamChatJid, { timeoutMs: 0 });
+    protectedAfterInnerRun = pool.getMemoryInstrumentationSnapshot().sessionManager.evictionProtectedChats;
+    return result;
+  });
+  try {
+    await modelStartedPromise;
+    const entry = (pool as any).pool.get(dreamChatJid);
+    entry.lastUsed = Date.now() - 10000;
+    // Keep TTL high so the original pool-limit race is exercised in isolation.
+    (pool as any).sessionManager.evictIdle({ mainIdleTtlMs: 600000, sideIdleTtlMs: 600000 });
+    expect((pool as any).pool.get(dreamChatJid)).toBe(entry);
+    expect(disposed).toBe(0);
+    // Only Dream is explicitly pinned; the other chat retains its own busy protection.
+    expect(pool.getMemoryInstrumentationSnapshot().sessionManager.evictionProtectedChats).toBe(1);
+    finishModel();
+
+    await promptStartedPromise;
+    (pool as any).sessionManager.evictIdle({ mainIdleTtlMs: 1, sideIdleTtlMs: 1 });
+    expect((pool as any).pool.get(dreamChatJid)).toBe(entry);
+    finishPrompt();
+    const result = await run;
+    expect(result.status).toBe("success");
+    expect(result.result).toBe("Dream done.");
+    expect(promptedModel).toBe("zai/glm-5.2");
+    expect(created).toBe(1);
+    expect(protectedAfterInnerRun).toBe(1);
+    expect(pool.getMemoryInstrumentationSnapshot().sessionManager.evictionProtectedChats).toBe(0);
+
+    // Once the outer lease ends, ordinary pool-limit eviction works again.
+    (pool as any).evictIdle();
+    expect((pool as any).pool.has(dreamChatJid)).toBe(false);
+    expect((pool as any).pool.has("web:busy")).toBe(true);
+    expect(disposed).toBe(1);
+  } finally {
+    finishModel();
+    finishPrompt();
+    await run.catch(() => {});
+    await pool.shutdown();
+  }
+});
+
+test("agent pool releases a scoped eviction lease on early return and synchronous/asynchronous errors", async () => {
+  const { AgentPool } = await importFresh<typeof import("../src/agent-pool.js")>("../src/agent-pool.js");
+  const pool = new AgentPool(createAgentPoolModelOptions());
+  const dreamChatJid = "dream:manual:web_default:release-test";
+  const protectedChats = () => pool.getMemoryInstrumentationSnapshot().sessionManager.evictionProtectedChats;
+  try {
+    expect(await pool.withSessionEvictionProtection(dreamChatJid, async () => {
+      expect(protectedChats()).toBe(1);
+      return "early return";
+    })).toBe("early return");
+    expect(protectedChats()).toBe(0);
+
+    await expect(pool.withSessionEvictionProtection(dreamChatJid, () => {
+      expect(protectedChats()).toBe(1);
+      throw new Error("synchronous failure");
+    })).rejects.toThrow("synchronous failure");
+    expect(protectedChats()).toBe(0);
+
+    await expect(pool.withSessionEvictionProtection(dreamChatJid, async () => {
+      await Promise.resolve();
+      expect(protectedChats()).toBe(1);
+      throw new Error("asynchronous failure");
+    })).rejects.toThrow("asynchronous failure");
+    expect(protectedChats()).toBe(0);
+  } finally {
+    await pool.shutdown();
+  }
+});
+
 test("agent pool applies the pressure pool cap immediately after acquiring a second session", async () => {
   const ws = getTestWorkspace();
   restoreEnv = setEnv({

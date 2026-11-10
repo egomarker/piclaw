@@ -9,6 +9,7 @@ afterEach(() => {
 });
 
 const acceptModelChange = async () => ({ status: "success", message: "ok" } as const);
+const withSessionEvictionProtection = async <T>(_chatJid: string, operation: () => Promise<T>): Promise<T> => await operation();
 
 test("runDreamAgentTurn applies an explicit Dream model override to the temporary dream chat", async () => {
   const config = await import("../src/core/config.js");
@@ -23,6 +24,8 @@ test("runDreamAgentTurn applies an explicit Dream model override to the temporar
   const expectedDreamChatJid = `dream:manual:web_default:${fixedNow}`;
   const applied: Array<{ chatJid: string; raw: string | undefined }> = [];
   const runChats: string[] = [];
+  const leaseEvents: string[] = [];
+  let protectedChatJid: string | null = null;
 
   const realNow = Date.now;
   Date.now = () => fixedNow;
@@ -34,21 +37,41 @@ test("runDreamAgentTurn applies an explicit Dream model override to the temporar
       mode: "manual",
       model: "openai-compatible/glm-5.1",
       agentPool: {
+        withSessionEvictionProtection: async <T>(chatJid: string, operation: () => Promise<T>): Promise<T> => {
+          expect(chatJid).toBe(expectedDreamChatJid);
+          protectedChatJid = chatJid;
+          leaseEvents.push("acquire");
+          try {
+            return await operation();
+          } finally {
+            protectedChatJid = null;
+            leaseEvents.push("release");
+          }
+        },
         applyControlCommand: async (chatJid: string, command: { raw?: string }) => {
+          expect(protectedChatJid).toBe(chatJid);
+          leaseEvents.push("model");
           applied.push({ chatJid, raw: command.raw });
           return { status: "success", message: "ok" };
         },
         runAgent: async (_prompt: string, chatJid: string) => {
+          expect(protectedChatJid).toBe(chatJid);
+          leaseEvents.push("prompt");
           runChats.push(chatJid);
           return { status: "success", result: "Dream complete." };
         },
-        disposeChatSession: async () => {},
+        disposeChatSession: async () => {
+          expect(protectedChatJid).toBeNull();
+          leaseEvents.push("cleanup");
+        },
       } as any,
     });
 
     expect(result.skipped).toBe(false);
     expect(applied).toEqual([{ chatJid: expectedDreamChatJid, raw: "/model openai-compatible/glm-5.1" }]);
     expect(runChats).toEqual([expectedDreamChatJid]);
+    expect(protectedChatJid).toBeNull();
+    expect(leaseEvents).toEqual(["acquire", "model", "prompt", "release", "cleanup"]);
   } finally {
     Date.now = realNow;
   }
@@ -105,6 +128,7 @@ test("runDreamAgentTurn reaps a stale dream lock and materializes memory files a
       days: 2,
       mode: "auto",
       agentPool: {
+        withSessionEvictionProtection,
         applyControlCommand: acceptModelChange,
         runAgent: async () => ({ status: "success", result: "AutoDream complete." }),
         disposeChatSession: async () => {},
@@ -157,6 +181,7 @@ test("runDreamAgentTurn skips gracefully when another live Dream run holds the l
       days: 2,
       mode: "auto",
       agentPool: {
+        withSessionEvictionProtection: async () => { throw new Error("Skipped Dream must not acquire protection"); },
         runAgent: async () => ({ status: "success", result: "should not run" }),
         disposeChatSession: async () => {},
       } as any,
@@ -182,6 +207,7 @@ test("runDreamAgentTurn records recovery summaries when the model pass succeeds 
     days: 2,
     mode: "auto",
     agentPool: {
+      withSessionEvictionProtection,
       applyControlCommand: acceptModelChange,
       runAgent: async () => ({
         status: "success",
@@ -218,6 +244,7 @@ test("runDreamAgentTurn falls back to deterministic refresh when the model pass 
     days: 2,
     mode: "auto",
     agentPool: {
+      withSessionEvictionProtection,
       applyControlCommand: acceptModelChange,
       runAgent: async (_prompt: string, _chatJid: string, options?: { timeoutMs?: number }) => {
         capturedTimeoutMs = options?.timeoutMs;
@@ -247,3 +274,69 @@ test("runDreamAgentTurn falls back to deterministic refresh when the model pass 
   expect(existsSync(join(config.WORKSPACE_DIR, "notes", "memory", "MEMORY.md"))).toBe(true);
   expect(existsSync(join(config.WORKSPACE_DIR, "notes", "memory", ".dream.lock"))).toBe(false);
 });
+
+for (const outcome of ["model_error", "model_throw", "prompt_error", "prompt_throw", "cleanup_error"] as const) {
+  test("runDreamAgentTurn releases protection before fallback/cleanup: " + outcome, async () => {
+    const config = await import("../src/core/config.js");
+    rmSync(join(config.WORKSPACE_DIR, "notes"), { recursive: true, force: true });
+    rmSync(join(config.DATA_DIR, "dream-backups"), { recursive: true, force: true });
+    rmSync(join(config.DATA_DIR, "workspace-search"), { recursive: true, force: true });
+    const db = await import("../src/db.js");
+    db.initDatabase();
+
+    let protectedChatJid: string | null = null;
+    let released = 0;
+    let prompted = 0;
+    let cleaned = 0;
+    const dream = await importFresh<typeof import("../src/dream.js")>("../src/dream.js");
+    const run = dream.runDreamAgentTurn({
+      chatJid: "web:default",
+      mode: "manual",
+      model: "zai/glm-5.2",
+      agentPool: {
+        withSessionEvictionProtection: async <T>(chatJid: string, operation: () => Promise<T>): Promise<T> => {
+          expect(chatJid.startsWith("dream:manual:")).toBe(true);
+          protectedChatJid = chatJid;
+          try {
+            return await operation();
+          } finally {
+            protectedChatJid = null;
+            released += 1;
+          }
+        },
+        applyControlCommand: async (chatJid: string) => {
+          expect(protectedChatJid).toBe(chatJid);
+          if (outcome === "model_throw") throw new Error("model setup failed");
+          if (outcome === "model_error") return { status: "error", message: "model unavailable" };
+          return acceptModelChange();
+        },
+        runAgent: async (_prompt: string, chatJid: string) => {
+          expect(protectedChatJid).toBe(chatJid);
+          prompted += 1;
+          if (outcome === "prompt_throw") throw new Error("prompt failed");
+          if (outcome === "prompt_error") return { status: "error", error: "Timed out", result: null };
+          return { status: "success", result: "Dream complete." };
+        },
+        disposeChatSession: async () => {
+          expect(protectedChatJid).toBeNull();
+          cleaned += 1;
+          if (outcome === "cleanup_error") throw new Error("cleanup failed");
+        },
+      } as any,
+    });
+
+    if (outcome === "model_throw" || outcome === "prompt_throw") {
+      await expect(run).rejects.toThrow(outcome === "model_throw" ? "model setup failed" : "prompt failed");
+    } else {
+      const result = await run;
+      expect(result.skipped).toBe(false);
+      if (outcome === "model_error") expect(result.result).toContain("model switch failed; deterministic refresh completed");
+      if (outcome === "prompt_error") expect(result.result).toContain("model pass failed; deterministic refresh completed");
+    }
+    expect(prompted).toBe(outcome.startsWith("model_") ? 0 : 1);
+    expect(protectedChatJid).toBeNull();
+    expect(released).toBe(1);
+    expect(cleaned).toBe(1);
+    expect(existsSync(join(config.WORKSPACE_DIR, "notes", "memory", ".dream.lock"))).toBe(false);
+  });
+}

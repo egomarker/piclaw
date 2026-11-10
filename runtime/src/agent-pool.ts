@@ -306,6 +306,16 @@ export class AgentPool {
     this.sessionBinder.setBinder(binder);
   }
 
+  /** Keep a chat cached across setup and execution, releasing on every settled path. */
+  async withSessionEvictionProtection<T>(chatJid: string, operation: () => Promise<T>): Promise<T> {
+    const release = this.sessionManager.acquireEvictionProtection(chatJid);
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+
   /** Run a prompt against the persistent session for `chatJid`. */
   async runAgent(prompt: string, chatJid: string, options: RunAgentOptions = {}): Promise<AgentOutput> {
     // Acquire before session lookup: the cleanup timer can run after getOrCreate

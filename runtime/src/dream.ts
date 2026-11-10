@@ -543,34 +543,41 @@ export async function runDreamAgentTurn(options: { chatJid: string; days?: numbe
     reapDreamArtifacts(null);
     const backupPath = await createDreamBackup(chatJid, mode, days);
     const dailyNotesRefreshed = refreshDailyNotes(chatJid, days);
-    if (requestedDreamModel) {
-      const modelError = await applyModelLabel(options.agentPool, dreamChatJid, requestedDreamModel);
-      if (modelError) {
-        const refresh = refreshAgentMemoryFromDailyNotes({ recentDays: days });
-        const postBacklog = inspectDailyNoteSummaryBacklog({ recentDays: days });
-        const workspaceIndexRefreshed = await refreshWorkspaceSearchIndex();
-        return {
-          mode,
-          skipped: false,
-          result: [
-            `${mode === "auto" ? "AutoDream" : "Dream"} model switch failed; deterministic refresh completed.`,
-            `- Model switch error: ${modelError}`,
-            `- Daily notes refreshed before Dream: ${dailyNotesRefreshed ? "yes" : "no"}`,
-            formatDailyNoteBacklogSummary(postBacklog),
-            `- Memory refreshed after Dream: yes`,
-            `- Updated memory: ${refresh.memoryPath}`,
-            `- Updated current state: ${refresh.currentStatePath}`,
-            `- Updated recent context: ${refresh.recentContextPath}`,
-            `- Pre-Dream backup: ${backupPath || "(none)"}`,
-            `- Workspace index refreshed: ${workspaceIndexRefreshed ? "yes" : "no"}`,
-          ].filter(Boolean).join("\n"),
-        };
+    // A fresh session's model selection is not flushed until its first prompt.
+    // Keep model setup and the agent turn on the same cached runtime.
+    const dreamRun = await options.agentPool.withSessionEvictionProtection(dreamChatJid, async () => {
+      if (requestedDreamModel) {
+        const modelError = await applyModelLabel(options.agentPool, dreamChatJid, requestedDreamModel);
+        if (modelError) return { kind: "model_error" as const, error: modelError };
       }
-    }
-    const out = await options.agentPool.runAgent(buildDreamPrompt({ mode, days }), dreamChatJid, {
-      timeoutMs: getDreamAgentTimeoutMs(),
-      toolCeilingFilter: isDreamToolAllowed,
+      const out = await options.agentPool.runAgent(buildDreamPrompt({ mode, days }), dreamChatJid, {
+        timeoutMs: getDreamAgentTimeoutMs(),
+        toolCeilingFilter: isDreamToolAllowed,
+      });
+      return { kind: "agent_output" as const, out };
     });
+    if (dreamRun.kind === "model_error") {
+      const refresh = refreshAgentMemoryFromDailyNotes({ recentDays: days });
+      const postBacklog = inspectDailyNoteSummaryBacklog({ recentDays: days });
+      const workspaceIndexRefreshed = await refreshWorkspaceSearchIndex();
+      return {
+        mode,
+        skipped: false,
+        result: [
+          `${mode === "auto" ? "AutoDream" : "Dream"} model switch failed; deterministic refresh completed.`,
+          `- Model switch error: ${dreamRun.error}`,
+          `- Daily notes refreshed before Dream: ${dailyNotesRefreshed ? "yes" : "no"}`,
+          formatDailyNoteBacklogSummary(postBacklog),
+          `- Memory refreshed after Dream: yes`,
+          `- Updated memory: ${refresh.memoryPath}`,
+          `- Updated current state: ${refresh.currentStatePath}`,
+          `- Updated recent context: ${refresh.recentContextPath}`,
+          `- Pre-Dream backup: ${backupPath || "(none)"}`,
+          `- Workspace index refreshed: ${workspaceIndexRefreshed ? "yes" : "no"}`,
+        ].filter(Boolean).join("\n"),
+      };
+    }
+    const out = dreamRun.out;
     const refresh = refreshAgentMemoryFromDailyNotes({ recentDays: days });
     const postBacklog = inspectDailyNoteSummaryBacklog({ recentDays: days });
     const workspaceIndexRefreshed = await refreshWorkspaceSearchIndex();
