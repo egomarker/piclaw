@@ -305,7 +305,16 @@ export async function handleWorkspaceUploadChunk(req: Request): Promise<Response
   const uploadId = readRequiredHeader(req, "X-Upload-Id");
   const chunkIndex = readRequiredHeaderInt(req, "X-Chunk-Index");
   const chunkTotal = readRequiredHeaderInt(req, "X-Chunk-Total");
-  const fileName = readRequiredHeader(req, "X-File-Name");
+  const encodedFileName = readRequiredHeader(req, "X-File-Name-Encoded");
+  let fileName = readRequiredHeader(req, "X-File-Name");
+  if (encodedFileName) {
+    try {
+      fileName = decodeURIComponent(encodedFileName);
+      if (fileName.includes("\0")) return errorJson("Invalid filename", 400);
+    } catch {
+      return errorJson("Invalid filename encoding", 400);
+    }
+  }
   const fileSize = readRequiredHeaderInt(req, "X-File-Size");
   if (!uploadId || chunkIndex === null || chunkTotal === null || !fileName || fileSize === null) {
     return errorJson("Missing upload chunk metadata", 400);

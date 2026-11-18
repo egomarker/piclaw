@@ -1,11 +1,12 @@
 import { html, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from '../vendor/preact-htm.js';
 import { useTranslation } from '../utils/i18n.js';
-import { getMediaInfo, getMediaUrl, getThumbnailUrl, sendAgentMessage, submitAdaptiveCardAction } from '../api.js';
+import { getMediaFile, getMediaInfo, getMediaUrl, getThumbnailUrl, sendAgentMessage, submitAdaptiveCardAction, uploadWorkspaceFile } from '../api.js';
 import { renderMarkdown, renderMermaidDiagrams, renderThinkingMarkdown, sanitizeUrl } from '../markdown.js';
 import { formatCount, formatFileSize, formatTime, formatTimestamp } from '../utils/format.js';
 import { buildPostMarkdownCopyPayload } from '../utils/post-copy-markdown.js';
 import { DEFAULT_AGENT_NAME, getAvatarInfo } from '../ui/agent-utils.js';
 import { getAttachmentPreviewKind, getAttachmentPreviewLabel } from '../ui/attachment-preview.js';
+import { COMPOSE_MEDIA_ATTACH_EVENT, requestComposeMediaAttachment } from '../ui/compose-media-attachment.js';
 import { extractCardBlocks, renderAdaptiveCard } from '../ui/adaptive-card-renderer.js';
 import { buildAdaptiveCardSubmissionFallbackText, describeAdaptiveCardSubmission, extractAdaptiveCardSubmissionBlocks } from '../ui/adaptive-card-submission.js';
 import { buildGeneratedWidgetPayload, canRenderGeneratedWidget } from '../ui/generated-widget.js';
@@ -33,12 +34,12 @@ import {
 import { buildSpeakablePostText, getSpeechPlaybackState, isSpeechSynthesisSupported, speakPostText, stopSpeechPlayback, subscribeSpeechPlayback } from './post-speech.ts';
 import { copyPlainTextSelectionFromElement, readSessionStorageFlagBestEffort, resolveLinkPreviewSiteName, writeClipboardDataViaExecCommand, writeClipboardTextBestEffort, writeSessionStorageFlagBestEffort } from './post-runtime-safety.js';
 
-/**
- * File attachment component - keeps single-click download on the main card while
- * exposing an explicit preview affordance for the v1 preview flow.
- */
+/** Keep the filename link downloadable and expose separate file-card actions. */
 function FileAttachment({ mediaId, onPreview }) {
+    const { t } = useTranslation();
     const [info, setInfo] = useState(null);
+    const [busy, setBusy] = useState(false);
+    const [status, setStatus] = useState<{ message: string; error?: boolean } | null>(null);
 
     useEffect(() => {
         getMediaInfo(mediaId).then(setInfo).catch((error) => {
@@ -53,6 +54,35 @@ function FileAttachment({ mediaId, onPreview }) {
     const sizeStr = size ? formatFileSize(size) : '';
     const previewKind = getAttachmentPreviewKind(info.content_type, info.filename);
     const canPreview = previewKind !== 'unsupported';
+    const saveLabel = t('post.attachmentSave');
+    const addLabel = t('post.attachmentAdd');
+
+    const handleAttachmentAction = async (action: 'save' | 'add') => {
+        if (busy) return;
+        setBusy(true);
+        setStatus(null);
+        try {
+            if (action === 'save') {
+                const file = await getMediaFile(mediaId, filename, info.content_type);
+                await uploadWorkspaceFile(file, '', { overwrite: false });
+                setStatus({ message: t('post.attachmentSaved') });
+            } else {
+                const added = await requestComposeMediaAttachment(mediaId, filename, info.content_type);
+                setStatus(added
+                    ? { message: t('post.attachmentAdded') }
+                    : { message: t('post.attachmentAddError'), error: true });
+            }
+        } catch (error) {
+            const exists = action === 'save' && error?.code === 'file_exists';
+            if (!exists) console.warn('[post] Attachment action failed:', action, error);
+            setStatus({
+                message: t(exists ? 'post.attachmentExists' : action === 'save' ? 'post.attachmentSaveError' : 'post.attachmentAddError'),
+                error: true,
+            });
+        } finally {
+            setBusy(false);
+        }
+    };
 
     return html`
         <div class="file-attachment" onClick=${(e) => e.stopPropagation()}>
@@ -77,19 +107,40 @@ function FileAttachment({ mediaId, onPreview }) {
                     <line x1="12" y1="15" x2="12" y2="3"/>
                 </svg>
             </a>
-            ${canPreview && html`
+            <div class="file-attachment-actions">
+                ${canPreview && html`
+                    <button class="file-attachment-preview" type="button" onClick=${() => onPreview?.({ mediaId, info })}>
+                        Preview
+                    </button>
+                `}
                 <button
-                    class="file-attachment-preview"
+                    class="file-attachment-action"
                     type="button"
-                    onClick=${(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onPreview?.({ mediaId, info });
-                    }}
+                    title=${saveLabel}
+                    aria-label=${saveLabel}
+                    aria-disabled=${busy ? 'true' : undefined}
+                    onClick=${() => void handleAttachmentAction('save')}
                 >
-                    Preview
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 8V6a2 2 0 0 1 2-2h4l3 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8Z"/>
+                        <path d="M12 10v7m-3-3 3 3 3-3"/>
+                    </svg>
                 </button>
-            `}
+                <button
+                    class="file-attachment-action"
+                    type="button"
+                    title=${addLabel}
+                    aria-label=${addLabel}
+                    aria-disabled=${busy ? 'true' : undefined}
+                    onClick=${() => void handleAttachmentAction('add')}
+                >
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10l-7-7Zm0 0v7h7"/>
+                        <path d="M12 12v6m-3-3h6"/>
+                    </svg>
+                </button>
+            </div>
+            <div class=${`file-attachment-status${status?.error ? ' is-error' : ''}`} role="status">${status?.message}</div>
         </div>
     `;
 }
@@ -1563,8 +1614,8 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
     const handleAnnotationSend = useCallback(async () => {
         if (!annotationResult?.id) return;
         // Attach the annotated image to the compose box so user can add commentary
-        window.dispatchEvent(new CustomEvent('piclaw:compose-media-attach', {
-            detail: { mediaId: annotationResult.id, mediaUrl: annotationResult.url },
+        window.dispatchEvent(new CustomEvent(COMPOSE_MEDIA_ATTACH_EVENT, {
+            detail: { mediaId: annotationResult.id },
         }));
         setAnnotationResult(null);
     }, [annotationResult]);

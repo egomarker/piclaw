@@ -779,11 +779,17 @@ export async function getMediaText(mediaId) {
     return response.text();
 }
 
-/** Load media as a Blob for preview flows that need object URLs (e.g. PDFs). */
-export async function getMediaBlob(mediaId) {
-    const response = await fetch(`${API_BASE}/media/${mediaId}`);
+/** Load media as a Blob for previews and attachment actions. */
+export async function getMediaBlob(mediaId, signal?: AbortSignal) {
+    const response = await fetch(getMediaUrl(mediaId), { signal });
     if (!response.ok) throw new Error('Failed to load media blob');
     return response.blob();
+}
+
+/** Recreate a stored attachment as a browser File for existing upload flows. */
+export async function getMediaFile(mediaId: number, filename: string, contentType?: string, signal?: AbortSignal) {
+    const blob = await getMediaBlob(mediaId, signal);
+    return new File([blob], filename, { type: contentType || blob.type });
 }
 
 /**
@@ -912,6 +918,11 @@ async function uploadWorkspaceFileChunked(file, targetPath = '', options: ApiOpt
     const chunkSize = Math.max(1, Math.min(MAX_UPLOAD_SIZE, Number(options.chunkSize) || WORKSPACE_UPLOAD_CHUNK_SIZE));
     const totalSize = Math.max(0, Number(file?.size) || 0);
     const chunkTotal = Math.max(1, Math.ceil(totalSize / chunkSize));
+    const filename = file?.name || 'upload.bin';
+    // Browser header values cannot carry arbitrary Unicode. Keep the plain header for ASCII clients.
+    const nameHeader = /^[ -~]+$/.test(filename)
+        ? { 'X-File-Name': filename }
+        : { 'X-File-Name-Encoded': encodeURIComponent(filename) };
     let completedBytes = 0;
     let lastResult = null;
 
@@ -924,7 +935,7 @@ async function uploadWorkspaceFileChunked(file, targetPath = '', options: ApiOpt
             'X-Upload-Id': uploadId,
             'X-Chunk-Index': chunkIndex,
             'X-Chunk-Total': chunkTotal,
-            'X-File-Name': file?.name || 'upload.bin',
+            ...nameHeader,
             'X-File-Size': totalSize,
         }, (progress) => {
             if (typeof options.onProgress !== 'function') return;

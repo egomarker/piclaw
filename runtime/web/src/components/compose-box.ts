@@ -1,7 +1,8 @@
-import { html, useRef, useState, useEffect, useCallback, useMemo } from '../vendor/preact-htm.js';
+import { html, useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo } from '../vendor/preact-htm.js';
 import { useTranslation } from '../utils/i18n.js';
 import { findPopupTypeaheadMatch, isPopupTypeaheadKey, resolvePopupTypeaheadMatch, updatePopupTypeaheadBuffer } from '../ui/popup-typeahead.js';
-import { getAgentModels, sendAgentMessage, uploadMedia } from '../api.js';
+import { getAgentModels, getMediaFile, sendAgentMessage, uploadMedia } from '../api.js';
+import { COMPOSE_MEDIA_ATTACH_EVENT, type ComposeMediaAttachRequest } from '../ui/compose-media-attachment.js';
 import { getLocalStorageItem, setLocalStorageItem } from '../utils/storage.js';
 import { buildMentionValue, filterMentionAgents, parseMentionAutocompleteQuery } from '../ui/agent-mentions.js';
 import { shouldOpenSessionSwitcherFromBlankCompose, shouldRouteComposeValueToSessionSwitcher } from '../ui/compose-session-switcher.js';
@@ -2781,31 +2782,43 @@ export function ComposeBox({
         }
     };
 
-    const addMediaFiles = (files) => {
+    const addMediaFiles = useCallback((files) => {
         const list = Array.from(files || []).filter((file) => file instanceof File && !String(file.name || '').startsWith('.DS_Store'));
-        if (!list.length) return;
+        if (!list.length) return false;
         setMediaFiles((current) => [...current, ...list]);
         setSubmitError(null);
-    };
-
-    // Listen for annotated image attachments from the image annotator
-    useEffect(() => {
-        const onComposeMediaAttach = async (e) => {
-            const mediaId = e?.detail?.mediaId;
-            if (!mediaId) return;
-            try {
-                const { getMediaBlob } = await import('../api.js');
-                const blob = await getMediaBlob(mediaId);
-                const file = new File([blob], `annotated-${mediaId}.png`, { type: blob.type || 'image/png' });
-                setMediaFiles((current) => [...current, file]);
-                textareaRef.current?.focus();
-            } catch (err) {
-                console.warn('[compose-box] Failed to attach annotated image:', err);
-            }
-        };
-        window.addEventListener('piclaw:compose-media-attach', onComposeMediaAttach);
-        return () => window.removeEventListener('piclaw:compose-media-attach', onComposeMediaAttach);
+        return true;
     }, []);
+
+    // Cancel in-flight attachment requests when the active chat changes.
+    useLayoutEffect(() => {
+        const controller = new AbortController();
+        const { signal } = controller;
+        const onComposeMediaAttach = (event: Event) => {
+            const detail = (event as CustomEvent<ComposeMediaAttachRequest>).detail;
+            if (!detail?.mediaId || detail.result) return;
+            const { mediaId, filename, contentType } = detail;
+            const isAnnotation = !filename;
+            detail.result = getMediaFile(
+                mediaId,
+                filename || `annotated-${mediaId}.png`,
+                isAnnotation ? 'image/png' : contentType,
+                signal,
+            ).then((file) => {
+                if (signal.aborted || !addMediaFiles([file])) return false;
+                if (isAnnotation) textareaRef.current?.focus();
+                return true;
+            }).catch((error) => {
+                if (!signal.aborted) console.warn('[compose-box] Failed to attach timeline media:', error);
+                return false;
+            });
+        };
+        window.addEventListener(COMPOSE_MEDIA_ATTACH_EVENT, onComposeMediaAttach);
+        return () => {
+            window.removeEventListener(COMPOSE_MEDIA_ATTACH_EVENT, onComposeMediaAttach);
+            controller.abort();
+        };
+    }, [currentChatJid, addMediaFiles]);
 
     const handleFileChange = (e) => {
         addMediaFiles(e.target.files);

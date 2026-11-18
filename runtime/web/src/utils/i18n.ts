@@ -156,6 +156,13 @@ type MessageKey =
   | 'post.deleteMessage'
   | 'post.tooLarge'
   | 'post.previewTruncated'
+  | 'post.attachmentSave'
+  | 'post.attachmentAdd'
+  | 'post.attachmentSaved'
+  | 'post.attachmentAdded'
+  | 'post.attachmentExists'
+  | 'post.attachmentSaveError'
+  | 'post.attachmentAddError'
   | 'post.submitted'
   | 'post.discard'
   | 'post.save'
@@ -862,6 +869,13 @@ const EN: Record<MessageKey, string> = {
   'post.deleteMessage': 'Delete message',
   'post.tooLarge': 'Message too large to display.',
   'post.previewTruncated': 'Preview truncated.',
+  'post.attachmentSave': 'Save to workspace',
+  'post.attachmentAdd': 'Add to prompt',
+  'post.attachmentSaved': 'Saved to the workspace root.',
+  'post.attachmentAdded': 'Added to the draft.',
+  'post.attachmentExists': 'A file with this name already exists in the workspace root.',
+  'post.attachmentSaveError': 'Could not save the attachment to the workspace.',
+  'post.attachmentAddError': 'Could not add the attachment to the draft.',
   'post.submitted': 'Submitted',
   'post.discard': 'Discard',
   'post.save': 'Save',
@@ -1563,6 +1577,13 @@ const ZH_CN: Partial<Record<MessageKey, string>> = {
   'post.deleteMessage': '删除消息',
   'post.tooLarge': '消息过大，无法显示。',
   'post.previewTruncated': '预览已截断。',
+  'post.attachmentSave': '保存到工作区',
+  'post.attachmentAdd': '添加到提示词',
+  'post.attachmentSaved': '已保存到工作区根目录。',
+  'post.attachmentAdded': '已添加到草稿。',
+  'post.attachmentExists': '工作区根目录中已有同名文件。',
+  'post.attachmentSaveError': '无法将附件保存到工作区。',
+  'post.attachmentAddError': '无法将附件添加到草稿。',
   'post.submitted': '已提交',
   'post.discard': '丢弃',
   'post.save': '保存',
@@ -2264,6 +2285,13 @@ const JA: Partial<Record<MessageKey, string>> = {
   'post.deleteMessage': 'メッセージを削除',
   'post.tooLarge': 'メッセージが大きすぎて表示できません。',
   'post.previewTruncated': 'プレビューは切り詰められました。',
+  'post.attachmentSave': 'ワークスペースに保存',
+  'post.attachmentAdd': 'プロンプトに追加',
+  'post.attachmentSaved': 'ワークスペースのルートに保存しました。',
+  'post.attachmentAdded': '下書きに追加しました。',
+  'post.attachmentExists': 'ワークスペースのルートに同名のファイルがあります。',
+  'post.attachmentSaveError': '添付ファイルをワークスペースに保存できませんでした。',
+  'post.attachmentAddError': '添付ファイルを下書きに追加できませんでした。',
   'post.submitted': '送信済み',
   'post.discard': '破棄',
   'post.save': '保存',
