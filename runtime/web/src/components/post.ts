@@ -6,6 +6,7 @@ import { formatCount, formatFileSize, formatTime, formatTimestamp } from '../uti
 import { buildPostMarkdownCopyPayload } from '../utils/post-copy-markdown.js';
 import { DEFAULT_AGENT_NAME, getAvatarInfo } from '../ui/agent-utils.js';
 import { getAttachmentPreviewKind, getAttachmentPreviewLabel } from '../ui/attachment-preview.js';
+import { shareAttachmentFile, shouldShowAttachmentShare } from '../ui/attachment-share.js';
 import { COMPOSE_MEDIA_ATTACH_EVENT, requestComposeMediaAttachment } from '../ui/compose-media-attachment.js';
 import { extractCardBlocks, renderAdaptiveCard } from '../ui/adaptive-card-renderer.js';
 import { buildAdaptiveCardSubmissionFallbackText, describeAdaptiveCardSubmission, extractAdaptiveCardSubmissionBlocks } from '../ui/adaptive-card-submission.js';
@@ -40,6 +41,9 @@ function FileAttachment({ mediaId, onPreview }) {
     const [info, setInfo] = useState(null);
     const [busy, setBusy] = useState(false);
     const [status, setStatus] = useState<{ message: string; error?: boolean } | null>(null);
+    // iOS only opens the share sheet while the tap still counts as a user
+    // gesture, so the download starts on pointerdown and the tap reuses it.
+    const shareFilePromiseRef = useRef<Promise<File> | null>(null);
 
     useEffect(() => {
         getMediaInfo(mediaId).then(setInfo).catch((error) => {
@@ -56,6 +60,8 @@ function FileAttachment({ mediaId, onPreview }) {
     const canPreview = previewKind !== 'unsupported';
     const saveLabel = t('post.attachmentSave');
     const addLabel = t('post.attachmentAdd');
+    const shareLabel = t('post.attachmentShare');
+    const shareEnabled = shouldShowAttachmentShare();
 
     const handleAttachmentAction = async (action: 'save' | 'add') => {
         if (busy) return;
@@ -82,6 +88,38 @@ function FileAttachment({ mediaId, onPreview }) {
         } finally {
             setBusy(false);
         }
+    };
+
+    const handleShareAttachment = async () => {
+        if (busy) return;
+        setBusy(true);
+        setStatus(null);
+        try {
+            const pending = shareFilePromiseRef.current ?? getMediaFile(mediaId, filename, info.content_type);
+            const file = await pending;
+            const outcome = await shareAttachmentFile({ file, title: filename });
+            if (outcome === 'unsupported') {
+                setStatus({ message: t('post.attachmentShareUnsupported'), error: true });
+            } else if (outcome === 'failed') {
+                setStatus({ message: t('post.attachmentShareError'), error: true });
+            }
+        } catch (error) {
+            console.warn('[post] Attachment share failed:', error);
+            setStatus({ message: t('post.attachmentShareError'), error: true });
+        } finally {
+            setBusy(false);
+            shareFilePromiseRef.current = null;
+        }
+    };
+
+    const prefetchShareFile = () => {
+        if (!shareEnabled || shareFilePromiseRef.current) return;
+        const pending = getMediaFile(mediaId, filename, info.content_type);
+        shareFilePromiseRef.current = pending;
+        // A rejected prefetch must not surface as an unhandled rejection.
+        pending.catch(() => {
+            if (shareFilePromiseRef.current === pending) shareFilePromiseRef.current = null;
+        });
     };
 
     return html`
@@ -139,6 +177,23 @@ function FileAttachment({ mediaId, onPreview }) {
                         <path d="M12 12v6m-3-3h6"/>
                     </svg>
                 </button>
+                ${shareEnabled && html`
+                    <button
+                        class="file-attachment-action"
+                        type="button"
+                        title=${shareLabel}
+                        aria-label=${shareLabel}
+                        aria-disabled=${busy ? 'true' : undefined}
+                        onPointerDown=${prefetchShareFile}
+                        onClick=${() => void handleShareAttachment()}
+                    >
+                        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M4 13v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/>
+                            <path d="M12 15V4"/>
+                            <path d="m8 8 4-4 4 4"/>
+                        </svg>
+                    </button>
+                `}
             </div>
             <div class=${`file-attachment-status${status?.error ? ' is-error' : ''}`} role="status">${status?.message}</div>
         </div>

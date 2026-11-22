@@ -163,6 +163,9 @@ type MessageKey =
   | 'post.attachmentExists'
   | 'post.attachmentSaveError'
   | 'post.attachmentAddError'
+  | 'post.attachmentShare'
+  | 'post.attachmentShareError'
+  | 'post.attachmentShareUnsupported'
   | 'post.submitted'
   | 'post.discard'
   | 'post.save'
@@ -876,6 +879,9 @@ const EN: Record<MessageKey, string> = {
   'post.attachmentExists': 'A file with this name already exists in the workspace root.',
   'post.attachmentSaveError': 'Could not save the attachment to the workspace.',
   'post.attachmentAddError': 'Could not add the attachment to the draft.',
+  'post.attachmentShare': 'Share',
+  'post.attachmentShareError': 'Could not open the share sheet.',
+  'post.attachmentShareUnsupported': 'This browser cannot share files.',
   'post.submitted': 'Submitted',
   'post.discard': 'Discard',
   'post.save': 'Save',
@@ -1584,6 +1590,9 @@ const ZH_CN: Partial<Record<MessageKey, string>> = {
   'post.attachmentExists': '工作区根目录中已有同名文件。',
   'post.attachmentSaveError': '无法将附件保存到工作区。',
   'post.attachmentAddError': '无法将附件添加到草稿。',
+  'post.attachmentShare': '分享',
+  'post.attachmentShareError': '无法打开分享面板。',
+  'post.attachmentShareUnsupported': '此浏览器无法分享文件。',
   'post.submitted': '已提交',
   'post.discard': '丢弃',
   'post.save': '保存',
@@ -2292,6 +2301,9 @@ const JA: Partial<Record<MessageKey, string>> = {
   'post.attachmentExists': 'ワークスペースのルートに同名のファイルがあります。',
   'post.attachmentSaveError': '添付ファイルをワークスペースに保存できませんでした。',
   'post.attachmentAddError': '添付ファイルを下書きに追加できませんでした。',
+  'post.attachmentShare': '共有',
+  'post.attachmentShareError': '共有シートを開けませんでした。',
+  'post.attachmentShareUnsupported': 'このブラウザではファイルを共有できません。',
   'post.submitted': '送信済み',
   'post.discard': '破棄',
   'post.save': '保存',
