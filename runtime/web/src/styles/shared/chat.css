@@ -679,8 +679,8 @@
 
 .compose-model-hint {
     font-size: 11.5px;
-    color: var(--text-secondary);
-    opacity: var(--model-hint-opacity, 0.85);
+    color: var(--text-primary);
+    opacity: 1;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -920,8 +920,8 @@
 .compose-model-usage-hint {
     display: block;
     font-size: 10.5px;
-    color: var(--text-tertiary, var(--text-secondary));
-    opacity: 0.82;
+    color: var(--text-primary);
+    opacity: 1;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

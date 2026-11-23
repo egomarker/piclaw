@@ -11,6 +11,7 @@ import { initTheme, reapplyStoredTheme } from './theme.js';
 import { useTimestampRefresh } from './app-helpers.js';
 import { watchReturnToApp, watchStandaloneWebAppMode } from './app-resume.js';
 import { installStandaloneMobileViewportFix } from './mobile-viewport.js';
+import { installPwaScreenWakeLock } from './screen-wake-lock.js';
 import { BTW_SESSION_KEY } from './app-shell-state.js';
 import { formatSessionBrowserTitle } from './browser-title.js';
 
@@ -171,6 +172,10 @@ export function useAppShellEnvironmentEffects(options: UseAppShellEnvironmentEff
   useEffect(() => initTheme(), []);
 
   useEffect(() => watchStandaloneWebAppMode(setIsWebAppMode), [setIsWebAppMode]);
+
+  // Installed web apps hide the browser chrome, so keep the display awake while
+  // the session is open. No-op in a normal tab and where the API is missing.
+  useEffect(() => installPwaScreenWakeLock(), []);
 
   useEffect(() => {
     let disposeSettling = () => {};
