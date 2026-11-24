@@ -1,5 +1,11 @@
 import { html, useState, useEffect, useCallback, useMemo, useRef } from '../../vendor/preact-htm.js';
 import { METERS_EVENT_NAME, applyMetersEnabled, readStoredMetersEnabled } from '../../ui/meters.js';
+import { isStandaloneWebAppMode } from '../../ui/chat-window.js';
+import {
+    isScreenWakeLockSupported,
+    readStoredWakeLockEnabled,
+    setStoredWakeLockEnabled,
+} from '../../ui/screen-wake-lock.js';
 import { NumberStepper } from './number-stepper.js';
 import { useTranslation } from '../../utils/i18n.js';
 
@@ -112,6 +118,8 @@ export function GeneralSection({ settingsData, setStatus, mergeSettingsData }) {
     const [widgetTokenCopied, setWidgetTokenCopied] = useState(false);
     const [widgetTokenBusy, setWidgetTokenBusy] = useState(false);
     const [metersEnabled, setMetersEnabled] = useState(() => readStoredMetersEnabled(false));
+    const [wakeLockEnabled, setWakeLockEnabledState] = useState(() => readStoredWakeLockEnabled());
+    const showWakeLockSetting = useMemo(() => isStandaloneWebAppMode() && isScreenWakeLockSupported(), []);
     const [appliedHint, setAppliedHint] = useState(false);
     const savedSnapshotRef = useRef('');
     const saveTimerRef = useRef(null);
@@ -302,6 +310,20 @@ export function GeneralSection({ settingsData, setStatus, mergeSettingsData }) {
                     <span class="settings-hint" style="margin:0">${t('settings.general.commentaryAddonsHint')}</span>
                 </div>
             </div>
+            ${showWakeLockSetting && html`
+            <div class="settings-row">
+                <label>${t('settings.general.wakeLock')}</label>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <input type="checkbox" checked=${wakeLockEnabled}
+                        onChange=${e => {
+                            const next = Boolean(e.currentTarget.checked);
+                            setWakeLockEnabledState(next);
+                            setStoredWakeLockEnabled(next);
+                        }} />
+                    <span class="settings-hint" style="margin:0">${t('settings.general.wakeLockHint')}</span>
+                </div>
+            </div>
+            `}
 
             <h3 style="margin-top:20px">${t('settings.general.instanceConfig')}</h3>
             <div class="settings-row">

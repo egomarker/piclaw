@@ -11,13 +11,26 @@
 
 import { isStandaloneWebAppMode } from './chat-window.js';
 
+export const WAKE_LOCK_STORAGE_KEY = 'piclaw_screen_wake_lock_enabled';
+export const WAKE_LOCK_PREFERENCE_EVENT = 'piclaw:wake-lock-preference-changed';
+
+export interface WakeLockPreferenceRuntime {
+  storage?: { getItem?: (key: string) => string | null; setItem?: (key: string, value: string) => void } | null;
+  events?: {
+    addEventListener?: (type: string, listener: (event: any) => void) => void;
+    removeEventListener?: (type: string, listener: (event: any) => void) => void;
+    dispatchEvent?: (event: any) => void;
+  } | null;
+  createEvent?: (detail: { enabled: boolean }) => any;
+}
+
 export interface WakeLockSentinelLike {
   released?: boolean;
   release?: () => Promise<void>;
   addEventListener?: (type: string, listener: () => void) => void;
 }
 
-export interface ScreenWakeLockRuntime {
+export interface ScreenWakeLockRuntime extends WakeLockPreferenceRuntime {
   navigator?: { wakeLock?: { request?: (type: 'screen') => Promise<WakeLockSentinelLike> } } | null;
   document?: {
     visibilityState?: string;
@@ -25,6 +38,7 @@ export interface ScreenWakeLockRuntime {
     removeEventListener?: (type: string, listener: () => void) => void;
   } | null;
   isStandalone?: () => boolean;
+  readEnabled?: () => boolean;
 }
 
 function resolveNavigator(runtime: ScreenWakeLockRuntime = {}) {
@@ -33,6 +47,39 @@ function resolveNavigator(runtime: ScreenWakeLockRuntime = {}) {
 
 function resolveDocument(runtime: ScreenWakeLockRuntime = {}) {
   return runtime.document ?? (typeof document !== 'undefined' ? document : null);
+}
+
+function resolveStorage(runtime: WakeLockPreferenceRuntime = {}) {
+  return runtime.storage ?? (typeof localStorage !== 'undefined' ? localStorage : null);
+}
+
+function resolveEvents(runtime: WakeLockPreferenceRuntime = {}) {
+  return runtime.events ?? (typeof window !== 'undefined' ? window : null);
+}
+
+/** Whether the user opted into keeping the display awake (default: off). */
+export function readStoredWakeLockEnabled(runtime: WakeLockPreferenceRuntime = {}): boolean {
+  try {
+    const raw = resolveStorage(runtime)?.getItem?.(WAKE_LOCK_STORAGE_KEY);
+    return raw === 'true' || raw === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** Persist the preference in this browser and notify live listeners. */
+export function setStoredWakeLockEnabled(enabled: boolean, runtime: WakeLockPreferenceRuntime = {}): void {
+  try {
+    resolveStorage(runtime)?.setItem?.(WAKE_LOCK_STORAGE_KEY, enabled ? 'true' : 'false');
+  } catch {
+    // Private-mode storage failures must not break the settings pane.
+  }
+  try {
+    const createEvent = runtime.createEvent ?? ((detail: { enabled: boolean }) => new CustomEvent(WAKE_LOCK_PREFERENCE_EVENT, { detail }));
+    resolveEvents(runtime)?.dispatchEvent?.(createEvent({ enabled }));
+  } catch {
+    // Event delivery is best-effort; the stored value still applies on reload.
+  }
 }
 
 /** Whether the runtime exposes the Screen Wake Lock API at all. */
@@ -134,17 +181,34 @@ export function installPwaScreenWakeLock(runtime: ScreenWakeLockRuntime = {}): (
   if (!isScreenWakeLockSupported(runtime)) return () => {};
 
   const doc = resolveDocument(runtime);
+  const events = resolveEvents(runtime);
+  const readEnabled = runtime.readEnabled ?? (() => readStoredWakeLockEnabled(runtime));
   const controller = createScreenWakeLockController(runtime);
+
   const arm = () => {
+    if (!readEnabled()) return;
     void controller.enable();
+  };
+
+  const handlePreferenceChange = (event?: { detail?: { enabled?: unknown } }) => {
+    const detail = event?.detail?.enabled;
+    const enabled = typeof detail === 'boolean' ? detail : readEnabled();
+    if (enabled) void controller.enable();
+    else void controller.disable();
   };
 
   doc?.addEventListener?.('pointerdown', arm, { once: true, passive: true });
   doc?.addEventListener?.('keydown', arm, { once: true });
+  events?.addEventListener?.(WAKE_LOCK_PREFERENCE_EVENT, handlePreferenceChange);
+
+  // Best effort only: iOS grants wake locks solely from a user gesture, so the
+  // first interaction remains the reliable arming path.
+  if (readEnabled()) void controller.enable();
 
   return () => {
     doc?.removeEventListener?.('pointerdown', arm);
     doc?.removeEventListener?.('keydown', arm);
+    events?.removeEventListener?.(WAKE_LOCK_PREFERENCE_EVENT, handlePreferenceChange);
     void controller.dispose();
   };
 }

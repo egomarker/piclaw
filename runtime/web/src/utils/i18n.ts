@@ -396,6 +396,8 @@ type MessageKey =
   | 'settings.general.commentaryTimelineHint'
   | 'settings.general.commentaryAddons'
   | 'settings.general.commentaryAddonsHint'
+  | 'settings.general.wakeLock'
+  | 'settings.general.wakeLockHint'
   | 'settings.general.instanceConfig'
   | 'settings.general.composeUpload'
   | 'settings.general.composeUploadAria'
@@ -1108,6 +1110,8 @@ const EN: Record<MessageKey, string> = {
   'settings.general.commentaryTimelineHint': 'Keep confirmed pre-tool narration as display-only timeline messages. It never counts as a completed reply.',
   'settings.general.commentaryAddons': 'Tool commentary in messaging add-ons',
   'settings.general.commentaryAddonsHint': 'Send confirmed pre-tool narration as separate messages in Telegram and other chat add-ons. This may generate channel notifications.',
+  'settings.general.wakeLock': 'Keep screen on',
+  'settings.general.wakeLockHint': 'Prevent the display from sleeping while piclaw is open. Installed app only, this browser only. Ignored in Low Power Mode.',
   'settings.general.instanceConfig': 'Instance Configuration',
   'settings.general.composeUpload': 'Compose upload (MB)',
   'settings.general.composeUploadAria': 'compose upload limit',
@@ -1819,6 +1823,8 @@ const ZH_CN: Partial<Record<MessageKey, string>> = {
   'settings.general.commentaryTimelineHint': '在时间线中保留确认的工具调用前说明，仅供显示，不计为已完成回复。',
   'settings.general.commentaryAddons': '消息附加组件中的工具注释',
   'settings.general.commentaryAddonsHint': '在 Telegram 和其他聊天附加组件中将确认的工具调用前说明作为单独消息发送。这可能会触发频道通知。',
+  'settings.general.wakeLock': '保持屏幕常亮',
+  'settings.general.wakeLockHint': '在 piclaw 打开时防止屏幕休眠。仅限已安装的应用、仅限此浏览器。低电量模式下无效。',
   'settings.general.instanceConfig': '实例配置',
   'settings.general.composeUpload': '撰写上传（MB）',
   'settings.general.composeUploadAria': '撰写上传限制',
@@ -2530,6 +2536,8 @@ const JA: Partial<Record<MessageKey, string>> = {
   'settings.general.commentaryTimelineHint': '確認済みのツール実行前コメントを表示専用でタイムラインに保存します。完了した返信には数えません。',
   'settings.general.commentaryAddons': 'メッセージングアドオンのツール注釈',
   'settings.general.commentaryAddonsHint': '確認済みのツール実行前コメントを Telegram などのチャットアドオンへ個別メッセージとして送信します。チャンネル通知が発生する場合があります。',
+  'settings.general.wakeLock': '画面をオンのままにする',
+  'settings.general.wakeLockHint': 'piclaw を開いている間、画面のスリープを防ぎます。インストール済みアプリかつこのブラウザのみ。低電力モードでは無効です。',
   'settings.general.instanceConfig': 'インスタンス設定',
   'settings.general.composeUpload': '作成アップロード（MB）',
   'settings.general.composeUploadAria': '作成アップロード上限',
