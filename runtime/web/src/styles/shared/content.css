@@ -340,23 +340,10 @@
     outline: none;
 }
 
-@media (hover: none) {
-    .post-actions.has-pin-action {
-        opacity: 1;
-    }
-    .post-pin-btn {
+@media (hover: none) and (pointer: coarse) {
+    .post-actions > .post-action-btn {
         width: 28px;
         height: 28px;
-    }
-}
-
-@media (hover: hover) {
-    .post-actions.has-pinned-post {
-        opacity: 1;
-    }
-    .post:not(:hover):not(:focus-within) .has-pinned-post > :not(.post-pin-btn) {
-        opacity: 0;
-        pointer-events: none;
     }
 }
 

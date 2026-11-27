@@ -1963,7 +1963,7 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
                 ${avatarInfo.image ? html`<img src=${avatarInfo.image} alt=${displayName} />` : avatarInfo.letter}
             </div>
             <div class="post-body">
-                <div class=${`post-actions${canPin ? ' has-pin-action' : ''}${pinned ? ' has-pinned-post' : ''}`}>
+                <div class="post-actions">
                     ${isAgent && speechSupported && speakableText && html`
                         <button
                             class=${`post-action-btn post-speak-btn${isSpeakingThisPost ? ' is-active' : ''}`}
