@@ -21,6 +21,7 @@ type WebChannelHttpSurfaceEndpointFacade = Pick<
   | "handleDeletePost"
   | "handleUpdatePost"
   | "handleUpdatePostAnnotations"
+  | "handleSetPostPin"
   | "handleInternalPost"
   | "handlePost"
   | "handleAgentStatus"
