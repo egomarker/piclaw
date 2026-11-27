@@ -38,10 +38,10 @@ function dispatchStoredReplyWebPush(
   dispatchWebPushNotification?: (interaction: ReturnType<WebChannelLike["storeMessage"]>) => Promise<unknown>,
 ): void {
   if (!interaction) return;
-  void (dispatchWebPushNotification || sendStoredAgentReplyWebPushNotification)(interaction).catch((error) => {
-    debugSuppressedError(log, "Failed to dispatch Web Push for stored agent reply.", error, {
-      chatJid: interaction.chat_jid,
+  void (dispatchWebPushNotification || sendStoredAgentReplyWebPushNotification)(interaction).catch(() => {
+    log.debug("Failed to dispatch Web Push for stored agent reply.", {
       rowId: interaction.id,
+      suppressed: true,
     });
   });
 }

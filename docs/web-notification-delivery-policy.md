@@ -61,6 +61,16 @@ If you want those markers while debugging delivery behavior, set:
 
 When enabled, local browser notifications and service-worker Web Push notifications both append the source label to the notification title.
 
+## Server-side Web Push diagnostics
+
+Set [`domains.web.pushDeliveryDiagnostics`](configuration.md#web-push-delivery-diagnostics) to `true` and restart to log reply Web Push outcomes at `info` level (`operation: "web.push.reply_delivery"`). This is off by default and independent of title labels.
+
+- `skipped`: no send was attempted. The reason can distinguish a visible same-chat client, a hidden same-chat client not recognized as iOS, a circuit breaker, and other dispatch skips.
+- `failed`: PiClaw could not send, or the relay returned an HTTP error. The record includes the status and an allowlisted relay error code (for example, `403` / `BadJwtToken`) when available, or a category such as `timeout` or `network_error`.
+- `accepted`: the relay accepted the request. For example, Apple HTTP `201` does **not** confirm service-worker receipt or that the notification appeared on the device.
+
+Records include the stored reply ID and, for per-subscription outcomes, a relay category. They do not contain message text, subscription URLs or keys, device IDs, or user agents.
+
 ## Practical examples
 
 ### Phone visible on chat A, chat B finishes

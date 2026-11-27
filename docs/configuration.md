@@ -197,6 +197,22 @@ PICLAW_WEB_NOTIFICATION_DEBUG_LABELS=1
 
 That appends labels like `[Local]` and `[Web Push]` to notification titles so local-vs-push behavior can be checked without digging through logs first.
 
+### Web Push delivery diagnostics
+
+To log server-side Web Push outcomes for stored agent replies, set `domains.web.pushDeliveryDiagnostics` to `true` in `.piclaw/config.json` and restart PiClaw:
+
+```json
+{
+  "domains": {
+    "web": {
+      "pushDeliveryDiagnostics": true
+    }
+  }
+}
+```
+
+Merge this field into the existing configuration. It defaults to `false` and does not change notification routing. With `info` logging enabled, look for `operation: "web.push.reply_delivery"` in the server log. See the [notification delivery policy](web-notification-delivery-policy.md#server-side-web-push-diagnostics) for how to interpret the outcomes.
+
 ### Reverse proxy / tunnel deployments
 
 If piclaw is served behind a reverse proxy or tunnel (for example Cloudflare Tunnel, Caddy, Nginx, or another TLS terminator), set:

@@ -6,7 +6,7 @@ import { createPrivateKey } from "node:crypto";
 
 import { getWebRuntimeConfig } from "../../../core/config.js";
 import type { InteractionRow } from "../../../db.js";
-import { createLogger, debugSuppressedError } from "../../../utils/logger.js";
+import { createLogger } from "../../../utils/logger.js";
 import {
   ensureStoredVapidKeys,
   listStoredWebPushSubscriptions,
@@ -23,6 +23,26 @@ const DEFAULT_WEB_PUSH_REQUEST_TIMEOUT_MS = 15_000;
 const AUTH_FAILURE_PRUNE_THRESHOLD = 3;
 const SETUP_BREAKER_COOLDOWN_MS = 5 * 60 * 1000;
 const DELIVERY_BREAKER_COOLDOWN_MS = 2 * 60 * 1000;
+
+// Never emit a relay's arbitrary response text or a transport's raw error.
+const SAFE_RELAY_ERROR_CODES = new Set([
+  "BadJwtToken", "BadVapidPublicKey", "VapidPkHashMismatch", "BadPath", "MethodNotAllowed", "PayloadTooLarge",
+  "BadWebPushRequest", "BadTtl", "BadUrgency", "Unregistered", "TooManyRequests",
+  "UNREGISTERED", "PERMISSION_DENIED", "INVALID_ARGUMENT", "RESOURCE_EXHAUSTED", "UNAVAILABLE",
+]);
+const SAFE_NETWORK_ERROR_CODES = new Set([
+  "ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "EHOSTUNREACH", "ENETUNREACH",
+  "CERT_HAS_EXPIRED", "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "ERR_TLS_CERT_ALTNAME_INVALID", "UND_ERR_CONNECT_TIMEOUT",
+]);
+
+type WebPushRelay = "apple" | "google" | "mozilla" | "other";
+type ReplyDeliveryTrace = (outcome: "skipped" | "failed" | "accepted", fields: {
+  relay?: WebPushRelay;
+  reason?: string;
+  statusCode?: number;
+  relayErrorCode?: string;
+  networkErrorCode?: string;
+}) => void;
 
 type WebPushBreakerState = {
   reason: Error;
@@ -146,6 +166,56 @@ function getStoredVapidDetails(baseDir?: string, vapidSubject?: string): {
   };
 }
 
+function classifyWebPushRelay(endpoint: string): WebPushRelay {
+  try {
+    const host = new URL(endpoint).hostname.toLowerCase().replace(/\.$/, "");
+    if (host === "push.apple.com" || host.endsWith(".push.apple.com")) return "apple";
+    if (host === "fcm.googleapis.com" || host === "android.googleapis.com") return "google";
+    if (host === "push.services.mozilla.com" || host.endsWith(".push.services.mozilla.com")) return "mozilla";
+  } catch {
+    // Do not log unrecognized or malformed endpoints.
+  }
+  return "other";
+}
+
+function getHttpStatusCode(error: unknown): number | undefined {
+  const rawStatus = (error as { statusCode?: unknown } | null)?.statusCode;
+  const status = typeof rawStatus === "string" ? Number(rawStatus) : rawStatus;
+  return typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599
+    ? status
+    : undefined;
+}
+
+function getSafeRelayErrorCode(body: unknown): string | undefined {
+  if (typeof body !== "string" || body.length > 8192) return undefined;
+  try {
+    const parsed = JSON.parse(body);
+    const code: unknown = parsed?.reason ?? parsed?.error?.status;
+    return typeof code === "string" && SAFE_RELAY_ERROR_CODES.has(code) ? code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function describeDeliveryFailure(error: unknown, requestDispatched: boolean) {
+  const statusCode = getHttpStatusCode(error);
+  if (statusCode !== undefined) {
+    return {
+      reason: "http_error",
+      statusCode,
+      relayErrorCode: getSafeRelayErrorCode((error as { body?: unknown })?.body),
+    };
+  }
+  if (!requestDispatched) return { reason: "request_generation_error" };
+
+  const transportError = error as { name?: unknown; code?: unknown; cause?: { code?: unknown } } | null;
+  const code = [transportError?.code, transportError?.cause?.code]
+    .find((value): value is string => typeof value === "string" && SAFE_NETWORK_ERROR_CODES.has(value));
+  const timeout = transportError?.name === "AbortError" || transportError?.name === "TimeoutError"
+    || code === "ETIMEDOUT" || code === "UND_ERR_CONNECT_TIMEOUT";
+  return { reason: timeout ? "timeout" : "network_error", networkErrorCode: code };
+}
+
 function getActiveBreaker(state: WebPushBreakerState | null): WebPushBreakerState | null {
   if (!state) return null;
   if (Date.now() < state.untilMs) return state;
@@ -169,8 +239,6 @@ function tripStoredWebPushSetupBreaker(error: unknown): void {
     untilMs: Date.now() + SETUP_BREAKER_COOLDOWN_MS,
   };
   log.warn("Disabled stored web push delivery after a fatal setup failure.", {
-    errorMessage: reason.message,
-    err: reason,
     cooldownMs: SETUP_BREAKER_COOLDOWN_MS,
   });
 }
@@ -183,10 +251,9 @@ function tripStoredWebPushDeliveryBreaker(subscription: StoredWebPushSubscriptio
     untilMs: Date.now() + DELIVERY_BREAKER_COOLDOWN_MS,
   });
   log.warn("Temporarily disabled stored web push delivery after repeated delivery failures.", {
-    errorMessage: reason.message,
-    err: reason,
     cooldownMs: DELIVERY_BREAKER_COOLDOWN_MS,
-    endpoint: subscription.endpoint,
+    relay: classifyWebPushRelay(subscription.endpoint),
+    statusCode: getHttpStatusCode(error),
   });
 }
 
@@ -216,7 +283,7 @@ function normalizeRequestHeaders(headers: GeneratedWebPushRequestDetails["header
 async function dispatchGeneratedWebPushRequest(
   requestDetails: GeneratedWebPushRequestDetails,
   fetchImpl: typeof fetch = fetch,
-): Promise<void> {
+): Promise<number> {
   const controller = typeof AbortController !== "undefined" && Number.isFinite(requestDetails.timeout) && Number(requestDetails.timeout) > 0
     ? new AbortController()
     : null;
@@ -234,15 +301,13 @@ async function dispatchGeneratedWebPushRequest(
       body: requestDetails.body ?? undefined,
       ...(controller ? { signal: controller.signal } : {}),
     });
-    if (response.ok) return;
+    if (response.ok) return response.status;
 
     const body = await response.text().catch(() => "");
-    const error = new Error(`Received unexpected response code: ${response.status}`);
-    (error as Error & { statusCode?: number; headers?: Record<string, string>; body?: string; endpoint?: string }).statusCode = response.status;
-    (error as Error & { statusCode?: number; headers?: Record<string, string>; body?: string; endpoint?: string }).headers = Object.fromEntries(response.headers.entries());
-    (error as Error & { statusCode?: number; headers?: Record<string, string>; body?: string; endpoint?: string }).body = body;
-    (error as Error & { statusCode?: number; headers?: Record<string, string>; body?: string; endpoint?: string }).endpoint = requestDetails.endpoint;
-    throw error;
+    throw Object.assign(new Error(`Received unexpected response code: ${response.status}`), {
+      statusCode: response.status,
+      body,
+    });
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
   }
@@ -305,25 +370,56 @@ export async function sendStoredAgentReplyWebPushNotification(
   interaction: InteractionRow,
   options: SendStoredWebPushNotificationOptions = {},
 ): Promise<StoredWebPushSendResult> {
-  const payload = buildStoredAgentReplyWebPushNotification(interaction);
-  if (!payload) {
-    return { attempted: 0, sent: 0, removed: 0, failed: 0 };
+  const replyId = interaction?.id;
+  const trace: ReplyDeliveryTrace | undefined = getWebRuntimeConfig().pushDeliveryDiagnostics
+    ? (outcome, fields) => {
+        try {
+          log.info("Stored reply Web Push outcome.", {
+            operation: "web.push.reply_delivery",
+            replyId: Number.isSafeInteger(replyId) ? replyId : undefined,
+            outcome,
+            ...fields,
+          });
+        } catch {
+          // Diagnostics must not change delivery outcomes.
+        }
+      }
+    : undefined;
+  try {
+    const payload = buildStoredAgentReplyWebPushNotification(interaction);
+    if (!payload) {
+      trace?.("skipped", { reason: "no_payload" });
+      return { attempted: 0, sent: 0, removed: 0, failed: 0 };
+    }
+    return await sendStoredWebPush(payload, {
+      ...options,
+      chatJid: typeof interaction.chat_jid === "string" ? interaction.chat_jid.trim() : options.chatJid,
+    }, trace);
+  } catch (error) {
+    trace?.("failed", { reason: "dispatch_error" });
+    throw error;
   }
-  return await sendStoredWebPushNotification(payload, {
-    ...options,
-    chatJid: typeof interaction.chat_jid === "string" ? interaction.chat_jid.trim() : options.chatJid,
-  });
 }
 
-export async function sendStoredWebPushNotification(
+export function sendStoredWebPushNotification(
   payload: WebPushNotificationPayload,
   options: SendStoredWebPushNotificationOptions = {},
 ): Promise<StoredWebPushSendResult> {
+  return sendStoredWebPush(payload, options);
+}
+
+async function sendStoredWebPush(
+  payload: WebPushNotificationPayload,
+  options: SendStoredWebPushNotificationOptions,
+  trace?: ReplyDeliveryTrace,
+): Promise<StoredWebPushSendResult> {
   const subscriptions = listStoredWebPushSubscriptions(options.baseDir);
   if (subscriptions.length === 0) {
+    trace?.("skipped", { reason: "no_subscriptions" });
     return { attempted: 0, sent: 0, removed: 0, failed: 0 };
   }
   if (getActiveBreaker(disabledStoredWebPushSetupState)) {
+    trace?.("skipped", { reason: "setup_breaker_active" });
     return { attempted: 0, sent: 0, removed: 0, failed: 0 };
   }
 
@@ -351,45 +447,62 @@ export async function sendStoredWebPushNotification(
       : (options.generateRequestDetails || await loadGenerateRequestDetailsImpl());
   } catch (error) {
     tripStoredWebPushSetupBreaker(error);
+    trace?.("skipped", { reason: "setup_failed" });
     return { attempted: 0, sent: 0, removed: 0, failed: 0 };
   }
   const presenceService = options.presenceService || webNotificationPresenceService;
 
   const eligibleSubscriptions = subscriptions.filter((subscription) => {
     if (typeof options.targetDeviceId === "string" && options.targetDeviceId.trim() && subscription.deviceId !== options.targetDeviceId.trim()) {
+      trace?.("skipped", { relay: classifyWebPushRelay(subscription.endpoint), reason: "target_device_mismatch" });
       return false;
     }
     if (getActiveDeliveryBreaker(subscription.endpoint)) {
+      trace?.("skipped", { relay: classifyWebPushRelay(subscription.endpoint), reason: "delivery_breaker_active" });
       return false;
     }
-    return presenceService.shouldSendWebPush(subscription.deviceId, options.chatJid);
+    const reason = presenceService.getWebPushSuppressionReason(subscription.deviceId, options.chatJid);
+    if (reason) {
+      trace?.("skipped", { relay: classifyWebPushRelay(subscription.endpoint), reason });
+      return false;
+    }
+    return true;
   });
 
   const outcomes = await Promise.all(eligibleSubscriptions.map(async (subscription) => {
+    let requestDispatched = false;
     try {
+      let statusCode: number | undefined;
       if (options.sendNotification) {
+        requestDispatched = true;
         await options.sendNotification(subscription, serializedPayload, requestOptions);
       } else if (generateRequestDetails) {
         const requestDetails = generateRequestDetails(subscription, serializedPayload, requestOptions);
-        await dispatchGeneratedWebPushRequest(requestDetails, options.fetchImpl || fetch);
+        requestDispatched = true;
+        statusCode = await dispatchGeneratedWebPushRequest(requestDetails, options.fetchImpl || fetch);
       }
       clearSubscriptionFailureState(subscription);
+      trace?.("accepted", { relay: classifyWebPushRelay(subscription.endpoint), statusCode });
       return { attempted: 1, sent: 1, removed: 0, failed: 0, systemicError: null as Error | null };
     } catch (error) {
+      trace?.("failed", {
+        relay: classifyWebPushRelay(subscription.endpoint),
+        ...describeDeliveryFailure(error, requestDispatched),
+      });
       if (isExpiredSubscriptionError(error)) {
         clearSubscriptionFailureState(subscription);
         if (removeStoredWebPushSubscription(subscription.endpoint, options.baseDir)) {
           log.info("Removed expired web push subscription after delivery failure.", {
-            endpoint: subscription.endpoint,
-            statusCode: (error as { statusCode?: unknown } | null)?.statusCode,
+            relay: classifyWebPushRelay(subscription.endpoint),
+            statusCode: getHttpStatusCode(error),
           });
           return { attempted: 1, sent: 0, removed: 1, failed: 0, systemicError: null as Error | null };
         }
       } else if (isAuthRejectedSubscriptionError(error) && shouldPruneSubscriptionAfterAuthFailure(subscription)) {
         if (removeStoredWebPushSubscription(subscription.endpoint, options.baseDir)) {
           log.info("Removed rejected web push subscription after repeated auth failures.", {
-            endpoint: subscription.endpoint,
-            statusCode: (error as { statusCode?: unknown } | null)?.statusCode,
+            relay: classifyWebPushRelay(subscription.endpoint),
+            statusCode: getHttpStatusCode(error),
             threshold: AUTH_FAILURE_PRUNE_THRESHOLD,
           });
           authFailureCountsByEndpoint.delete(subscription.endpoint);
@@ -402,8 +515,10 @@ export async function sendStoredWebPushNotification(
         : new Error(typeof (error as { message?: unknown } | null)?.message === "string"
             ? String((error as { message: string }).message)
             : "Web push delivery failed.");
-      debugSuppressedError(log, "Web push delivery failed for a stored subscription.", error, {
-        endpoint: subscription.endpoint,
+      log.debug("Web push delivery failed for a stored subscription.", {
+        relay: classifyWebPushRelay(subscription.endpoint),
+        statusCode: getHttpStatusCode(error),
+        suppressed: true,
       });
       return {
         attempted: 1,

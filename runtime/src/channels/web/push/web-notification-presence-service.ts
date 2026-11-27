@@ -25,6 +25,8 @@ export interface WebNotificationPresenceState {
   clients: WebNotificationPresenceRecord[];
 }
 
+export type WebPushPresenceSuppressionReason = "visible_same_chat_client" | "hidden_non_ios_same_chat_client";
+
 function normalizeTrimmedString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -132,16 +134,26 @@ export class WebNotificationPresenceService {
   }
 
   shouldSendWebPush(deviceId: string | null | undefined, chatJid: string | null | undefined, nowMs = this.now()): boolean {
+    return this.getWebPushSuppressionReason(deviceId, chatJid, nowMs) === null;
+  }
+
+  getWebPushSuppressionReason(
+    deviceId: string | null | undefined,
+    chatJid: string | null | undefined,
+    nowMs = this.now(),
+  ): WebPushPresenceSuppressionReason | null {
     const normalizedDeviceId = normalizeTrimmedString(deviceId);
     const normalizedChatJid = normalizeTrimmedString(chatJid);
-    if (!normalizedDeviceId || !normalizedChatJid) return true;
+    if (!normalizedDeviceId || !normalizedChatJid) return null;
     const state = this.getDeviceChatState(normalizedDeviceId, normalizedChatJid, nowMs);
-    if (!state.hasLiveClient) return true;
-    if (state.hasVisibleClient) return false;
+    if (!state.hasLiveClient) return null;
+    if (state.hasVisibleClient) return "visible_same_chat_client";
 
     // iPhone/iPad PWAs can be swiped away without delivering a final teardown beacon.
     // If the only remaining presence records are hidden iOS WebKit clients, prefer Web Push.
-    return state.clients.every((record) => isLikelyIosWebKitClient(record.userAgent));
+    return state.clients.every((record) => isLikelyIosWebKitClient(record.userAgent))
+      ? null
+      : "hidden_non_ios_same_chat_client";
   }
 
   list(nowMs = this.now()): WebNotificationPresenceRecord[] {

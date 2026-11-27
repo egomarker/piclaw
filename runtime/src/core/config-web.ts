@@ -201,6 +201,7 @@ export interface WebRuntimeConfig {
   terminalImageProtocol: string;
   pushSubscriptionCap: number;
   pushVapidSubject: string;
+  pushDeliveryDiagnostics: boolean;
   composeUploadLimitMb: number;
   workspaceUploadLimitMb: number;
   notificationDebugLabels: boolean;
@@ -269,6 +270,7 @@ type WebOrdinaryDomainConfig = Pick<
   | "terminalImageProtocol"
   | "pushSubscriptionCap"
   | "pushVapidSubject"
+  | "pushDeliveryDiagnostics"
   | "composeUploadLimitMb"
   | "workspaceUploadLimitMb"
   | "notificationDebugLabels"
@@ -301,6 +303,7 @@ const webOrdinaryDomainSchema = registerDomainConfig<WebOrdinaryDomainConfig>({
     } as DomainConfigField<WebPasskeyMode>,
     pushSubscriptionCap: integerField({ key: "pushSubscriptionCap", owner: "web", defaultValue: configWebPushSubscriptionCap ?? legacyWebPushSubscriptionCap ?? 32, min: 1, bounds: "positive integer", persistence: "json-config", precedence: ["compat-env", "persisted", "default"], secretClass: "none", compatibilityEnv: [{ envKey: "PICLAW_WEB_PUSH_SUBSCRIPTION_CAP", replacement: "domains.web.pushSubscriptionCap", removalVersion: "3.0.0", parse: parseLegacyPushSubscriptionCap }] }),
     pushVapidSubject: stringField({ key: "pushVapidSubject", owner: "web", defaultValue: configWebPushVapidSubject ?? legacyWebPushVapidSubject ?? "mailto:notifications@localhost.invalid", nonEmpty: true, persistence: "json-config", precedence: ["compat-env", "persisted", "default"], secretClass: "none", compatibilityEnv: [{ envKey: "PICLAW_WEB_PUSH_VAPID_SUBJECT", replacement: "domains.web.pushVapidSubject", removalVersion: "3.0.0", parse: (raw) => parseLegacyNonEmptyString(raw, "mailto:notifications@localhost.invalid") }] }),
+    pushDeliveryDiagnostics: boolField({ key: "pushDeliveryDiagnostics", owner: "web", defaultValue: false, persistence: "json-config", precedence: ["persisted", "default"], secretClass: "none" }),
     terminalEnabled: boolField({ key: "terminalEnabled", owner: "web", defaultValue: nestedWebTerminalEnabled ?? legacyWebTerminalEnabled ?? isDefaultWebTerminalEnabled(), persistence: "json-config", precedence: ["compat-env", "persisted", "default"], secretClass: "none", compatibilityEnv: [{ envKey: "PICLAW_WEB_TERMINAL_ENABLED", replacement: "domains.web.terminalEnabled", removalVersion: "3.0.0" }] }),
     terminalImageProtocol: stringField({ key: "terminalImageProtocol", owner: "web", defaultValue: configWebTerminalImageProtocol ?? legacyWebTerminalImageProtocol ?? "iterm2", nonEmpty: true, persistence: "json-config", precedence: ["compat-env", "persisted", "default"], secretClass: "none", compatibilityEnv: [{ envKey: "PICLAW_TERMINAL_IMAGE_PROTOCOL", replacement: "domains.web.terminalImageProtocol", removalVersion: "3.0.0", parse: (raw) => parseLegacyNonEmptyString(raw, "iterm2") }] }),
     composeUploadLimitMb: integerField({ key: "composeUploadLimitMb", owner: "web", defaultValue: configWebComposeUploadLimitMb ?? legacyWebComposeUploadLimitMb ?? 32, min: 1, max: 512, bounds: "1..512", persistence: "json-config", precedence: ["compat-env", "persisted", "default"], secretClass: "none", compatibilityEnv: [{ envKey: "PICLAW_WEB_COMPOSE_UPLOAD_LIMIT_MB", replacement: "domains.web.composeUploadLimitMb", removalVersion: "3.0.0" }] }),
@@ -353,6 +356,7 @@ export const WEB_RUNTIME_CONFIG: WebRuntimeConfig = Object.seal({
   terminalImageProtocol: WEB_ORDINARY_DOMAIN_CONFIG.terminalImageProtocol,
   pushSubscriptionCap: WEB_ORDINARY_DOMAIN_CONFIG.pushSubscriptionCap,
   pushVapidSubject: WEB_ORDINARY_DOMAIN_CONFIG.pushVapidSubject,
+  pushDeliveryDiagnostics: WEB_ORDINARY_DOMAIN_CONFIG.pushDeliveryDiagnostics,
   composeUploadLimitMb: WEB_ORDINARY_DOMAIN_CONFIG.composeUploadLimitMb,
   workspaceUploadLimitMb: WEB_ORDINARY_DOMAIN_CONFIG.workspaceUploadLimitMb,
   notificationDebugLabels: WEB_ORDINARY_DOMAIN_CONFIG.notificationDebugLabels,

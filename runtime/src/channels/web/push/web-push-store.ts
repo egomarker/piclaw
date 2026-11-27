@@ -50,8 +50,9 @@ function readJsonFile<T>(path: string): T | null {
   if (!existsSync(path)) return null;
   try {
     return JSON.parse(readFileSync(path, "utf-8")) as T;
-  } catch (error) {
-    debugSuppressedError(log, "Failed to read stored web push state; ignoring the stale file.", error, { path });
+  } catch {
+    // A JSON parse error can quote subscription URLs or key material from the file.
+    log.debug("Failed to read stored web push state; ignoring the stale file.", { path, suppressed: true });
     return null;
   }
 }
