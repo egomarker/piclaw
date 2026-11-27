@@ -23,7 +23,7 @@ export async function summarizeBatch(
   batch: CapturedBatch,
   model: NonNullable<ExtensionContext["model"]>,
   modelRuntime: Pick<ModelRuntime, "completeSimple">,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; sessionId?: string } = {},
 ): Promise<SummarizeResult | null> {
   if (options.signal?.aborted) return null;
 
@@ -34,7 +34,7 @@ export async function summarizeBatch(
     {
       messages: [{ role: "user", content: [{ type: "text", text: userMessage }], timestamp: Date.now() }],
     },
-    { signal: options.signal },
+    options,
   );
 
   if (options.signal?.aborted || response.stopReason === "aborted") return null;

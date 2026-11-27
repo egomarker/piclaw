@@ -119,13 +119,20 @@ export function createContextPruneExtension(extensionOptions: { modelRuntime?: P
       if (!model) {
         throw new Error(assigned ? "The configured context prune model was not found in the model registry." : "No session model is available for context pruning.");
       }
+      const summaryOptions = {
+        signal: options.signal,
+        // Pi's OpenCode adapters use this to supply the required routing header.
+        ...(model.provider === "opencode" || model.provider === "opencode-go"
+          ? { sessionId: ctx.sessionManager.getSessionId() }
+          : {}),
+      };
 
       for (let index = 0; index < batches.length; index++) {
         const batch = batches[index];
         if (options.signal?.aborted) return { ok: false, reason: "aborted" };
         sendToolProgress(options.onUpdate, `Context prune summarizing batch ${index + 1}/${batches.length} (${batch.toolCalls.length} tool call${batch.toolCalls.length === 1 ? "" : "s"})…`);
 
-        const result = await summarizeBatch(batch, model, modelRuntime, { signal: options.signal });
+        const result = await summarizeBatch(batch, model, modelRuntime, summaryOptions);
         if (!result) return { ok: false, reason: "summarizer-failed" };
 
         const refs = indexer.allocateSummaryRefs(batch);
