@@ -1,9 +1,10 @@
 /**
- * web/push/web-push-routes.ts – HTTP handlers for VAPID key discovery and subscription persistence.
+ * web/push/web-push-routes.ts – HTTP handlers for Web Push subscriptions and notification presence.
  */
 
 import {
   getStoredVapidPublicKey,
+  listStoredWebPushSubscriptions,
   removeStoredWebPushSubscription,
   upsertStoredWebPushSubscription,
 } from "./web-push-store.js";
@@ -41,6 +42,16 @@ export async function handleWebPushSubscriptionUpsert(req: Request, options: { b
   }
 }
 
+/** Report whether Web Push owns delivery for this browser profile, without returning subscription details. */
+export async function handleWebPushSubscriptionStatus(req: Request, options: { baseDir?: string } = {}): Promise<Response> {
+  const body = await req.json().catch(() => null) as Record<string, unknown> | null;
+  const deviceId = resolveDeviceId(body?.device_id ?? body?.deviceId);
+  if (!deviceId) return Response.json({ error: "Missing notification device ID." }, { status: 400 });
+
+  const subscribed = listStoredWebPushSubscriptions(options.baseDir).some((subscription) => subscription.deviceId === deviceId);
+  return Response.json({ subscribed }, { headers: { "Cache-Control": "no-store" } });
+}
+
 export async function handleWebPushSubscriptionDelete(req: Request, options: { baseDir?: string } = {}): Promise<Response> {
   const body = await req.json().catch(() => null);
   const subscription = body && typeof body === "object" && body.subscription ? body.subscription : body;
@@ -75,7 +86,7 @@ export async function handleWebPushPresence(
       return Response.json({ ok: true, active: false, removed });
     }
 
-    const stored = presenceService.upsert(payload, { userAgent: resolveUserAgent(req) });
+    const stored = presenceService.upsert(payload);
     return Response.json({
       ok: true,
       active: true,

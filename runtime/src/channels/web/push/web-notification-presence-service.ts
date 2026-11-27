@@ -1,10 +1,8 @@
 /**
  * web/push/web-notification-presence-service.ts – in-memory device/chat presence for notification routing.
  *
- * Tracks recent live browser clients by device + tab/window so reply delivery can distinguish:
- * - visible current chat on a device → no notification on that device
- * - hidden-but-live current chat on a device → local notification only on that device
- * - no live client for that chat on a device → Web Push allowed for that device
+ * Tracks recent browser clients by device + tab/window. Only a visible
+ * client in the reply's chat suppresses Web Push for that device.
  */
 
 export const DEFAULT_WEB_NOTIFICATION_PRESENCE_TTL_MS = 120000;
@@ -16,7 +14,6 @@ export interface WebNotificationPresenceRecord {
   visibilityState: "visible" | "hidden";
   hasFocus: boolean;
   updatedAtMs: number;
-  userAgent: string | null;
 }
 
 export interface WebNotificationPresenceState {
@@ -25,25 +22,15 @@ export interface WebNotificationPresenceState {
   clients: WebNotificationPresenceRecord[];
 }
 
-export type WebPushPresenceSuppressionReason = "visible_same_chat_client" | "hidden_non_ios_same_chat_client";
+export type WebPushPresenceSuppressionReason = "visible_same_chat_client";
 
 function normalizeTrimmedString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function isLikelyIosWebKitClient(userAgent: string | null | undefined): boolean {
-  const normalized = normalizeTrimmedString(userAgent).toLowerCase();
-  if (!normalized) return false;
-  const isAppleMobileDevice = normalized.includes("iphone")
-    || normalized.includes("ipad")
-    || normalized.includes("ipod")
-    || (normalized.includes("macintosh") && normalized.includes("mobile"));
-  return isAppleMobileDevice && normalized.includes("applewebkit");
-}
-
 export function normalizeWebNotificationPresence(
   value: unknown,
-  options: { nowMs?: number; userAgent?: string | null } = {},
+  options: { nowMs?: number } = {},
 ): WebNotificationPresenceRecord | null {
   if (!value || typeof value !== "object") return null;
   const input = value as Record<string, unknown>;
@@ -64,7 +51,6 @@ export function normalizeWebNotificationPresence(
     visibilityState,
     hasFocus,
     updatedAtMs,
-    userAgent: typeof options.userAgent === "string" && options.userAgent.trim() ? options.userAgent.trim() : null,
   };
 }
 
@@ -93,12 +79,9 @@ export class WebNotificationPresenceService {
     }
   }
 
-  upsert(value: unknown, options: { nowMs?: number; userAgent?: string | null } = {}): WebNotificationPresenceRecord {
+  upsert(value: unknown, options: { nowMs?: number } = {}): WebNotificationPresenceRecord {
     const nowMs = options.nowMs ?? this.now();
-    const normalized = normalizeWebNotificationPresence(value, {
-      nowMs,
-      userAgent: options.userAgent,
-    });
+    const normalized = normalizeWebNotificationPresence(value, { nowMs });
     if (!normalized) {
       throw new Error("Invalid web notification presence payload.");
     }
@@ -145,15 +128,9 @@ export class WebNotificationPresenceService {
     const normalizedDeviceId = normalizeTrimmedString(deviceId);
     const normalizedChatJid = normalizeTrimmedString(chatJid);
     if (!normalizedDeviceId || !normalizedChatJid) return null;
-    const state = this.getDeviceChatState(normalizedDeviceId, normalizedChatJid, nowMs);
-    if (!state.hasLiveClient) return null;
-    if (state.hasVisibleClient) return "visible_same_chat_client";
-
-    // iPhone/iPad PWAs can be swiped away without delivering a final teardown beacon.
-    // If the only remaining presence records are hidden iOS WebKit clients, prefer Web Push.
-    return state.clients.every((record) => isLikelyIosWebKitClient(record.userAgent))
-      ? null
-      : "hidden_non_ios_same_chat_client";
+    return this.getDeviceChatState(normalizedDeviceId, normalizedChatJid, nowMs).hasVisibleClient
+      ? "visible_same_chat_client"
+      : null;
   }
 
   list(nowMs = this.now()): WebNotificationPresenceRecord[] {

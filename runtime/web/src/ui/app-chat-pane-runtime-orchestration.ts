@@ -71,7 +71,7 @@ interface UseChatPaneRuntimeOrchestrationOptions {
 
   lastNotifiedIdRef: RefBox<string | number | null>;
   agentsRef: RefBox<Record<string, any>>;
-  notify: (title: string, body: string) => void;
+  notify: (title: string, body: string, options: { chatJid: string; sourceLabel: string }) => Promise<boolean>;
   shouldNotifyLocallyForChat: (chatJid: string) => boolean;
 }
 
@@ -315,7 +315,7 @@ export function useChatPaneRuntimeOrchestration(options: UseChatPaneRuntimeOrche
     const agentsMap = agentsRef.current || {};
     const agent = post?.data?.agent_id ? agentsMap[post.data.agent_id] : null;
     const title = agent?.name || 'Pi';
-    notify(title, body, { sourceLabel: 'Local' });
+    void notify(title, body, { chatJid, sourceLabel: 'Local' });
   }, [agentsRef, lastAgentResponseRef, lastNotifiedIdRef, notify, shouldNotifyLocallyForChat]);
 
   return {

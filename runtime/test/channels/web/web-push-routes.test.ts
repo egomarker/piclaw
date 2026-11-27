@@ -7,6 +7,7 @@ import { WebNotificationPresenceService } from "../../../src/channels/web/push/w
 import {
   handleWebPushPresence,
   handleWebPushSubscriptionDelete,
+  handleWebPushSubscriptionStatus,
   handleWebPushSubscriptionUpsert,
   handleWebPushVapidPublicKey,
 } from "../../../src/channels/web/push/web-push-routes.js";
@@ -60,6 +61,21 @@ describe("web push routes", () => {
     expect(upsertResponse.status).toBe(200);
     expect(await upsertResponse.json()).toEqual({ ok: true, device_id: "device-1" });
 
+    const checkStatus = (deviceId: string) => handleWebPushSubscriptionStatus(new Request(
+      "https://example.com/agent/push/subscription/status",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device_id: deviceId }),
+      },
+    ), { baseDir });
+    const subscribed = await checkStatus("device-1");
+    expect(subscribed.status).toBe(200);
+    expect(subscribed.headers.get("Cache-Control")).toBe("no-store");
+    expect(await subscribed.json()).toEqual({ subscribed: true });
+    expect(await (await checkStatus("another-device")).json()).toEqual({ subscribed: false });
+    expect((await checkStatus(" ")).status).toBe(400);
+
     const deleteReq = new Request("https://example.com/agent/push/subscription", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
@@ -68,6 +84,7 @@ describe("web push routes", () => {
     const deleteResponse = await handleWebPushSubscriptionDelete(deleteReq, { baseDir });
     expect(deleteResponse.status).toBe(200);
     expect(await deleteResponse.json()).toEqual({ ok: true, removed: true });
+    expect(await (await checkStatus("device-1")).json()).toEqual({ subscribed: false });
   });
 
   test("tracks live presence updates", async () => {

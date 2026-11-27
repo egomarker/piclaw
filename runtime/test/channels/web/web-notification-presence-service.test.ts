@@ -13,7 +13,7 @@ describe("web notification presence service", () => {
       chat_jid: "web:default",
       visibility_state: "hidden",
       has_focus: false,
-    }, { nowMs: 1234, userAgent: "PiClaw Test" });
+    }, { nowMs: 1234 });
 
     expect(normalized).toEqual({
       deviceId: "device-1",
@@ -22,12 +22,11 @@ describe("web notification presence service", () => {
       visibilityState: "hidden",
       hasFocus: false,
       updatedAtMs: 1234,
-      userAgent: "PiClaw Test",
     });
     expect(normalizeWebNotificationPresence(null)).toBeNull();
   });
 
-  test("suppresses Web Push only when the same device still has the chat live", () => {
+  test("suppresses Web Push only for visible same-chat presence on the subscribed device", () => {
     let now = 1000;
     const service = new WebNotificationPresenceService({ now: () => now, ttlMs: 5000 });
     service.upsert({
@@ -38,6 +37,16 @@ describe("web notification presence service", () => {
       has_focus: false,
     });
 
+    expect(service.shouldSendWebPush("device-1", "web:default")).toBe(true);
+
+    service.upsert({
+      device_id: "device-1",
+      client_id: "client-visible",
+      chat_jid: "web:default",
+      visibility_state: "visible",
+      has_focus: false,
+    });
+    expect(service.getWebPushSuppressionReason("device-1", "web:default")).toBe("visible_same_chat_client");
     expect(service.shouldSendWebPush("device-1", "web:default")).toBe(false);
     expect(service.shouldSendWebPush("device-1", "web:other")).toBe(true);
     expect(service.shouldSendWebPush("device-2", "web:default")).toBe(true);
@@ -74,7 +83,6 @@ describe("web notification presence service", () => {
           visibilityState: "visible",
           hasFocus: true,
           updatedAtMs: 1000,
-          userAgent: null,
         },
         {
           deviceId: "device-1",
@@ -83,7 +91,6 @@ describe("web notification presence service", () => {
           visibilityState: "hidden",
           hasFocus: false,
           updatedAtMs: 1000,
-          userAgent: null,
         },
       ],
     });

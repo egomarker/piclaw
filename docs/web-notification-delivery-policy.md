@@ -4,12 +4,13 @@ PiClaw uses a per-**device**, per-**chat** delivery coordinator to choose betwee
 
 ## Rule
 
-For a given **device + chat_jid** pair:
+For a given **browser profile + chat_jid** pair, with notifications enabled:
 
-- **Visible live client** → **no notification** on that device for that chat
-- **Hidden non-iPhone/iPad live client(s)** → **local notification only** on that device for that chat
-- **Hidden iPhone/iPad PWA live client(s) only** → **Web Push allowed** on that device for that chat
-- **No live client** → **Web Push only** on that device for that chat
+- **The reply's chat is visible** → **no notification** in that browser profile.
+- **The reply's chat is not visible and there is a stored subscription** → **Web Push only**, whether the chat is hidden, open in another tab, or closed.
+- **The reply's chat is not visible and there is no stored subscription** → **local notification** if a live tab for that chat receives the reply and can show browser notifications.
+
+The rule is the same on iPad and desktop. Browser visibility and the stored subscription determine the route, not the user agent.
 
 ## Why routing uses `chat_jid`
 
@@ -26,18 +27,11 @@ Replies from non-active threads still notify on that device.
 
 Multiple hidden tabs or windows on the same device can still be live for the same chat. To avoid duplicate local notifications, the client elects exactly one hidden tab/window per **device + chat** to show the local notification.
 
-If any tab/window for that same chat is visible, hidden tabs stay silent.
+If any tab/window for that same chat is visible, hidden tabs stay silent. The elected tab shows an alert only if the server confirms there is no stored subscription for its browser profile. If that status is unknown, the tab stays silent rather than risk duplicating a push in flight.
 
 ## Web Push suppression
 
-Each Web Push subscription is associated with a stable device id. Before sending a reply notification, the server checks whether that device has a recent live client for the same `chat_jid`.
-
-- visible same-chat client present → suppress Web Push for that device
-- only hidden iPhone/iPad WebKit same-chat clients remain → allow Web Push for that device
-- hidden non-iPhone/iPad same-chat client present → suppress Web Push for that device
-- no live same-chat client → allow Web Push for that device
-
-This avoids local/push duplicates on the same device while still letting a swiped-away iPhone PWA fall back to Web Push.
+A Web Push subscription's device ID identifies the browser profile. The server suppresses Web Push only if that profile has recent **visible** presence for the reply's `chat_jid`. Hidden tabs never block Web Push; a tab showing another chat does not block it either.
 
 ## Presence model
 
@@ -65,7 +59,7 @@ When enabled, local browser notifications and service-worker Web Push notificati
 
 Set [`domains.web.pushDeliveryDiagnostics`](configuration.md#web-push-delivery-diagnostics) to `true` and restart to log reply Web Push outcomes at `info` level (`operation: "web.push.reply_delivery"`). This is off by default and independent of title labels.
 
-- `skipped`: no send was attempted. The reason can distinguish a visible same-chat client, a hidden same-chat client not recognized as iOS, a circuit breaker, and other dispatch skips.
+- `skipped`: no send was attempted. The reason can distinguish a visible same-chat client, a circuit breaker, and other dispatch skips.
 - `failed`: PiClaw could not send, or the relay returned an HTTP error. The record includes the status and an allowlisted relay error code (for example, `403` / `BadJwtToken`) when available, or a category such as `timeout` or `network_error`.
 - `accepted`: the relay accepted the request. For example, Apple HTTP `201` does **not** confirm service-worker receipt or that the notification appeared on the device.
 
@@ -79,20 +73,11 @@ Records include the stored reply ID and, for per-subscription outcomes, a relay 
 - no live phone client exists for chat B
 - result: **Web Push may still fire for chat B**
 
-### Hidden laptop tab on chat A, phone swiped away, chat A finishes
+### Subscribed laptop and iPad both hide chat A, chat A finishes
 
-- laptop has a hidden live client for chat A
-- phone may still have a hidden iPhone PWA presence record for chat A
-- result:
-  - **laptop:** local notification only
-  - **phone:** Web Push only
+- result: **Web Push only** on both. Neither device depends on its hidden tab continuing to run.
 
-### Hidden iPhone PWA on chat A, no other live clients, chat A finishes
-
-- the only recent same-chat presence is an iPhone/iPad WebKit client
-- result: **Web Push only**
-
-### Two hidden tabs for chat A on the same laptop
+### Two hidden tabs for chat A on the same laptop without a subscription
 
 - both are live, neither is visible
 - result: exactly **one** hidden tab shows the local notification

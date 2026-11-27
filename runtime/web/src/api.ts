@@ -496,6 +496,14 @@ export async function saveWebPushSubscription(subscription, options: ApiOptions 
     });
 }
 
+export async function getWebPushSubscriptionStatus(deviceId: string): Promise<{ subscribed: boolean }> {
+    return request('/agent/push/subscription/status', {
+        method: 'POST',
+        cache: 'no-store',
+        body: JSON.stringify({ device_id: deviceId }),
+    });
+}
+
 export async function deleteWebPushSubscription(subscription, options: ApiOptions = {}) {
     const payload = {
         subscription,

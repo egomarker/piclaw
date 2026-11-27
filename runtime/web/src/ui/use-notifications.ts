@@ -1,4 +1,4 @@
-import { deleteWebPushSubscription, getWebPushPublicKey, saveWebPushSubscription } from '../api.js';
+import { deleteWebPushSubscription, getWebPushPublicKey, getWebPushSubscriptionStatus, saveWebPushSubscription } from '../api.js';
 import { useCallback, useEffect, useRef, useState } from '../vendor/preact-htm.js';
 import { getLocalStorageBoolean, setLocalStorageItem } from '../utils/storage.js';
 import { focusWindowBestEffort } from './notification-focus.js';
@@ -271,24 +271,6 @@ export function useNotifications(options = {}) {
     }
   }, [requestNotificationPermission]);
 
-  const notify = useCallback((title, body, options = {}) => {
-    if (!notificationsEnabledRef.current) return false;
-    if (typeof Notification === 'undefined') return false;
-    if (Notification.permission !== 'granted') return false;
-    try {
-      const notification = new Notification(formatNotificationTitle(title, options?.sourceLabel || '', window), { body });
-      notification.onclick = () => {
-        focusWindowBestEffort(window);
-      };
-      return true;
-    } catch (error) {
-      console.debug('[use-notifications] Local notification creation failed.', error, {
-        title: typeof title === 'string' ? title : null,
-      });
-      return false;
-    }
-  }, []);
-
   const shouldNotifyLocallyForChatId = useCallback((chatJid) => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return false;
     return shouldNotifyLocallyForChat({
@@ -299,6 +281,34 @@ export function useNotifications(options = {}) {
       clientId: clientIdRef.current || getOrCreateNotificationClientId(window),
     });
   }, [currentChatJid]);
+
+  const notify = useCallback(async (title: string, body: string, options: { chatJid: string; sourceLabel: string }) => {
+    if (typeof window === 'undefined' || typeof Notification === 'undefined') return false;
+    const canNotify = () => getLocalStorageBoolean('notificationsEnabled', notificationsEnabledRef.current)
+      && Notification.permission === 'granted';
+    if (!canNotify()) return false;
+
+    const deviceId = deviceIdRef.current || getOrCreateNotificationDeviceId(window);
+    try {
+      // Check the server's registration, not Push API support or cached browser state.
+      const status = await getWebPushSubscriptionStatus(deviceId);
+      if (status?.subscribed !== false) return false;
+    } catch {
+      // Push could already be in flight. An unknown registration status is not a local fallback.
+      return false;
+    }
+
+    // The tab, its peers, or notification settings may have changed while the check was in flight.
+    if (!canNotify() || !shouldNotifyLocallyForChatId(options.chatJid)) return false;
+    try {
+      const notification = new Notification(formatNotificationTitle(title, options.sourceLabel, window), { body });
+      notification.onclick = () => focusWindowBestEffort(window);
+      return true;
+    } catch {
+      console.debug('[use-notifications] Local notification creation failed.');
+      return false;
+    }
+  }, [shouldNotifyLocallyForChatId]);
 
   return {
     notificationsEnabled,

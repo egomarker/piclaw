@@ -216,7 +216,7 @@ describe("web push service", () => {
     expect(listStoredWebPushSubscriptions(baseDir)).toEqual([]);
   });
 
-  test("suppresses Web Push when the same device still has a live client for that chat", async () => {
+  test("suppresses Web Push when the same device has a visible client for that chat", async () => {
     const baseDir = createTempPushDir();
     upsertStoredWebPushSubscription(createSubscription(13, "device-13"), { baseDir, deviceId: "device-13" });
 
@@ -225,11 +225,8 @@ describe("web push service", () => {
       device_id: "device-13",
       client_id: "client-1",
       chat_jid: "web:default",
-      visibility_state: "hidden",
+      visibility_state: "visible",
       has_focus: false,
-    }, {
-      nowMs: 1000,
-      userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/135.0.0.0 Safari/537.36",
     });
 
     const deliveries: Array<Record<string, unknown>> = [];
@@ -250,23 +247,25 @@ describe("web push service", () => {
     expect(deliveries).toEqual([]);
   });
 
-  test("allows Web Push when the only live client is a hidden iPhone PWA", async () => {
+  test("sends one Web Push each for hidden same-chat iPad and desktop clients", async () => {
     const baseDir = createTempPushDir();
-    upsertStoredWebPushSubscription(createSubscription(14, "device-14"), { baseDir, deviceId: "device-14" });
-
+    const clients = [
+      { id: 14, deviceId: "ipad", userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.4 Safari/605.1.15" },
+      { id: 15, deviceId: "desktop", userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/135.0.0.0 Safari/537.36" },
+    ];
     const presenceService = new WebNotificationPresenceService({ now: () => 1000 });
-    presenceService.upsert({
-      device_id: "device-14",
-      client_id: "client-1",
-      chat_jid: "web:default",
-      visibility_state: "hidden",
-      has_focus: false,
-    }, {
-      nowMs: 1000,
-      userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Mobile/15E148 Safari/604.1",
-    });
+    for (const { id, deviceId, userAgent } of clients) {
+      upsertStoredWebPushSubscription(createSubscription(id, deviceId), { baseDir, deviceId, userAgent });
+      presenceService.upsert({
+        device_id: deviceId,
+        client_id: "client-1",
+        chat_jid: "web:default",
+        visibility_state: "hidden",
+        has_focus: false,
+      });
+    }
 
-    const deliveries: Array<Record<string, unknown>> = [];
+    const deliveries: Array<{ deviceId: string | null; payload: unknown }> = [];
     const result = await sendStoredAgentReplyWebPushNotification({
       id: 89,
       chat_jid: "web:default",
@@ -275,19 +274,22 @@ describe("web push service", () => {
     } as any, {
       baseDir,
       presenceService,
-      sendNotification: async (_subscription, payload) => {
-        deliveries.push(JSON.parse(payload));
+      sendNotification: async (subscription, payload) => {
+        deliveries.push({ deviceId: subscription.deviceId, payload: JSON.parse(payload) });
       },
     });
 
-    expect(result).toEqual({ attempted: 1, sent: 1, removed: 0, failed: 0 });
-    expect(deliveries).toEqual([{
-      title: "PiClaw reply",
-      body: "Delivered",
-      url: "/?chat_jid=web%3Adefault#msg-89",
-      tag: "piclaw:reply:web%3Adefault",
-      sourceLabel: "Web Push",
-    }]);
+    expect(result).toEqual({ attempted: 2, sent: 2, removed: 0, failed: 0 });
+    expect(deliveries).toEqual(clients.map(({ deviceId }) => ({
+      deviceId,
+      payload: {
+        title: "PiClaw reply",
+        body: "Delivered",
+        url: "/?chat_jid=web%3Adefault#msg-89",
+        tag: "piclaw:reply:web%3Adefault",
+        sourceLabel: "Web Push",
+      },
+    })));
   });
 
   test("builds a reply notification payload from a stored interaction", () => {

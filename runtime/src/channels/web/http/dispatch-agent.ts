@@ -49,6 +49,7 @@ import {
 import {
   handleWebPushPresence,
   handleWebPushSubscriptionDelete,
+  handleWebPushSubscriptionStatus,
   handleWebPushSubscriptionUpsert,
   handleWebPushVapidPublicKey,
 } from "../push/web-push-routes.js";
@@ -309,6 +310,11 @@ const EXACT_AGENT_ROUTES: ExactAgentRoute[] = [
     method: "DELETE",
     path: "/agent/push/subscription",
     handle: (_channel, req) => handleWebPushSubscriptionDelete(req),
+  },
+  {
+    method: "POST",
+    path: "/agent/push/subscription/status",
+    handle: (_channel, req) => handleWebPushSubscriptionStatus(req),
   },
   {
     method: "POST",
