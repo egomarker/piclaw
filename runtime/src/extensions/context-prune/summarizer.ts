@@ -21,7 +21,7 @@ function extractTextContent(message: any): string {
 
 export async function summarizeBatch(
   batch: CapturedBatch,
-  ctx: ExtensionContext,
+  model: NonNullable<ExtensionContext["model"]>,
   modelRuntime: Pick<ModelRuntime, "completeSimple">,
   options: { signal?: AbortSignal } = {},
 ): Promise<SummarizeResult | null> {
@@ -30,7 +30,7 @@ export async function summarizeBatch(
   const serialized = serializeBatchForSummarizer(batch);
   const userMessage = `${SYSTEM_PROMPT}\n\n<tool-call-batch>\n${serialized}\n</tool-call-batch>`;
   const response = await modelRuntime.completeSimple(
-    ctx.model as any,
+    model,
     {
       messages: [{ role: "user", content: [{ type: "text", text: userMessage }], timestamp: Date.now() }],
     },

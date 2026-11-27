@@ -54,6 +54,7 @@ import {
 } from "../push/web-push-routes.js";
 import { getThinkingContentForChat } from "../../../db/messages.js";
 import { readKeychainBootstrapKeyMaterial } from "../../../core/config.js";
+import { getContextPruneModelSettings, saveContextPruneModelSetting } from "../../../core/config-context-prune.js";
 
 interface ExactAgentRoute {
   method: string;
@@ -528,6 +529,29 @@ const EXACT_AGENT_ROUTES: ExactAgentRoute[] = [
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return channel.json({ error: message || "Failed to save environment override." }, 400);
+      }
+    },
+  },
+  {
+    method: "GET",
+    path: "/agent/settings/context-prune",
+    handle: (channel) => {
+      try {
+        return channel.json({ ok: true, settings: getContextPruneModelSettings() });
+      } catch {
+        return channel.json({ error: "Failed to load context prune settings." }, 500);
+      }
+    },
+  },
+  {
+    method: "POST",
+    path: "/agent/settings/context-prune",
+    handle: async (channel, req) => {
+      try {
+        const body = await req.json().catch(() => null);
+        return channel.json({ ok: true, settings: saveContextPruneModelSetting(body?.model) });
+      } catch (error) {
+        return channel.json({ error: error instanceof Error ? error.message : "Failed to save context prune settings." }, 400);
       }
     },
   },

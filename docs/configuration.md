@@ -421,6 +421,12 @@ Notes:
 - Oversized persisted `toolResult` payloads are sanitized before session resume and at append-time so inline image/blob payloads do not keep re-accumulating inside session files.
 - Blank or no-terminal-output turns are not considered successful consumption. Automatic recovery still runs first; if no terminal assistant reply is persisted, the cursor is rewound and the failed run is held for explicit retry or skip resolution.
 
+### Context prune model
+
+In **Settings → Compaction → Context prune model**, choose a model for the on-demand `context_prune` tool only. This does not change the session model, smart compaction, or automatic tool-result summaries. The selected provider receives the assistant text, tool arguments, and tool-result excerpts needed to write the summary, which the session model reads afterward.
+
+A saved choice takes effect on the next prune. **Use deployment default** clears the choice, so the tool uses `PICLAW_CONTEXT_PRUNE_MODEL` (a `provider/model-id`), or the current session model if that variable is unset. A configured model must be registered and usable with the provider's normal credentials. If it cannot be resolved or its request fails, the prune stops without switching models.
+
 ### Smart-compaction processing method
 
 Smart compaction has two processing methods:

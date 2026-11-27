@@ -3,6 +3,7 @@
  */
 import { html, useState, useEffect, useCallback, useMemo, useRef } from '../../vendor/preact-htm.js';
 import { NumberStepper } from './number-stepper.js';
+import { ContextPruneModelSection } from './context-prune-model.js';
 import { useTranslation } from '../../utils/i18n.js';
 
 function normalizeSmartCompactionMethod(value) {
@@ -471,6 +472,7 @@ export function CompactionSection({ settingsData, setStatus, mergeSettingsData }
                     </table>
                 </div>
             `}
+            <${ContextPruneModelSection} />
         </div>
     `;
 }

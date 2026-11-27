@@ -9,6 +9,7 @@
 
 import { Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext, ExtensionFactory, ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { getContextPruneModelOverride } from "../core/config-context-prune.js";
 import { createLogger } from "../utils/logger.js";
 import { captureUnindexedBatchesFromSession, groupBatchesByAgentMessage } from "./context-prune/batch-capture.js";
 import { ToolCallIndexer } from "./context-prune/indexer.js";
@@ -50,7 +51,7 @@ function makeResultText(result: FlushResult): string {
   return `Context prune ${result.reason === "skipped-oversized" ? "skipped" : "completed"}. Summarized ${result.toolCallCount} tool call${result.toolCallCount === 1 ? "" : "s"} from ${result.batchCount} batch${result.batchCount === 1 ? "" : "es"}. Summary size: ${result.summaryCharCount} chars vs ${result.rawCharCount} raw chars.${skipped} Use context_tree_query with summary refs to retrieve full outputs.`;
 }
 
-export function createContextPruneExtension(extensionOptions: { modelRuntime?: Pick<ModelRuntime, "completeSimple"> } = {}): ExtensionFactory {
+export function createContextPruneExtension(extensionOptions: { modelRuntime?: Pick<ModelRuntime, "completeSimple" | "getModel"> } = {}): ExtensionFactory {
   return function contextPrune(pi: ExtensionAPI) {
   const indexer = new ToolCallIndexer();
   let isFlushing = false;
@@ -111,13 +112,20 @@ export function createContextPruneExtension(extensionOptions: { modelRuntime?: P
     let totalSummaryChars = 0;
 
     try {
+      const { modelRuntime } = extensionOptions;
+      if (!modelRuntime) return { ok: false, reason: "summarizer-failed" };
+      const assigned = getContextPruneModelOverride();
+      const model = assigned ? modelRuntime.getModel(assigned.provider, assigned.id) : ctx.model;
+      if (!model) {
+        throw new Error(assigned ? "The configured context prune model was not found in the model registry." : "No session model is available for context pruning.");
+      }
+
       for (let index = 0; index < batches.length; index++) {
         const batch = batches[index];
         if (options.signal?.aborted) return { ok: false, reason: "aborted" };
         sendToolProgress(options.onUpdate, `Context prune summarizing batch ${index + 1}/${batches.length} (${batch.toolCalls.length} tool call${batch.toolCalls.length === 1 ? "" : "s"})…`);
 
-        if (!extensionOptions.modelRuntime) return { ok: false, reason: "summarizer-failed" };
-        const result = await summarizeBatch(batch, ctx, extensionOptions.modelRuntime, { signal: options.signal });
+        const result = await summarizeBatch(batch, model, modelRuntime, { signal: options.signal });
         if (!result) return { ok: false, reason: "summarizer-failed" };
 
         const refs = indexer.allocateSummaryRefs(batch);

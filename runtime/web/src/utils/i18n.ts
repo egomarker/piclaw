@@ -692,6 +692,17 @@ type MessageKey =
   | 'settings.compaction.clearFailed'
   | 'settings.compaction.cleared'
   | 'settings.compaction.autoHeading'
+  | 'settings.pruneModel.label'
+  | 'settings.pruneModel.deploymentEnv'
+  | 'settings.pruneModel.deploymentSession'
+  | 'settings.pruneModel.hint'
+  | 'settings.pruneModel.save'
+  | 'settings.pruneModel.loading'
+  | 'settings.pruneModel.saving'
+  | 'settings.pruneModel.saved'
+  | 'settings.pruneModel.loadFailed'
+  | 'settings.pruneModel.saveFailed'
+  | 'settings.pruneModel.catalogueFailed'
   | 'settings.compaction.enableAutomatic'
   | 'settings.compaction.enableAutomaticHint'
   | 'settings.compaction.processingMethod'
@@ -1413,6 +1424,17 @@ const EN: Record<MessageKey, string> = {
   'settings.compaction.clearFailed': 'Failed to clear compaction suppression.',
   'settings.compaction.cleared': 'Cleared compaction suppression for {chat}.',
   'settings.compaction.autoHeading': 'Automatic compaction',
+  'settings.pruneModel.label': 'Context prune model',
+  'settings.pruneModel.deploymentEnv': 'Use deployment default (environment)',
+  'settings.pruneModel.deploymentSession': 'Use deployment default (session model)',
+  'settings.pruneModel.hint': 'Only affects manual context pruning. The selected provider receives excerpts of tool outputs and related context.',
+  'settings.pruneModel.save': 'Save',
+  'settings.pruneModel.loading': 'Loading context prune model…',
+  'settings.pruneModel.saving': 'Saving context prune model…',
+  'settings.pruneModel.saved': 'Context prune model saved.',
+  'settings.pruneModel.loadFailed': 'Could not load the context prune model setting.',
+  'settings.pruneModel.saveFailed': 'Could not save the context prune model setting.',
+  'settings.pruneModel.catalogueFailed': 'Could not load the model list.',
   'settings.compaction.enableAutomatic': 'Enable automatic compaction',
   'settings.compaction.enableAutomaticHint': 'Piclaw-managed pre-prompt/idle compaction. The upstream agent auto-compactor stays suppressed internally.',
   'settings.compaction.processingMethod': 'Processing method',
@@ -2134,6 +2156,17 @@ const ZH_CN: Partial<Record<MessageKey, string>> = {
   'settings.compaction.clearFailed': '清除压缩抑制失败。',
   'settings.compaction.cleared': '已清除 {chat} 的压缩抑制。',
   'settings.compaction.autoHeading': '自动压缩',
+  'settings.pruneModel.label': '上下文裁剪模型',
+  'settings.pruneModel.deploymentEnv': '使用部署默认值（环境变量）',
+  'settings.pruneModel.deploymentSession': '使用部署默认值（会话模型）',
+  'settings.pruneModel.hint': '仅影响手动上下文裁剪。所选提供商会收到工具输出的摘录和相关上下文。',
+  'settings.pruneModel.save': '保存',
+  'settings.pruneModel.loading': '正在加载上下文裁剪模型…',
+  'settings.pruneModel.saving': '正在保存上下文裁剪模型…',
+  'settings.pruneModel.saved': '已保存上下文裁剪模型。',
+  'settings.pruneModel.loadFailed': '无法加载上下文裁剪模型设置。',
+  'settings.pruneModel.saveFailed': '无法保存上下文裁剪模型设置。',
+  'settings.pruneModel.catalogueFailed': '无法加载模型列表。',
   'settings.compaction.enableAutomatic': '启用自动压缩',
   'settings.compaction.enableAutomaticHint': '由 Piclaw 管理的提示前/空闲压缩。上游代理自动压缩器会继续在内部保持禁用。',
   'settings.compaction.processingMethod': '处理方法',
@@ -2855,6 +2888,17 @@ const JA: Partial<Record<MessageKey, string>> = {
   'settings.compaction.clearFailed': '圧縮抑制のクリアに失敗しました。',
   'settings.compaction.cleared': '{chat} の圧縮抑制をクリアしました。',
   'settings.compaction.autoHeading': '自動圧縮',
+  'settings.pruneModel.label': 'コンテキスト整理モデル',
+  'settings.pruneModel.deploymentEnv': 'デプロイの既定値を使用（環境変数）',
+  'settings.pruneModel.deploymentSession': 'デプロイの既定値を使用（セッションモデル）',
+  'settings.pruneModel.hint': '手動のコンテキスト整理にのみ適用されます。選択したプロバイダーにツール出力の抜粋と関連情報が送信されます。',
+  'settings.pruneModel.save': '保存',
+  'settings.pruneModel.loading': 'コンテキスト整理モデルを読み込み中…',
+  'settings.pruneModel.saving': 'コンテキスト整理モデルを保存中…',
+  'settings.pruneModel.saved': 'コンテキスト整理モデルを保存しました。',
+  'settings.pruneModel.loadFailed': 'コンテキスト整理モデルの設定を読み込めませんでした。',
+  'settings.pruneModel.saveFailed': 'コンテキスト整理モデルの設定を保存できませんでした。',
+  'settings.pruneModel.catalogueFailed': 'モデル一覧を読み込めませんでした。',
   'settings.compaction.enableAutomatic': '自動圧縮を有効化',
   'settings.compaction.enableAutomaticHint': 'Piclaw が管理するプロンプト前/アイドル時の圧縮です。上流エージェントの自動圧縮は内部的に抑制されたままです。',
   'settings.compaction.processingMethod': '処理方式',
