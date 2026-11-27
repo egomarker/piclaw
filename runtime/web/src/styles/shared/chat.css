@@ -1523,11 +1523,18 @@
 }
 
 .compose-session-trigger-top {
+    --compose-session-trigger-max-width: min(34vw, 140px);
     position: absolute;
     top: 4px;
     right: 6px;
     z-index: 5;
-    max-width: min(34vw, 140px);
+    max-width: min(var(--compose-session-trigger-max-width), calc(100% - 12px));
+    pointer-events: none;
+}
+
+.compose-session-trigger-top[data-caret-yield]:not(:focus-within) > .compose-session-trigger-pill {
+    opacity: 0;
+    pointer-events: none;
 }
 
 .compose-session-trigger-top + .compose-input-main textarea {
@@ -1556,8 +1563,12 @@
     outline: none;
 }
 
-.compose-session-trigger-pill {
+.compose-session-trigger-top > .compose-session-trigger-pill {
     justify-content: flex-start;
+    min-width: 0;
+    max-width: 100%;
+    pointer-events: auto;
+    transform: translateY(var(--compose-session-pill-offset-y, 0px));
 }
 
 .compose-session-trigger-icon-btn {
@@ -1569,6 +1580,8 @@
     display: inline-flex;
     align-items: center;
     min-height: 24px;
+    min-width: 0;
+    max-width: 100%;
     border: 1px solid transparent;
     background: transparent;
     font-family: var(--font-mono, monospace);
@@ -1577,15 +1590,19 @@
     line-height: 1;
     color: var(--text-secondary);
     padding: 3px 8px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: min(28vw, 180px);
     border-radius: var(--radius-full);
     box-shadow: none;
     opacity: 0.95;
     transition: background-color var(--ui-transition-fast), color var(--ui-transition-fast), border-color var(--ui-transition-fast), opacity var(--ui-transition-fast), transform var(--ui-transition-fast);
     pointer-events: none;
+}
+
+.compose-session-trigger-label {
+    display: block;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .compose-current-agent-label.active {

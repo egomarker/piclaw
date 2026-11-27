@@ -55,17 +55,8 @@
     }
 
     .compose-session-trigger-top {
-        position: absolute;
-        top: 4px;
-        right: 6px;
+        --compose-session-trigger-max-width: min(42vw, 148px);
         z-index: 7;
-        align-self: auto;
-        max-width: min(42vw, 148px);
-        margin-bottom: 0;
-    }
-
-    .compose-session-trigger-top + .compose-input-main textarea {
-        padding-right: max(calc(var(--spacing-xs) + 28px), min(44vw, 156px));
     }
 
     .compose-queue-stack {
@@ -227,17 +218,8 @@
     }
 
     .compose-session-trigger-top {
-        position: absolute;
-        top: 4px;
-        right: 6px;
+        --compose-session-trigger-max-width: min(42vw, 148px);
         z-index: 7;
-        align-self: auto;
-        max-width: min(42vw, 148px);
-        margin-bottom: 0;
-    }
-
-    .compose-session-trigger-top + .compose-input-main textarea {
-        padding-right: max(calc(var(--spacing-xs) + 28px), min(44vw, 156px));
     }
 
     .compose-model-hint,

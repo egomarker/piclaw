@@ -6,6 +6,7 @@ import { COMPOSE_MEDIA_ATTACH_EVENT, type ComposeMediaAttachRequest } from '../u
 import { getLocalStorageItem, setLocalStorageItem } from '../utils/storage.js';
 import { buildMentionValue, filterMentionAgents, parseMentionAutocompleteQuery } from '../ui/agent-mentions.js';
 import { shouldOpenSessionSwitcherFromBlankCompose, shouldRouteComposeValueToSessionSwitcher } from '../ui/compose-session-switcher.js';
+import { observeComposeSessionPill } from '../ui/compose-session-pill.js';
 import { formatBranchPickerBaseLabel, formatBranchPickerLabel, getBranchLifecycleBadges } from '../ui/branch-lifecycle.js';
 import { buildComposeStatusDotClass } from '../ui/status-dot.js';
 import { getStatusElapsedLabel, isCompactionStatus, resolveStatusPanelTitle } from '../ui/status-duration.js';
@@ -1251,6 +1252,7 @@ export function ComposeBox({
     const sessionPopupScrollRestoreRef = useRef(null);
     const sessionPopupScrollRestoreTokenRef = useRef(0);
     const sessionTriggerRef = useRef(null);
+    const sessionPillObserverRef = useRef<ReturnType<typeof observeComposeSessionPill>>(undefined);
     const footerRef = useRef(null);
     const popupTypeaheadRef = useRef({ value: '', updatedAt: 0 });
     const speechRecognitionRef = useRef(null);
@@ -2939,6 +2941,23 @@ export function ComposeBox({
         }
     }, [searchMode]);
 
+    useLayoutEffect(() => {
+        const editor = textareaRef.current;
+        const trigger = sessionTriggerRef.current;
+        if (!showSessionSwitcherButton || !editor || !trigger) return;
+        const observer = observeComposeSessionPill(editor, trigger);
+        sessionPillObserverRef.current = observer;
+        return () => {
+            observer?.dispose();
+            sessionPillObserverRef.current = undefined;
+        };
+    }, [showSessionSwitcherButton]);
+
+    // Programmatic draft changes don't always dispatch an input event.
+    useLayoutEffect(() => {
+        sessionPillObserverRef.current?.refresh();
+    }, [content]);
+
     useEffect(() => {
         if (showSessionPopup && !showSessionSwitcherButton) {
             setShowSessionPopup(false);
@@ -3302,7 +3321,9 @@ export function ComposeBox({
                                 : 'Manage Sessions/Agents'}
                             aria-expanded=${showSessionPopup ? 'true' : 'false'}
                         >
-                            <span class="compose-current-agent-label active">${currentSessionAgent?.agent_name ? `@${currentSessionAgent.agent_name}` : 'Sessions'}</span>
+                            <span class="compose-current-agent-label active">
+                                <span class="compose-session-trigger-label">${currentSessionAgent?.agent_name ? `@${currentSessionAgent.agent_name}` : 'Sessions'}</span>
+                            </span>
                         </button>
                     </div>
                 `}
