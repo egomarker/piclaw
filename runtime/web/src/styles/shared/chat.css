@@ -1523,12 +1523,12 @@
 }
 
 .compose-session-trigger-top {
-    --compose-session-trigger-max-width: min(34vw, 140px);
     position: absolute;
     top: 4px;
     right: 6px;
     z-index: 5;
-    max-width: min(var(--compose-session-trigger-max-width), calc(100% - 12px));
+    width: max-content;
+    max-width: calc(100% - 12px);
     pointer-events: none;
 }
 
@@ -1600,9 +1600,9 @@
 .compose-session-trigger-label {
     display: block;
     min-width: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: start;
 }
 
 .compose-current-agent-label.active {

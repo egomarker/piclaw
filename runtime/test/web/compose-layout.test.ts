@@ -32,7 +32,7 @@ test("hides compose agent affordance when there are no visible agents", () => {
   })).toBe(false);
 });
 
-test("session pill is bounded and truncates only the label without reserving input width", () => {
+test("session pill fits the full label within the composer without reserving input width", () => {
   const anchor = chatCss.match(/\.compose-session-trigger-top\s*\{[^}]+\}/)?.[0];
   const button = chatCss.match(/\.compose-session-trigger-top > \.compose-session-trigger-pill\s*\{[^}]+\}/)?.[0];
   const label = chatCss.match(/\.compose-session-trigger-label\s*\{[^}]+\}/)?.[0];
@@ -40,19 +40,21 @@ test("session pill is bounded and truncates only the label without reserving inp
 
   expect(anchor).toContain("position: absolute;");
   expect(anchor).toContain("right: 6px;");
-  expect(anchor).toContain("max-width: min(var(--compose-session-trigger-max-width), calc(100% - 12px));");
+  expect(anchor).toContain("width: max-content;");
+  expect(anchor).toContain("max-width: calc(100% - 12px);");
   expect(anchor).toContain("pointer-events: none;");
   expect(anchor).not.toContain("transform:");
   expect(button).toContain("max-width: 100%;");
   expect(button).toContain("pointer-events: auto;");
   expect(button).toContain("transform: translateY(var(--compose-session-pill-offset-y, 0px));");
   expect(label).toContain("min-width: 0;");
-  expect(label).toContain("white-space: nowrap;");
-  expect(label).toContain("overflow: hidden;");
-  expect(label).toContain("text-overflow: ellipsis;");
+  expect(label).toContain("white-space: normal;");
+  expect(label).toContain("overflow-wrap: anywhere;");
+  expect(label).not.toContain("text-overflow:");
   expect(mobileRules).toHaveLength(2);
   for (const rule of mobileRules) {
-    expect(rule).toContain("--compose-session-trigger-max-width:");
+    expect(rule).toContain("z-index: 7;");
+    expect(rule).not.toContain("width:");
     expect(rule).not.toContain("position:");
   }
   expect(responsiveCss).not.toContain(".compose-session-trigger-top + .compose-input-main textarea");
@@ -72,6 +74,13 @@ test("dodges below the caret and returns to the original corner when it clears",
   expect(resolveComposeSessionPillOffset(home, caretOnNextLine, editor, 40)).toBe(0);
   const caretToTheLeft = { ...overlappingCaret, left: 180, right: 181 };
   expect(resolveComposeSessionPillOffset(home, caretToTheLeft, editor, 40)).toBe(0);
+});
+
+test("caret avoidance uses the width and height of a wrapped session name", () => {
+  const wrappedHome = { ...home, left: 6, bottom: 146 };
+  const caretUnderWrappedLabel = { left: 25, right: 26, top: 130, bottom: 149 };
+  expect(resolveComposeSessionPillOffset(wrappedHome, caretUnderWrappedLabel, { ...editor, bottom: 240 }, 40)).toBe(47);
+  expect(resolveComposeSessionPillOffset(wrappedHome, caretUnderWrappedLabel, editor, 80)).toBeNull();
 });
 
 test("parks above a short editor if there is room, otherwise yields without entering the footer", () => {

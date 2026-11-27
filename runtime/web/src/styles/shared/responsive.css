@@ -55,7 +55,6 @@
     }
 
     .compose-session-trigger-top {
-        --compose-session-trigger-max-width: min(42vw, 148px);
         z-index: 7;
     }
 
@@ -218,7 +217,6 @@
     }
 
     .compose-session-trigger-top {
-        --compose-session-trigger-max-width: min(42vw, 148px);
         z-index: 7;
     }
 
