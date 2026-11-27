@@ -52,6 +52,7 @@ export interface InteractionData {
   link_previews?: unknown[];
   /** User-created annotations (highlights, markup) stored on the message. */
   annotations?: unknown[];
+  pinned?: boolean;
 }
 
 /**

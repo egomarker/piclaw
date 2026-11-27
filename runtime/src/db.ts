@@ -42,6 +42,8 @@ export {
   deleteThreadByRowId,
   getTimeline,
   hasOlderMessages,
+  isHiddenQueuePlaceholder,
+  setMessagePinned,
   getMessagesByHashtag,
   searchMessages,
   searchMessagesAcrossChats,

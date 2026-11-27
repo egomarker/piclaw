@@ -148,7 +148,7 @@ export function handleRovingTabKeyDown(event, { tabs, currentId, focusTab, onAct
     return true;
 }
 
-export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, onCloseAll, onTogglePin, onTogglePreview, onToggleDiff, onEditSource, previewTabs, diffTabs, paneOverrides, detachedTabs, onReattachTab, toolbarAction, onToggleDock, dockVisible, onToggleZen, zenMode, onPopOutTab, rovingFocus = false, restoreFocusAfterClose = false, touchContextMenu = false, renderContextMenu, tabListId, tabListLabel, getTabElementId, getTabPanelId }) {
+export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, onCloseAll, onTogglePin, onTogglePreview, onToggleDiff, onEditSource, previewTabs, diffTabs, paneOverrides, detachedTabs, onReattachTab, toolbarAction, onTogglePinnedMessages, pinnedMessagesVisible = false, onToggleDock, dockVisible, onToggleZen, zenMode, onPopOutTab, rovingFocus = false, restoreFocusAfterClose = false, touchContextMenu = false, renderContextMenu, tabListId, tabListLabel, getTabElementId, getTabPanelId }) {
     const { t } = useTranslation();
     const [contextMenu, setContextMenu] = useState(null);
     const stripRef = useRef(null);
@@ -552,7 +552,7 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
                     `}
                 </div>
             `)}
-            ${(toolbarAction || onToggleDock) && html`<div class="tab-strip-spacer"></div>`}
+            ${(toolbarAction || onToggleDock || onTogglePinnedMessages) && html`<div class="tab-strip-spacer"></div>`}
             ${toolbarAction && html`
                 <button
                     type="button"
@@ -565,6 +565,21 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onCloseOthers, o
                     disabled=${toolbarAction.disabled === true}
                 >
                     ${toolbarAction.icon}
+                </button>
+            `}
+            ${onTogglePinnedMessages && html`
+                <button
+                    class=${`tab-strip-pinned-toggle${pinnedMessagesVisible ? ' active' : ''}`}
+                    type="button"
+                    onClick=${onTogglePinnedMessages}
+                    aria-pressed=${String(pinnedMessagesVisible)}
+                    title=${t(pinnedMessagesVisible ? 'timeline.showAll' : 'timeline.showPinned')}
+                    data-testid="timeline-pinned-toggle"
+                >
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M8 3h8l-1 7 3 3v2H6v-2l3-3zM12 15v6"/>
+                    </svg>
+                    ${t('timeline.pinned')}
                 </button>
             `}
             ${onToggleDock && html`

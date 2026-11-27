@@ -144,7 +144,7 @@ export interface WebChannelLike
   handleAgents(): Promise<Response>;
 
   handleWorkspaceVisibility(req: Request): Promise<Response>;
-  handleTimeline(limit: number, before?: number, chatJid?: string): Response;
+  handleTimeline(limit: number, before?: number, chatJid?: string, pinnedOnly?: boolean): Response;
   handleHashtag(tag: string, limit: number, offset: number, chatJid?: string): Response;
   handleSearch(query: string, limit: number, offset: number, chatJid?: string, searchScope?: "current" | "root" | "all", rootChatJid?: string, filters?: { images?: boolean; attachments?: boolean } | null): Response;
   handleThread(id: number | null, chatJid?: string): Response;
@@ -153,6 +153,7 @@ export interface WebChannelLike
   handleDeletePost(req: Request, id: number | null, cascade: boolean): Response;
   handleUpdatePost(req: Request, id: number | null): Promise<Response>;
   handleUpdatePostAnnotations(req: Request, id: number): Promise<Response>;
+  handleSetPostPin(req: Request, id: number): Promise<Response>;
   handleInternalPost(req: Request): Promise<Response>;
   handlePost(req: Request, isReply: boolean): Promise<Response>;
 

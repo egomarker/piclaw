@@ -2,7 +2,7 @@
  * channels/web/post-mutations.ts – Post update/internal-post endpoint orchestration.
  */
 
-import type { InteractionRow } from "../../db.js";
+import { setMessagePinned, type InteractionRow } from "../../db.js";
 import { updateMessageAnnotations } from "../../db/messages.js";
 
 function resolveChatJid(req: Request, defaultChatJid: string, bodyChatJid?: unknown): string {
@@ -98,6 +98,34 @@ export async function handleInternalPostRequest(req: Request, ctx: PostMutations
 
   ctx.broadcastAgentResponse(interaction);
   return ctx.json({ status: "ok", ok: true, id: interaction.id }, 201);
+}
+
+/** PATCH /post/:id/pin sets the requested state; retries never toggle it back. */
+export async function handleSetPostPinRequest(
+  req: Request,
+  id: number,
+  ctx: {
+    json(payload: unknown, status?: number): Response;
+    broadcastEvent(eventType: string, data: unknown): void;
+  },
+): Promise<Response> {
+  if (!Number.isSafeInteger(id) || id < 1) return ctx.json({ error: "Invalid post id" }, 400);
+  const chatJid = new URL(req.url).searchParams.get("chat_jid")?.trim();
+  if (!chatJid) return ctx.json({ error: "Missing chat_jid" }, 400);
+
+  let body: { pinned?: unknown } | null;
+  try {
+    body = await req.json();
+  } catch {
+    return ctx.json({ error: "Invalid JSON" }, 400);
+  }
+  if (typeof body?.pinned !== "boolean") return ctx.json({ error: "Invalid pinned value" }, 400);
+  const result = setMessagePinned(chatJid, id, body.pinned);
+  if (!result) return ctx.json({ error: "Post not found" }, 404);
+
+  const update = { id, chat_jid: chatJid, pinned: body.pinned };
+  if (result.changed) ctx.broadcastEvent("post_pin_updated", update);
+  return ctx.json(update);
 }
 
 /** PATCH /post/:id/annotations orchestration. */

@@ -97,6 +97,7 @@ export function composeMainAppShellOptions(input: ComposeMainAppShellOptionsInpu
     handleCompleteProviderReadyOobe: shellState.handleCompleteProviderReadyOobe,
     posts: shellState.posts,
     postsChatJid: shellState.postsChatJid,
+    pins: shellState.pins,
     hasMore: shellState.hasMore,
     loadMore: shellState.loadMore,
     timelineRef: shellState.timelineRef,

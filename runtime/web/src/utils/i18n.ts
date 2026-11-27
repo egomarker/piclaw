@@ -154,6 +154,14 @@ type MessageKey =
   | 'preview.method'
   | 'preview.size'
   | 'post.deleteMessage'
+  | 'post.pinMessage'
+  | 'post.unpinMessage'
+  | 'post.pinFailed'
+  | 'timeline.pinned'
+  | 'timeline.showPinned'
+  | 'timeline.showAll'
+  | 'timeline.noPinned'
+  | 'timeline.pinLoadFailed'
   | 'post.tooLarge'
   | 'post.previewTruncated'
   | 'post.attachmentSave'
@@ -872,6 +880,14 @@ const EN: Record<MessageKey, string> = {
   'preview.method': 'Method',
   'preview.size': 'Size',
   'post.deleteMessage': 'Delete message',
+  'post.pinMessage': 'Pin message',
+  'post.unpinMessage': 'Unpin message',
+  'post.pinFailed': 'Could not update pin. Try again.',
+  'timeline.pinned': 'Pinned',
+  'timeline.showPinned': 'Show pinned messages',
+  'timeline.showAll': 'Show all messages',
+  'timeline.noPinned': 'No pinned messages',
+  'timeline.pinLoadFailed': 'Could not load pinned messages. Turn the filter off and on to retry.',
   'post.tooLarge': 'Message too large to display.',
   'post.previewTruncated': 'Preview truncated.',
   'post.attachmentSave': 'Save to workspace',
@@ -1585,6 +1601,14 @@ const ZH_CN: Partial<Record<MessageKey, string>> = {
   'preview.method': '方法',
   'preview.size': '大小',
   'post.deleteMessage': '删除消息',
+  'post.pinMessage': '固定消息',
+  'post.unpinMessage': '取消固定消息',
+  'post.pinFailed': '无法更新固定状态，请重试。',
+  'timeline.pinned': '已固定',
+  'timeline.showPinned': '仅显示已固定的消息',
+  'timeline.showAll': '显示所有消息',
+  'timeline.noPinned': '没有已固定的消息',
+  'timeline.pinLoadFailed': '无法加载已固定的消息，请关闭筛选后重新打开。',
   'post.tooLarge': '消息过大，无法显示。',
   'post.previewTruncated': '预览已截断。',
   'post.attachmentSave': '保存到工作区',
@@ -2298,6 +2322,14 @@ const JA: Partial<Record<MessageKey, string>> = {
   'preview.method': '方式',
   'preview.size': 'サイズ',
   'post.deleteMessage': 'メッセージを削除',
+  'post.pinMessage': 'メッセージをピン留め',
+  'post.unpinMessage': 'メッセージのピン留めを解除',
+  'post.pinFailed': 'ピン留めを更新できませんでした。もう一度お試しください。',
+  'timeline.pinned': 'ピン留め済み',
+  'timeline.showPinned': 'ピン留めしたメッセージを表示',
+  'timeline.showAll': 'すべてのメッセージを表示',
+  'timeline.noPinned': 'ピン留めしたメッセージはありません',
+  'timeline.pinLoadFailed': 'ピン留めしたメッセージを読み込めませんでした。フィルターを切り替えて再試行してください。',
   'post.tooLarge': 'メッセージが大きすぎて表示できません。',
   'post.previewTruncated': 'プレビューは切り詰められました。',
   'post.attachmentSave': 'ワークスペースに保存',

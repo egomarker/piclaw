@@ -113,8 +113,8 @@ export class WebChannelHttpSurfaceService {
     return await this.channel.endpointFacade.handleWorkspaceVisibility(req);
   }
 
-  handleTimeline(limit: number, before?: number, chatJid?: string): Response {
-    return this.channel.endpointFacade.handleTimeline(limit, before, chatJid);
+  handleTimeline(...args: Parameters<WebChannelEndpointFacadeService["handleTimeline"]>): Response {
+    return this.channel.endpointFacade.handleTimeline(...args);
   }
 
   handleHashtag(tag: string, limit: number, offset: number, chatJid?: string): Response {
@@ -155,6 +155,10 @@ export class WebChannelHttpSurfaceService {
 
   async handleUpdatePostAnnotations(req: Request, id: number): Promise<Response> {
     return await this.channel.endpointFacade.handleUpdatePostAnnotations(req, id);
+  }
+
+  handleSetPostPin(req: Request, id: number): Promise<Response> {
+    return this.channel.endpointFacade.handleSetPostPin(req, id);
   }
 
   async handleInternalPost(req: Request): Promise<Response> {

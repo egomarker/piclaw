@@ -186,6 +186,7 @@ function MainApp({ locationParams, navigate }) {
         currentChatJid,
         currentHashtag: surface.currentHashtag,
         searchQuery: surface.searchQuery,
+        searchOpen: surface.searchOpen,
         followupQueueItems: surface.followupQueueItems,
         onIdentity: useCallback((identity) => {
             if (!identity) return;

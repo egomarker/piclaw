@@ -190,6 +190,7 @@ function createSchema(database: Database): void {
       is_bot_message INTEGER DEFAULT 0,
       is_terminal_agent_reply INTEGER DEFAULT 0,
       is_steering_message INTEGER DEFAULT 0,
+      pinned INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (id, chat_jid),
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
@@ -570,6 +571,9 @@ function ensureMessageColumns(database: Database): void {
   ensureColumn("is_terminal_agent_reply", "INTEGER DEFAULT 0");
   ensureColumn("is_steering_message", "INTEGER DEFAULT 0");
   ensureColumn("annotations");
+  ensureColumn("pinned", "INTEGER NOT NULL DEFAULT 0");
+  // The secondary index also carries rowid, the timeline's page cursor.
+  database.exec("CREATE INDEX IF NOT EXISTS idx_messages_pinned_chat ON messages(chat_jid) WHERE pinned = 1");
 }
 
 /**

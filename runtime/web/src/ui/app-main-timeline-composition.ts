@@ -1,5 +1,6 @@
-import { useMemo, useRef } from '../vendor/preact-htm.js';
+import { useCallback, useMemo, useRef } from '../vendor/preact-htm.js';
 import { useTimeline } from './use-timeline.js';
+import { usePinnedTimeline } from './use-pinned-timeline.js';
 import { useTimelineScrollOrchestration } from './app-timeline-scroll-orchestration.js';
 
 type RefBox<T> = { current: T };
@@ -43,6 +44,7 @@ export function useMainAppTimelineComposition(options: {
   currentChatJid: string;
   currentHashtag: string | null;
   searchQuery: string | null;
+  searchOpen?: boolean;
   followupQueueItems: any[];
 }) {
   const {
@@ -52,25 +54,36 @@ export function useMainAppTimelineComposition(options: {
     currentChatJid,
     currentHashtag,
     searchQuery,
+    searchOpen,
     followupQueueItems,
   } = options;
 
+  const pinnedViewRef = useRef(false);
   const scrollToBottomRef = useRef<(() => void) | null>(null);
   const postsOwnerRef = useRef<{ posts: any[] | null; chatJid: string } | null>(null);
   const {
-    scrollToBottom,
-    preserveTimelineScroll,
-    preserveTimelineScrollTop,
+    scrollToBottom: scrollVisibleTimelineToBottom,
+    preserveTimelineScroll: preserveVisibleTimelineScroll,
+    preserveTimelineScrollTop: preserveVisibleTimelineScrollTop,
     filterQueuedPosts,
   } = useTimelineScrollOrchestration({
     timelineRef,
     viewStateRef,
     followupQueueRowIdsRef,
   });
-  syncScrollToBottomRef({
-    scrollToBottomRef,
-    scrollToBottom,
-  });
+  // The live feed can update in the background without scrolling the pinned view.
+  const scrollToBottom = useCallback(() => {
+    if (!pinnedViewRef.current) scrollVisibleTimelineToBottom();
+  }, [scrollVisibleTimelineToBottom]);
+  const preserveTimelineScroll = useCallback((mutate: () => void) => {
+    if (pinnedViewRef.current) mutate();
+    else preserveVisibleTimelineScroll(mutate);
+  }, [preserveVisibleTimelineScroll]);
+  const preserveTimelineScrollTop = useCallback((mutate: () => void) => {
+    if (pinnedViewRef.current) mutate();
+    else preserveVisibleTimelineScrollTop(mutate);
+  }, [preserveVisibleTimelineScrollTop]);
+  syncScrollToBottomRef({ scrollToBottomRef, scrollToBottom });
 
   const {
     posts: rawPosts,
@@ -82,6 +95,8 @@ export function useMainAppTimelineComposition(options: {
     refreshTimeline,
     loadMore,
     loadMoreRef,
+    reloadLatest,
+    applyPinToTimeline,
   } = useTimeline({
     preserveTimelineScroll,
     preserveTimelineScrollTop,
@@ -89,6 +104,15 @@ export function useMainAppTimelineComposition(options: {
     currentHashtag,
     searchQuery,
   });
+
+  const pins = usePinnedTimeline({
+    chatJid: currentChatJid,
+    available: !currentHashtag && !searchQuery && !searchOpen,
+    reloadLatest,
+    preserveTimelineScrollTop: preserveVisibleTimelineScrollTop,
+    applyPinToTimeline,
+  });
+  pinnedViewRef.current = pins.active;
 
   const postsChatJid = resolveTimelinePostsChatJid({
     ownerRef: postsOwnerRef,
@@ -117,5 +141,6 @@ export function useMainAppTimelineComposition(options: {
     loadMore,
     loadMoreRef,
     posts,
+    pins,
   };
 }

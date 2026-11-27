@@ -16,6 +16,7 @@ import {
   getMessagesByHashtag,
   getTimeline,
   hasOlderMessages,
+  isHiddenQueuePlaceholder,
   listChatBranches,
   searchMessages,
   searchMessagesAcrossChats,
@@ -23,25 +24,10 @@ import {
 
 import type { InteractionRow } from "../../db/types.js";
 
-const QUEUE_PLACEHOLDER_MARKER = "\u2063";
-const LEGACY_QUEUE_STATUS = "Queued as a follow-up (one-at-a-time).";
-
-type QueueFilterablePost = {
-  data?: {
-    content?: string;
-    is_bot_message?: boolean;
-  };
-};
-
-function isHiddenQueuePlaceholder(post: QueueFilterablePost): boolean {
-  const content = post?.data?.content;
-  const isBot = Boolean(post?.data?.is_bot_message);
-  if (!isBot || typeof content !== "string") return false;
-  return content === QUEUE_PLACEHOLDER_MARKER || content === LEGACY_QUEUE_STATUS;
-}
-
-function filterHiddenQueuePlaceholders<T extends QueueFilterablePost>(items: T[]): T[] {
-  return items.filter((post) => !isHiddenQueuePlaceholder(post));
+function filterHiddenQueuePlaceholders(posts: InteractionRow[]): InteractionRow[] {
+  return posts.filter(({ data }) => !isHiddenQueuePlaceholder(
+    data?.type === "agent_response", data?.content,
+  ));
 }
 
 export interface TimelineIdentity {
@@ -58,11 +44,12 @@ export function getTimelineResponse(
   limit: number,
   before?: number,
   identity?: TimelineIdentity | null,
+  pinnedOnly = false,
 ): { status: number; body: unknown } {
-  const rawPosts = getTimeline(chatJid, limit, before ?? undefined);
-  const posts = filterHiddenQueuePlaceholders(rawPosts);
+  const rawPosts = getTimeline(chatJid, limit, before ?? undefined, pinnedOnly);
+  const posts = pinnedOnly ? rawPosts : filterHiddenQueuePlaceholders(rawPosts);
   const oldestId = rawPosts.length > 0 ? rawPosts[0].id : null;
-  const hasMore = oldestId !== null && rawPosts.length === limit && hasOlderMessages(chatJid, oldestId);
+  const hasMore = oldestId !== null && rawPosts.length === limit && hasOlderMessages(chatJid, oldestId, pinnedOnly);
   const body: Record<string, unknown> = { posts, limit, has_more: hasMore };
   if (identity) {
     body.identity = identity;

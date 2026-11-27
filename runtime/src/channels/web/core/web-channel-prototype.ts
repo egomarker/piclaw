@@ -414,8 +414,7 @@ export function installWebChannelPrototype(
     handleTimeline: {
       configurable: true,
       writable: true,
-      value: withHttpSurface((service, limit: number, before?: number, chatJid?: string) =>
-        service.handleTimeline(limit, before, chatJid)),
+      value: withHttpSurface((service, ...args: Parameters<WebChannelLike["handleTimeline"]>) => service.handleTimeline(...args)),
     },
     handleHashtag: {
       configurable: true,
@@ -467,6 +466,11 @@ export function installWebChannelPrototype(
       configurable: true,
       writable: true,
       value: withHttpSurface(async (service, req: Request, id: number) => await service.handleUpdatePostAnnotations(req, id)),
+    },
+    handleSetPostPin: {
+      configurable: true,
+      writable: true,
+      value: withHttpSurface((service, req: Request, id: number) => service.handleSetPostPin(req, id)),
     },
     handleInternalPost: {
       configurable: true,

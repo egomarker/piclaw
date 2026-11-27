@@ -52,10 +52,18 @@ interface StoredMessageRow {
   thread_id: number | null;
   timestamp: string;
   is_bot_message: number;
+  pinned: number;
 }
 
 /** Column list used in SELECT queries to ensure a consistent shape. */
-const MESSAGE_COLUMNS = "rowid, chat_jid, sender, sender_name, content, screen_hint, content_blocks, link_previews, annotations, thread_id, timestamp, is_bot_message";
+const MESSAGE_COLUMNS = "rowid, chat_jid, sender, sender_name, content, screen_hint, content_blocks, link_previews, annotations, thread_id, timestamp, is_bot_message, pinned";
+const HIDDEN_QUEUE_CONTENT = ["\u2063", "Queued as a follow-up (one-at-a-time)."] as const;
+const VISIBLE_MESSAGE = "NOT (COALESCE(is_bot_message, 0) <> 0 AND COALESCE(content, '') IN (?, ?))";
+const PINNED_TIMELINE_FILTER = ` AND pinned = 1 AND ${VISIBLE_MESSAGE}`;
+
+export function isHiddenQueuePlaceholder(isBot: boolean, content: unknown): boolean {
+  return isBot && HIDDEN_QUEUE_CONTENT.some((marker) => marker === content);
+}
 
 function ensureMonotonicMessageTimestamp(chatJid: string, requestedTimestamp: string): string {
   const requestedMs = Date.parse(requestedTimestamp);
@@ -105,6 +113,7 @@ function buildInteraction(row: StoredMessageRow, mediaIds: number[] = []): Inter
   if (linkPreviews?.length) data.link_previews = linkPreviews;
   const annotations = parseJsonArray(row.annotations);
   if (annotations?.length) data.annotations = annotations;
+  if (row.pinned === 1) data.pinned = true;
   if (row.thread_id !== null && row.thread_id !== undefined) data.thread_id = row.thread_id;
   return {
     id: row.rowid,
@@ -585,19 +594,13 @@ export function deleteThreadByRowId(chatJid: string, rowId: number): number[] {
  * before a given rowid, in chronological order (oldest first).
  * Used by the web channel's GET /timeline endpoint.
  */
-export function getTimeline(chatJid: string, limit: number, beforeId?: number): InteractionRow[] {
+export function getTimeline(chatJid: string, limit: number, beforeId?: number, pinnedOnly = false): InteractionRow[] {
   const db = getDb();
-  const rows = beforeId
-    ? (db
-        .prepare(
-          `SELECT ${MESSAGE_COLUMNS} FROM messages WHERE chat_jid = ? AND rowid < ? ORDER BY rowid DESC LIMIT ?`
-        )
-        .all(chatJid, beforeId, limit) as StoredMessageRow[])
-    : (db
-        .prepare(
-          `SELECT ${MESSAGE_COLUMNS} FROM messages WHERE chat_jid = ? ORDER BY rowid DESC LIMIT ?`
-        )
-        .all(chatJid, limit) as StoredMessageRow[]);
+  const cursor = beforeId ? " AND rowid < ?" : "";
+  const filter = pinnedOnly ? PINNED_TIMELINE_FILTER : "";
+  const rows = db
+    .prepare(`SELECT ${MESSAGE_COLUMNS} FROM messages WHERE chat_jid = ?${cursor}${filter} ORDER BY rowid DESC LIMIT ?`)
+    .all(chatJid, ...(beforeId ? [beforeId] : []), ...(pinnedOnly ? HIDDEN_QUEUE_CONTENT : []), limit) as StoredMessageRow[];
 
   const rowIds = rows.map((row) => row.rowid);
   const mediaByMessage = new Map<number, number[]>();
@@ -617,12 +620,27 @@ export function getTimeline(chatJid: string, limit: number, beforeId?: number): 
 }
 
 /** Check whether there are messages older than the given rowid in a chat. */
-export function hasOlderMessages(chatJid: string, oldestId: number): boolean {
+export function hasOlderMessages(chatJid: string, oldestId: number, pinnedOnly = false): boolean {
+  const filter = pinnedOnly ? PINNED_TIMELINE_FILTER : "";
+  return Boolean(getDb()
+    .prepare(`SELECT rowid FROM messages WHERE chat_jid = ? AND rowid < ?${filter} LIMIT 1`)
+    .get(chatJid, oldestId, ...(pinnedOnly ? HIDDEN_QUEUE_CONTENT : [])));
+}
+
+/** Set a visible post's pin by its chat and web row ID. Null means no such post. */
+export function setMessagePinned(chatJid: string, rowId: number, pinned: boolean): { changed: boolean } | null {
   const db = getDb();
-  const row = db
-    .prepare("SELECT rowid FROM messages WHERE chat_jid = ? AND rowid < ? LIMIT 1")
-    .get(chatJid, oldestId) as { rowid: number } | undefined;
-  return Boolean(row);
+  const value = pinned ? 1 : 0;
+  const match = `chat_jid = ? AND rowid = ? AND ${VISIBLE_MESSAGE}`;
+  return db.transaction(() => {
+    const result = db.prepare(`UPDATE messages SET pinned = ? WHERE ${match} AND pinned <> ?`)
+      .run(value, chatJid, rowId, ...HIDDEN_QUEUE_CONTENT, value);
+    if (result.changes > 0) return { changed: true };
+    // Avoid updating unchanged rows (including their full-text index entries).
+    return db.prepare(`SELECT 1 FROM messages WHERE ${match}`).get(chatJid, rowId, ...HIDDEN_QUEUE_CONTENT)
+      ? { changed: false }
+      : null;
+  })();
 }
 
 /**
@@ -681,7 +699,7 @@ function searchMessagesInternal(chatJids: string[] | null, query: string, limit:
   try {
     const rows = db
       .prepare(
-        `SELECT messages.rowid, messages.chat_jid, messages.sender, messages.sender_name, messages.content, messages.screen_hint, messages.content_blocks, messages.link_previews, messages.thread_id, messages.timestamp, messages.is_bot_message
+        `SELECT messages.rowid, messages.chat_jid, messages.sender, messages.sender_name, messages.content, messages.screen_hint, messages.content_blocks, messages.link_previews, messages.thread_id, messages.timestamp, messages.is_bot_message, messages.pinned
          FROM messages
          JOIN messages_fts ON messages_fts.rowid = messages.rowid
          WHERE ${ftsChatClause}messages_fts MATCH ?

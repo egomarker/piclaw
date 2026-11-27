@@ -168,6 +168,7 @@ export function composeMainAppLifecycleCompositionOptions(options: UseMainAppOrc
     searchPosts: services.searchPosts,
     setPosts: timeline.setPosts,
     setHasMore: timeline.setHasMore,
+    onTimelinePinEvent: timeline.pins?.handleEvent,
     scrollToBottom: timeline.scrollToBottom,
     paneStateOwnerChatJidRef: refs.paneStateOwnerChatJidRef,
     chatPaneStateByChatRef: refs.chatPaneStateByChatRef,

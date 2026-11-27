@@ -20,6 +20,7 @@ interface UseRealtimeLifecycleOrchestrationOptions {
   handleConnectionStatusChange: (status: string) => void;
   loadPosts: (hashtag?: string | null) => Promise<void>;
   refreshCurrentView: () => void;
+  onTimelinePinEvent?: (eventType: string, data: any) => void;
 
   // SSE event routing context
   updateAgentProfile: (payload: any) => void;
@@ -99,6 +100,7 @@ export function useRealtimeLifecycleOrchestration(options: UseRealtimeLifecycleO
     handleConnectionStatusChange,
     loadPosts,
     refreshCurrentView,
+    onTimelinePinEvent,
 
     updateAgentProfile,
     updateUserProfile,
@@ -167,6 +169,7 @@ export function useRealtimeLifecycleOrchestration(options: UseRealtimeLifecycleO
   } = options;
 
   const handleSseEvent = useCallback((eventType: string, data: any) => {
+    onTimelinePinEvent?.(eventType, data);
     handleAppSseEvent(eventType, data, {
       currentChatJid,
       updateAgentProfile,
@@ -250,6 +253,7 @@ export function useRealtimeLifecycleOrchestration(options: UseRealtimeLifecycleO
     loadMoreRef,
     noteAgentActivity,
     notifyForFinalResponse,
+    onTimelinePinEvent,
     pendingRequestRef,
     preserveTimelineScrollTop,
     previewResyncGenerationRef,

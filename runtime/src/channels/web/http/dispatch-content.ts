@@ -22,6 +22,9 @@ export async function handleContentPrimaryRoutes(
     const limit = channel.clampInt(url.searchParams.get("limit"), 10, 1, 100);
     const before = channel.parseOptionalInt(url.searchParams.get("before"));
     const chatJid = url.searchParams.get("chat_jid")?.trim() || undefined;
+    if (url.searchParams.get("pinned") === "1") {
+      return channel.handleTimeline(limit, before ?? undefined, chatJid, true);
+    }
     return channel.handleTimeline(limit, before ?? undefined, chatJid);
   }
 
@@ -56,6 +59,11 @@ export async function handleContentPrimaryRoutes(
 
   if (req.method === "PATCH" && pathname.startsWith("/post/")) {
     const rest = pathname.slice(6); // after "/post/"
+    const pinMatch = rest.match(/^([^/]*)\/pin$/);
+    if (pinMatch) {
+      const id = /^\d+$/.test(pinMatch[1]!) ? Number(pinMatch[1]) : NaN;
+      return await channel.handleSetPostPin(req, id);
+    }
     const annotationsMatch = rest.match(/^(\d+)\/annotations$/);
     if (annotationsMatch) {
       const id = parseInt(annotationsMatch[1]!, 10);

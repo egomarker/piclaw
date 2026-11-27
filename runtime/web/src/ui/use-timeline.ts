@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from '../vendor/preact-htm.js';
-import { getTimeline, getPostsByHashtag } from '../api.js';
+import { getTimeline, getPostsByHashtag, type PostPinUpdate } from '../api.js';
 import { cacheTimelineSnapshot, getCachedTimelineSnapshot } from './app-timeline-cache.js';
 import { dedupePosts } from './timeline-utils.js';
 
@@ -105,7 +105,7 @@ export function useTimeline({ preserveTimelineScroll, preserveTimelineScrollTop,
     cacheCurrentSnapshot(postsRef.current, hasMoreRef.current);
   }, [cacheCurrentSnapshot]);
 
-  const loadPosts = useCallback(async (hashtag = null) => {
+  const loadPosts = useCallback(async (hashtag = null, { fresh = false } = {}) => {
     const token = chatTokenRef.current;
     const mutationVersion = mutationVersionRef.current;
     try {
@@ -127,7 +127,7 @@ export function useTimeline({ preserveTimelineScroll, preserveTimelineScrollTop,
         setTimelineState(nextPosts, nextHasMore);
       };
 
-      const cached = getCachedTimelineSnapshot(chatJid);
+      const cached = fresh ? null : getCachedTimelineSnapshot(chatJid);
       if (cached) {
         setTimelineState(cached.posts, cached.has_more);
         const backgroundMutationVersion = mutationVersionRef.current;
@@ -150,7 +150,7 @@ export function useTimeline({ preserveTimelineScroll, preserveTimelineScrollTop,
         return;
       }
 
-      const result = await getTimeline(10, null, chatJid);
+      const result = fresh ? await getTimeline(10, null, chatJid, { fresh }) : await getTimeline(10, null, chatJid);
       applyFreshPayload(result);
     } catch (error) {
       if (token !== chatTokenRef.current) return;
@@ -256,9 +256,29 @@ export function useTimeline({ preserveTimelineScroll, preserveTimelineScrollTop,
     });
   }, [chatJid, shouldCacheCurrentView]);
 
+  const reloadLatest = useCallback(() => {
+    // Invalidate previous history requests, but retain the live page if the
+    // refresh fails (the pinned view never overwrites it).
+    chatTokenRef.current += 1;
+    lastBeforeIdRef.current = null;
+    loadingMoreRef.current = false;
+    return loadPosts(null, { fresh: true });
+  }, [loadPosts]);
+
+  const applyPinToTimeline = useCallback((update: PostPinUpdate) => {
+    const matches = (post) => post.id === update.id && (post.chat_jid || chatJid) === update.chat_jid
+      && Boolean(post.data?.pinned) !== update.pinned;
+    if (!postsRef.current?.some(matches)) return;
+    setPosts((current) => current?.map((post) => matches(post)
+      ? { ...post, data: { ...post.data, pinned: update.pinned } }
+      : post) ?? current);
+  }, [chatJid, setPosts]);
+
   return {
     posts,
     setPosts,
+    reloadLatest,
+    applyPinToTimeline,
     hasMore,
     setHasMore: setHasMoreState,
     hasMoreRef,

@@ -257,6 +257,7 @@ interface ComposeRealtimeLifecycleOptionsInput {
   handleConnectionStatusChange: (status: string) => void;
   loadPosts: (hashtag?: string | null) => Promise<void>;
   refreshCurrentView: () => void;
+  onTimelinePinEvent?: (eventType: string, data: any) => void;
   updateAgentProfile: (payload: any) => void;
   updateUserProfile: (payload: any) => void;
   currentTurnIdRef: RefBox<string | null>;
@@ -329,6 +330,7 @@ export function composeRealtimeLifecycleOptions(input: ComposeRealtimeLifecycleO
     handleConnectionStatusChange: input.handleConnectionStatusChange,
     loadPosts: input.loadPosts,
     refreshCurrentView: input.refreshCurrentView,
+    onTimelinePinEvent: input.onTimelinePinEvent,
     updateAgentProfile: input.updateAgentProfile,
     updateUserProfile: input.updateUserProfile,
     currentTurnIdRef: input.currentTurnIdRef,

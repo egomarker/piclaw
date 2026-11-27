@@ -124,7 +124,7 @@ async function consumeEventStream(response, onEvent) {
 /**
  * Get timeline posts (chat style - returns oldest first)
  */
-export async function getTimeline(limit = 10, beforeId = null, chatJid = null) {
+export async function getTimeline(limit = 10, beforeId = null, chatJid = null, options: { pinnedOnly?: boolean; signal?: AbortSignal; fresh?: boolean } = {}) {
     let url = `/timeline?limit=${limit}`;
     if (beforeId) {
         url += `&before=${beforeId}`;
@@ -132,7 +132,23 @@ export async function getTimeline(limit = 10, beforeId = null, chatJid = null) {
     if (chatJid) {
         url += `&chat_jid=${encodeURIComponent(chatJid)}`;
     }
-    return deduplicatedGet(url);
+    if (options.pinnedOnly) url += '&pinned=1';
+    return options.signal || options.fresh
+        ? request(url, { signal: options.signal, cache: 'no-store' })
+        : deduplicatedGet(url);
+}
+
+export interface PostPinUpdate {
+    id: number;
+    chat_jid: string;
+    pinned: boolean;
+}
+
+export async function setPostPinned(id: number, chatJid: string, pinned: boolean): Promise<PostPinUpdate> {
+    return request(`/post/${id}/pin?chat_jid=${encodeURIComponent(chatJid)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ pinned }),
+    });
 }
 
 /**
@@ -1197,6 +1213,7 @@ export class SSEClient {
         bindJsonEvent('agent_response');
         bindJsonEvent('interaction_updated');
         bindJsonEvent('interaction_deleted');
+        bindJsonEvent('post_pin_updated');
         bindJsonEvent('agent_status');
         bindJsonEvent('active_chats_changed');
         bindJsonEvent('agent_steer_queued');

@@ -1464,7 +1464,7 @@ function highlightHtml(html, query) {
 /**
  * Single post component
  */
-export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMessage, agentName, agentAvatarUrl, userName, userAvatarUrl, userAvatarBackground, onDelete, isThreadReply, isThreadPrev, isThreadNext, isRemoving, highlightQuery, canContinue, onFileRef, onOpenWidget, onOpenAttachmentPreview }) {
+export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMessage, agentName, agentAvatarUrl, userName, userAvatarUrl, userAvatarBackground, onDelete, onSetPinned, isThreadReply, isThreadPrev, isThreadNext, isRemoving, highlightQuery, canContinue, onFileRef, onOpenWidget, onOpenAttachmentPreview }) {
     const { t } = useTranslation();
     const [zoomedImage, setZoomedImage] = useState(null);
     const [annotatingImage, setAnnotatingImage] = useState(null);
@@ -1475,6 +1475,9 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
     const [highlightVersion, setHighlightVersion] = useState(0);
     const [asideInput, setAsideInput] = useState(null); // { text, textOffset, rect }
     const [asideText, setAsideText] = useState('');
+    const [pinBusy, setPinBusy] = useState(false);
+    const [pinFailed, setPinFailed] = useState(false);
+    const pinInFlight = useRef(false);
     const contentRef = useRef(null);
     const copyResetTimerRef = useRef(null);
 
@@ -1485,6 +1488,25 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
     const selfContinuationMeta = getSelfContinuationMeta(blocks);
     const restartHandoffMeta = getRestartHandoffMeta(blocks);
     const isAgent = data.type === 'agent_response';
+    const pinned = data.pinned === true;
+    // Locally recovered partials use synthetic IDs and have no owning chat.
+    const canPin = Boolean(onSetPinned && post.chat_jid && Number.isSafeInteger(post.id) && post.id > 0
+        && (isAgent || data.type === 'user_message'));
+    const handlePinClick = async (event: MouseEvent) => {
+        event.stopPropagation();
+        if (pinInFlight.current || !canPin) return;
+        pinInFlight.current = true;
+        setPinBusy(true);
+        setPinFailed(false);
+        try {
+            await onSetPinned(post, !pinned);
+        } catch {
+            setPinFailed(true);
+        } finally {
+            pinInFlight.current = false;
+            setPinBusy(false);
+        }
+    };
     const resolvedUserName = userName || 'You';
     const isPeerAgentMessage = Boolean(!isAgent && peerMessageMeta?.sourceAgentName);
     const isSelfContinuation = Boolean(!isAgent && selfContinuationMeta);
@@ -1941,7 +1963,7 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
                 ${avatarInfo.image ? html`<img src=${avatarInfo.image} alt=${displayName} />` : avatarInfo.letter}
             </div>
             <div class="post-body">
-                <div class="post-actions">
+                <div class=${`post-actions${canPin ? ' has-pin-action' : ''}${pinned ? ' has-pinned-post' : ''}`}>
                     ${isAgent && speechSupported && speakableText && html`
                         <button
                             class=${`post-action-btn post-speak-btn${isSpeakingThisPost ? ' is-active' : ''}`}
@@ -1969,6 +1991,22 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
                                 ? html`<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"></circle><path d="M9 9l6 6M15 9l-6 6"></path></svg>`
                                 : html`<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="9" width="10" height="10" rx="2"></rect><path d="M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1"></path></svg>`}
                     </button>
+                    ${canPin && html`
+                        <button
+                            class="post-action-btn post-pin-btn"
+                            type="button"
+                            title=${t(pinned ? 'post.unpinMessage' : 'post.pinMessage')}
+                            aria-label=${t('post.pinMessage')}
+                            aria-pressed=${String(pinned)}
+                            disabled=${pinBusy}
+                            onClick=${handlePinClick}
+                        >
+                            <svg viewBox="0 0 24 24" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round">
+                                <path class="post-pin-shape" d="M8 3h8l-1 7 3 3v2H6v-2l3-3z"/>
+                                <path d="M12 15v6"/>
+                            </svg>
+                        </button>
+                    `}
                     <button
                         class="post-action-btn post-delete-btn"
                         type="button"
@@ -1980,6 +2018,7 @@ export function Post({ post, onClick, onHashtagClick, onMessageRef, onScrollToMe
                             <path d="M18 6L6 18M6 6l12 12" />
                         </svg>
                     </button>
+                    ${pinFailed && html`<span class="post-pin-error" role="status">${t('post.pinFailed')}</span>`}
                 </div>
                 <div class="post-meta">
                     <span class="post-author">${displayName}</span>

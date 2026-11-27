@@ -347,7 +347,7 @@ function usePreactVirtualizer(options) {
  * coordinates and disables native CSS anchoring; TanStack owns keyed prepend
  * anchoring, dynamic-size corrections, and end following on this path.
  */
-function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, removingPostIds, searchQuery, active = true }) {
+function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, onSetPinned, removingPostIds, searchQuery, active = true, pinnedOnly = false }) {
     const [loadingMore, setLoadingMore] = useState(false);
     const loadingMoreRef = useRef(false);
     const initialScrollPendingRef = useRef(true);
@@ -378,7 +378,7 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
         restoringActiveRef.current = false;
     }, []);
     const maintainBottomIntent = useCallback((instance) => {
-        if (!activeRef.current || !bottomIntentRef.current || bottomIntentFrameRef.current) return;
+        if (pinnedOnly || !activeRef.current || !bottomIntentRef.current || bottomIntentFrameRef.current) return;
         bottomIntentFrameRef.current = requestAnimationFrame(() => {
             bottomIntentFrameRef.current = 0;
             const root = timelineRef?.current;
@@ -388,21 +388,21 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
                 instance.scrollToEnd({ behavior: 'auto' });
             }
         });
-    }, [timelineRef]);
+    }, [pinnedOnly, timelineRef]);
     const observeTimelineRect = useCallback((instance, callback) => observeElementRect(instance, (rect) => {
         if (!activeRef.current) return;
         const previousHeight = previousViewportHeightRef.current;
         previousViewportHeightRef.current = rect.height;
         const viewportHeightChanged = previousHeight !== null
             && Math.abs(rect.height - previousHeight) > 0.5;
-        const shouldRestoreEnd = viewportHeightChanged && pinnedToEndRef.current;
+        const shouldRestoreEnd = !pinnedOnly && viewportHeightChanged && pinnedToEndRef.current;
         callback(rect);
 
         // Status panels live below the timeline in the same flex column. When
         // one appears or expands, the timeline viewport shrinks without a user
         // scroll. Preserve bottom pinning only if it was pinned before resize.
         if (shouldRestoreEnd) instance.scrollToEnd({ behavior: 'auto' });
-    }), []);
+    }), [pinnedOnly]);
     const observeTimelineOffset = useCallback((instance, callback) => observeElementOffset(instance, (offset, isScrolling) => {
         if (activeRef.current) callback(offset, isScrolling);
     }), []);
@@ -433,7 +433,7 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
         scrollToFn: elementScroll,
         overscan: CHAT_VIRTUAL_OVERSCAN_ROWS,
         anchorTo: 'end',
-        followOnAppend: true,
+        followOnAppend: !pinnedOnly,
         scrollEndThreshold: 80,
         enabled: Boolean(posts) && sessionReady,
         onChange: maintainBottomIntent,
@@ -507,7 +507,7 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
         cancelAnimationFrame(initialEndFrameRef.current);
         initialEndFrameRef.current = 0;
         if (!active || !sessionReady
-            || (!initialScrollPendingRef.current && !bottomIntentRef.current)
+            || (!initialScrollPendingRef.current && (pinnedOnly || !bottomIntentRef.current))
             || displayPosts.length === 0 || !timelineRef?.current) return;
 
         let attempts = 0;
@@ -536,6 +536,7 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
                 || attempts >= CHAT_INITIAL_END_MAX_FRAMES) {
                 initialEndFrameRef.current = 0;
                 initialScrollPendingRef.current = false;
+                if (pinnedOnly) bottomIntentRef.current = false;
                 pinnedToEndRef.current = true;
                 restoringActiveRef.current = false;
                 return;
@@ -549,7 +550,7 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
             initialEndFrameRef.current = 0;
             restoringActiveRef.current = false;
         };
-    }, [active, displayPosts.length, posts, sessionReady, timelineRef, virtualizer]);
+    }, [active, displayPosts.length, pinnedOnly, posts, sessionReady, timelineRef, virtualizer]);
 
     useLayoutEffect(() => {
         const wasActive = previousActiveRef.current;
@@ -702,7 +703,7 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
                                 isThreadPrev=${threadInfo.hasThreadPrev}
                                 isThreadNext=${threadInfo.hasThreadNext}
                                 isRemoving=${isRemoving}
-                                canContinue=${!searchQuery && index === displayPosts.length - 1}
+                                canContinue=${!pinnedOnly && !searchQuery && index === displayPosts.length - 1}
                                 highlightQuery=${searchQuery}
                                 agentName=${getAgentName(post.data?.agent_id, agents || {})}
                                 agentAvatarUrl=${getAgentAvatarUrl(post.data?.agent_id, agents || {})}
@@ -716,6 +717,7 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
                                 onFileRef=${onFileRef}
                                 onOpenWidget=${onOpenWidget}
                                 onDelete=${onDeletePost}
+                                onSetPinned=${onSetPinned}
                                 onOpenAttachmentPreview=${onOpenAttachmentPreview}
                             />
                         </div>
@@ -727,7 +729,7 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
 }
 
 /** Timeline component. */
-function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, reverse = true, removingPostIds, searchQuery, active = true }) {
+function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, onSetPinned, reverse = true, removingPostIds, searchQuery, active = true, pinnedOnly = false }) {
     const [loadingMore, setLoadingMore] = useState(false);
     const [windowRange, setWindowRange] = useState({ start: 0, end: 0 });
     const [windowingActive, setWindowingActive] = useState(false);
@@ -1486,7 +1488,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
                         isThreadPrev=${threadInfo.hasThreadPrev}
                         isThreadNext=${threadInfo.hasThreadNext}
                         isRemoving=${isRemoving}
-                        canContinue=${!searchQuery && index === displayPosts.length - 1}
+                        canContinue=${!pinnedOnly && !searchQuery && index === displayPosts.length - 1}
                         highlightQuery=${searchQuery}
                         agentName=${getAgentName(post.data?.agent_id, agents || {})}
                         agentAvatarUrl=${getAgentAvatarUrl(post.data?.agent_id, agents || {})}
@@ -1500,6 +1502,7 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
                         onFileRef=${onFileRef}
                         onOpenWidget=${onOpenWidget}
                         onDelete=${onDeletePost}
+                        onSetPinned=${onSetPinned}
                         onOpenAttachmentPreview=${onOpenAttachmentPreview}
                     />
                 `})}

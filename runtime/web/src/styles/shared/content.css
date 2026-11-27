@@ -340,6 +340,59 @@
     outline: none;
 }
 
+@media (hover: none) {
+    .post-actions.has-pin-action {
+        opacity: 1;
+    }
+    .post-pin-btn {
+        width: 28px;
+        height: 28px;
+    }
+}
+
+@media (hover: hover) {
+    .post-actions.has-pinned-post {
+        opacity: 1;
+    }
+    .post:not(:hover):not(:focus-within) .has-pinned-post > :not(.post-pin-btn) {
+        opacity: 0;
+        pointer-events: none;
+    }
+}
+
+.post-pin-btn[aria-pressed="true"] {
+    color: var(--accent-color);
+    border-color: var(--border-color);
+}
+
+.post-pin-btn[aria-pressed="true"] .post-pin-shape {
+    fill: currentColor;
+}
+
+.post-pin-btn:focus-visible {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 1px;
+}
+
+.post-pin-btn:disabled {
+    opacity: 0.6;
+    cursor: progress;
+}
+
+.post-pin-error {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 2;
+    padding: 3px 6px;
+    background: var(--bg-secondary);
+    color: var(--danger-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    white-space: nowrap;
+    font-size: var(--font-size-sm);
+}
+
 .post-delete-btn:hover,
 .post-delete-btn:focus-visible {
     color: var(--danger-color);

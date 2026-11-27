@@ -1003,6 +1003,40 @@
 }
 
 /* ── Zen mode toggle button ── */
+.tab-strip-pinned-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    flex: 0 0 auto;
+    min-height: 28px;
+    padding: 2px 6px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.tab-strip-pinned-toggle:hover,
+.tab-strip-pinned-toggle.active {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.tab-strip-pinned-toggle.active {
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+}
+
+.tab-strip-pinned-toggle:focus-visible {
+    outline: 2px solid var(--accent-color);
+    outline-offset: -2px;
+}
+
 .tab-strip-zen-toggle {
     display: inline-flex;
     align-items: center;

@@ -24,7 +24,8 @@ export function handleTimelineRequest(
   limit: number,
   before: number | undefined,
   chatJid: string | undefined,
-  ctx: ContentEndpointsContext
+  ctx: ContentEndpointsContext,
+  pinnedOnly = false,
 ): Response {
   const identity = ctx.getIdentity?.();
   const timelineIdentity = identity ? {
@@ -34,7 +35,7 @@ export function handleTimelineRequest(
     user_avatar_url: identity.userAvatarUrl ?? null,
     user_avatar_background: identity.userAvatarBackground ?? null,
   } : null;
-  const { result, durationMs } = measureSync(() => getTimelineResponse(chatJid || ctx.defaultChatJid, limit, before, timelineIdentity));
+  const { result, durationMs } = measureSync(() => getTimelineResponse(chatJid || ctx.defaultChatJid, limit, before, timelineIdentity, pinnedOnly));
   return appendServerTiming(ctx.json(result.body, result.status), {
     name: "timeline",
     durationMs,

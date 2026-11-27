@@ -1,4 +1,5 @@
 import { html } from '../vendor/preact-htm.js';
+import { t } from '../utils/i18n.js';
 import { ComposeBox } from '../components/compose-box.js';
 import { OobePanel } from '../components/oobe-panel.js';
 import { BtwPanel } from '../components/btw-panel.js';
@@ -219,6 +220,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
     handleCompleteProviderReadyOobe,
     posts,
     postsChatJid,
+    pins,
     isMainTimelineView,
     hasMore,
     loadMore,
@@ -324,6 +326,8 @@ export function renderMainShell(options: MainShellRenderOptions): any {
   const mobileTimelineActive = uiMode === 'mobile'
     && (chatOnlyMode || mobileChatActive || (!editorOpen && !mobileWorkspaceActive));
   const timelineSurfaceActive = uiMode !== 'mobile' || mobileTimelineActive;
+  const pinnedOnly = Boolean(pins?.active);
+  const pinnedPage = pins?.page;
   const mobileTerminalDockControlEnabled = uiMode === 'mobile' && hasDockPanes && !chatOnlyMode;
   const mobilePaneLabelledBy = mobileTabAccessibilityEnabled && tabStripActiveId
     ? getMobileSurfaceTabElementId(tabStripActiveId)
@@ -497,6 +501,8 @@ export function renderMainShell(options: MainShellRenderOptions): any {
               detachedTabs=${detachedTabs}
               onReattachTab=${handleReattachPane}
               toolbarAction=${mobileAttachToChatAction}
+              onTogglePinnedMessages=${timelineSurfaceActive && isMainTimelineView ? pins?.toggle : undefined}
+              pinnedMessagesVisible=${pinnedOnly}
               onToggleDock=${hasDockPanes ? toggleDock : undefined}
               dockVisible=${hasDockPanes && dockVisible}
               onToggleZen=${toggleZenMode}
@@ -647,13 +653,14 @@ export function renderMainShell(options: MainShellRenderOptions): any {
           />
         `}
         <${Timeline}
-          key=${currentChatJid}
+          key=${pinnedOnly ? `${currentChatJid}:pinned` : currentChatJid}
           chatJid=${currentChatJid}
-          postsChatJid=${postsChatJid}
-          posts=${posts}
+          postsChatJid=${pinnedOnly ? currentChatJid : postsChatJid}
+          posts=${pinnedOnly ? pinnedPage?.posts ?? null : posts}
           active=${timelineSurfaceActive}
-          hasMore=${isMainTimelineView ? hasMore : false}
-          onLoadMore=${isMainTimelineView ? loadMore : undefined}
+          pinnedOnly=${pinnedOnly}
+          hasMore=${pinnedOnly ? Boolean(pinnedPage?.hasMore) : isMainTimelineView && hasMore}
+          onLoadMore=${pinnedOnly ? pins.loadMore : isMainTimelineView ? loadMore : undefined}
           timelineRef=${timelineRef}
           onHashtagClick=${handleHashtagClick}
           onMessageRef=${addMessageRef}
@@ -661,9 +668,12 @@ export function renderMainShell(options: MainShellRenderOptions): any {
           onFileRef=${openTimelineFileFromPill || openFileFromPill}
           onPostClick=${undefined}
           onDeletePost=${handleDeletePost}
+          onSetPinned=${pins?.setPinned}
           onOpenWidget=${handleOpenFloatingWidget}
           onOpenAttachmentPreview=${setAttachmentPreview}
-          emptyMessage=${currentHashtag ? `No posts with #${currentHashtag}` : searchQuery ? `No results for "${searchQuery}"` : undefined}
+          emptyMessage=${pinnedOnly
+            ? t(pinnedPage?.failed ? 'timeline.pinLoadFailed' : 'timeline.noPinned')
+            : currentHashtag ? `No posts with #${currentHashtag}` : searchQuery ? `No results for "${searchQuery}"` : undefined}
           agents=${agents}
           user=${userProfile}
           reverse=${isMainTimelineView}
@@ -719,6 +729,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
         />
         <${ComposeBox}
           onPost=${(response) => {
+            if (pinnedOnly) return;
             handleComposePost({
               response,
               viewStateRef,

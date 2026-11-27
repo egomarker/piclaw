@@ -25,6 +25,7 @@ const CHAT_SCOPED_EVENT_TYPES = new Set([
   "new_reply",
   "interaction_updated",
   "interaction_deleted",
+  "post_pin_updated",
   "agent_steer_queued",
   "agent_followup_queued",
   "agent_followup_consumed",

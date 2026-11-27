@@ -23,7 +23,7 @@ import {
 import { deletePostResponse } from "../timeline-service.js";
 import { handleAgentsRequest, handleAvatarRequest } from "./identity-endpoints.js";
 import { handleManifestRequest, type ManifestIconMeta } from "../manifest.js";
-import { handleInternalPostRequest, handleUpdatePostAnnotationsRequest, handleUpdatePostRequest } from "../post-mutations.js";
+import { handleInternalPostRequest, handleSetPostPinRequest, handleUpdatePostAnnotationsRequest, handleUpdatePostRequest } from "../post-mutations.js";
 import {
   handleAgentRespondRequest,
   handleThoughtVisibilityRequest,
@@ -91,8 +91,8 @@ export class WebChannelEndpointFacadeService {
     return await this.options.handlePostRequest(req, isReply, chatJid);
   }
 
-  handleTimeline(limit: number, before?: number, chatJid?: string): Response {
-    return handleTimelineRequest(limit, before, chatJid, this.options.endpointContexts.content());
+  handleTimeline(limit: number, before?: number, chatJid?: string, pinnedOnly?: boolean): Response {
+    return handleTimelineRequest(limit, before, chatJid, this.options.endpointContexts.content(), pinnedOnly);
   }
 
   handleHashtag(tag: string, limit: number, offset: number, chatJid?: string): Response {
@@ -148,6 +148,10 @@ export class WebChannelEndpointFacadeService {
 
   async handleUpdatePostAnnotations(req: Request, id: number): Promise<Response> {
     return await handleUpdatePostAnnotationsRequest(req, id, this.options.endpointContexts.postMutations());
+  }
+
+  handleSetPostPin(req: Request, id: number): Promise<Response> {
+    return handleSetPostPinRequest(req, id, this.options);
   }
 
   async handleInternalPost(req: Request): Promise<Response> {
