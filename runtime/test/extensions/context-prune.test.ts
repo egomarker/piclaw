@@ -168,11 +168,8 @@ describe("contextPrune extension", () => {
     expect(completeSimple).toHaveBeenCalledTimes(1);
     expect(pruneResult.content[0].text).toContain("Context prune completed");
     expect(pi.sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ customType: CUSTOM_TYPE_SUMMARY, content: expect.stringContaining("Summarized tool refs") }),
-    );
-    expect(pi.sendMessage).not.toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ deliverAs: "steer" }),
+      expect.objectContaining({ customType: CUSTOM_TYPE_SUMMARY, content: expect.stringContaining("Summarized tool refs"), display: true }),
+      { triggerTurn: false },
     );
     expect(pi.appendEntry).toHaveBeenCalledWith(
       CUSTOM_TYPE_INDEX,
@@ -213,6 +210,7 @@ describe("contextPrune extension", () => {
 
     expect(pi.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ customType: CUSTOM_TYPE_SUMMARY, content: expect.stringContaining("Summarized tool refs") }),
+      { triggerTurn: false },
     );
     expect(ctx.sessionManager.appendCustomMessageEntry).toHaveBeenCalledWith(
       CUSTOM_TYPE_SUMMARY,

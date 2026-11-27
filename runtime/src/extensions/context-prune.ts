@@ -67,7 +67,11 @@ export function createContextPruneExtension(extensionOptions: { modelRuntime?: P
 
   const persistSummary = (ctx: ExtensionContext, content: string, details: unknown): void => {
     try {
-      pi.sendMessage({ customType: CUSTOM_TYPE_SUMMARY, content, display: true, details });
+      // While streaming, Pi defaults to steering unless triggerTurn is false.
+      pi.sendMessage(
+        { customType: CUSTOM_TYPE_SUMMARY, content, display: true, details },
+        { triggerTurn: false },
+      );
       return;
     } catch (err) {
       log.debug("Falling back to direct custom summary append", { operation: "context_prune.summary_fallback", error: errorMessage(err) });
