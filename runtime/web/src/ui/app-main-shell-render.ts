@@ -659,6 +659,7 @@ export function renderMainShell(options: MainShellRenderOptions): any {
           posts=${pinnedOnly ? pinnedPage?.posts ?? null : posts}
           active=${timelineSurfaceActive}
           pinnedOnly=${pinnedOnly}
+          showLatest=${isMainTimelineView && !pinnedOnly}
           hasMore=${pinnedOnly ? Boolean(pinnedPage?.hasMore) : isMainTimelineView && hasMore}
           onLoadMore=${pinnedOnly ? pins.loadMore : isMainTimelineView ? loadMore : undefined}
           timelineRef=${timelineRef}

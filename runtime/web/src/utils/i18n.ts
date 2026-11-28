@@ -162,6 +162,7 @@ type MessageKey =
   | 'timeline.showAll'
   | 'timeline.noPinned'
   | 'timeline.pinLoadFailed'
+  | 'timeline.latest'
   | 'post.tooLarge'
   | 'post.previewTruncated'
   | 'post.attachmentSave'
@@ -899,6 +900,7 @@ const EN: Record<MessageKey, string> = {
   'timeline.showAll': 'Show all messages',
   'timeline.noPinned': 'No pinned messages',
   'timeline.pinLoadFailed': 'Could not load pinned messages. Turn the filter off and on to retry.',
+  'timeline.latest': 'Latest',
   'post.tooLarge': 'Message too large to display.',
   'post.previewTruncated': 'Preview truncated.',
   'post.attachmentSave': 'Save to workspace',
@@ -1631,6 +1633,7 @@ const ZH_CN: Partial<Record<MessageKey, string>> = {
   'timeline.showAll': '显示所有消息',
   'timeline.noPinned': '没有已固定的消息',
   'timeline.pinLoadFailed': '无法加载已固定的消息，请关闭筛选后重新打开。',
+  'timeline.latest': '最新消息',
   'post.tooLarge': '消息过大，无法显示。',
   'post.previewTruncated': '预览已截断。',
   'post.attachmentSave': '保存到工作区',
@@ -2363,6 +2366,7 @@ const JA: Partial<Record<MessageKey, string>> = {
   'timeline.showAll': 'すべてのメッセージを表示',
   'timeline.noPinned': 'ピン留めしたメッセージはありません',
   'timeline.pinLoadFailed': 'ピン留めしたメッセージを読み込めませんでした。フィルターを切り替えて再試行してください。',
+  'timeline.latest': '最新へ',
   'post.tooLarge': 'メッセージが大きすぎて表示できません。',
   'post.previewTruncated': 'プレビューは切り詰められました。',
   'post.attachmentSave': 'ワークスペースに保存',

@@ -8,6 +8,7 @@ import {
 import { Post } from './post.js';
 import { isAnchorScrolling } from '../ui/scroll-anchor.js';
 import { getAgentAvatarUrl, getAgentName } from '../ui/agent-utils.js';
+import { useTranslation } from '../utils/i18n.js';
 
 export const TIMELINE_WINDOW_SIZE = 16;
 export const TIMELINE_WINDOW_THRESHOLD = 100;
@@ -20,6 +21,7 @@ const CHAT_HISTORY_PAGE_SIZE = 30;
 const CHAT_INITIAL_END_MAX_FRAMES = 48;
 const CHAT_INITIAL_END_STABLE_FRAMES = 2;
 const CHAT_END_EPSILON_PX = 1;
+const LATEST_BUTTON_HIDE_DISTANCE_PX = 200;
 
 export function isAndroidTimelinePlatform(navigatorLike = typeof navigator === 'undefined' ? null : navigator) {
     const userAgent = String(navigatorLike?.userAgent || '');
@@ -144,6 +146,54 @@ export function getTimelineWindowForViewport(prefixHeights, viewportStart, viewp
         start = Math.max(0, end - minimumRows);
     }
     return { start, end };
+}
+
+function TimelineLatestButton({ timelineRef, contentRef, reverse = false, onJump }) {
+    const { t } = useTranslation();
+    const [visible, setVisible] = useState(false);
+    const jumpFrame = useRef(0);
+    const onJumpRef = useRef(onJump);
+    onJumpRef.current = onJump;
+
+    useLayoutEffect(() => {
+        const root = timelineRef?.current;
+        if (!root) return;
+        const update = () => {
+            const height = root.clientHeight;
+            const distance = reverse ? -root.scrollTop : getTimelineDistanceFromEnd(root);
+            // The hide zone wins even when the visible timeline is shorter than 200px.
+            setVisible((wasVisible) => height > 0 && distance > LATEST_BUTTON_HIDE_DISTANCE_PX
+                && (wasVisible || distance >= height));
+        };
+        root.addEventListener('scroll', update, { passive: true });
+        const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+        observer?.observe(root);
+        if (contentRef.current) observer?.observe(contentRef.current);
+        update();
+        return () => {
+            root.removeEventListener('scroll', update);
+            observer?.disconnect();
+            cancelAnimationFrame(jumpFrame.current);
+            jumpFrame.current = 0;
+        };
+    }, [contentRef, reverse, timelineRef]);
+
+    if (!visible) return null;
+    const jump = () => {
+        // Run after any already-queued shell scroll restoration.
+        cancelAnimationFrame(jumpFrame.current);
+        jumpFrame.current = requestAnimationFrame(() => {
+            jumpFrame.current = 0;
+            onJumpRef.current();
+        });
+    };
+    return html`
+        <div class="timeline-latest-anchor">
+            <button type="button" class="timeline-latest-button" onClick=${jump}>
+                <span aria-hidden="true">↓</span> ${t('timeline.latest')}
+            </button>
+        </div>
+    `;
 }
 
 function getTimelineViewportWindow(root, prefixHeights, postCount, reverse) {
@@ -347,7 +397,7 @@ function usePreactVirtualizer(options) {
  * coordinates and disables native CSS anchoring; TanStack owns keyed prepend
  * anchoring, dynamic-size corrections, and end following on this path.
  */
-function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, onSetPinned, removingPostIds, searchQuery, active = true, pinnedOnly = false }) {
+function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, onSetPinned, removingPostIds, searchQuery, active = true, pinnedOnly = false, showLatest = false }) {
     const [loadingMore, setLoadingMore] = useState(false);
     const loadingMoreRef = useRef(false);
     const initialScrollPendingRef = useRef(true);
@@ -486,6 +536,17 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
         }
         maybePreload(root);
     }, [active, maintainBottomIntent, maybePreload, virtualizer]);
+
+    const jumpToLatest = () => {
+        // A pending pane-resume restore must not undo an explicit jump.
+        cancelAnimationFrame(resumeFramesRef.current.first);
+        cancelAnimationFrame(resumeFramesRef.current.second);
+        cancelAnimationFrame(resumeFramesRef.current.third);
+        restoringActiveRef.current = false;
+        pinnedToEndRef.current = true;
+        suspendedAnchorRef.current = null;
+        virtualizer.scrollToEnd({ behavior: 'auto' });
+    };
 
     const handleTouchStart = useCallback((event) => {
         event.currentTarget.dataset.timelineTouchScrolling = 'true';
@@ -725,11 +786,14 @@ function EndAnchoredTimelineView({ posts, chatJid, postsChatJid, hasMore, onLoad
                 })}
             </div>
         </div>
+        ${showLatest && active && html`
+            <${TimelineLatestButton} timelineRef=${timelineRef} contentRef=${timelineContentRef} onJump=${jumpToLatest} />
+        `}
     `;
 }
 
 /** Timeline component. */
-function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, onSetPinned, reverse = true, removingPostIds, searchQuery, active = true, pinnedOnly = false }) {
+function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick, onMessageRef, onScrollToMessage, onFileRef, onOpenWidget, onOpenAttachmentPreview, emptyMessage, timelineRef, agents, user, onDeletePost, onSetPinned, reverse = true, removingPostIds, searchQuery, active = true, pinnedOnly = false, showLatest = false }) {
     const [loadingMore, setLoadingMore] = useState(false);
     const [windowRange, setWindowRange] = useState({ start: 0, end: 0 });
     const [windowingActive, setWindowingActive] = useState(false);
@@ -1013,6 +1077,32 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
             updateWindowForScrollRef.current?.(root);
         });
     }, [active, reverse, scheduleTouchScrollEnd, shouldWindow, triggerLoadMore]);
+
+    const jumpToLatest = () => {
+        const root = timelineRef?.current;
+        if (!root) return;
+        cancelAnimationFrame(resumeFramesRef.current.first);
+        cancelAnimationFrame(resumeFramesRef.current.second);
+        cancelAnimationFrame(resumeFramesRef.current.third);
+        cancelAnimationFrame(restoreFramesRef.current.first);
+        cancelAnimationFrame(restoreFramesRef.current.second);
+        restoringActiveRef.current = false;
+        restoringAnchorRef.current = false;
+        loadAnchorRef.current = null;
+        pendingAnchorRef.current = null;
+        pinnedToEndRef.current = true;
+        suspendedAnchorRef.current = null;
+        if (shouldWindow) {
+            // Mount the newest rows even when the current window ends in a spacer.
+            setWindowRange(getTimelineWindowForViewport(
+                virtualHeights,
+                virtualHeights[displayPosts.length] - root.clientHeight,
+                root.clientHeight,
+                displayPosts.length,
+            ));
+        }
+        root.scrollTop = 0; // Column-reverse puts the newest messages at zero.
+    };
 
     useLayoutEffect(() => {
         const wasActive = previousActiveRef.current;
@@ -1510,5 +1600,8 @@ function TimelineView({ posts, hasMore, onLoadMore, onPostClick, onHashtagClick,
                 ${reverse ? null : loadMoreSentinel}
             </div>
         </div>
+        ${showLatest && active && html`
+            <${TimelineLatestButton} timelineRef=${timelineRef} contentRef=${timelineContentRef} reverse=${reverse} onJump=${jumpToLatest} />
+        `}
     `;
 }

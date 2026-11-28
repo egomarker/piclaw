@@ -21,6 +21,44 @@
     flex-direction: column-reverse;
 }
 
+/* Zero-height sibling: align to the timeline, not its scrollable content or the composer. */
+.timeline-latest-anchor {
+    position: relative;
+    flex: 0 0 0;
+    align-self: stretch;
+}
+
+.timeline-latest-button {
+    position: absolute;
+    bottom: var(--spacing-sm);
+    right: var(--chat-surface-padding-x);
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: var(--chat-surface-control-height);
+    padding: 2px 10px;
+    border: 1px solid var(--accent-color);
+    border-radius: var(--radius-full);
+    background: var(--accent-color);
+    color: var(--accent-contrast-text);
+    font: inherit;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
+.timeline-latest-button:hover {
+    background: color-mix(in srgb, var(--accent-color) 86%, var(--bg-primary));
+}
+
+.timeline-latest-button:focus-visible {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 2px;
+}
+
 /* Swipe navigation indicator — centered pill, themed */
 .chat-swipe-indicator {
     display: none;
